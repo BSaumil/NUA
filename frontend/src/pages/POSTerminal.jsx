@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, Plus, Minus, Trash2, User, CreditCard, Banknote, Smartphone, ShoppingCart } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent } from '../components/ui/card';
 import { useTheme } from '../contexts/ThemeContext';
 import { usePOS } from '../contexts/POSContext';
-import { products, promotions, customers } from '../mockData';
+import { productsAPI, promotionsAPI, customersAPI, transactionsAPI } from '../services/api';
 import { useToast } from '../hooks/use-toast';
 
 const POSTerminal = () => {
