@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FileText, Calendar, Send, CheckCircle, AlertCircle, Download, Upload } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { useTheme } from '../contexts/ThemeContext';
-import { basReports } from '../mockData';
+import { basGstAPI } from '../services/api';
 import { useToast } from '../hooks/use-toast';
 
 const BASGST = () => {
@@ -12,15 +12,35 @@ const BASGST = () => {
   const { toast } = useToast();
   const [showApiConfig, setShowApiConfig] = useState(false);
   const [apiKey, setApiKey] = useState('');
+  const [basReports, setBasReports] = useState([]);
 
-  const handleMockSubmit = (report) => {
-    toast({
-      title: "BAS Report Submitted (Mock)",
-      description: `${report.quarter} report has been submitted successfully to ATO (simulated)`,
-    });
+  useEffect(() => {
+    fetchReports();
+  }, []);
+  
+  const fetchReports = async () => {
+    try {
+      const res = await basGstAPI.getReports();
+      setBasReports(res.data);
+    } catch (error) {
+      console.error('Error fetching BAS reports:', error);
+    }
   };
 
-  const handleApiSubmit = (report) => {
+  const handleMockSubmit = async (report) => {
+    try {
+      await basGstAPI.submit(report.id, false);
+      toast({
+        title: "BAS Report Submitted (Mock)",
+        description: `${report.quarter} report has been submitted successfully to ATO (simulated)`,
+      });
+      fetchReports();
+    } catch (error) {
+      console.error('Error submitting report:', error);
+    }
+  };
+
+  const handleApiSubmit = async (report) => {
     if (!apiKey) {
       toast({
         title: "API Key Required",
@@ -29,10 +49,16 @@ const BASGST = () => {
       });
       return;
     }
-    toast({
-      title: "BAS Report Submitted",
-      description: `${report.quarter} report has been submitted to ATO via API`,
-    });
+    try {
+      await basGstAPI.submit(report.id, true);
+      toast({
+        title: "BAS Report Submitted",
+        description: `${report.quarter} report has been submitted to ATO via API`,
+      });
+      fetchReports();
+    } catch (error) {
+      console.error('Error submitting report:', error);
+    }
   };
 
   return (
@@ -99,7 +125,9 @@ const BASGST = () => {
               <p className="text-sm text-gray-500">Current Quarter GST</p>
               <FileText size={20} style={{ color: theme.primary }} />
             </div>
-            <p className="text-3xl font-bold" style={{ color: theme.text }}>$3,772.00</p>
+            <p className="text-3xl font-bold" style={{ color: theme.text }}>
+              ${basReports.find(r => r.status === 'draft')?.netGst.toFixed(2) || '0.00'}
+            </p>
             <p className="text-xs text-gray-500 mt-1">Due: 28 Apr 2025</p>
           </CardContent>
         </Card>
@@ -110,7 +138,9 @@ const BASGST = () => {
               <p className="text-sm text-gray-500">YTD GST Collected</p>
               <CheckCircle size={20} style={{ color: '#10b981' }} />
             </div>
-            <p className="text-3xl font-bold" style={{ color: theme.text }}>$18,460.00</p>
+            <p className="text-3xl font-bold" style={{ color: theme.text }}>
+              ${basReports.reduce((sum, r) => sum + r.gstCollected, 0).toFixed(2)}
+            </p>
             <p className="text-xs text-green-500 mt-1">On track</p>
           </CardContent>
         </Card>
@@ -121,7 +151,9 @@ const BASGST = () => {
               <p className="text-sm text-gray-500">Reports Filed</p>
               <Calendar size={20} style={{ color: theme.accent }} />
             </div>
-            <p className="text-3xl font-bold" style={{ color: theme.text }}>4</p>
+            <p className="text-3xl font-bold" style={{ color: theme.text }}>
+              {basReports.filter(r => r.status === 'submitted').length}
+            </p>
             <p className="text-xs text-gray-500 mt-1">This year</p>
           </CardContent>
         </Card>

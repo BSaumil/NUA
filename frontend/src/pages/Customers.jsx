@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, Plus, Mail, Phone, Award, TrendingUp } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent } from '../components/ui/card';
 import { useTheme } from '../contexts/ThemeContext';
-import { customers } from '../mockData';
+import { customersAPI } from '../services/api';
 
 const membershipColors = {
   Platinum: '#e5e7eb',
@@ -16,6 +16,20 @@ const membershipColors = {
 const Customers = () => {
   const { theme } = useTheme();
   const [searchTerm, setSearchTerm] = useState('');
+  const [customers, setCustomers] = useState([]);
+
+  useEffect(() => {
+    fetchCustomers();
+  }, []);
+  
+  const fetchCustomers = async () => {
+    try {
+      const res = await customersAPI.getAll();
+      setCustomers(res.data);
+    } catch (error) {
+      console.error('Error fetching customers:', error);
+    }
+  };
 
   const filteredCustomers = customers.filter(c =>
     c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -39,9 +53,9 @@ const Customers = () => {
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         {[
-          { label: 'Total Customers', value: '1,234', color: theme.primary },
-          { label: 'Platinum Members', value: '45', color: '#e5e7eb' },
-          { label: 'Gold Members', value: '123', color: '#fbbf24' },
+          { label: 'Total Customers', value: customers.length.toString(), color: theme.primary },
+          { label: 'Platinum Members', value: customers.filter(c => c.membershipTier === 'Platinum').length.toString(), color: '#e5e7eb' },
+          { label: 'Gold Members', value: customers.filter(c => c.membershipTier === 'Gold').length.toString(), color: '#fbbf24' },
           { label: 'New This Month', value: '67', color: theme.accent }
         ].map((stat, idx) => (
           <Card key={idx}>
