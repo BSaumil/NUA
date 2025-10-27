@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { DollarSign, ShoppingBag, Users, TrendingUp, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { useTheme } from '../contexts/ThemeContext';
-import { transactions, customers, products } from '../mockData';
+import { transactionsAPI, customersAPI, accountingAPI } from '../services/api';
 
 const Dashboard = () => {
   const { theme } = useTheme();
