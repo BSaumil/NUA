@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, Plus, Edit, Trash2, Tag, Package } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent } from '../components/ui/card';
 import { useTheme } from '../contexts/ThemeContext';
-import { products, promotions } from '../mockData';
+import { productsAPI, promotionsAPI } from '../services/api';
 
 const Products = () => {
   const { theme } = useTheme();
