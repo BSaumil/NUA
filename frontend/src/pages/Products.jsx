@@ -10,6 +10,25 @@ const Products = () => {
   const { theme } = useTheme();
   const [searchTerm, setSearchTerm] = useState('');
   const [view, setView] = useState('products'); // 'products' or 'promotions'
+  const [products, setProducts] = useState([]);
+  const [promotions, setPromotions] = useState([]);
+  
+  useEffect(() => {
+    fetchData();
+  }, []);
+  
+  const fetchData = async () => {
+    try {
+      const [productsRes, promotionsRes] = await Promise.all([
+        productsAPI.getAll(),
+        promotionsAPI.getAll()
+      ]);
+      setProducts(productsRes.data);
+      setPromotions(promotionsRes.data);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    }
+  };
 
   const filteredProducts = products.filter(p =>
     p.name.toLowerCase().includes(searchTerm.toLowerCase())
