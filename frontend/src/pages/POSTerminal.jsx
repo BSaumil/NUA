@@ -10,13 +10,42 @@ import { useToast } from '../hooks/use-toast';
 
 const POSTerminal = () => {
   const { theme } = useTheme();
-  const { cart, addToCart, removeFromCart, updateQuantity, clearCart, calculateTotal, selectedCustomer, setSelectedCustomer } = usePOS();
+  const { cart, addToCart, removeFromCart, updateQuantity, clearCart, calculateTotal, selectedCustomer, setSelectedCustomer, currentUser, currentLocation } = usePOS();
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [showPayment, setShowPayment] = useState(false);
+  const [products, setProducts] = useState([]);
+  const [promotions, setPromotions] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [loading, setLoading] = useState(false);
 
   const categories = ['All', 'Beverages', 'Food', 'Bakery'];
+  
+  useEffect(() => {
+    fetchData();
+  }, []);
+  
+  const fetchData = async () => {
+    try {
+      const [productsRes, promotionsRes, customersRes] = await Promise.all([
+        productsAPI.getAll(),
+        promotionsAPI.getActive(),
+        customersAPI.getAll()
+      ]);
+      setProducts(productsRes.data);
+      setPromotions(promotionsRes.data);
+      setCustomers(customersRes.data);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load data. Using cached data.",
+        variant: "destructive"
+      });
+    }
+  };
+  
   const filteredProducts = products.filter(p =>
     (selectedCategory === 'All' || p.category === selectedCategory) &&
     p.name.toLowerCase().includes(searchTerm.toLowerCase())
@@ -24,13 +53,47 @@ const POSTerminal = () => {
 
   const totals = calculateTotal();
 
-  const handleCheckout = (paymentMethod) => {
-    toast({
-      title: "Transaction Complete!",
-      description: `Payment of $${totals.total} received via ${paymentMethod}`,
-    });
-    clearCart();
-    setShowPayment(false);
+  const handleCheckout = async (paymentMethod) => {
+    if (loading) return;
+    
+    setLoading(true);
+    try {
+      const transactionData = {
+        items: cart.map(item => ({
+          productId: item.id,
+          productName: item.name,
+          quantity: item.quantity,
+          price: item.price
+        })),
+        paymentMethod,
+        customerId: selectedCustomer?.id || null,
+        location: currentLocation,
+        cashier: currentUser.name
+      };
+      
+      await transactionsAPI.create(transactionData);
+      
+      toast({
+        title: "Transaction Complete!",
+        description: `Payment of $${totals.total} received via ${paymentMethod}`,
+      });
+      
+      clearCart();
+      setShowPayment(false);
+      
+      // Refresh products to update stock
+      const productsRes = await productsAPI.getAll();
+      setProducts(productsRes.data);
+    } catch (error) {
+      console.error('Error creating transaction:', error);
+      toast({
+        title: "Error",
+        description: "Failed to complete transaction. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
