@@ -6,11 +6,38 @@ import { transactionsAPI, customersAPI, accountingAPI } from '../services/api';
 
 const Dashboard = () => {
   const { theme } = useTheme();
+  const [transactions, setTransactions] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [summary, setSummary] = useState({
+    totalRevenue: 0,
+    gstCollected: 0,
+    transactions: 0,
+    avgTransaction: 0
+  });
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+  
+  const fetchData = async () => {
+    try {
+      const [txnRes, custRes, summaryRes] = await Promise.all([
+        transactionsAPI.getAll(),
+        customersAPI.getAll(),
+        accountingAPI.getSummary()
+      ]);
+      setTransactions(txnRes.data);
+      setCustomers(custRes.data);
+      setSummary(summaryRes.data);
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+    }
+  };
 
   const stats = [
     {
       title: 'Total Revenue',
-      value: '$48,920',
+      value: `$${summary.totalRevenue.toFixed(2)}`,
       change: '+12.5%',
       trend: 'up',
       icon: DollarSign,
@@ -18,7 +45,7 @@ const Dashboard = () => {
     },
     {
       title: 'Transactions Today',
-      value: '87',
+      value: summary.transactions.toString(),
       change: '+8.2%',
       trend: 'up',
       icon: ShoppingBag,
@@ -26,7 +53,7 @@ const Dashboard = () => {
     },
     {
       title: 'Active Customers',
-      value: '1,234',
+      value: customers.length.toString(),
       change: '+5.4%',
       trend: 'up',
       icon: Users,
@@ -34,7 +61,7 @@ const Dashboard = () => {
     },
     {
       title: 'Avg. Transaction',
-      value: '$45.80',
+      value: `$${summary.avgTransaction.toFixed(2)}`,
       change: '-2.1%',
       trend: 'down',
       icon: TrendingUp,
