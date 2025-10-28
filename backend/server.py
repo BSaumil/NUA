@@ -19,6 +19,12 @@ from models.user import User, UserCreate
 from models.category import Category, CategoryCreate
 from models.modifier import Modifier, ModifierCreate
 from models.printer import PrinterConfig, PrinterConfigCreate
+from models.gift_card import GiftCard, GiftCardCreate
+from models.refund import Refund, RefundCreate
+from models.supplier import Supplier, SupplierCreate, PurchaseOrder, PurchaseOrderCreate
+from models.expense import Expense, ExpenseCreate
+from models.staff import StaffCommission, StaffShift
+from models.table import Table, TableCreate, DineInOrder
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
