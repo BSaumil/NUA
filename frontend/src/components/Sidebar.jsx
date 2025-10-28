@@ -39,10 +39,10 @@ const Sidebar = () => {
             className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-xl"
             style={{ backgroundColor: theme.primary }}
           >
-            S
+            A
           </div>
           <div>
-            <h1 className="text-xl font-bold" style={{ color: theme.text }}>Square POS</h1>
+            <h1 className="text-xl font-bold" style={{ color: theme.text }}>Ananta POS</h1>
             <p className="text-xs text-gray-500">Pro Edition</p>
           </div>
         </div>
