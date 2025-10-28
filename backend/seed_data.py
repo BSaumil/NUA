@@ -41,6 +41,29 @@ async def seed_database():
             "sku": "BEV-ESP-001",
             "image": "https://images.unsplash.com/photo-1510591509098-f4fdc6d0ff04?w=200",
             "gstRate": 10,
+            "modifiers": [
+                {
+                    "id": "mod-size",
+                    "name": "Size",
+                    "type": "single",
+                    "required": True,
+                    "options": [
+                        {"id": "size-small", "name": "Small", "price": 0.0},
+                        {"id": "size-medium", "name": "Medium", "price": 1.0},
+                        {"id": "size-large", "name": "Large", "price": 2.0}
+                    ]
+                },
+                {
+                    "id": "mod-extras",
+                    "name": "Extras",
+                    "type": "multiple",
+                    "required": False,
+                    "options": [
+                        {"id": "extra-shot", "name": "Extra Shot", "price": 1.5},
+                        {"id": "extra-milk", "name": "Extra Milk", "price": 0.5}
+                    ]
+                }
+            ],
             "createdAt": datetime.utcnow(),
             "updatedAt": datetime.utcnow()
         },
@@ -54,6 +77,19 @@ async def seed_database():
             "sku": "BEV-CAP-001",
             "image": "https://images.unsplash.com/photo-1572442388796-11668a67e53d?w=200",
             "gstRate": 10,
+            "modifiers": [
+                {
+                    "id": "mod-size",
+                    "name": "Size",
+                    "type": "single",
+                    "required": True,
+                    "options": [
+                        {"id": "size-small", "name": "Small", "price": 0.0},
+                        {"id": "size-medium", "name": "Medium", "price": 1.0},
+                        {"id": "size-large", "name": "Large", "price": 2.0}
+                    ]
+                }
+            ],
             "createdAt": datetime.utcnow(),
             "updatedAt": datetime.utcnow()
         },
@@ -67,6 +103,7 @@ async def seed_database():
             "sku": "BAK-CHO-001",
             "image": "https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=200",
             "gstRate": 10,
+            "modifiers": [],
             "createdAt": datetime.utcnow(),
             "updatedAt": datetime.utcnow()
         },
@@ -80,6 +117,41 @@ async def seed_database():
             "sku": "FOD-BUR-001",
             "image": "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=200",
             "gstRate": 10,
+            "modifiers": [
+                {
+                    "id": "mod-cooking",
+                    "name": "Cooking Level",
+                    "type": "single",
+                    "required": True,
+                    "options": [
+                        {"id": "rare", "name": "Rare", "price": 0.0},
+                        {"id": "medium", "name": "Medium", "price": 0.0},
+                        {"id": "well-done", "name": "Well Done", "price": 0.0}
+                    ]
+                },
+                {
+                    "id": "mod-add-ons",
+                    "name": "Add-ons",
+                    "type": "multiple",
+                    "required": False,
+                    "options": [
+                        {"id": "extra-cheese", "name": "Extra Cheese", "price": 2.0},
+                        {"id": "bacon", "name": "Bacon", "price": 3.0},
+                        {"id": "avocado", "name": "Avocado", "price": 2.5}
+                    ]
+                },
+                {
+                    "id": "mod-remove",
+                    "name": "Remove",
+                    "type": "multiple",
+                    "required": False,
+                    "options": [
+                        {"id": "no-onions", "name": "No Onions", "price": 0.0},
+                        {"id": "no-pickles", "name": "No Pickles", "price": 0.0},
+                        {"id": "no-tomato", "name": "No Tomato", "price": 0.0}
+                    ]
+                }
+            ],
             "createdAt": datetime.utcnow(),
             "updatedAt": datetime.utcnow()
         },
@@ -93,6 +165,7 @@ async def seed_database():
             "sku": "BEV-SOD-001",
             "image": "https://images.unsplash.com/photo-1629203851122-3726ecdf080e?w=200",
             "gstRate": 10,
+            "modifiers": [],
             "createdAt": datetime.utcnow(),
             "updatedAt": datetime.utcnow()
         },
@@ -106,6 +179,7 @@ async def seed_database():
             "sku": "FOD-SAL-001",
             "image": "https://images.unsplash.com/photo-1546793665-c74683f339c1?w=200",
             "gstRate": 10,
+            "modifiers": [],
             "createdAt": datetime.utcnow(),
             "updatedAt": datetime.utcnow()
         }
