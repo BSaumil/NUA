@@ -63,4 +63,28 @@ export const usersAPI = {
   create: (data) => api.post('/users', data),
 };
 
+// Categories API
+export const categoriesAPI = {
+  getAll: () => api.get('/categories'),
+  create: (data) => api.post('/categories', data),
+};
+
+// Modifiers API
+export const modifiersAPI = {
+  getAll: () => api.get('/modifiers'),
+  create: (data) => api.post('/modifiers', data),
+};
+
+// Printers API
+export const printersAPI = {
+  getAll: () => api.get('/printers'),
+  create: (data) => api.post('/printers', data),
+  print: (printerId, transactionId) => api.post(`/printers/${printerId}/print`, null, { params: { transaction_id: transactionId } }),
+};
+
+// Offline Sync API
+export const offlineAPI = {
+  sync: (data) => api.post('/offline/sync', data),
+};
+
 export default api;
