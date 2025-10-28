@@ -33,7 +33,7 @@ class PrinterService {
     receipt += this.ESC_POS.ALIGN_CENTER;
     receipt += this.ESC_POS.BOLD_ON;
     receipt += this.ESC_POS.DOUBLE_HEIGHT;
-    receipt += `${businessInfo.name || 'Square POS'}\n`;
+    receipt += `${businessInfo.name || 'Ananta POS'}\n`;
     receipt += this.ESC_POS.NORMAL_SIZE;
     receipt += this.ESC_POS.BOLD_OFF;
     
