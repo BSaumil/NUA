@@ -179,8 +179,13 @@ async def create_transaction(transaction: TransactionCreate):
             discount_amount = transaction.discount.value
     
     subtotal_after_discount = subtotal - discount_amount
+    
+    # Add tip
+    tip_amount = transaction.tipAmount or 0
+    
+    # Calculate GST
     gst = subtotal_after_discount * 0.1
-    total = subtotal_after_discount + gst
+    total = subtotal_after_discount + gst + tip_amount
     
     # Generate transaction ID
     txn_id = f"TXN-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:3].upper()}"
@@ -209,14 +214,37 @@ async def create_transaction(transaction: TransactionCreate):
         subtotal=subtotal,
         discount=transaction.discount,
         discountAmount=discount_amount,
+        tipAmount=tip_amount,
         gst=gst,
         total=total,
         paymentMethod=transaction.paymentMethod,
+        paymentSplits=transaction.paymentSplits,
+        isSplitPayment=transaction.isSplitPayment,
         customerId=transaction.customerId,
         customerName=customer_name,
         location=transaction.location,
-        cashier=transaction.cashier
+        cashier=transaction.cashier,
+        emailReceipt=transaction.emailReceipt,
+        smsReceipt=transaction.smsReceipt,
+        tableNumber=transaction.tableNumber,
+        orderType=transaction.orderType
     )
+    
+    await db.transactions.insert_one(transaction_obj.dict())
+    
+    # Update product stock
+    for item in transaction.items:
+        await db.products.update_one(
+            {"id": item.productId},
+            {"$inc": {"stock": -item.quantity}}
+        )
+    
+    # Send digital receipt if requested
+    if transaction.emailReceipt or transaction.smsReceipt:
+        # TODO: Integrate email/SMS service
+        pass
+    
+    return transaction_obj
     
     await db.transactions.insert_one(transaction_obj.dict())
     
