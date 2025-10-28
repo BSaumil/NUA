@@ -1,4 +1,4 @@
-# Square POS Clone - Backend Implementation Contracts
+# Ananta POS Clone - Backend Implementation Contracts
 
 ## API Contracts
 
