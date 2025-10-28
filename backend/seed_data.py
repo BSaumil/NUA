@@ -24,6 +24,9 @@ async def seed_database():
     await db.bas_reports.delete_many({})
     await db.locations.delete_many({})
     await db.users.delete_many({})
+    await db.categories.delete_many({})
+    await db.modifiers.delete_many({})
+    await db.printers.delete_many({})
     
     # Seed Products
     print("Seeding products...")
