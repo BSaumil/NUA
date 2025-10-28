@@ -283,10 +283,24 @@ async def seed_database():
             "id": "TXN-20250115-001",
             "timestamp": datetime(2025, 1, 15, 9, 15, 32),
             "items": [
-                {"productId": "1", "productName": "Espresso", "quantity": 2, "price": 4.50},
-                {"productId": "3", "productName": "Chocolate Cake", "quantity": 1, "price": 6.50}
+                {
+                    "productId": "1", 
+                    "productName": "Espresso", 
+                    "quantity": 2, 
+                    "price": 4.50,
+                    "modifiers": []
+                },
+                {
+                    "productId": "3", 
+                    "productName": "Chocolate Cake", 
+                    "quantity": 1, 
+                    "price": 6.50,
+                    "modifiers": []
+                }
             ],
             "subtotal": 15.50,
+            "discount": None,
+            "discountAmount": 0.0,
             "gst": 1.55,
             "total": 17.05,
             "paymentMethod": "Card",
@@ -294,40 +308,84 @@ async def seed_database():
             "customerName": "Sarah Johnson",
             "location": "Main Street",
             "cashier": "John Doe",
-            "status": "completed"
+            "status": "completed",
+            "printed": False
         },
         {
             "id": "TXN-20250115-002",
             "timestamp": datetime(2025, 1, 15, 9, 23, 18),
             "items": [
-                {"productId": "4", "productName": "Beef Burger", "quantity": 1, "price": 12.00},
-                {"productId": "5", "productName": "Soft Drink", "quantity": 1, "price": 3.50}
+                {
+                    "productId": "4", 
+                    "productName": "Beef Burger", 
+                    "quantity": 1, 
+                    "price": 12.00,
+                    "modifiers": [
+                        {
+                            "modifierId": "mod-cooking",
+                            "modifierName": "Cooking Level",
+                            "optionId": "medium",
+                            "optionName": "Medium",
+                            "price": 0.0
+                        },
+                        {
+                            "modifierId": "mod-add-ons",
+                            "modifierName": "Add-ons",
+                            "optionId": "extra-cheese",
+                            "optionName": "Extra Cheese",
+                            "price": 2.0
+                        }
+                    ]
+                },
+                {
+                    "productId": "5", 
+                    "productName": "Soft Drink", 
+                    "quantity": 1, 
+                    "price": 3.50,
+                    "modifiers": []
+                }
             ],
-            "subtotal": 15.50,
-            "gst": 1.55,
-            "total": 17.05,
+            "subtotal": 17.50,
+            "discount": None,
+            "discountAmount": 0.0,
+            "gst": 1.75,
+            "total": 19.25,
             "paymentMethod": "Cash",
             "customerId": None,
             "customerName": None,
             "location": "Main Street",
             "cashier": "John Doe",
-            "status": "completed"
+            "status": "completed",
+            "printed": False
         },
         {
             "id": "TXN-20250115-003",
             "timestamp": datetime(2025, 1, 15, 9, 45, 7),
             "items": [
-                {"productId": "2", "productName": "Cappuccino", "quantity": 3, "price": 5.00}
+                {
+                    "productId": "2", 
+                    "productName": "Cappuccino", 
+                    "quantity": 3, 
+                    "price": 5.00,
+                    "modifiers": []
+                }
             ],
             "subtotal": 15.00,
-            "gst": 1.50,
-            "total": 16.50,
+            "discount": {
+                "type": "percentage",
+                "value": 10,
+                "reason": "Loyal customer"
+            },
+            "discountAmount": 1.50,
+            "gst": 1.35,
+            "total": 14.85,
             "paymentMethod": "Digital Wallet",
             "customerId": "cust-2",
             "customerName": "Michael Chen",
             "location": "Mall Branch",
             "cashier": "Jane Smith",
-            "status": "completed"
+            "status": "completed",
+            "printed": True
         }
     ]
     await db.transactions.insert_many(transactions)
