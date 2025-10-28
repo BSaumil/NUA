@@ -3,6 +3,18 @@ from typing import List, Optional
 from datetime import datetime
 import uuid
 
+class ModifierOption(BaseModel):
+    id: str
+    name: str
+    price: float = 0.0
+
+class ProductModifier(BaseModel):
+    id: str
+    name: str
+    type: str
+    required: bool = False
+    options: List[ModifierOption]
+
 class Product(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
@@ -13,6 +25,7 @@ class Product(BaseModel):
     sku: str
     image: str
     gstRate: float = 10.0
+    modifiers: List[ProductModifier] = []
     createdAt: datetime = Field(default_factory=datetime.utcnow)
     updatedAt: datetime = Field(default_factory=datetime.utcnow)
 
