@@ -1,4 +1,4 @@
-# Square POS Clone - Complete Feature Comparison
+# Ananta POS Clone - Complete Feature Comparison
 
 ## ✅ IMPLEMENTED - Core Features
 
