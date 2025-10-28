@@ -359,6 +359,86 @@ async def create_user(user: UserCreate):
     await db.users.insert_one(user_obj.dict())
     return user_obj
 
+# ============ CATEGORIES API ============
+@api_router.get("/categories", response_model=List[Category])
+async def get_categories():
+    categories = await db.categories.find().sort("sortOrder", 1).to_list(1000)
+    return [Category(**c) for c in categories]
+
+@api_router.post("/categories", response_model=Category)
+async def create_category(category: CategoryCreate):
+    category_dict = category.dict()
+    category_obj = Category(**category_dict)
+    await db.categories.insert_one(category_obj.dict())
+    return category_obj
+
+# ============ MODIFIERS API ============
+@api_router.get("/modifiers", response_model=List[Modifier])
+async def get_modifiers():
+    modifiers = await db.modifiers.find().to_list(1000)
+    return [Modifier(**m) for m in modifiers]
+
+@api_router.post("/modifiers", response_model=Modifier)
+async def create_modifier(modifier: ModifierCreate):
+    modifier_dict = modifier.dict()
+    modifier_obj = Modifier(**modifier_dict)
+    await db.modifiers.insert_one(modifier_obj.dict())
+    return modifier_obj
+
+# ============ PRINTER API ============
+@api_router.get("/printers", response_model=List[PrinterConfig])
+async def get_printers():
+    printers = await db.printers.find().to_list(1000)
+    return [PrinterConfig(**p) for p in printers]
+
+@api_router.post("/printers", response_model=PrinterConfig)
+async def create_printer(printer: PrinterConfigCreate):
+    printer_dict = printer.dict()
+    printer_obj = PrinterConfig(**printer_dict)
+    await db.printers.insert_one(printer_obj.dict())
+    return printer_obj
+
+@api_router.post("/printers/{printer_id}/print")
+async def print_receipt(printer_id: str, transaction_id: str):
+    printer = await db.printers.find_one({"id": printer_id})
+    if not printer:
+        raise HTTPException(status_code=404, detail="Printer not found")
+    
+    transaction = await db.transactions.find_one({"id": transaction_id})
+    if not transaction:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    
+    # Mark transaction as printed
+    await db.transactions.update_one(
+        {"id": transaction_id},
+        {"$set": {"printed": True}}
+    )
+    
+    # Return printer config and transaction for client-side printing
+    return {
+        "printer": PrinterConfig(**printer),
+        "transaction": Transaction(**transaction),
+        "message": "Receipt data prepared for printing"
+    }
+
+# ============ OFFLINE SYNC API ============
+@api_router.post("/offline/sync")
+async def sync_offline_data(data: dict):
+    """Sync offline transactions and data"""
+    synced = []
+    
+    # Sync transactions
+    if "transactions" in data:
+        for txn_data in data["transactions"]:
+            await db.transactions.insert_one(txn_data)
+            synced.append(txn_data["id"])
+    
+    return {
+        "success": True,
+        "synced": synced,
+        "message": f"Synced {len(synced)} items"
+    }
+
 # ============ ROOT ============
 @api_router.get("/")
 async def root():
