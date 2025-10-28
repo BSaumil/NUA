@@ -416,6 +416,70 @@ async def seed_database():
     ]
     await db.bas_reports.insert_many(bas_reports)
     
+    # Seed Categories
+    print("Seeding categories...")
+    categories = [
+        {
+            "id": "cat-1",
+            "name": "Beverages",
+            "description": "Hot and cold drinks",
+            "color": "#3b82f6",
+            "icon": "coffee",
+            "sortOrder": 1,
+            "active": True,
+            "createdAt": datetime.utcnow()
+        },
+        {
+            "id": "cat-2",
+            "name": "Food",
+            "description": "Main meals and snacks",
+            "color": "#10b981",
+            "icon": "utensils",
+            "sortOrder": 2,
+            "active": True,
+            "createdAt": datetime.utcnow()
+        },
+        {
+            "id": "cat-3",
+            "name": "Bakery",
+            "description": "Fresh baked goods",
+            "color": "#f59e0b",
+            "icon": "cake",
+            "sortOrder": 3,
+            "active": True,
+            "createdAt": datetime.utcnow()
+        }
+    ]
+    await db.categories.insert_many(categories)
+    
+    # Seed Printer Configurations
+    print("Seeding printer configurations...")
+    printers = [
+        {
+            "id": "printer-1",
+            "name": "Main Counter Printer",
+            "type": "network",
+            "ipAddress": "192.168.1.100",
+            "port": 9100,
+            "paperWidth": 80,
+            "autoprint": True,
+            "location": "Main Street",
+            "status": "active"
+        },
+        {
+            "id": "printer-2",
+            "name": "Mall Branch Printer",
+            "type": "network",
+            "ipAddress": "192.168.1.101",
+            "port": 9100,
+            "paperWidth": 80,
+            "autoprint": False,
+            "location": "Mall Branch",
+            "status": "active"
+        }
+    ]
+    await db.printers.insert_many(printers)
+    
     print("✅ Database seeded successfully!")
     client.close()
 
