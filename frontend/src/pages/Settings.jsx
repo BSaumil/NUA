@@ -245,7 +245,7 @@ const Settings = () => {
             <div className="space-y-4">
               <div>
                 <label className="text-sm font-medium mb-2 block">Business Name</label>
-                <Input placeholder="Your Business Name" defaultValue="Square POS Pro" />
+                <Input placeholder="Your Business Name" defaultValue="Ananta POS Pro" />
               </div>
               <div>
                 <label className="text-sm font-medium mb-2 block">ABN</label>
