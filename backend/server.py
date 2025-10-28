@@ -16,6 +16,9 @@ from models.transaction import Transaction, TransactionCreate, TransactionItem
 from models.bas_report import BASReport, BASReportCreate
 from models.location import Location, LocationCreate
 from models.user import User, UserCreate
+from models.category import Category, CategoryCreate
+from models.modifier import Modifier, ModifierCreate
+from models.printer import PrinterConfig, PrinterConfigCreate
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
