@@ -153,10 +153,28 @@ async def get_transactions(
 
 @api_router.post("/transactions", response_model=Transaction)
 async def create_transaction(transaction: TransactionCreate):
-    # Calculate totals
-    subtotal = sum(item.quantity * item.price for item in transaction.items)
-    gst = subtotal * 0.1
-    total = subtotal + gst
+    # Calculate subtotal including modifiers
+    subtotal = 0
+    for item in transaction.items:
+        item_total = item.quantity * item.price
+        # Add modifier prices
+        for modifier in item.modifiers:
+            item_total += modifier.price * item.quantity
+        subtotal += item_total
+    
+    # Apply discount
+    discount_amount = 0
+    if transaction.discount:
+        if transaction.discount.type == "percentage":
+            discount_amount = subtotal * (transaction.discount.value / 100)
+        elif transaction.discount.type == "fixed":
+            discount_amount = transaction.discount.value
+        elif transaction.discount.type == "custom":
+            discount_amount = transaction.discount.value
+    
+    subtotal_after_discount = subtotal - discount_amount
+    gst = subtotal_after_discount * 0.1
+    total = subtotal_after_discount + gst
     
     # Generate transaction ID
     txn_id = f"TXN-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:3].upper()}"
@@ -183,6 +201,8 @@ async def create_transaction(transaction: TransactionCreate):
         id=txn_id,
         items=transaction.items,
         subtotal=subtotal,
+        discount=transaction.discount,
+        discountAmount=discount_amount,
         gst=gst,
         total=total,
         paymentMethod=transaction.paymentMethod,
