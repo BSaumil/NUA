@@ -746,11 +746,18 @@ async def export_report_csv(report_type: str, start_date: str, end_date: str):
 # ============ ROOT ============
 @api_router.get("/")
 async def root():
-    return {"message": "Square POS API", "version": "2.0.0", "features": [
-        "Sales & Checkout", "Inventory Management", "Customer Loyalty",
-        "Staff Management", "Accounting & Tax", "Gift Cards", "Refunds",
-        "Suppliers", "Expenses", "Table Management", "Offline Support"
-    ]}
+    return {
+        "name": "Ananta POS API",
+        "version": "2.0.0",
+        "description": "Complete Point of Sale System with Accounting & BAS/GST Filing",
+        "features": [
+            "Sales & Checkout", "Inventory Management", "Customer Loyalty",
+            "Staff Management", "Accounting & Tax", "Gift Cards", "Refunds",
+            "Suppliers", "Expenses", "Table Management", "Offline Support",
+            "Split Payments", "Tipping", "Product Modifiers", "Multi-location"
+        ],
+        "status": "Production Ready"
+    }
 
 # Include router
 app.include_router(api_router)
