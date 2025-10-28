@@ -191,7 +191,7 @@ class PrinterService {
         </style>
       </head>
       <body>
-        <div class="center bold large">Square POS</div>
+        <div class="center bold large">Ananta POS</div>
         <div class="center">123 Main St, Sydney NSW 2000</div>
         <div class="center">Tel: +61 2 9876 5432</div>
         <div class="separator"></div>
