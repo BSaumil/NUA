@@ -445,10 +445,284 @@ async def sync_offline_data(data: dict):
         "message": f"Synced {len(synced)} items"
     }
 
+# ============ GIFT CARDS API ============
+@api_router.get("/gift-cards", response_model=List[GiftCard])
+async def get_gift_cards():
+    cards = await db.gift_cards.find().to_list(1000)
+    return [GiftCard(**c) for c in cards]
+
+@api_router.post("/gift-cards", response_model=GiftCard)
+async def create_gift_card(card: GiftCardCreate):
+    import random
+    import string
+    code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=12))
+    
+    card_obj = GiftCard(
+        code=code,
+        balance=card.initialValue,
+        initialValue=card.initialValue,
+        customerId=card.customerId,
+        expiryDate=card.expiryDate
+    )
+    await db.gift_cards.insert_one(card_obj.dict())
+    return card_obj
+
+@api_router.post("/gift-cards/{code}/redeem")
+async def redeem_gift_card(code: str, amount: float):
+    card = await db.gift_cards.find_one({"code": code})
+    if not card:
+        raise HTTPException(status_code=404, detail="Gift card not found")
+    
+    if card["balance"] < amount:
+        raise HTTPException(status_code=400, detail="Insufficient balance")
+    
+    new_balance = card["balance"] - amount
+    status = "redeemed" if new_balance == 0 else "active"
+    
+    await db.gift_cards.update_one(
+        {"code": code},
+        {"$set": {"balance": new_balance, "status": status}}
+    )
+    
+    return {"balance": new_balance, "amount_redeemed": amount}
+
+# ============ REFUNDS API ============
+@api_router.get("/refunds", response_model=List[Refund])
+async def get_refunds():
+    refunds = await db.refunds.find().to_list(1000)
+    return [Refund(**r) for r in refunds]
+
+@api_router.post("/refunds", response_model=Refund)
+async def create_refund(refund: RefundCreate):
+    # Verify original transaction exists
+    original_txn = await db.transactions.find_one({"id": refund.originalTransactionId})
+    if not original_txn:
+        raise HTTPException(status_code=404, detail="Original transaction not found")
+    
+    refund_obj = Refund(**refund.dict())
+    await db.refunds.insert_one(refund_obj.dict())
+    
+    # If store credit, add to customer account
+    if refund.refundMethod == "store_credit" and refund.customerId:
+        await db.customers.update_one(
+            {"id": refund.customerId},
+            {"$inc": {"storeCredit": refund.amount}}
+        )
+    
+    return refund_obj
+
+# ============ SUPPLIERS API ============
+@api_router.get("/suppliers", response_model=List[Supplier])
+async def get_suppliers():
+    suppliers = await db.suppliers.find().to_list(1000)
+    return [Supplier(**s) for s in suppliers]
+
+@api_router.post("/suppliers", response_model=Supplier)
+async def create_supplier(supplier: SupplierCreate):
+    supplier_dict = supplier.dict()
+    supplier_obj = Supplier(**supplier_dict)
+    await db.suppliers.insert_one(supplier_obj.dict())
+    return supplier_obj
+
+# ============ PURCHASE ORDERS API ============
+@api_router.get("/purchase-orders", response_model=List[PurchaseOrder])
+async def get_purchase_orders():
+    orders = await db.purchase_orders.find().to_list(1000)
+    return [PurchaseOrder(**o) for o in orders]
+
+@api_router.post("/purchase-orders", response_model=PurchaseOrder)
+async def create_purchase_order(po: PurchaseOrderCreate):
+    supplier = await db.suppliers.find_one({"id": po.supplierId})
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    
+    subtotal = sum(item["quantity"] * item["price"] for item in po.items)
+    gst = subtotal * 0.1
+    total = subtotal + gst
+    
+    po_obj = PurchaseOrder(
+        supplierId=po.supplierId,
+        supplierName=supplier["name"],
+        expectedDelivery=po.expectedDelivery,
+        items=po.items,
+        subtotal=subtotal,
+        gst=gst,
+        total=total,
+        notes=po.notes
+    )
+    
+    await db.purchase_orders.insert_one(po_obj.dict())
+    return po_obj
+
+# ============ EXPENSES API ============
+@api_router.get("/expenses", response_model=List[Expense])
+async def get_expenses(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    category: Optional[str] = None
+):
+    query = {}
+    if category:
+        query["category"] = category
+    if start_date and end_date:
+        query["date"] = {
+            "$gte": datetime.fromisoformat(start_date),
+            "$lte": datetime.fromisoformat(end_date)
+        }
+    
+    expenses = await db.expenses.find(query).to_list(1000)
+    return [Expense(**e) for e in expenses]
+
+@api_router.post("/expenses", response_model=Expense)
+async def create_expense(expense: ExpenseCreate):
+    expense_dict = expense.dict()
+    expense_obj = Expense(**expense_dict)
+    await db.expenses.insert_one(expense_obj.dict())
+    return expense_obj
+
+# ============ STAFF API ============
+@api_router.get("/staff/commissions")
+async def get_staff_commissions(period: Optional[str] = None):
+    query = {"period": period} if period else {}
+    commissions = await db.staff_commissions.find(query).to_list(1000)
+    return commissions
+
+@api_router.post("/staff/clock-in")
+async def staff_clock_in(user_id: str, location: str):
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    shift = StaffShift(
+        userId=user_id,
+        userName=user["name"],
+        location=location,
+        clockIn=datetime.utcnow()
+    )
+    
+    await db.staff_shifts.insert_one(shift.dict())
+    return shift
+
+@api_router.post("/staff/clock-out/{shift_id}")
+async def staff_clock_out(shift_id: str, break_minutes: int = 0):
+    shift = await db.staff_shifts.find_one({"id": shift_id})
+    if not shift:
+        raise HTTPException(status_code=404, detail="Shift not found")
+    
+    clock_out = datetime.utcnow()
+    clock_in = shift["clockIn"]
+    total_hours = (clock_out - clock_in).total_seconds() / 3600
+    total_hours -= break_minutes / 60
+    
+    await db.staff_shifts.update_one(
+        {"id": shift_id},
+        {
+            "$set": {
+                "clockOut": clock_out,
+                "breakMinutes": break_minutes,
+                "totalHours": total_hours,
+                "status": "completed"
+            }
+        }
+    )
+    
+    return {"total_hours": total_hours}
+
+# ============ TABLES API (For Restaurants) ============
+@api_router.get("/tables", response_model=List[Table])
+async def get_tables(location: Optional[str] = None):
+    query = {"location": location} if location else {}
+    tables = await db.tables.find(query).to_list(1000)
+    return [Table(**t) for t in tables]
+
+@api_router.post("/tables", response_model=Table)
+async def create_table(table: TableCreate):
+    table_dict = table.dict()
+    table_obj = Table(**table_dict)
+    await db.tables.insert_one(table_obj.dict())
+    return table_obj
+
+@api_router.post("/tables/{table_id}/occupy")
+async def occupy_table(table_id: str, order_id: str):
+    await db.tables.update_one(
+        {"id": table_id},
+        {"$set": {"status": "occupied", "currentOrderId": order_id}}
+    )
+    return {"message": "Table occupied"}
+
+@api_router.post("/tables/{table_id}/free")
+async def free_table(table_id: str):
+    await db.tables.update_one(
+        {"id": table_id},
+        {"$set": {"status": "available", "currentOrderId": None}}
+    )
+    return {"message": "Table freed"}
+
+# ============ REPORTS & EXPORT API ============
+@api_router.get("/reports/sales-summary")
+async def get_sales_summary(
+    start_date: str,
+    end_date: str,
+    location: Optional[str] = None
+):
+    query = {
+        "timestamp": {
+            "$gte": datetime.fromisoformat(start_date),
+            "$lte": datetime.fromisoformat(end_date)
+        }
+    }
+    if location:
+        query["location"] = location
+    
+    transactions = await db.transactions.find(query).to_list(10000)
+    
+    total_sales = sum(t["total"] for t in transactions)
+    total_transactions = len(transactions)
+    avg_transaction = total_sales / total_transactions if total_transactions > 0 else 0
+    
+    # Group by payment method
+    by_payment = {}
+    for txn in transactions:
+        method = txn["paymentMethod"]
+        by_payment[method] = by_payment.get(method, 0) + txn["total"]
+    
+    # Group by product
+    product_sales = {}
+    for txn in transactions:
+        for item in txn["items"]:
+            pid = item["productId"]
+            if pid not in product_sales:
+                product_sales[pid] = {
+                    "name": item["productName"],
+                    "quantity": 0,
+                    "revenue": 0
+                }
+            product_sales[pid]["quantity"] += item["quantity"]
+            product_sales[pid]["revenue"] += item["quantity"] * item["price"]
+    
+    return {
+        "period": {"start": start_date, "end": end_date},
+        "total_sales": total_sales,
+        "total_transactions": total_transactions,
+        "avg_transaction": avg_transaction,
+        "by_payment_method": by_payment,
+        "top_products": sorted(product_sales.values(), key=lambda x: x["revenue"], reverse=True)[:10]
+    }
+
+@api_router.get("/reports/export/csv")
+async def export_report_csv(report_type: str, start_date: str, end_date: str):
+    """Export reports in CSV format"""
+    # This would generate CSV data
+    return {"message": "CSV export endpoint - implement with csv library"}
+
 # ============ ROOT ============
 @api_router.get("/")
 async def root():
-    return {"message": "Square POS API", "version": "1.0.0"}
+    return {"message": "Square POS API", "version": "2.0.0", "features": [
+        "Sales & Checkout", "Inventory Management", "Customer Loyalty",
+        "Staff Management", "Accounting & Tax", "Gift Cards", "Refunds",
+        "Suppliers", "Expenses", "Table Management", "Offline Support"
+    ]}
 
 # Include router
 app.include_router(api_router)
