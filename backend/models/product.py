@@ -38,6 +38,7 @@ class ProductCreate(BaseModel):
     sku: str
     image: str
     gstRate: float = 10.0
+    modifiers: List[ProductModifier] = []
 
 class ProductUpdate(BaseModel):
     name: Optional[str] = None
@@ -48,3 +49,4 @@ class ProductUpdate(BaseModel):
     sku: Optional[str] = None
     image: Optional[str] = None
     gstRate: Optional[float] = None
+    modifiers: Optional[List[ProductModifier]] = None
