@@ -744,6 +744,173 @@ async def export_report_csv(report_type: str, start_date: str, end_date: str):
     # This would generate CSV data
     return {"message": "CSV export endpoint - implement with csv library"}
 
+# ============ EFTPOS API ============
+@api_router.get("/eftpos/terminals", response_model=List[EFTPOSConfig])
+async def get_eftpos_terminals():
+    """Get all EFTPOS terminal configurations"""
+    terminals = await db.eftpos_terminals.find().to_list(1000)
+    return [EFTPOSConfig(**t) for t in terminals]
+
+@api_router.post("/eftpos/terminals", response_model=EFTPOSConfig)
+async def create_eftpos_terminal(terminal: EFTPOSConfigCreate):
+    """Configure new EFTPOS terminal"""
+    terminal_dict = terminal.dict()
+    terminal_obj = EFTPOSConfig(**terminal_dict)
+    await db.eftpos_terminals.insert_one(terminal_obj.dict())
+    return terminal_obj
+
+@api_router.put("/eftpos/terminals/{terminal_id}", response_model=EFTPOSConfig)
+async def update_eftpos_terminal(terminal_id: str, terminal: EFTPOSConfigCreate):
+    """Update EFTPOS terminal configuration"""
+    update_data = terminal.dict()
+    result = await db.eftpos_terminals.find_one_and_update(
+        {"id": terminal_id},
+        {"$set": update_data},
+        return_document=True
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Terminal not found")
+    return EFTPOSConfig(**result)
+
+@api_router.delete("/eftpos/terminals/{terminal_id}")
+async def delete_eftpos_terminal(terminal_id: str):
+    """Delete EFTPOS terminal configuration"""
+    result = await db.eftpos_terminals.delete_one({"id": terminal_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Terminal not found")
+    return {"message": "Terminal deleted successfully"}
+
+@api_router.post("/eftpos/terminals/{terminal_id}/test")
+async def test_eftpos_connection(terminal_id: str):
+    """Test EFTPOS terminal connection"""
+    terminal = await db.eftpos_terminals.find_one({"id": terminal_id})
+    if not terminal:
+        raise HTTPException(status_code=404, detail="Terminal not found")
+    
+    try:
+        from services.eftpos_service import eftpos_service
+        
+        provider = eftpos_service.get_provider(terminal)
+        connected = await provider.connect()
+        
+        if connected:
+            await provider.disconnect()
+            await db.eftpos_terminals.update_one(
+                {"id": terminal_id},
+                {"$set": {"status": "active", "lastPing": datetime.utcnow()}}
+            )
+            return {"success": True, "message": "Connection successful"}
+        else:
+            await db.eftpos_terminals.update_one(
+                {"id": terminal_id},
+                {"$set": {"status": "error"}}
+            )
+            return {"success": False, "message": "Connection failed"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+@api_router.post("/eftpos/transaction", response_model=EFTPOSTransaction)
+async def process_eftpos_transaction(request: EFTPOSTransactionRequest):
+    """Process EFTPOS payment transaction"""
+    # Get terminal configuration
+    terminal = await db.eftpos_terminals.find_one({"id": request.terminalId})
+    if not terminal:
+        raise HTTPException(status_code=404, detail="Terminal not found")
+    
+    try:
+        from services.eftpos_service import eftpos_service
+        
+        # Process transaction
+        result = await eftpos_service.process_transaction(
+            config=terminal,
+            transaction_type=request.transactionType,
+            amount=request.amount,
+            reference=request.reference,
+            cashout=request.cashout
+        )
+        
+        # Create EFTPOS transaction record
+        eftpos_txn = EFTPOSTransaction(
+            terminalId=request.terminalId,
+            provider=terminal["provider"],
+            transactionType=request.transactionType,
+            amount=request.amount,
+            cashout=request.cashout,
+            reference=request.reference,
+            posTransactionId=request.posTransactionId,
+            cardType=result.get("cardType"),
+            maskedPan=result.get("maskedPan"),
+            authCode=result.get("authCode"),
+            rrn=result.get("rrn"),
+            stan=result.get("stan"),
+            responseCode=result.get("responseCode", "99"),
+            responseText=result.get("responseText", "Unknown"),
+            approved=result.get("approved", False)
+        )
+        
+        await db.eftpos_transactions.insert_one(eftpos_txn.dict())
+        
+        return eftpos_txn
+        
+    except Exception as e:
+        logger.error(f"EFTPOS transaction error: {e}")
+        # Create failed transaction record
+        eftpos_txn = EFTPOSTransaction(
+            terminalId=request.terminalId,
+            provider=terminal["provider"],
+            transactionType=request.transactionType,
+            amount=request.amount,
+            cashout=request.cashout,
+            reference=request.reference,
+            posTransactionId=request.posTransactionId,
+            responseCode="99",
+            responseText=str(e),
+            approved=False
+        )
+        await db.eftpos_transactions.insert_one(eftpos_txn.dict())
+        return eftpos_txn
+
+@api_router.get("/eftpos/transactions", response_model=List[EFTPOSTransaction])
+async def get_eftpos_transactions(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    terminal_id: Optional[str] = None
+):
+    """Get EFTPOS transaction history"""
+    query = {}
+    if terminal_id:
+        query["terminalId"] = terminal_id
+    if start_date and end_date:
+        query["timestamp"] = {
+            "$gte": datetime.fromisoformat(start_date),
+            "$lte": datetime.fromisoformat(end_date)
+        }
+    
+    transactions = await db.eftpos_transactions.find(query).sort("timestamp", -1).to_list(1000)
+    return [EFTPOSTransaction(**t) for t in transactions]
+
+@api_router.post("/eftpos/terminals/{terminal_id}/settlement")
+async def perform_settlement(terminal_id: str):
+    """Perform end-of-day settlement"""
+    terminal = await db.eftpos_terminals.find_one({"id": terminal_id})
+    if not terminal:
+        raise HTTPException(status_code=404, detail="Terminal not found")
+    
+    try:
+        from services.eftpos_service import eftpos_service
+        
+        provider = eftpos_service.get_provider(terminal)
+        await provider.connect()
+        result = await provider.settlement()
+        await provider.disconnect()
+        
+        return {
+            "success": result.get("approved", False),
+            "message": result.get("responseText", "Settlement completed")
+        }
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
 # ============ ROOT ============
 @api_router.get("/")
 async def root():
@@ -755,7 +922,8 @@ async def root():
             "Sales & Checkout", "Inventory Management", "Customer Loyalty",
             "Staff Management", "Accounting & Tax", "Gift Cards", "Refunds",
             "Suppliers", "Expenses", "Table Management", "Offline Support",
-            "Split Payments", "Tipping", "Product Modifiers", "Multi-location"
+            "Split Payments", "Tipping", "Product Modifiers", "Multi-location",
+            "EFTPOS Integration (Linkly, Tyro, Smartpay, Windcave, etc.)"
         ],
         "status": "Production Ready"
     }
