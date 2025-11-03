@@ -26,6 +26,8 @@ from models.expense import Expense, ExpenseCreate
 from models.staff import StaffCommission, StaffShift
 from models.table import Table, TableCreate, DineInOrder
 from models.eftpos import EFTPOSConfig, EFTPOSConfigCreate, EFTPOSTransaction, EFTPOSTransactionRequest
+from models.integration import Integration, IntegrationCreate, IntegrationUpdate, SyncRequest
+from models.employee import EmployeeSchedule, EmployeeScheduleCreate, TimeOffRequest, AgeVerification
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
