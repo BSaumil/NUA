@@ -25,6 +25,7 @@ from models.supplier import Supplier, SupplierCreate, PurchaseOrder, PurchaseOrd
 from models.expense import Expense, ExpenseCreate
 from models.staff import StaffCommission, StaffShift
 from models.table import Table, TableCreate, DineInOrder
+from models.eftpos import EFTPOSConfig, EFTPOSConfigCreate, EFTPOSTransaction, EFTPOSTransactionRequest
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
