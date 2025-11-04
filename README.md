@@ -1,23 +1,37 @@
 # 🚀 Ananta POS - Complete Point of Sale System
 
-**Version 2.0** | Production Ready | Made with ❤️ in Australia
+**Version 2.0** | Production Ready | Windows .exe Available | Made with ❤️
 
 **Ananta** (अनन्त) - Sanskrit for "infinite" or "endless"
 
 ---
 
+## 🎯 Quick Start - Get Your Windows .exe
+
+**Want the Windows installer?** 👉 **[START HERE](START_HERE.md)**
+
+This guide will help you:
+1. Download the code to your Windows PC
+2. Build the standalone .exe installer
+3. Distribute to users
+
+**Total time:** ~1 hour (mostly automated)
+
+---
+
 ## 🌟 What is Ananta POS?
 
-Ananta POS is a comprehensive, enterprise-level Point of Sale system that works **completely offline** while providing cloud sync capabilities. Built for retail stores, restaurants, cafes, and service businesses across Australia.
+Ananta POS is a comprehensive, enterprise-level Point of Sale system that works **completely offline** while providing cloud sync capabilities. Built for retail stores, restaurants, cafes, and service businesses.
 
 ### Why Ananta?
 
 ✅ **True Offline-First** - No internet? No problem!
-✅ **Australian Tax Compliant** - Built-in BAS/GST filing
+✅ **Windows Installer** - One-click install, everything bundled
 ✅ **Production Ready** - Deploy today, start selling tomorrow
 ✅ **Feature Complete** - 95% feature parity with Square, Lightspeed & Epos Now
 ✅ **Modern Tech** - React + FastAPI + MongoDB
 ✅ **Affordable** - No per-transaction fees
+✅ **Standalone** - No dependencies, works out of the box
 
 ---
 
