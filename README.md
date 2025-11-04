@@ -151,12 +151,54 @@ yarn start
 
 ---
 
+## 💻 Windows Desktop Application
+
+### Build Your Own .exe Installer
+
+Ananta POS can be packaged as a **standalone Windows executable** that includes:
+- ✅ Complete React frontend
+- ✅ FastAPI backend server
+- ✅ MongoDB database
+- ✅ All runtimes (Node.js, Python)
+- ✅ 100% offline capability
+
+**📦 What You Get:**
+- Professional Windows installer (~250-300 MB)
+- One-click installation for users
+- No dependencies needed
+- Desktop and Start Menu shortcuts
+- Works on Windows 7/8/10/11
+
+**🚀 Quick Start:**
+1. **Read:** [START_HERE.md](START_HERE.md)
+2. **Download code** to Windows PC (via GitHub or direct download)
+3. **Run:** `build_windows_exe.bat`
+4. **Get:** `Ananta POS-Setup-2.0.1.exe`
+
+**📚 Complete Documentation:**
+- **[START_HERE.md](START_HERE.md)** - Choose download method
+- **[GITHUB_DOWNLOAD_GUIDE.md](GITHUB_DOWNLOAD_GUIDE.md)** - Download via GitHub
+- **[DIRECT_DOWNLOAD_GUIDE.md](DIRECT_DOWNLOAD_GUIDE.md)** - Direct download
+- **[WINDOWS_SETUP_GUIDE.md](WINDOWS_SETUP_GUIDE.md)** - Prepare Windows PC
+- **[WINDOWS_BUILD_GUIDE.md](WINDOWS_BUILD_GUIDE.md)** - Build the .exe
+- **[BUILD_GUIDE.html](BUILD_GUIDE.html)** - Visual guide (open in browser)
+- **[BUILD_CHECKLIST.md](BUILD_CHECKLIST.md)** - Quick reference
+
+**⏱️ Build Time:** 20-35 minutes (mostly automated)
+
+**💡 Tools Included:**
+- `build_windows_exe.bat` - One-click build script
+- `check_prerequisites.py` - System readiness checker
+
+---
+
 ## 🌐 Deployment Options
 
-1. **Local Server** - On-premise deployment
-2. **Cloud** - AWS, Azure, Google Cloud
-3. **Hybrid** - Local POS + cloud backup
-4. **Multi-tenant SaaS** - Host for multiple businesses
+1. **Windows Desktop App** - Standalone .exe installer (see above)
+2. **Local Server** - On-premise deployment
+3. **Cloud** - AWS, Azure, Google Cloud
+4. **Hybrid** - Local POS + cloud backup
+5. **Multi-tenant SaaS** - Host for multiple businesses
 
 ---
 
