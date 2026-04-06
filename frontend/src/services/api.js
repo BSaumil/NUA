@@ -29,6 +29,14 @@ export const customersAPI = {
   getAll: (params) => api.get('/customers', { params }),
   create: (data) => api.post('/customers', data),
   update: (id, data) => api.put(`/customers/${id}`, data),
+  getProfile: (id) => api.get(`/customers/${id}/profile`),
+};
+
+// Feedback API
+export const feedbackAPI = {
+  getAll: (params) => api.get('/feedback', { params }),
+  create: (data) => api.post('/feedback', data),
+  respond: (id, response) => api.put(`/feedback/${id}/respond`, null, { params: { response } }),
 };
 
 // Transactions API
@@ -118,6 +126,18 @@ export const waitlistAPI = {
   update: (id, data) => api.put(`/waitlist/${id}`, data),
   seat: (id, tableId) => api.post(`/waitlist/${id}/seat`, null, { params: { table_id: tableId } }),
   remove: (id) => api.delete(`/waitlist/${id}`),
+};
+
+// Kitchen Display (KDS) API
+export const kitchenAPI = {
+  getOrders: (params) => api.get('/kitchen/orders', { params }),
+  createOrder: (data) => api.post('/kitchen/orders', data),
+  startOrder: (id) => api.post(`/kitchen/orders/${id}/start`),
+  readyOrder: (id) => api.post(`/kitchen/orders/${id}/ready`),
+  servedOrder: (id) => api.post(`/kitchen/orders/${id}/served`),
+  cancelOrder: (id) => api.post(`/kitchen/orders/${id}/cancel`),
+  fireCourse: (id, course) => api.post(`/kitchen/orders/${id}/fire-course`, null, { params: { course } }),
+  setPriority: (id, priority) => api.post(`/kitchen/orders/${id}/priority`, null, { params: { priority } }),
 };
 
 export default api;

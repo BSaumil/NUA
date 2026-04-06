@@ -16,6 +16,7 @@ import Settings from './pages/Settings';
 import Reservations from './pages/Reservations';
 import FloorPlan from './pages/FloorPlan';
 import WaitlistPage from './pages/Waitlist';
+import Kitchen from './pages/Kitchen';
 
 function App() {
   return (
@@ -32,6 +33,7 @@ function App() {
                   <Route path="/reservations" element={<Reservations />} />
                   <Route path="/floor-plan" element={<FloorPlan />} />
                   <Route path="/waitlist" element={<WaitlistPage />} />
+                  <Route path="/kitchen" element={<Kitchen />} />
                   <Route path="/products" element={<Products />} />
                   <Route path="/customers" element={<Customers />} />
                   <Route path="/inventory" element={<Inventory />} />

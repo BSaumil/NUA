@@ -11,7 +11,8 @@ import {
   Store,
   CalendarDays,
   Map,
-  ClipboardList
+  ClipboardList,
+  ChefHat
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 
@@ -21,6 +22,7 @@ const menuItems = [
   { path: '/reservations', icon: CalendarDays, label: 'Reservations' },
   { path: '/floor-plan', icon: Map, label: 'Floor Plan' },
   { path: '/waitlist', icon: ClipboardList, label: 'Waitlist' },
+  { path: '/kitchen', icon: ChefHat, label: 'Kitchen (KDS)' },
   { path: '/products', icon: Package, label: 'Products' },
   { path: '/customers', icon: Users, label: 'Customers' },
   { path: '/inventory', icon: Store, label: 'Inventory' },

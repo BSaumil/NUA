@@ -31,6 +31,8 @@ from models.employee import EmployeeSchedule, EmployeeScheduleCreate, TimeOffReq
 from models.reservation import Reservation, ReservationCreate, ReservationUpdate
 from models.floor_plan import FloorPlan, FloorPlanCreate, FloorPlanUpdate
 from models.waitlist import WaitlistEntry, WaitlistEntryCreate, WaitlistEntryUpdate
+from models.feedback import Feedback, FeedbackCreate
+from models.kitchen_order import KitchenOrder, KitchenOrderCreate
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -916,6 +918,70 @@ async def perform_settlement(terminal_id: str):
     except Exception as e:
         return {"success": False, "message": str(e)}
 
+# ============ CUSTOMER PROFILE (360° Guest CRM) ============
+@api_router.get("/customers/{customer_id}/profile")
+async def get_customer_profile(customer_id: str):
+    """Full 360° guest profile with dining history."""
+    customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    # Get reservation history
+    reservations = await db.reservations.find(
+        {"$or": [{"customerId": customer_id}, {"guestEmail": customer.get("email", "")}]},
+        {"_id": 0}
+    ).sort("date", -1).to_list(50)
+    # Get feedback
+    feedbacks = await db.feedback.find({"customerId": customer_id}, {"_id": 0}).sort("createdAt", -1).to_list(50)
+    # Get transaction history
+    transactions = await db.transactions.find({"customerId": customer_id}, {"_id": 0}).sort("timestamp", -1).to_list(50)
+    return {
+        **customer,
+        "reservationHistory": reservations,
+        "feedbackHistory": feedbacks,
+        "transactionHistory": transactions,
+    }
+
+# ============ FEEDBACK API ============
+@api_router.get("/feedback", response_model=List[Feedback])
+async def get_feedback(customer_id: Optional[str] = None, status: Optional[str] = None):
+    query = {}
+    if customer_id:
+        query["customerId"] = customer_id
+    if status:
+        query["status"] = status
+    items = await db.feedback.find(query, {"_id": 0}).sort("createdAt", -1).to_list(1000)
+    return [Feedback(**f) for f in items]
+
+@api_router.post("/feedback", response_model=Feedback)
+async def create_feedback(fb: FeedbackCreate):
+    fb_obj = Feedback(**fb.dict())
+    await db.feedback.insert_one(fb_obj.dict())
+    # Update customer feedback stats
+    if fb.customerId:
+        customer = await db.customers.find_one({"id": fb.customerId}, {"_id": 0})
+        if customer:
+            count = customer.get("feedbackCount", 0)
+            avg = customer.get("feedbackRating", 0)
+            new_count = count + 1
+            new_avg = ((avg * count) + fb.rating) / new_count
+            await db.customers.update_one(
+                {"id": fb.customerId},
+                {"$set": {"feedbackRating": round(new_avg, 1), "feedbackCount": new_count}}
+            )
+    return fb_obj
+
+@api_router.put("/feedback/{feedback_id}/respond")
+async def respond_to_feedback(feedback_id: str, response: str = ""):
+    result = await db.feedback.find_one_and_update(
+        {"id": feedback_id},
+        {"$set": {"status": "responded", "response": response}},
+        return_document=True
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Feedback not found")
+    result.pop("_id", None)
+    return Feedback(**result)
+
 # ============ RESERVATIONS API ============
 @api_router.get("/reservations", response_model=List[Reservation])
 async def get_reservations(
@@ -1205,6 +1271,96 @@ async def remove_from_waitlist(entry_id: str):
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Entry not found")
     return {"message": "Removed from waitlist"}
+
+# ============ KITCHEN DISPLAY (KDS) API ============
+@api_router.get("/kitchen/orders")
+async def get_kitchen_orders(status: Optional[str] = None):
+    query = {}
+    if status:
+        query["status"] = status
+    else:
+        query["status"] = {"$in": ["new", "preparing", "ready"]}
+    orders = await db.kitchen_orders.find(query, {"_id": 0}).sort("createdAt", 1).to_list(100)
+    return orders
+
+@api_router.post("/kitchen/orders")
+async def create_kitchen_order(order: KitchenOrderCreate):
+    order_obj = KitchenOrder(**order.dict())
+    await db.kitchen_orders.insert_one(order_obj.dict())
+    return order_obj.dict()
+
+@api_router.post("/kitchen/orders/{order_id}/start")
+async def start_kitchen_order(order_id: str):
+    result = await db.kitchen_orders.find_one_and_update(
+        {"id": order_id},
+        {"$set": {"status": "preparing", "startedAt": datetime.utcnow().isoformat()}},
+        return_document=True
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Order not found")
+    result.pop("_id", None)
+    return result
+
+@api_router.post("/kitchen/orders/{order_id}/ready")
+async def mark_order_ready(order_id: str):
+    result = await db.kitchen_orders.find_one_and_update(
+        {"id": order_id},
+        {"$set": {"status": "ready", "readyAt": datetime.utcnow().isoformat()}},
+        return_document=True
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Order not found")
+    result.pop("_id", None)
+    return result
+
+@api_router.post("/kitchen/orders/{order_id}/served")
+async def mark_order_served(order_id: str):
+    result = await db.kitchen_orders.find_one_and_update(
+        {"id": order_id},
+        {"$set": {"status": "served", "servedAt": datetime.utcnow().isoformat()}},
+        return_document=True
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Order not found")
+    result.pop("_id", None)
+    return result
+
+@api_router.post("/kitchen/orders/{order_id}/cancel")
+async def cancel_kitchen_order(order_id: str):
+    result = await db.kitchen_orders.find_one_and_update(
+        {"id": order_id},
+        {"$set": {"status": "cancelled"}},
+        return_document=True
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Order not found")
+    result.pop("_id", None)
+    return result
+
+@api_router.post("/kitchen/orders/{order_id}/fire-course")
+async def fire_next_course(order_id: str, course: int = 2):
+    """Fire the next course for a multi-course order."""
+    result = await db.kitchen_orders.find_one_and_update(
+        {"id": order_id},
+        {"$set": {"currentCourse": course}},
+        return_document=True
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Order not found")
+    result.pop("_id", None)
+    return result
+
+@api_router.post("/kitchen/orders/{order_id}/priority")
+async def set_order_priority(order_id: str, priority: str = "rush"):
+    result = await db.kitchen_orders.find_one_and_update(
+        {"id": order_id},
+        {"$set": {"priority": priority}},
+        return_document=True
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Order not found")
+    result.pop("_id", None)
+    return result
 
 # ============ ROOT ============
 @api_router.get("/")

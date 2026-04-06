@@ -238,7 +238,21 @@ async def seed_database():
             "totalSpent": 2450.00,
             "visits": 87,
             "joinDate": datetime(2023, 6, 15),
-            "points": 2450
+            "points": 2450,
+            "birthday": "1990-03-15",
+            "company": "",
+            "seatingPreference": "window",
+            "dietaryRestrictions": ["Gluten-Free"],
+            "allergies": ["Peanuts"],
+            "favoriteDishes": ["Espresso", "Chocolate Cake", "Caesar Salad"],
+            "tags": ["Regular", "High Spender"],
+            "isVip": True,
+            "notes": "Prefers quiet corner table. Always orders espresso first.",
+            "noShowCount": 0,
+            "avgSpendPerVisit": 28.16,
+            "feedbackRating": 4.5,
+            "feedbackCount": 3,
+            "storeCredit": 0
         },
         {
             "id": "cust-2",
@@ -249,7 +263,21 @@ async def seed_database():
             "totalSpent": 5680.00,
             "visits": 156,
             "joinDate": datetime(2023, 1, 20),
-            "points": 5680
+            "points": 5680,
+            "birthday": "1985-11-22",
+            "company": "Chen Industries",
+            "seatingPreference": "indoor",
+            "dietaryRestrictions": [],
+            "allergies": [],
+            "favoriteDishes": ["Beef Burger", "Cappuccino", "Fish & Chips"],
+            "tags": ["VIP", "Corporate", "Regular"],
+            "isVip": True,
+            "notes": "Top spender. Hosts business lunches often. Comp dessert on visits.",
+            "noShowCount": 0,
+            "avgSpendPerVisit": 36.41,
+            "feedbackRating": 4.8,
+            "feedbackCount": 5,
+            "storeCredit": 25.00
         },
         {
             "id": "cust-3",
@@ -260,7 +288,21 @@ async def seed_database():
             "totalSpent": 890.00,
             "visits": 34,
             "joinDate": datetime(2024, 3, 10),
-            "points": 890
+            "points": 890,
+            "birthday": "1995-07-08",
+            "company": "",
+            "seatingPreference": "outdoor",
+            "dietaryRestrictions": ["Vegan"],
+            "allergies": ["Milk", "Eggs"],
+            "favoriteDishes": ["Garden Salad", "Mushroom Risotto"],
+            "tags": ["Birthday Month"],
+            "isVip": False,
+            "notes": "Strict vegan. Birthday coming up in July.",
+            "noShowCount": 1,
+            "avgSpendPerVisit": 26.18,
+            "feedbackRating": 4.0,
+            "feedbackCount": 2,
+            "storeCredit": 0
         },
         {
             "id": "cust-4",
@@ -271,7 +313,21 @@ async def seed_database():
             "totalSpent": 245.00,
             "visits": 12,
             "joinDate": datetime(2024, 10, 5),
-            "points": 245
+            "points": 245,
+            "birthday": "",
+            "company": "",
+            "seatingPreference": "bar",
+            "dietaryRestrictions": [],
+            "allergies": [],
+            "favoriteDishes": [],
+            "tags": [],
+            "isVip": False,
+            "notes": "",
+            "noShowCount": 2,
+            "avgSpendPerVisit": 20.42,
+            "feedbackRating": 0,
+            "feedbackCount": 0,
+            "storeCredit": 0
         }
     ]
     await db.customers.insert_many(customers)
@@ -600,6 +656,40 @@ async def seed_database():
         {"id": "WL-003", "guestName": "Kevin Zhang", "partySize": 5, "quotedWait": 30, "preferences": "outdoor", "status": "notified", "position": 3, "checkInTime": datetime.utcnow().isoformat(), "createdAt": datetime.utcnow().isoformat()},
     ]
     await db.waitlist.insert_many(waitlist)
+    
+    # ============ FEEDBACK ============
+    print("Seeding feedback...")
+    await db.feedback.delete_many({})
+    feedback = [
+        {"id": "FB-001", "customerId": "cust-1", "guestName": "Sarah Johnson", "rating": 5, "foodRating": 5, "serviceRating": 5, "ambienceRating": 4, "comment": "Absolutely wonderful experience! The espresso was perfect as always.", "tags": ["great-food"], "status": "responded", "response": "Thank you Sarah! We love having you.", "createdAt": datetime.utcnow().isoformat()},
+        {"id": "FB-002", "customerId": "cust-1", "guestName": "Sarah Johnson", "rating": 4, "foodRating": 4, "serviceRating": 5, "ambienceRating": 4, "comment": "Great service but the cake was slightly dry today.", "tags": [], "status": "read", "createdAt": datetime.utcnow().isoformat()},
+        {"id": "FB-003", "customerId": "cust-2", "guestName": "Michael Chen", "rating": 5, "foodRating": 5, "serviceRating": 5, "ambienceRating": 5, "comment": "Business lunch was impeccable. Your team is fantastic.", "tags": ["great-food", "excellent-service"], "status": "responded", "response": "Thank you Michael! Happy to host your team anytime.", "createdAt": datetime.utcnow().isoformat()},
+        {"id": "FB-004", "customerId": "cust-3", "guestName": "Emma Wilson", "rating": 4, "foodRating": 4, "serviceRating": 4, "ambienceRating": 4, "comment": "Love the vegan options. Would love to see more variety.", "tags": [], "status": "new", "createdAt": datetime.utcnow().isoformat()},
+    ]
+    await db.feedback.insert_many(feedback)
+    
+    # ============ KITCHEN ORDERS ============
+    print("Seeding kitchen orders...")
+    await db.kitchen_orders.delete_many({})
+    kitchen_orders = [
+        {"id": "KO-001", "tableNumber": "3", "orderType": "dine_in", "items": [
+            {"productId": "4", "productName": "Beef Burger", "quantity": 2, "course": 1, "status": "pending"},
+            {"productId": "5", "productName": "Soft Drink", "quantity": 2, "course": 1, "status": "pending"}
+        ], "notes": "No onions on one burger", "priority": "normal", "status": "new", "currentCourse": 1, "createdAt": datetime.utcnow().isoformat(), "estimatedMinutes": 15},
+        {"id": "KO-002", "tableNumber": "7", "orderType": "dine_in", "items": [
+            {"productId": "1", "productName": "Espresso", "quantity": 3, "course": 1, "status": "pending"},
+            {"productId": "3", "productName": "Chocolate Cake", "quantity": 2, "course": 2, "status": "pending"},
+            {"productId": "6", "productName": "Caesar Salad", "quantity": 1, "course": 1, "status": "pending"}
+        ], "notes": "VIP table - birthday celebration", "priority": "vip", "status": "preparing", "currentCourse": 1, "startedAt": datetime.utcnow().isoformat(), "createdAt": datetime.utcnow().isoformat(), "estimatedMinutes": 20},
+        {"id": "KO-003", "tableNumber": "9", "orderType": "dine_in", "items": [
+            {"productId": "2", "productName": "Cappuccino", "quantity": 2, "course": 1, "status": "pending"}
+        ], "priority": "normal", "status": "ready", "currentCourse": 1, "readyAt": datetime.utcnow().isoformat(), "createdAt": datetime.utcnow().isoformat(), "estimatedMinutes": 5},
+        {"id": "KO-004", "orderType": "takeaway", "items": [
+            {"productId": "4", "productName": "Beef Burger", "quantity": 1, "course": 1, "status": "pending"},
+            {"productId": "7", "productName": "Fish & Chips", "quantity": 1, "course": 1, "status": "pending"}
+        ], "notes": "Extra tartar sauce", "priority": "rush", "status": "new", "currentCourse": 1, "createdAt": datetime.utcnow().isoformat(), "estimatedMinutes": 12},
+    ]
+    await db.kitchen_orders.insert_many(kitchen_orders)
     
     print("Database seeded successfully!")
     client.close()
