@@ -17,6 +17,10 @@ import Reservations from './pages/Reservations';
 import FloorPlan from './pages/FloorPlan';
 import WaitlistPage from './pages/Waitlist';
 import Kitchen from './pages/Kitchen';
+import PreShift from './pages/PreShift';
+import CommandCenter from './pages/CommandCenter';
+import MenuEngineering from './pages/MenuEngineering';
+import AutomationEngine from './pages/AutomationEngine';
 
 function App() {
   return (
@@ -29,14 +33,18 @@ function App() {
               <div className="ml-64 flex-1 p-8 min-h-screen bg-gray-50">
                 <Routes>
                   <Route path="/" element={<Dashboard />} />
+                  <Route path="/pre-shift" element={<PreShift />} />
+                  <Route path="/command-center" element={<CommandCenter />} />
                   <Route path="/pos" element={<POSTerminal />} />
                   <Route path="/reservations" element={<Reservations />} />
                   <Route path="/floor-plan" element={<FloorPlan />} />
                   <Route path="/waitlist" element={<WaitlistPage />} />
                   <Route path="/kitchen" element={<Kitchen />} />
+                  <Route path="/menu-engineering" element={<MenuEngineering />} />
                   <Route path="/products" element={<Products />} />
                   <Route path="/customers" element={<Customers />} />
                   <Route path="/inventory" element={<Inventory />} />
+                  <Route path="/automation" element={<AutomationEngine />} />
                   <Route path="/accounting" element={<Accounting />} />
                   <Route path="/bas-gst" element={<BASGST />} />
                   <Route path="/settings" element={<Settings />} />

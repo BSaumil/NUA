@@ -138,6 +138,28 @@ export const kitchenAPI = {
   cancelOrder: (id) => api.post(`/kitchen/orders/${id}/cancel`),
   fireCourse: (id, course) => api.post(`/kitchen/orders/${id}/fire-course`, null, { params: { course } }),
   setPriority: (id, priority) => api.post(`/kitchen/orders/${id}/priority`, null, { params: { priority } }),
+  getPrepList: () => api.get('/kitchen/prep-list'),
+};
+
+// Pre-Shift Dashboard API
+export const preShiftAPI = {
+  getToday: () => api.get('/pre-shift/today'),
+};
+
+// AI Command Center API
+export const analyticsAPI = {
+  getCommandCenter: () => api.get('/analytics/command-center'),
+  getMenuEngineering: () => api.get('/analytics/menu-engineering'),
+};
+
+// Automation API
+export const automationAPI = {
+  getRules: () => api.get('/automation/rules'),
+  createRule: (data) => api.post('/automation/rules', data),
+  updateRule: (id, data) => api.put(`/automation/rules/${id}`, data),
+  deleteRule: (id) => api.delete(`/automation/rules/${id}`),
+  toggleRule: (id) => api.post(`/automation/rules/${id}/toggle`),
+  getAlerts: () => api.get('/automation/alerts'),
 };
 
 export default api;

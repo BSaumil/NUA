@@ -1362,6 +1362,399 @@ async def set_order_priority(order_id: str, priority: str = "rush"):
     result.pop("_id", None)
     return result
 
+# ============ PRE-SHIFT DASHBOARD API ============
+@api_router.get("/pre-shift/today")
+async def get_pre_shift_data():
+    """Pre-shift dashboard: today's reservations, VIP alerts, dietary needs, kitchen prep."""
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    
+    # Today's reservations
+    reservations = await db.reservations.find({"date": today}, {"_id": 0}).sort("time", 1).to_list(100)
+    
+    # VIP guests arriving today
+    vip_guests = []
+    for r in reservations:
+        if r.get("customerId"):
+            cust = await db.customers.find_one({"id": r["customerId"]}, {"_id": 0})
+            if cust and cust.get("isVip"):
+                vip_guests.append({**r, "customerProfile": cust})
+        elif "VIP" in (r.get("tags") or []):
+            vip_guests.append(r)
+    
+    # Dietary alerts (from reservations + customer profiles)
+    dietary_alerts = []
+    for r in reservations:
+        alerts = []
+        if r.get("customerId"):
+            cust = await db.customers.find_one({"id": r["customerId"]}, {"_id": 0})
+            if cust:
+                if cust.get("dietaryRestrictions"):
+                    alerts.extend(cust["dietaryRestrictions"])
+                if cust.get("allergies"):
+                    alerts.extend([f"ALLERGY: {a}" for a in cust["allergies"]])
+        if alerts:
+            dietary_alerts.append({"reservation": r["id"], "guest": r["guestName"], "time": r["time"], "alerts": alerts})
+    
+    # Special requests
+    special_requests = [
+        {"guest": r["guestName"], "time": r["time"], "request": r["specialRequests"], "partySize": r["partySize"]}
+        for r in reservations if r.get("specialRequests")
+    ]
+    
+    # Today's stats
+    total_covers = sum(r.get("partySize", 0) for r in reservations)
+    confirmed = len([r for r in reservations if r.get("status") == "confirmed"])
+    seated = len([r for r in reservations if r.get("status") == "seated"])
+    
+    # Kitchen orders pending
+    kitchen_pending = await db.kitchen_orders.count_documents({"status": {"$in": ["new", "preparing"]}})
+    
+    # Waitlist count
+    waitlist_count = await db.waitlist.count_documents({"status": "waiting"})
+    
+    # Recent transactions today (for revenue tracking)
+    txns_today = await db.transactions.find({}, {"_id": 0}).sort("timestamp", -1).to_list(100)
+    revenue_today = sum(t.get("total", 0) for t in txns_today)
+    
+    return {
+        "date": today,
+        "reservations": reservations,
+        "totalReservations": len(reservations),
+        "totalCovers": total_covers,
+        "confirmed": confirmed,
+        "seated": seated,
+        "vipGuests": vip_guests,
+        "dietaryAlerts": dietary_alerts,
+        "specialRequests": special_requests,
+        "kitchenPending": kitchen_pending,
+        "waitlistCount": waitlist_count,
+        "revenueToday": revenue_today,
+        "transactionsToday": len(txns_today),
+    }
+
+# ============ AI COMMAND CENTER API ============
+@api_router.get("/analytics/command-center")
+async def get_command_center():
+    """AI Command Center: real-time metrics, insights, and alerts."""
+    # Sales data
+    all_txns = await db.transactions.find({}, {"_id": 0}).to_list(10000)
+    total_revenue = sum(t.get("total", 0) for t in all_txns)
+    total_txns = len(all_txns)
+    avg_ticket = total_revenue / total_txns if total_txns > 0 else 0
+    
+    # Products for COGS
+    products = await db.products.find({}, {"_id": 0}).to_list(1000)
+    product_map = {p["id"]: p for p in products}
+    
+    # Food cost calculation
+    total_cogs = 0
+    for txn in all_txns:
+        for item in txn.get("items", []):
+            prod = product_map.get(item.get("productId"))
+            if prod:
+                total_cogs += prod.get("cost", 0) * item.get("quantity", 0)
+    food_cost_pct = (total_cogs / total_revenue * 100) if total_revenue > 0 else 0
+    
+    # Expenses
+    expenses = await db.expenses.find({}, {"_id": 0}).to_list(10000)
+    total_expenses = sum(e.get("amount", 0) for e in expenses)
+    
+    # Staff shifts for labor cost estimate
+    shifts = await db.staff_shifts.find({}, {"_id": 0}).to_list(1000)
+    total_hours = sum(s.get("totalHours", 0) for s in shifts)
+    labor_cost = total_hours * 30  # avg $30/hr estimate
+    labor_pct = (labor_cost / total_revenue * 100) if total_revenue > 0 else 0
+    
+    # Product performance
+    product_sales = {}
+    for txn in all_txns:
+        for item in txn.get("items", []):
+            pid = item.get("productId", "")
+            if pid not in product_sales:
+                prod = product_map.get(pid, {})
+                product_sales[pid] = {
+                    "id": pid, "name": item.get("productName", ""),
+                    "revenue": 0, "quantity": 0, "cost": prod.get("cost", 0),
+                    "price": prod.get("price", item.get("price", 0))
+                }
+            product_sales[pid]["revenue"] += item.get("price", 0) * item.get("quantity", 0)
+            product_sales[pid]["quantity"] += item.get("quantity", 0)
+    
+    # Calculate profit margin per product
+    for pid, ps in product_sales.items():
+        ps["totalCost"] = ps["cost"] * ps["quantity"]
+        ps["profit"] = ps["revenue"] - ps["totalCost"]
+        ps["margin"] = (ps["profit"] / ps["revenue"] * 100) if ps["revenue"] > 0 else 0
+    
+    top_sellers = sorted(product_sales.values(), key=lambda x: x["revenue"], reverse=True)[:10]
+    low_performers = sorted(product_sales.values(), key=lambda x: x["margin"])[:5]
+    
+    # Reservations stats
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    today_res = await db.reservations.find({"date": today}, {"_id": 0}).to_list(100)
+    
+    # Generate AI insights
+    insights = []
+    if food_cost_pct > 35:
+        insights.append({"type": "warning", "title": "High Food Cost", "message": f"Food cost at {food_cost_pct:.1f}% - target is under 35%. Review portion sizes and supplier pricing.", "priority": "high"})
+    if labor_pct > 30:
+        insights.append({"type": "warning", "title": "Labor Cost Alert", "message": f"Labor cost at {labor_pct:.1f}% of revenue. Consider optimizing shift schedules.", "priority": "high"})
+    if len(today_res) > 20:
+        insights.append({"type": "info", "title": "Busy Night Ahead", "message": f"{len(today_res)} reservations today ({sum(r.get('partySize', 0) for r in today_res)} covers). Ensure adequate prep and staffing.", "priority": "medium"})
+    if low_performers:
+        worst = low_performers[0]
+        if worst["margin"] < 20:
+            insights.append({"type": "alert", "title": "Underperforming Dish", "message": f'"{worst["name"]}" has only {worst["margin"]:.0f}% margin. Consider price increase or recipe review.', "priority": "medium"})
+    
+    # Customers
+    customers = await db.customers.find({}, {"_id": 0}).to_list(10000)
+    vip_count = len([c for c in customers if c.get("isVip")])
+    avg_rating = sum(c.get("feedbackRating", 0) for c in customers if c.get("feedbackRating", 0) > 0)
+    rated = len([c for c in customers if c.get("feedbackRating", 0) > 0])
+    avg_rating = avg_rating / rated if rated > 0 else 0
+    
+    return {
+        "revenue": {"total": total_revenue, "transactions": total_txns, "avgTicket": avg_ticket},
+        "costs": {"foodCost": total_cogs, "foodCostPct": food_cost_pct, "laborCost": labor_cost, "laborPct": labor_pct, "expenses": total_expenses},
+        "profit": {"gross": total_revenue - total_cogs, "net": total_revenue - total_cogs - total_expenses - labor_cost},
+        "topSellers": top_sellers,
+        "lowPerformers": low_performers,
+        "insights": insights,
+        "customers": {"total": len(customers), "vips": vip_count, "avgRating": round(avg_rating, 1)},
+        "todayReservations": len(today_res),
+        "todayCovers": sum(r.get("partySize", 0) for r in today_res),
+    }
+
+# ============ MENU ENGINEERING API ============
+@api_router.get("/analytics/menu-engineering")
+async def get_menu_engineering():
+    """Menu performance analysis: star/puzzle/horse/dog classification."""
+    products = await db.products.find({}, {"_id": 0}).to_list(1000)
+    all_txns = await db.transactions.find({}, {"_id": 0}).to_list(10000)
+    
+    product_map = {p["id"]: p for p in products}
+    sales_data = {}
+    
+    for txn in all_txns:
+        for item in txn.get("items", []):
+            pid = item.get("productId", "")
+            if pid not in sales_data:
+                prod = product_map.get(pid, {})
+                sales_data[pid] = {
+                    "id": pid, "name": item.get("productName", prod.get("name", "")),
+                    "category": prod.get("category", "Other"),
+                    "price": prod.get("price", 0), "cost": prod.get("cost", 0),
+                    "quantity": 0, "revenue": 0
+                }
+            sales_data[pid]["quantity"] += item.get("quantity", 0)
+            sales_data[pid]["revenue"] += item.get("price", 0) * item.get("quantity", 0)
+    
+    # Calculate metrics
+    items = list(sales_data.values())
+    for item in items:
+        item["totalCost"] = item["cost"] * item["quantity"]
+        item["profit"] = item["revenue"] - item["totalCost"]
+        item["margin"] = (item["profit"] / item["revenue"] * 100) if item["revenue"] > 0 else 0
+        item["contributionMargin"] = item["price"] - item["cost"]
+    
+    # Menu engineering matrix (BCG-style)
+    if items:
+        avg_qty = sum(i["quantity"] for i in items) / len(items)
+        avg_margin = sum(i["margin"] for i in items) / len(items)
+        
+        for item in items:
+            high_pop = item["quantity"] >= avg_qty * 0.7
+            high_profit = item["margin"] >= avg_margin
+            if high_pop and high_profit:
+                item["classification"] = "star"  # High popularity, high profit
+            elif not high_pop and high_profit:
+                item["classification"] = "puzzle"  # Low popularity, high profit
+            elif high_pop and not high_profit:
+                item["classification"] = "horse"  # High popularity, low profit
+            else:
+                item["classification"] = "dog"  # Low both
+    
+    # Category breakdown
+    categories = {}
+    for item in items:
+        cat = item["category"]
+        if cat not in categories:
+            categories[cat] = {"name": cat, "revenue": 0, "cost": 0, "quantity": 0, "items": 0}
+        categories[cat]["revenue"] += item["revenue"]
+        categories[cat]["cost"] += item["totalCost"]
+        categories[cat]["quantity"] += item["quantity"]
+        categories[cat]["items"] += 1
+    
+    for cat in categories.values():
+        cat["profit"] = cat["revenue"] - cat["cost"]
+        cat["margin"] = (cat["profit"] / cat["revenue"] * 100) if cat["revenue"] > 0 else 0
+    
+    return {
+        "items": sorted(items, key=lambda x: x["revenue"], reverse=True),
+        "categories": sorted(categories.values(), key=lambda x: x["revenue"], reverse=True),
+        "summary": {
+            "stars": len([i for i in items if i.get("classification") == "star"]),
+            "puzzles": len([i for i in items if i.get("classification") == "puzzle"]),
+            "horses": len([i for i in items if i.get("classification") == "horse"]),
+            "dogs": len([i for i in items if i.get("classification") == "dog"]),
+        }
+    }
+
+# ============ AUTOMATION RULES API ============
+@api_router.get("/automation/rules")
+async def get_automation_rules():
+    rules = await db.automation_rules.find({}, {"_id": 0}).to_list(100)
+    return rules
+
+@api_router.post("/automation/rules")
+async def create_automation_rule(rule: dict):
+    rule_id = f"RULE-{str(uuid.uuid4())[:8].upper()}"
+    rule_doc = {
+        "id": rule_id,
+        "name": rule.get("name", ""),
+        "trigger": rule.get("trigger", ""),
+        "condition": rule.get("condition", ""),
+        "action": rule.get("action", ""),
+        "enabled": rule.get("enabled", True),
+        "lastTriggered": None,
+        "triggerCount": 0,
+        "createdAt": datetime.utcnow().isoformat(),
+    }
+    await db.automation_rules.insert_one(rule_doc)
+    rule_doc.pop("_id", None)  # Remove MongoDB _id before returning
+    return rule_doc
+
+@api_router.put("/automation/rules/{rule_id}")
+async def update_automation_rule(rule_id: str, update: dict):
+    update_data = {k: v for k, v in update.items() if k != "id"}
+    result = await db.automation_rules.find_one_and_update(
+        {"id": rule_id}, {"$set": update_data}, return_document=True
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    result.pop("_id", None)
+    return result
+
+@api_router.delete("/automation/rules/{rule_id}")
+async def delete_automation_rule(rule_id: str):
+    result = await db.automation_rules.delete_one({"id": rule_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    return {"message": "Rule deleted"}
+
+@api_router.post("/automation/rules/{rule_id}/toggle")
+async def toggle_automation_rule(rule_id: str):
+    rule = await db.automation_rules.find_one({"id": rule_id}, {"_id": 0})
+    if not rule:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    new_state = not rule.get("enabled", True)
+    await db.automation_rules.update_one({"id": rule_id}, {"$set": {"enabled": new_state}})
+    return {"enabled": new_state}
+
+@api_router.get("/automation/alerts")
+async def get_automation_alerts():
+    """Generate real-time automation alerts based on current data."""
+    alerts = []
+    
+    # Check low stock
+    low_stock = await db.products.find({"stock": {"$lt": 10}}, {"_id": 0}).to_list(100)
+    for p in low_stock:
+        alerts.append({
+            "type": "inventory", "severity": "warning",
+            "title": f"Low Stock: {p['name']}",
+            "message": f"Only {p.get('stock', 0)} units remaining. Consider reordering.",
+            "action": "create_purchase_order", "data": {"productId": p["id"]}
+        })
+    
+    # Check kitchen backlog
+    kitchen_new = await db.kitchen_orders.count_documents({"status": "new"})
+    if kitchen_new > 5:
+        alerts.append({
+            "type": "kitchen", "severity": "high",
+            "title": "Kitchen Backlog",
+            "message": f"{kitchen_new} orders waiting. Kitchen may be overwhelmed.",
+            "action": "notify_manager"
+        })
+    
+    # Check no-show pattern
+    no_show_customers = await db.customers.find({"noShowCount": {"$gte": 3}}, {"_id": 0}).to_list(50)
+    for c in no_show_customers:
+        alerts.append({
+            "type": "customer", "severity": "info",
+            "title": f"Frequent No-Show: {c['name']}",
+            "message": f"{c.get('noShowCount', 0)} no-shows recorded. Consider requiring deposits.",
+            "action": "flag_customer"
+        })
+    
+    # Check for products with negative margin
+    products = await db.products.find({}, {"_id": 0}).to_list(1000)
+    for p in products:
+        if p.get("cost", 0) > 0 and p.get("price", 0) > 0:
+            margin = ((p["price"] - p["cost"]) / p["price"]) * 100
+            if margin < 15:
+                alerts.append({
+                    "type": "menu", "severity": "warning",
+                    "title": f"Low Margin: {p['name']}",
+                    "message": f"Only {margin:.0f}% margin. Price: ${p['price']}, Cost: ${p['cost']}",
+                    "action": "review_pricing"
+                })
+    
+    return alerts
+
+# ============ PREP MANAGEMENT API ============
+@api_router.get("/kitchen/prep-list")
+async def get_prep_list():
+    """Dynamic prep list based on today's reservations and historical sales."""
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    reservations = await db.reservations.find({"date": today}, {"_id": 0}).to_list(100)
+    total_covers = sum(r.get("partySize", 0) for r in reservations)
+    
+    products = await db.products.find({}, {"_id": 0}).to_list(1000)
+    all_txns = await db.transactions.find({}, {"_id": 0}).to_list(10000)
+    
+    # Calculate avg items per cover from history
+    total_items_sold = sum(
+        sum(item.get("quantity", 0) for item in txn.get("items", []))
+        for txn in all_txns
+    )
+    total_historical_covers = max(total_covers, 1)  # prevent div by zero
+    
+    # Build prep list based on product popularity
+    product_popularity = {}
+    for txn in all_txns:
+        for item in txn.get("items", []):
+            pid = item.get("productId", "")
+            product_popularity[pid] = product_popularity.get(pid, 0) + item.get("quantity", 0)
+    
+    total_qty = sum(product_popularity.values()) or 1
+    
+    prep_items = []
+    for p in products:
+        pop_qty = product_popularity.get(p["id"], 0)
+        popularity_pct = (pop_qty / total_qty) * 100
+        # Estimated prep quantity based on expected covers
+        est_qty = max(1, int((pop_qty / max(len(all_txns), 1)) * max(total_covers, 10)))
+        
+        prep_items.append({
+            "productId": p["id"],
+            "name": p["name"],
+            "category": p.get("category", "Other"),
+            "currentStock": p.get("stock", 0),
+            "estimatedNeeded": est_qty,
+            "popularityPct": round(popularity_pct, 1),
+            "prepStatus": "pending",  # pending, in_progress, done
+        })
+    
+    # Sort by estimated need (highest first)
+    prep_items.sort(key=lambda x: x["estimatedNeeded"], reverse=True)
+    
+    return {
+        "date": today,
+        "expectedCovers": total_covers,
+        "totalReservations": len(reservations),
+        "prepItems": prep_items[:20],  # Top 20 items to prep
+    }
+
 # ============ ROOT ============
 @api_router.get("/")
 async def root():

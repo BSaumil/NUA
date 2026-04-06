@@ -12,20 +12,28 @@ import {
   CalendarDays,
   Map,
   ClipboardList,
-  ChefHat
+  ChefHat,
+  Sun,
+  Brain,
+  UtensilsCrossed,
+  Zap
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 
 const menuItems = [
   { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
+  { path: '/pre-shift', icon: Sun, label: 'Pre-Shift Brief' },
+  { path: '/command-center', icon: Brain, label: 'AI Command Center' },
   { path: '/pos', icon: ShoppingCart, label: 'POS Terminal' },
   { path: '/reservations', icon: CalendarDays, label: 'Reservations' },
   { path: '/floor-plan', icon: Map, label: 'Floor Plan' },
   { path: '/waitlist', icon: ClipboardList, label: 'Waitlist' },
   { path: '/kitchen', icon: ChefHat, label: 'Kitchen (KDS)' },
+  { path: '/menu-engineering', icon: UtensilsCrossed, label: 'Menu Engineering' },
   { path: '/products', icon: Package, label: 'Products' },
   { path: '/customers', icon: Users, label: 'Customers' },
   { path: '/inventory', icon: Store, label: 'Inventory' },
+  { path: '/automation', icon: Zap, label: 'Automation' },
   { path: '/accounting', icon: BarChart3, label: 'Accounting' },
   { path: '/bas-gst', icon: FileText, label: 'BAS/GST' },
   { path: '/settings', icon: Settings, label: 'Settings' }

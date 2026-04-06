@@ -691,6 +691,18 @@ async def seed_database():
     ]
     await db.kitchen_orders.insert_many(kitchen_orders)
     
+    # ============ AUTOMATION RULES ============
+    print("Seeding automation rules...")
+    await db.automation_rules.delete_many({})
+    automation_rules = [
+        {"id": "RULE-001", "name": "Auto-Reorder Low Stock Items", "trigger": "low_stock", "condition": "stock < 10", "action": "create_purchase_order", "enabled": True, "triggerCount": 12, "lastTriggered": datetime.utcnow().isoformat(), "createdAt": datetime.utcnow().isoformat()},
+        {"id": "RULE-002", "name": "Kitchen Overload Alert", "trigger": "kitchen_backlog", "condition": "pending orders > 8", "action": "notify_manager", "enabled": True, "triggerCount": 3, "lastTriggered": None, "createdAt": datetime.utcnow().isoformat()},
+        {"id": "RULE-003", "name": "Flag Repeat No-Shows", "trigger": "no_show_pattern", "condition": "no-shows >= 3", "action": "flag_customer", "enabled": True, "triggerCount": 1, "lastTriggered": None, "createdAt": datetime.utcnow().isoformat()},
+        {"id": "RULE-004", "name": "Margin Drop Warning", "trigger": "margin_drop", "condition": "margin < 20%", "action": "adjust_pricing", "enabled": False, "triggerCount": 0, "lastTriggered": None, "createdAt": datetime.utcnow().isoformat()},
+        {"id": "RULE-005", "name": "Busy Period Staff Alert", "trigger": "busy_period", "condition": "reservations > 15", "action": "increase_staff", "enabled": True, "triggerCount": 5, "lastTriggered": datetime.utcnow().isoformat(), "createdAt": datetime.utcnow().isoformat()},
+    ]
+    await db.automation_rules.insert_many(automation_rules)
+    
     print("Database seeded successfully!")
     client.close()
 
