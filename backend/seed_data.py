@@ -538,7 +538,70 @@ async def seed_database():
     ]
     await db.printers.insert_many(printers)
     
-    print("✅ Database seeded successfully!")
+    # ============ FLOOR PLANS ============
+    print("Seeding floor plans...")
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    await db.floor_plans.delete_many({})
+    await db.reservations.delete_many({})
+    await db.waitlist.delete_many({})
+    
+    floor_plans = [
+        {
+            "id": "FP-MAIN",
+            "name": "Main Dining",
+            "locationId": None,
+            "tables": [
+                {"id": "TBL-01", "number": "1", "capacity": 2, "shape": "circle", "x": 80, "y": 80, "width": 60, "height": 60, "rotation": 0, "section": "Window", "status": "available", "isActive": True, "minCovers": 1, "maxCovers": 2},
+                {"id": "TBL-02", "number": "2", "capacity": 2, "shape": "circle", "x": 200, "y": 80, "width": 60, "height": 60, "rotation": 0, "section": "Window", "status": "reserved", "isActive": True, "minCovers": 1, "maxCovers": 2},
+                {"id": "TBL-03", "number": "3", "capacity": 4, "shape": "rectangle", "x": 350, "y": 60, "width": 90, "height": 70, "rotation": 0, "section": "Window", "status": "occupied", "isActive": True, "minCovers": 2, "maxCovers": 4},
+                {"id": "TBL-04", "number": "4", "capacity": 4, "shape": "rectangle", "x": 80, "y": 220, "width": 90, "height": 70, "rotation": 0, "section": "Main", "status": "available", "isActive": True, "minCovers": 2, "maxCovers": 4},
+                {"id": "TBL-05", "number": "5", "capacity": 4, "shape": "rectangle", "x": 230, "y": 220, "width": 90, "height": 70, "rotation": 0, "section": "Main", "status": "available", "isActive": True, "minCovers": 2, "maxCovers": 4},
+                {"id": "TBL-06", "number": "6", "capacity": 6, "shape": "rectangle", "x": 380, "y": 220, "width": 110, "height": 70, "rotation": 0, "section": "Main", "status": "cleaning", "isActive": True, "minCovers": 4, "maxCovers": 6},
+                {"id": "TBL-07", "number": "7", "capacity": 8, "shape": "rectangle", "x": 550, "y": 60, "width": 130, "height": 80, "rotation": 0, "section": "Private", "status": "reserved", "isActive": True, "minCovers": 6, "maxCovers": 8},
+                {"id": "TBL-08", "number": "8", "capacity": 6, "shape": "rectangle", "x": 550, "y": 220, "width": 110, "height": 70, "rotation": 0, "section": "Private", "status": "available", "isActive": True, "minCovers": 4, "maxCovers": 6},
+                {"id": "TBL-09", "number": "9", "capacity": 2, "shape": "circle", "x": 80, "y": 380, "width": 60, "height": 60, "rotation": 0, "section": "Bar", "status": "occupied", "isActive": True, "minCovers": 1, "maxCovers": 2},
+                {"id": "TBL-10", "number": "10", "capacity": 2, "shape": "circle", "x": 200, "y": 380, "width": 60, "height": 60, "rotation": 0, "section": "Bar", "status": "available", "isActive": True, "minCovers": 1, "maxCovers": 2},
+                {"id": "TBL-11", "number": "11", "capacity": 4, "shape": "square", "x": 350, "y": 370, "width": 70, "height": 70, "rotation": 0, "section": "Outdoor", "status": "available", "isActive": True, "minCovers": 2, "maxCovers": 4},
+                {"id": "TBL-12", "number": "12", "capacity": 4, "shape": "square", "x": 460, "y": 370, "width": 70, "height": 70, "rotation": 0, "section": "Outdoor", "status": "available", "isActive": True, "minCovers": 2, "maxCovers": 4},
+            ],
+            "sections": [
+                {"id": "SEC-WIN", "name": "Window", "color": "#3B82F6"},
+                {"id": "SEC-MAIN", "name": "Main", "color": "#10B981"},
+                {"id": "SEC-PRIV", "name": "Private", "color": "#8B5CF6"},
+                {"id": "SEC-BAR", "name": "Bar", "color": "#F59E0B"},
+                {"id": "SEC-OUT", "name": "Outdoor", "color": "#06B6D4"},
+            ],
+            "width": 1000,
+            "height": 600,
+            "isActive": True,
+            "createdAt": datetime.utcnow().isoformat(),
+            "updatedAt": datetime.utcnow().isoformat()
+        }
+    ]
+    await db.floor_plans.insert_many(floor_plans)
+    
+    # ============ RESERVATIONS ============
+    print("Seeding reservations...")
+    reservations = [
+        {"id": "RES-001", "guestName": "Sarah Mitchell", "guestPhone": "+61 412 345 678", "guestEmail": "sarah@email.com", "partySize": 2, "date": today, "time": "12:00", "duration": 90, "tableId": "TBL-02", "tableNumber": "2", "section": "Window", "status": "confirmed", "specialRequests": "Anniversary dinner, window seat preferred", "source": "phone", "tags": ["VIP"], "depositRequired": 0, "depositPaid": False, "noShowFee": 0, "createdAt": datetime.utcnow().isoformat(), "updatedAt": datetime.utcnow().isoformat()},
+        {"id": "RES-002", "guestName": "James Chen", "guestPhone": "+61 423 456 789", "partySize": 4, "date": today, "time": "12:30", "duration": 120, "tableId": "TBL-03", "tableNumber": "3", "section": "Window", "status": "seated", "specialRequests": "Gluten-free options needed", "source": "online", "tags": ["dietary"], "depositRequired": 0, "depositPaid": False, "noShowFee": 0, "seatedAt": datetime.utcnow().isoformat(), "createdAt": datetime.utcnow().isoformat(), "updatedAt": datetime.utcnow().isoformat()},
+        {"id": "RES-003", "guestName": "Emma Watson", "guestPhone": "+61 434 567 890", "guestEmail": "emma.w@email.com", "partySize": 6, "date": today, "time": "18:30", "duration": 120, "tableId": "TBL-07", "tableNumber": "7", "section": "Private", "status": "confirmed", "specialRequests": "Birthday celebration, need cake service", "source": "phone", "tags": ["birthday", "VIP"], "depositRequired": 50, "depositPaid": True, "noShowFee": 0, "createdAt": datetime.utcnow().isoformat(), "updatedAt": datetime.utcnow().isoformat()},
+        {"id": "RES-004", "guestName": "David Park", "guestPhone": "+61 445 678 901", "partySize": 2, "date": today, "time": "19:00", "duration": 90, "section": "Main", "status": "confirmed", "source": "online", "tags": [], "depositRequired": 0, "depositPaid": False, "noShowFee": 0, "createdAt": datetime.utcnow().isoformat(), "updatedAt": datetime.utcnow().isoformat()},
+        {"id": "RES-005", "guestName": "Lisa Thompson", "guestPhone": "+61 456 789 012", "guestEmail": "lisa.t@work.com", "partySize": 8, "date": today, "time": "19:30", "duration": 150, "section": "Private", "status": "confirmed", "specialRequests": "Business dinner, need projector", "source": "phone", "tags": ["corporate"], "depositRequired": 100, "depositPaid": True, "noShowFee": 0, "createdAt": datetime.utcnow().isoformat(), "updatedAt": datetime.utcnow().isoformat()},
+        {"id": "RES-006", "guestName": "Michael Brown", "partySize": 2, "date": today, "time": "20:00", "duration": 90, "status": "confirmed", "source": "walk_in", "tags": [], "depositRequired": 0, "depositPaid": False, "noShowFee": 0, "createdAt": datetime.utcnow().isoformat(), "updatedAt": datetime.utcnow().isoformat()},
+    ]
+    await db.reservations.insert_many(reservations)
+    
+    # ============ WAITLIST ============
+    print("Seeding waitlist...")
+    waitlist = [
+        {"id": "WL-001", "guestName": "Tom Harris", "guestPhone": "+61 401 111 222", "partySize": 3, "quotedWait": 15, "preferences": "indoor", "status": "waiting", "position": 1, "checkInTime": datetime.utcnow().isoformat(), "createdAt": datetime.utcnow().isoformat()},
+        {"id": "WL-002", "guestName": "Anna Lee", "guestPhone": "+61 402 333 444", "partySize": 2, "quotedWait": 20, "preferences": "window", "status": "waiting", "position": 2, "notes": "Regular customer", "checkInTime": datetime.utcnow().isoformat(), "createdAt": datetime.utcnow().isoformat()},
+        {"id": "WL-003", "guestName": "Kevin Zhang", "partySize": 5, "quotedWait": 30, "preferences": "outdoor", "status": "notified", "position": 3, "checkInTime": datetime.utcnow().isoformat(), "createdAt": datetime.utcnow().isoformat()},
+    ]
+    await db.waitlist.insert_many(waitlist)
+    
+    print("Database seeded successfully!")
     client.close()
 
 if __name__ == "__main__":

@@ -87,4 +87,37 @@ export const offlineAPI = {
   sync: (data) => api.post('/offline/sync', data),
 };
 
+// Reservations API
+export const reservationsAPI = {
+  getAll: (params) => api.get('/reservations', { params }),
+  get: (id) => api.get(`/reservations/${id}`),
+  create: (data) => api.post('/reservations', data),
+  update: (id, data) => api.put(`/reservations/${id}`, data),
+  delete: (id) => api.delete(`/reservations/${id}`),
+  seat: (id, tableId) => api.post(`/reservations/${id}/seat`, null, { params: { table_id: tableId } }),
+  complete: (id) => api.post(`/reservations/${id}/complete`),
+  noShow: (id, fee) => api.post(`/reservations/${id}/no-show`, null, { params: { fee } }),
+  autoAssign: (id) => api.get(`/reservations/auto-assign/${id}`),
+};
+
+// Floor Plans API
+export const floorPlansAPI = {
+  getAll: () => api.get('/floor-plans'),
+  get: (id) => api.get(`/floor-plans/${id}`),
+  create: (data) => api.post('/floor-plans', data),
+  update: (id, data) => api.put(`/floor-plans/${id}`, data),
+  delete: (id) => api.delete(`/floor-plans/${id}`),
+  updateTableStatus: (tableId, status, planId) => api.post(`/floor-plans/tables/${tableId}/status`, null, { params: { status, plan_id: planId } }),
+  assignServer: (sectionId, serverId, planId) => api.post(`/floor-plans/sections/${sectionId}/assign`, null, { params: { server_id: serverId, plan_id: planId } }),
+};
+
+// Waitlist API
+export const waitlistAPI = {
+  getAll: (params) => api.get('/waitlist', { params }),
+  add: (data) => api.post('/waitlist', data),
+  update: (id, data) => api.put(`/waitlist/${id}`, data),
+  seat: (id, tableId) => api.post(`/waitlist/${id}/seat`, null, { params: { table_id: tableId } }),
+  remove: (id) => api.delete(`/waitlist/${id}`),
+};
+
 export default api;

@@ -13,6 +13,9 @@ import Inventory from './pages/Inventory';
 import Accounting from './pages/Accounting';
 import BASGST from './pages/BASGST';
 import Settings from './pages/Settings';
+import Reservations from './pages/Reservations';
+import FloorPlan from './pages/FloorPlan';
+import WaitlistPage from './pages/Waitlist';
 
 function App() {
   return (
@@ -26,6 +29,9 @@ function App() {
                 <Routes>
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/pos" element={<POSTerminal />} />
+                  <Route path="/reservations" element={<Reservations />} />
+                  <Route path="/floor-plan" element={<FloorPlan />} />
+                  <Route path="/waitlist" element={<WaitlistPage />} />
                   <Route path="/products" element={<Products />} />
                   <Route path="/customers" element={<Customers />} />
                   <Route path="/inventory" element={<Inventory />} />

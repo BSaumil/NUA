@@ -8,13 +8,19 @@ import {
   BarChart3,
   FileText,
   Settings,
-  Store
+  Store,
+  CalendarDays,
+  Map,
+  ClipboardList
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 
 const menuItems = [
   { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { path: '/pos', icon: ShoppingCart, label: 'POS Terminal' },
+  { path: '/reservations', icon: CalendarDays, label: 'Reservations' },
+  { path: '/floor-plan', icon: Map, label: 'Floor Plan' },
+  { path: '/waitlist', icon: ClipboardList, label: 'Waitlist' },
   { path: '/products', icon: Package, label: 'Products' },
   { path: '/customers', icon: Users, label: 'Customers' },
   { path: '/inventory', icon: Store, label: 'Inventory' },
