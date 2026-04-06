@@ -1,14 +1,7 @@
 # Ananta POS - Product Requirements Document
 
 ## Original Problem Statement
-Build a pixel-perfect clone of a Square POS system with comprehensive accounting capabilities, including direct BAS and GST filing. Core features include fast checkout, multiple payment options, split bills, tipping, digital receipts, custom promotions, offline capability, LAN printer configuration, and EFTPOS integration. Subsequently, the user requested OpenTable-like reservation/booking features and a complete restaurant management system requiring NO external software for any cafe or restaurant business. Also requested Windows .exe and Android .apk builds.
-
-## User Personas
-- **Restaurant Owner/Manager**: Manages all operations, reservations, staff, accounting
-- **Host/Front-of-House**: Manages reservations, waitlist, table assignments, seating
-- **Kitchen Staff**: Views and manages kitchen orders via KDS
-- **Servers**: Takes orders, processes payments via POS terminal
-- **Accountant**: Manages BAS/GST filing, P&L, expenses
+Build a pixel-perfect clone of a Square POS system with comprehensive accounting capabilities, including direct BAS and GST filing. Extended to include ALL OpenTable Pro/Advanced features, SevenRooms CRM, and full restaurant management intelligence. The goal: NO external software needed for any cafe or restaurant business. Also requires Windows .exe and Android .apk builds.
 
 ## Core Architecture
 - **Frontend**: React.js + Tailwind CSS + Shadcn UI
@@ -19,86 +12,98 @@ Build a pixel-perfect clone of a Square POS system with comprehensive accounting
 
 ## What's Been Implemented
 
-### Phase 0 - Core POS (Complete)
-- Dashboard with sales stats
-- POS Terminal with fast checkout
-- Products management with categories, modifiers
-- Customer directory
-- Inventory management
-- Accounting (P&L, summary)
-- BAS/GST reporting and filing
-- Settings (themes, printers)
-- Gift cards, refunds, suppliers, expenses
-- Staff shifts and commissions
-- EFTPOS integration (Linkly, Tyro, Smartpay, Windcave)
-- Offline sync support
-- LAN printer configuration
-- Electron wrapper + Windows build scripts/guides
+### Core POS (Complete - Previous Sessions)
+- Dashboard, POS Terminal, Products, Categories, Modifiers
+- Customer directory, Inventory, Suppliers, Expenses
+- Accounting (P&L), BAS/GST reporting
+- Gift cards, Refunds, Staff shifts/commissions
+- EFTPOS integration, Offline sync, LAN printer
+- Electron wrapper + Windows build scripts
 
 ### Phase 1 - Reservation & Table Management (Complete - Feb 2026)
-- **Reservations System**: Full CRUD, seat/complete/no-show/auto-assign, date navigation, status filtering, search, list and timeline views
-- **Interactive Floor Plan**: SVG canvas, drag-drop tables, multiple shapes (rect/circle/square), sections with colors, view/edit modes, multi-floor support
-- **Waitlist Management**: Walk-in queue, estimated wait times with progress bars, notify/seat/remove actions, seating preferences
+- Reservations CRUD + seat/complete/no-show/auto-assign
+- Interactive SVG Floor Plan with drag-drop tables, multi-section
+- Waitlist Management with walk-in queue & wait times
 
 ### Phase 2 - Guest CRM & 360° Profiles (Complete - Feb 2026)
-- **360° Guest Profiles**: Dining history, spending stats, avg spend/visit, seating preferences, favorite dishes, birthday, company
-- **Dietary & Allergies**: Clickable badge selection for dietary restrictions and allergies
-- **Guest Tags & Segmentation**: Auto-tags (VIP, Regular, High Spender, Corporate, Birthday Month, etc.)
-- **Feedback System**: Star ratings (overall, food, service, ambience), comments, response management
-- **Profile Tabs**: Overview, Reservations, Feedback, Transactions
+- 360° Guest Profiles with dining history, preferences, allergies
+- Guest Tags & Segmentation (VIP, Corporate, Birthday Month, etc.)
+- Feedback System with star ratings + response management
 
 ### Phase 3 - Kitchen Display System (Complete - Feb 2026)
-- **Kanban Board**: Three columns (New → Preparing → Ready to Serve)
-- **Order Management**: Start, Ready, Served, Cancel actions
-- **Priority System**: Rush (red pulsing) and VIP (amber highlight) indicators
-- **Course Management**: Fire courses in sequence (Fire C2, C3...)
-- **Auto-Refresh**: 10-second polling for real-time updates
-- **New Order Creation**: Product selection, table assignment, notes, priority
+- Kanban Board (New → Preparing → Ready to Serve)
+- Priority System (Rush/VIP), Course Management
+- Auto-Refresh, New Order Creation
 
-## Prioritized Backlog
+### Phase 4 - Intelligence & Automation (Complete - Feb 2026)
+- **Pre-Shift Dashboard**: VIP arrivals, dietary alerts, special requests, service timeline
+- **AI Command Center**: Revenue/cost/profit metrics, food cost %, labor %, AI insights
+- **Menu Engineering**: Star/Puzzle/Workhorse/Dog classification, category P&L
+- **Automation Engine**: Rule-based triggers, live alerts, toggle on/off
 
-### P0 - Next Up
-- **Capacitor Android APK**: WebView wrapper for Android deployment
-- **PWA**: Service worker + manifest for installable web app
-
-### P1 - Marketing & Communications
-- Automated reservation confirmations (in-app notifications)
-- Direct messaging (staff-to-guest)
-- Email campaign builder with templates and segments
-- Loyalty/Membership program with tiers and rewards
-- Events & Experiences listing with ticketing
-
-### P2 - Advanced Analytics & Revenue
-- Pre-shift reports (today's reservations, VIP alerts, special requests)
-- Table turn-time optimization
-- Revenue per guest/table/daypart metrics
-- Demand forecasting / predictive analytics
-- Multi-location sync and cross-venue guest recognition
-
-### P3 - Future Enhancements
-- Online ordering page (customer self-service)
-- SMS/Email reservation confirmations
-- QR code menu generator
-- Customer-facing display
-- Responsive mobile/tablet UI optimization
+## Pages (16 total)
+1. Dashboard
+2. Pre-Shift Brief
+3. AI Command Center
+4. POS Terminal
+5. Reservations
+6. Floor Plan
+7. Waitlist
+8. Kitchen (KDS)
+9. Menu Engineering
+10. Products
+11. Customers (Guest CRM)
+12. Inventory
+13. Automation
+14. Accounting
+15. BAS/GST
+16. Settings
 
 ## Key API Endpoints
+- `/api/pre-shift/today` - Pre-shift briefing data
+- `/api/analytics/command-center` - AI Command Center metrics
+- `/api/analytics/menu-engineering` - Menu performance analysis
+- `/api/automation/rules` - CRUD + toggle automation rules
+- `/api/automation/alerts` - Real-time alerts
+- `/api/kitchen/prep-list` - Dynamic prep list
 - `/api/reservations` - Full CRUD + seat/complete/no-show/auto-assign
 - `/api/floor-plans` - CRUD + table status + section assignment
 - `/api/waitlist` - CRUD + seat/notify
 - `/api/customers/{id}/profile` - 360° guest profile
 - `/api/feedback` - CRUD + respond
 - `/api/kitchen/orders` - CRUD + start/ready/served/cancel/priority/fire-course
-- `/api/products`, `/api/transactions`, `/api/accounting/*`, `/api/bas-gst/*`
 
-## Key Database Collections
-- `reservations`, `floor_plans`, `waitlist`, `feedback`, `kitchen_orders`
-- `customers`, `products`, `transactions`, `categories`, `modifiers`
-- `promotions`, `gift_cards`, `refunds`, `suppliers`, `expenses`
-- `staff_shifts`, `eftpos_terminals`, `eftpos_transactions`, `printers`
+## Prioritized Backlog
+
+### P0 - Mobile Deployment
+- Capacitor Android APK (WebView wrapper)
+- PWA (Progressive Web App)
+
+### P1 - Communications & Loyalty
+- Automated reservation confirmations
+- Direct messaging (staff-to-guest)
+- Email campaign builder
+- Loyalty/Membership tiers
+- Events & Experiences with ticketing
+
+### P2 - Enhanced Intelligence
+- Predictive analytics (weather, events, seasonality)
+- Table turn-time optimization
+- Revenue per guest/table/daypart
+- Cash flow prediction
+- Demand forecasting
+- Smart rostering (auto roster builder based on demand)
+
+### P3 - Integration Layer
+- Unified order dashboard (dine-in + delivery)
+- Order throttling
+- Multi-location sync
+- QR code menu generator
+- Online ordering page
+- Customer-facing display
 
 ## Testing Status
-- All features tested via automated testing agent
-- Backend: 100% pass rate (50/50 tests across 2 iterations)
-- Frontend: 100% working (all pages, CRUD, navigation)
-- Test files: `/app/test_reports/iteration_1.json`, `/app/test_reports/iteration_2.json`
+- 3 test iterations, all 100% pass rate
+- Backend: 69/69 total tests passed
+- Frontend: All 16 pages working
+- Test files: iteration_1.json, iteration_2.json, iteration_3.json
