@@ -202,4 +202,20 @@ export const qrMenuAPI = {
   getData: () => api.get('/menu/qr-data'),
 };
 
+// Public Booking Portal
+export const publicAPI = {
+  getMenu: () => api.get('/public/menu'),
+  getAvailableSlots: (date, partySize) => api.get('/public/available-slots', { params: { date, party_size: partySize } }),
+  book: (data) => api.post('/public/book', data),
+  joinWaitlist: (data) => api.post('/public/join-waitlist', data),
+  getEvents: () => api.get('/public/events'),
+};
+
+// QR Payment
+export const paymentAPI = {
+  generateQR: (data) => api.post('/payments/generate-qr', data),
+  createSplit: (data) => api.post('/payments/split', data),
+  confirm: (paymentId) => api.post(`/payments/${paymentId}/confirm`),
+};
+
 export default api;
