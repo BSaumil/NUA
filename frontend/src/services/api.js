@@ -162,4 +162,44 @@ export const automationAPI = {
   getAlerts: () => api.get('/automation/alerts'),
 };
 
+// Predictive Customer Matching
+export const predictiveAPI = {
+  predictCustomer: (items) => api.post('/orders/predict-customer', items),
+  linkCustomer: (txnId, customerId, points) => api.post('/orders/link-customer', null, { params: { transaction_id: txnId, customer_id: customerId, points_earned: points } }),
+};
+
+// What-If Simulator
+export const simulatorAPI = {
+  simulate: (changes) => api.post('/analytics/what-if', changes),
+};
+
+// Loyalty Program
+export const loyaltyAPI = {
+  getRewards: () => api.get('/loyalty/rewards'),
+  createReward: (data) => api.post('/loyalty/rewards', data),
+  deleteReward: (id) => api.delete(`/loyalty/rewards/${id}`),
+  redeem: (customerId, rewardId) => api.post('/loyalty/redeem', null, { params: { customer_id: customerId, reward_id: rewardId } }),
+  getTiers: () => api.get('/loyalty/tiers'),
+};
+
+// Events & Experiences
+export const eventsAPI = {
+  getAll: (params) => api.get('/events', { params }),
+  create: (data) => api.post('/events', data),
+  update: (id, data) => api.put(`/events/${id}`, data),
+  bookTicket: (id, customerId, qty) => api.post(`/events/${id}/book`, null, { params: { customer_id: customerId, quantity: qty } }),
+};
+
+// Demand Forecasting
+export const forecastAPI = {
+  getDemand: () => api.get('/analytics/demand-forecast'),
+  getTableTurns: () => api.get('/analytics/table-turns'),
+  getSmartRoster: () => api.get('/staff/smart-roster'),
+};
+
+// QR Menu
+export const qrMenuAPI = {
+  getData: () => api.get('/menu/qr-data'),
+};
+
 export default api;

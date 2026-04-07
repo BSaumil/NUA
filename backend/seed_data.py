@@ -703,6 +703,30 @@ async def seed_database():
     ]
     await db.automation_rules.insert_many(automation_rules)
     
+    # ============ LOYALTY REWARDS ============
+    print("Seeding loyalty rewards...")
+    await db.loyalty_rewards.delete_many({})
+    await db.events.delete_many({})
+    
+    loyalty_rewards = [
+        {"id": "RWD-001", "name": "Free Coffee", "description": "Any regular coffee on the house", "pointsCost": 50, "rewardType": "free_item", "discountAmount": 0, "isActive": True, "createdAt": datetime.utcnow().isoformat()},
+        {"id": "RWD-002", "name": "$10 Off Next Visit", "description": "Discount on any order over $30", "pointsCost": 100, "rewardType": "discount", "discountAmount": 10, "isActive": True, "createdAt": datetime.utcnow().isoformat()},
+        {"id": "RWD-003", "name": "Free Dessert", "description": "Complimentary dessert of your choice", "pointsCost": 150, "rewardType": "free_item", "discountAmount": 0, "isActive": True, "createdAt": datetime.utcnow().isoformat()},
+        {"id": "RWD-004", "name": "Chef's Table Experience", "description": "Exclusive 5-course tasting menu with the chef", "pointsCost": 2000, "rewardType": "experience", "discountAmount": 0, "isActive": True, "createdAt": datetime.utcnow().isoformat()},
+        {"id": "RWD-005", "name": "25% Off Entire Bill", "description": "Valid for parties up to 6", "pointsCost": 500, "rewardType": "discount", "discountPercent": 25, "isActive": True, "createdAt": datetime.utcnow().isoformat()},
+    ]
+    await db.loyalty_rewards.insert_many(loyalty_rewards)
+    
+    # ============ EVENTS ============
+    print("Seeding events...")
+    events = [
+        {"id": "EVT-001", "name": "Wine & Dine: Italian Night", "description": "4-course Italian feast paired with premium wines from Tuscany", "date": "2026-03-15", "time": "19:00", "duration": 180, "capacity": 40, "ticketsBooked": 28, "ticketPrice": 89, "eventType": "wine_pairing", "isActive": True, "createdAt": datetime.utcnow().isoformat()},
+        {"id": "EVT-002", "name": "Sushi Masterclass", "description": "Learn to roll sushi with our head chef. Includes all ingredients and sake tasting.", "date": "2026-03-22", "time": "14:00", "duration": 150, "capacity": 16, "ticketsBooked": 12, "ticketPrice": 120, "eventType": "cooking_class", "isActive": True, "createdAt": datetime.utcnow().isoformat()},
+        {"id": "EVT-003", "name": "Jazz & Cocktails Friday", "description": "Live jazz trio with signature cocktail menu. No cover charge.", "date": "2026-03-07", "time": "20:00", "duration": 180, "capacity": 80, "ticketsBooked": 45, "ticketPrice": 0, "eventType": "live_music", "isActive": True, "createdAt": datetime.utcnow().isoformat()},
+        {"id": "EVT-004", "name": "Corporate Tasting Dinner", "description": "Private dining experience for corporate groups with personalised menu.", "date": "2026-04-10", "time": "18:30", "duration": 240, "capacity": 30, "ticketsBooked": 0, "ticketPrice": 150, "eventType": "private", "isActive": True, "createdAt": datetime.utcnow().isoformat()},
+    ]
+    await db.events.insert_many(events)
+    
     print("Database seeded successfully!")
     client.close()
 

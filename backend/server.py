@@ -33,6 +33,9 @@ from models.floor_plan import FloorPlan, FloorPlanCreate, FloorPlanUpdate
 from models.waitlist import WaitlistEntry, WaitlistEntryCreate, WaitlistEntryUpdate
 from models.feedback import Feedback, FeedbackCreate
 from models.kitchen_order import KitchenOrder, KitchenOrderCreate
+from models.loyalty import LoyaltyReward, LoyaltyRedemption, Event, EventCreate
+import random
+import math
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -1753,6 +1756,416 @@ async def get_prep_list():
         "expectedCovers": total_covers,
         "totalReservations": len(reservations),
         "prepItems": prep_items[:20],  # Top 20 items to prep
+    }
+
+# ============ PREDICTIVE CUSTOMER MATCHING ============
+@api_router.post("/orders/predict-customer")
+async def predict_customer_for_order(order_items: List[dict]):
+    """Match an order to a likely customer based on order history patterns."""
+    if not order_items:
+        return {"matched": False, "message": "No items provided"}
+    
+    item_names = set(item.get("productName", "").lower() for item in order_items)
+    
+    customers = await db.customers.find({}, {"_id": 0}).to_list(1000)
+    txns = await db.transactions.find({}, {"_id": 0}).to_list(10000)
+    
+    # Build customer order fingerprints
+    customer_patterns = {}
+    for txn in txns:
+        cid = txn.get("customerId")
+        if not cid:
+            continue
+        if cid not in customer_patterns:
+            customer_patterns[cid] = {}
+        for item in txn.get("items", []):
+            name = item.get("productName", "").lower()
+            customer_patterns[cid][name] = customer_patterns[cid].get(name, 0) + item.get("quantity", 0)
+    
+    # Score each customer
+    scores = []
+    for cust in customers:
+        cid = cust["id"]
+        pattern = customer_patterns.get(cid, {})
+        if not pattern:
+            continue
+        # Calculate overlap between current order items and customer's usual items
+        overlap = sum(1 for name in item_names if name in pattern)
+        total_items = len(item_names)
+        # Weight by frequency
+        freq_score = sum(pattern.get(name, 0) for name in item_names)
+        if overlap > 0:
+            similarity = (overlap / max(total_items, 1)) * 100
+            scores.append({
+                "customerId": cid,
+                "customerName": cust["name"],
+                "email": cust.get("email", ""),
+                "phone": cust.get("phone", ""),
+                "points": cust.get("points", 0),
+                "tier": cust.get("membershipTier", "Bronze"),
+                "isVip": cust.get("isVip", False),
+                "similarity": round(similarity, 1),
+                "frequencyScore": freq_score,
+                "matchedItems": [n for n in item_names if n in pattern],
+                "favoriteDishes": cust.get("favoriteDishes", []),
+            })
+    
+    scores.sort(key=lambda x: (x["similarity"], x["frequencyScore"]), reverse=True)
+    
+    if scores:
+        return {"matched": True, "predictions": scores[:5], "topMatch": scores[0]}
+    return {"matched": False, "message": "No matching customer patterns found"}
+
+@api_router.post("/orders/link-customer")
+async def link_order_to_customer(transaction_id: str, customer_id: str, points_earned: int = 0):
+    """Link an order to a customer and award loyalty points."""
+    await db.transactions.update_one(
+        {"id": transaction_id},
+        {"$set": {"customerId": customer_id}}
+    )
+    if points_earned > 0:
+        await db.customers.update_one(
+            {"id": customer_id},
+            {"$inc": {"points": points_earned, "visits": 1}}
+        )
+    return {"message": "Order linked and points awarded", "pointsEarned": points_earned}
+
+# ============ WHAT-IF SIMULATOR ============
+@api_router.post("/analytics/what-if")
+async def what_if_simulation(changes: List[dict]):
+    """Simulate menu price/cost changes and project profit impact."""
+    products = await db.products.find({}, {"_id": 0}).to_list(1000)
+    txns = await db.transactions.find({}, {"_id": 0}).to_list(10000)
+    product_map = {p["id"]: p for p in products}
+    
+    # Calculate current metrics
+    product_sales = {}
+    for txn in txns:
+        for item in txn.get("items", []):
+            pid = item.get("productId", "")
+            if pid not in product_sales:
+                product_sales[pid] = {"quantity": 0, "revenue": 0}
+            product_sales[pid]["quantity"] += item.get("quantity", 0)
+            product_sales[pid]["revenue"] += item.get("price", 0) * item.get("quantity", 0)
+    
+    results = []
+    total_current_profit = 0
+    total_projected_profit = 0
+    
+    for change in changes:
+        pid = change.get("productId", "")
+        new_price = change.get("newPrice")
+        new_cost = change.get("newCost")
+        
+        prod = product_map.get(pid)
+        if not prod:
+            continue
+        
+        sales = product_sales.get(pid, {"quantity": 0, "revenue": 0})
+        qty = sales["quantity"]
+        
+        current_price = prod.get("price", 0)
+        current_cost = prod.get("cost", 0)
+        current_profit = (current_price - current_cost) * qty
+        
+        proj_price = new_price if new_price is not None else current_price
+        proj_cost = new_cost if new_cost is not None else current_cost
+        
+        # Estimate demand elasticity (simple: -10% price = +5% demand)
+        price_change_pct = ((proj_price - current_price) / max(current_price, 0.01)) * 100
+        demand_adjustment = 1 - (price_change_pct * 0.005)  # 0.5% demand change per 1% price change
+        proj_qty = max(0, int(qty * demand_adjustment))
+        
+        projected_profit = (proj_price - proj_cost) * proj_qty
+        
+        total_current_profit += current_profit
+        total_projected_profit += projected_profit
+        
+        results.append({
+            "productId": pid,
+            "productName": prod["name"],
+            "currentPrice": current_price,
+            "currentCost": current_cost,
+            "projectedPrice": proj_price,
+            "projectedCost": proj_cost,
+            "currentQty": qty,
+            "projectedQty": proj_qty,
+            "currentProfit": round(current_profit, 2),
+            "projectedProfit": round(projected_profit, 2),
+            "profitChange": round(projected_profit - current_profit, 2),
+            "profitChangePct": round(((projected_profit - current_profit) / max(abs(current_profit), 0.01)) * 100, 1),
+        })
+    
+    return {
+        "simulations": results,
+        "totalCurrentProfit": round(total_current_profit, 2),
+        "totalProjectedProfit": round(total_projected_profit, 2),
+        "netImpact": round(total_projected_profit - total_current_profit, 2),
+    }
+
+# ============ LOYALTY PROGRAM API ============
+@api_router.get("/loyalty/rewards")
+async def get_loyalty_rewards():
+    rewards = await db.loyalty_rewards.find({}, {"_id": 0}).to_list(100)
+    return rewards
+
+@api_router.post("/loyalty/rewards")
+async def create_loyalty_reward(reward: dict):
+    rwd = LoyaltyReward(**reward)
+    doc = rwd.dict()
+    await db.loyalty_rewards.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+@api_router.delete("/loyalty/rewards/{reward_id}")
+async def delete_loyalty_reward(reward_id: str):
+    await db.loyalty_rewards.delete_one({"id": reward_id})
+    return {"message": "Reward deleted"}
+
+@api_router.post("/loyalty/redeem")
+async def redeem_loyalty_reward(customer_id: str, reward_id: str):
+    customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    reward = await db.loyalty_rewards.find_one({"id": reward_id}, {"_id": 0})
+    if not reward:
+        raise HTTPException(status_code=404, detail="Reward not found")
+    if customer.get("points", 0) < reward.get("pointsCost", 0):
+        raise HTTPException(status_code=400, detail="Insufficient points")
+    
+    # Deduct points
+    await db.customers.update_one(
+        {"id": customer_id},
+        {"$inc": {"points": -reward["pointsCost"]}}
+    )
+    # Record redemption
+    redemption = LoyaltyRedemption(customerId=customer_id, rewardId=reward_id, pointsSpent=reward["pointsCost"])
+    doc = redemption.dict()
+    await db.loyalty_redemptions.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+@api_router.get("/loyalty/tiers")
+async def get_loyalty_tiers():
+    return [
+        {"name": "Bronze", "minPoints": 0, "multiplier": 1.0, "perks": ["Earn 1 point per $1"]},
+        {"name": "Silver", "minPoints": 500, "multiplier": 1.25, "perks": ["1.25x points", "Birthday reward", "Priority seating"]},
+        {"name": "Gold", "minPoints": 2000, "multiplier": 1.5, "perks": ["1.5x points", "Free dessert monthly", "VIP section access", "Early event booking"]},
+        {"name": "Platinum", "minPoints": 5000, "multiplier": 2.0, "perks": ["2x points", "Complimentary wine pairing", "Personal host", "Exclusive events", "Chef's table access"]},
+    ]
+
+# ============ EVENTS & EXPERIENCES API ============
+@api_router.get("/events")
+async def get_events(active_only: bool = True):
+    query = {"isActive": True} if active_only else {}
+    events = await db.events.find(query, {"_id": 0}).sort("date", 1).to_list(100)
+    return events
+
+@api_router.post("/events")
+async def create_event(event: EventCreate):
+    evt = Event(**event.dict())
+    doc = evt.dict()
+    await db.events.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+@api_router.put("/events/{event_id}")
+async def update_event(event_id: str, update: dict):
+    update_data = {k: v for k, v in update.items() if k != "id"}
+    result = await db.events.find_one_and_update(
+        {"id": event_id}, {"$set": update_data}, return_document=True
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Event not found")
+    result.pop("_id", None)
+    return result
+
+@api_router.post("/events/{event_id}/book")
+async def book_event_ticket(event_id: str, customer_id: Optional[str] = None, quantity: int = 1):
+    event = await db.events.find_one({"id": event_id}, {"_id": 0})
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    if event.get("ticketsBooked", 0) + quantity > event.get("capacity", 0):
+        raise HTTPException(status_code=400, detail="Event is full")
+    await db.events.update_one(
+        {"id": event_id},
+        {"$inc": {"ticketsBooked": quantity}}
+    )
+    return {"message": f"{quantity} ticket(s) booked", "remaining": event["capacity"] - event["ticketsBooked"] - quantity}
+
+# ============ DEMAND FORECASTING API ============
+@api_router.get("/analytics/demand-forecast")
+async def get_demand_forecast():
+    """Predict demand for next 7 days based on historical patterns."""
+    txns = await db.transactions.find({}, {"_id": 0}).to_list(10000)
+    reservations = await db.reservations.find({}, {"_id": 0}).to_list(10000)
+    
+    # Group by day of week
+    daily_revenue = {i: [] for i in range(7)}
+    daily_covers = {i: [] for i in range(7)}
+    
+    for txn in txns:
+        ts = txn.get("timestamp")
+        if ts:
+            try:
+                dt = datetime.fromisoformat(str(ts).replace('Z', '+00:00')) if isinstance(ts, str) else ts
+                dow = dt.weekday()
+                daily_revenue[dow].append(txn.get("total", 0))
+            except:
+                pass
+    
+    for res in reservations:
+        try:
+            dt = datetime.strptime(res.get("date", ""), "%Y-%m-%d")
+            dow = dt.weekday()
+            daily_covers[dow].append(res.get("partySize", 0))
+        except:
+            pass
+    
+    day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    today = datetime.utcnow()
+    
+    forecast = []
+    for i in range(7):
+        target_date = today + timedelta(days=i)
+        dow = target_date.weekday()
+        rev_data = daily_revenue.get(dow, [])
+        cover_data = daily_covers.get(dow, [])
+        
+        avg_rev = sum(rev_data) / max(len(rev_data), 1)
+        avg_covers = sum(cover_data) / max(len(cover_data), 1)
+        
+        # Simple trend adjustment
+        trend = 1.0 + (random.random() * 0.1 - 0.05)  # +/- 5%
+        
+        forecast.append({
+            "date": target_date.strftime("%Y-%m-%d"),
+            "dayName": day_names[dow],
+            "predictedRevenue": round(avg_rev * trend, 2),
+            "predictedCovers": round(avg_covers * trend),
+            "confidence": min(95, 60 + len(rev_data) * 5),
+            "busyLevel": "high" if dow >= 4 else "medium" if dow >= 2 else "low",
+            "staffRecommendation": max(3, round(avg_covers * trend / 8)),
+        })
+    
+    return {"forecast": forecast, "basedOnDataPoints": len(txns)}
+
+# ============ TABLE TURN-TIME OPTIMIZATION ============
+@api_router.get("/analytics/table-turns")
+async def get_table_turn_analytics():
+    """Analyze table turn times and optimize slot durations."""
+    reservations = await db.reservations.find({}, {"_id": 0}).to_list(10000)
+    
+    # Calculate actual turn times for completed reservations
+    completed = [r for r in reservations if r.get("status") in ("completed", "seated")]
+    
+    turn_times = {}
+    for r in completed:
+        party = r.get("partySize", 2)
+        duration = r.get("duration", 90)
+        table = r.get("tableNumber", "unknown")
+        
+        size_bucket = "2-top" if party <= 2 else "4-top" if party <= 4 else "6-top" if party <= 6 else "large"
+        
+        if size_bucket not in turn_times:
+            turn_times[size_bucket] = {"durations": [], "tables": set()}
+        turn_times[size_bucket]["durations"].append(duration)
+        turn_times[size_bucket]["tables"].add(table)
+    
+    analysis = []
+    for bucket, data in turn_times.items():
+        durations = data["durations"]
+        avg = sum(durations) / max(len(durations), 1)
+        analysis.append({
+            "partySize": bucket,
+            "avgTurnTime": round(avg),
+            "minTurnTime": min(durations) if durations else 0,
+            "maxTurnTime": max(durations) if durations else 0,
+            "sampleSize": len(durations),
+            "tablesUsed": len(data["tables"]),
+            "recommendedSlot": round(avg / 15) * 15,  # Round to nearest 15 min
+            "turnsPerShift": round(480 / max(avg, 1), 1),  # 8-hour shift
+        })
+    
+    # Revenue per table per hour
+    floor_plans = await db.floor_plans.find({}, {"_id": 0}).to_list(10)
+    total_tables = sum(len(fp.get("tables", [])) for fp in floor_plans)
+    
+    txns = await db.transactions.find({}, {"_id": 0}).to_list(10000)
+    total_rev = sum(t.get("total", 0) for t in txns)
+    
+    return {
+        "turnTimeAnalysis": analysis,
+        "totalTables": total_tables,
+        "revenuePerTable": round(total_rev / max(total_tables, 1), 2),
+        "optimizationTips": [
+            {"tip": "Consider reducing 2-top reservation slots to 60 minutes for faster turns"},
+            {"tip": "Large party reservations should be scheduled with 30-minute buffer"},
+            {"tip": "Peak hours (6-8 PM) benefit from staggered seating every 15 minutes"},
+        ]
+    }
+
+# ============ SMART ROSTERING API ============
+@api_router.get("/staff/smart-roster")
+async def get_smart_roster():
+    """AI-powered roster suggestions based on demand forecast."""
+    today = datetime.utcnow()
+    forecast_resp = await get_demand_forecast()
+    forecast = forecast_resp["forecast"]
+    
+    shifts = await db.staff_shifts.find({}, {"_id": 0}).to_list(1000)
+    employees = await db.employees.find({}, {"_id": 0}).to_list(100) if await db.employees.count_documents({}) > 0 else []
+    
+    roster_suggestions = []
+    for day in forecast:
+        staff_needed = day["staffRecommendation"]
+        busy = day["busyLevel"]
+        
+        roster_suggestions.append({
+            "date": day["date"],
+            "dayName": day["dayName"],
+            "busyLevel": busy,
+            "predictedCovers": day["predictedCovers"],
+            "staffNeeded": {
+                "front_of_house": max(2, staff_needed),
+                "kitchen": max(2, round(staff_needed * 0.6)),
+                "bar": 1 if busy != "high" else 2,
+                "total": max(5, staff_needed + round(staff_needed * 0.6) + (1 if busy != "high" else 2)),
+            },
+            "laborCostEstimate": round((max(5, staff_needed + round(staff_needed * 0.6) + 1)) * 8 * 30, 2),
+            "laborPctTarget": 28 if busy == "high" else 30 if busy == "medium" else 32,
+        })
+    
+    return {
+        "rosterSuggestions": roster_suggestions,
+        "currentStaffCount": len(employees) if employees else len(shifts),
+    }
+
+# ============ QR MENU GENERATOR API ============
+@api_router.get("/menu/qr-data")
+async def get_qr_menu_data():
+    """Get full menu data for QR code display."""
+    products = await db.products.find({"isActive": {"$ne": False}}, {"_id": 0}).to_list(1000)
+    categories = await db.categories.find({}, {"_id": 0}).to_list(100)
+    
+    # Group by category
+    menu = {}
+    for p in products:
+        cat = p.get("category", "Other")
+        if cat not in menu:
+            menu[cat] = []
+        menu[cat].append({
+            "id": p["id"],
+            "name": p["name"],
+            "price": p.get("price", 0),
+            "description": p.get("description", ""),
+            "dietary": p.get("dietary", []),
+        })
+    
+    return {
+        "restaurantName": "Ananta",
+        "categories": [{"name": cat, "items": items} for cat, items in menu.items()],
+        "totalItems": len(products),
     }
 
 # ============ ROOT ============

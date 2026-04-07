@@ -16,7 +16,10 @@ import {
   Sun,
   Brain,
   UtensilsCrossed,
-  Zap
+  Zap,
+  Award,
+  TrendingUp,
+  FlaskConical
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 
@@ -30,9 +33,12 @@ const menuItems = [
   { path: '/waitlist', icon: ClipboardList, label: 'Waitlist' },
   { path: '/kitchen', icon: ChefHat, label: 'Kitchen (KDS)' },
   { path: '/menu-engineering', icon: UtensilsCrossed, label: 'Menu Engineering' },
+  { path: '/what-if', icon: FlaskConical, label: 'What-If Simulator' },
   { path: '/products', icon: Package, label: 'Products' },
   { path: '/customers', icon: Users, label: 'Customers' },
+  { path: '/loyalty', icon: Award, label: 'Loyalty & Events' },
   { path: '/inventory', icon: Store, label: 'Inventory' },
+  { path: '/forecasting', icon: TrendingUp, label: 'Forecasting' },
   { path: '/automation', icon: Zap, label: 'Automation' },
   { path: '/accounting', icon: BarChart3, label: 'Accounting' },
   { path: '/bas-gst', icon: FileText, label: 'BAS/GST' },

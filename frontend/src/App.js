@@ -21,6 +21,9 @@ import PreShift from './pages/PreShift';
 import CommandCenter from './pages/CommandCenter';
 import MenuEngineering from './pages/MenuEngineering';
 import AutomationEngine from './pages/AutomationEngine';
+import LoyaltyEvents from './pages/LoyaltyEvents';
+import Forecasting from './pages/Forecasting';
+import WhatIfSimulator from './pages/WhatIfSimulator';
 
 function App() {
   return (
@@ -41,9 +44,12 @@ function App() {
                   <Route path="/waitlist" element={<WaitlistPage />} />
                   <Route path="/kitchen" element={<Kitchen />} />
                   <Route path="/menu-engineering" element={<MenuEngineering />} />
+                  <Route path="/what-if" element={<WhatIfSimulator />} />
                   <Route path="/products" element={<Products />} />
                   <Route path="/customers" element={<Customers />} />
+                  <Route path="/loyalty" element={<LoyaltyEvents />} />
                   <Route path="/inventory" element={<Inventory />} />
+                  <Route path="/forecasting" element={<Forecasting />} />
                   <Route path="/automation" element={<AutomationEngine />} />
                   <Route path="/accounting" element={<Accounting />} />
                   <Route path="/bas-gst" element={<BASGST />} />
