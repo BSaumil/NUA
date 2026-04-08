@@ -21,6 +21,7 @@ import {
   TrendingUp,
   FlaskConical
 } from 'lucide-react';
+import { Plug } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 
 const menuItems = [
@@ -42,6 +43,7 @@ const menuItems = [
   { path: '/automation', icon: Zap, label: 'Automation' },
   { path: '/accounting', icon: BarChart3, label: 'Accounting' },
   { path: '/bas-gst', icon: FileText, label: 'BAS/GST' },
+  { path: '/integrations', icon: Plug, label: 'Integrations' },
   { path: '/settings', icon: Settings, label: 'Settings' }
 ];
 

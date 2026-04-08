@@ -25,6 +25,9 @@ import LoyaltyEvents from './pages/LoyaltyEvents';
 import Forecasting from './pages/Forecasting';
 import WhatIfSimulator from './pages/WhatIfSimulator';
 import BookingPortal from './pages/BookingPortal';
+import TableOrder from './pages/TableOrder';
+import PaymentSuccess from './pages/PaymentSuccess';
+import Integrations from './pages/Integrations';
 
 function StaffLayout({ children }) {
   return (
@@ -42,8 +45,10 @@ function App() {
         <div className="App">
           <BrowserRouter>
             <Routes>
-              {/* Public route — no sidebar */}
+              {/* Public routes — no sidebar */}
               <Route path="/booking" element={<BookingPortal />} />
+              <Route path="/table/:tableId" element={<TableOrder />} />
+              <Route path="/payment-success" element={<PaymentSuccess />} />
 
               {/* Staff routes — with sidebar */}
               <Route path="/*" element={
@@ -68,6 +73,7 @@ function App() {
                     <Route path="/accounting" element={<Accounting />} />
                     <Route path="/bas-gst" element={<BASGST />} />
                     <Route path="/settings" element={<Settings />} />
+                    <Route path="/integrations" element={<Integrations />} />
                   </Routes>
                 </StaffLayout>
               } />

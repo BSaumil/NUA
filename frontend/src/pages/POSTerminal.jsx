@@ -13,7 +13,7 @@ import {
 } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { usePOS } from '../contexts/POSContext';
-import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI } from '../services/api';
+import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI } from '../services/api';
 import { useToast } from '../hooks/use-toast';
 
 const POSTerminal = () => {
@@ -93,6 +93,20 @@ const POSTerminal = () => {
       setPaymentView(method === 'upi' ? 'upi' : 'qr');
     } catch {
       toast({ title: "Error", description: "Failed to generate QR code.", variant: "destructive" });
+    } finally { setLoading(false); }
+  };
+
+  // ---- Stripe Checkout ----
+  const handleStripeCheckout = async () => {
+    setLoading(true);
+    try {
+      const res = await stripeAPI.createCheckout({
+        originUrl: window.location.origin,
+        amount: totalNum,
+      });
+      if (res.data.url) window.location.href = res.data.url;
+    } catch {
+      toast({ title: "Error", description: "Failed to initiate Stripe checkout.", variant: "destructive" });
     } finally { setLoading(false); }
   };
 
@@ -329,6 +343,10 @@ const POSTerminal = () => {
                 <Smartphone size={20} /><span className="text-xs">UPI</span>
               </Button>
             </div>
+            <Button className="w-full h-12 bg-violet-600 hover:bg-violet-700 text-white font-medium"
+              onClick={handleStripeCheckout} disabled={loading} data-testid="pay-stripe">
+              <CreditCard size={18} className="mr-2" /> Pay with Stripe
+            </Button>
             <Button className="w-full h-14 bg-indigo-600 hover:bg-indigo-700 text-white font-medium"
               onClick={handleStartSplit} data-testid="pay-split">
               <SplitSquareHorizontal size={20} className="mr-2" /> Split Payment

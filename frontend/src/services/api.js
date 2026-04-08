@@ -218,4 +218,27 @@ export const paymentAPI = {
   confirm: (paymentId) => api.post(`/payments/${paymentId}/confirm`),
 };
 
+// Table-Side Ordering (Public)
+export const tableOrderAPI = {
+  getMenu: (tableId) => api.get(`/table/${tableId}/menu`),
+  placeOrder: (tableId, data) => api.post(`/table/${tableId}/order`, data),
+  getOrders: (tableId) => api.get(`/table/${tableId}/orders`),
+  getOrderStatus: (orderId) => api.get(`/table/order/${orderId}/status`),
+  getTableQRCodes: () => api.get('/tables/qr-codes'),
+};
+
+// Stripe Checkout
+export const stripeAPI = {
+  createCheckout: (data) => api.post('/stripe/checkout', data),
+  checkStatus: (sessionId) => api.get(`/stripe/checkout/status/${sessionId}`),
+};
+
+// Integrations Hub
+export const integrationsAPI = {
+  getAll: () => api.get('/integrations'),
+  connect: (slug, data) => api.post(`/integrations/${slug}/connect`, data),
+  disconnect: (slug) => api.post(`/integrations/${slug}/disconnect`),
+  sync: (slug) => api.post(`/integrations/${slug}/sync`),
+};
+
 export default api;

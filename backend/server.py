@@ -14,6 +14,8 @@ from routes.automation import router as automation_router
 from routes.settings import router as settings_router
 from routes.loyalty import router as loyalty_router
 from routes.public import router as public_router
+from routes.table_ordering import router as table_ordering_router
+from routes.integrations import router as integrations_router
 
 # Create the main app
 app = FastAPI()
@@ -32,6 +34,8 @@ api_router.include_router(automation_router)
 api_router.include_router(settings_router)
 api_router.include_router(loyalty_router)
 api_router.include_router(public_router)
+api_router.include_router(table_ordering_router)
+api_router.include_router(integrations_router)
 
 # Root endpoint
 @api_router.get("/")

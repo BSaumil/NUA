@@ -28,7 +28,15 @@ const Dashboard = () => {
       ]);
       setTransactions(txnRes.data);
       setCustomers(custRes.data);
-      setSummary(summaryRes.data);
+      // Map API response to expected format
+      const apiSummary = summaryRes.data;
+      const txnCount = txnRes.data.length;
+      setSummary({
+        totalRevenue: apiSummary.revenue || 0,
+        gstCollected: apiSummary.gstCollected || 0,
+        transactions: txnCount,
+        avgTransaction: txnCount > 0 ? (apiSummary.revenue || 0) / txnCount : 0
+      });
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
     }
@@ -140,7 +148,7 @@ const Dashboard = () => {
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="font-bold" style={{ color: theme.primary }}>${txn.total.toFixed(2)}</p>
+                    <p className="font-bold" style={{ color: theme.primary }}>${(txn.total || 0).toFixed(2)}</p>
                     <p className="text-xs text-gray-500">{txn.paymentMethod}</p>
                   </div>
                 </div>
@@ -171,8 +179,8 @@ const Dashboard = () => {
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="font-bold" style={{ color: theme.primary }}>${customer.totalSpent.toFixed(2)}</p>
-                    <p className="text-xs text-gray-500">{customer.visits} visits</p>
+                    <p className="font-bold" style={{ color: theme.primary }}>${(customer.totalSpent || 0).toFixed(2)}</p>
+                    <p className="text-xs text-gray-500">{customer.visits || 0} visits</p>
                   </div>
                 </div>
               ))}
