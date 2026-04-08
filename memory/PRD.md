@@ -1,92 +1,65 @@
 # Ananta POS - Product Requirements Document
 
 ## Original Problem Statement
-Build the ultimate all-in-one restaurant management platform. No external software needed. Includes POS, OpenTable-like reservations, Guest CRM, Kitchen Display, AI analytics, automation, loyalty, events, forecasting, and mobile deployment.
+Pixel-perfect clone of a Square POS system with comprehensive accounting capabilities, including direct BAS and GST filing. Evolved into a full restaurant management suite with OpenTable-style features, eliminating the need for any 3rd-party restaurant software.
 
-## Architecture
-- **Frontend**: React.js + Tailwind CSS + Shadcn UI + PWA (Service Worker)
-- **Backend**: FastAPI (Python)
-- **Database**: MongoDB
-- **Desktop**: Electron (Windows .exe)
-- **Mobile**: Capacitor (Android .apk - structure ready)
+## Core Features
+- Fast checkout with multiple payment options (Card, Cash, QR Code, UPI, Split Payments)
+- Digital receipts, custom promotions, offline capability
+- LAN printer configuration, EFTPOS integration
+- Full accounting with BAS/GST filing
 
-## 19 Pages Implemented
-1. Dashboard
-2. Pre-Shift Brief
-3. AI Command Center
-4. POS Terminal
-5. Reservations
-6. Floor Plan
-7. Waitlist
-8. Kitchen (KDS)
-9. Menu Engineering
-10. What-If Simulator
-11. Products
-12. Customers (Guest CRM)
-13. Loyalty & Events
-14. Inventory
-15. Forecasting
-16. Automation
-17. Accounting
-18. BAS/GST
-19. Settings
+## Tech Stack
+- Frontend: React.js, Tailwind CSS, Shadcn UI, qrcode.react, PWA
+- Backend: FastAPI (Python), Modular Routes Architecture
+- Database: MongoDB (AsyncIOMotorClient)
 
-## Features Implemented (All Tested)
+## Architecture (v3.0.0 — Modular)
+```
+/app/backend/
+  server.py          — 77-line orchestrator (imports all route modules)
+  database.py         — Shared MongoDB connection
+  routes/
+    products.py       — Products, Categories, Modifiers
+    transactions.py   — Transactions, Promotions, Gift Cards, Refunds
+    customers.py      — Customers, CRM Profiles, Feedback
+    reservations.py   — Reservations, Floor Plans, Waitlist
+    kitchen.py        — Kitchen Display, Prep Management
+    analytics.py      — Pre-Shift, Command Center, Menu Engineering, What-If, Forecasting, Roster, Predictive Matching
+    automation.py     — Automation Rules & Alerts
+    settings.py       — Locations, Users, Printers, Offline, Tables, EFTPOS, Staff
+    loyalty.py        — Loyalty Rewards, Events, QR Menu
+    public.py         — Public Booking Portal, QR/UPI/Split Payments
+```
 
-### Core POS
-- Fast checkout, products, categories, modifiers
-- Gift cards, refunds, split bills, tipping
-- EFTPOS integration, offline sync, LAN printing
+## Completed Phases
+- Phase 1: Reservations, Floor Plan, Waitlist (DONE)
+- Phase 2: Guest CRM & 360 Profiles (DONE)
+- Phase 3: Kitchen Display System (DONE)
+- Phase 4: Pre-Shift Dashboard, AI Command Center, Menu Engineering, Automation Engine (DONE)
+- Phase 5: Loyalty, Forecasting, What-If Simulator, QR Menu, PWA (DONE)
+- Phase 6: Customer Self-Service Booking Portal, QR/UPI/Split Payments, Backend Refactoring (DONE - April 2026)
 
-### Reservation & Table Management
-- Full CRUD + seat/complete/no-show/auto-assign
-- Interactive SVG floor plan, multi-section
-- Waitlist with wait-time tracking
+## Phase 6 Details
+### Customer Self-Service Booking Portal (/booking)
+- Public page (no sidebar, no auth)
+- 4 tabs: Reserve a Table, Join Waitlist, Events, View Menu
+- Responsive mobile layout (wrapping tabs, stacked inputs, 3-col time grid)
+- Complete booking flow: date/party/time → details form → confirmation
 
-### Guest CRM (360°)
-- Dining history, dietary restrictions, allergies, preferences
-- VIP tagging, segmentation, feedback with star ratings
-- Profile tabs: Overview, Reservations, Feedback, Transactions
+### Advanced Payment Methods (POS Terminal)
+- QR Code Payment: Generates QR using qrcode.react, shows dialog with scannable code
+- UPI Payment: Generates UPI deeplink QR, shows merchant UPI ID with copy button
+- Split Payment: Equal or Custom mode, 2-10 splits, per-guest name/amount/method, tracks remaining balance, processes partial payments independently
 
-### Kitchen Display System
-- Kanban board (New/Preparing/Ready)
-- Rush/VIP priority, course management, auto-refresh
+### Backend Refactoring
+- Refactored from 2382-line monolith to 77-line orchestrator + 10 route modules
+- Zero regression — all 19+ endpoint groups verified working
 
-### Intelligence Suite
-- Pre-Shift Brief: VIP alerts, dietary alerts, special requests
-- AI Command Center: Revenue, food cost %, labor %, AI insights
-- Menu Engineering: Star/Puzzle/Workhorse/Dog classification
-- What-If Simulator: Price change → profit impact with demand elasticity
+## Testing Status
+- 5 test iterations, all 100% pass rate
+- 32 tests in iteration 5 (19 backend + 13 frontend)
+- No known regressions
 
-### Loyalty & Events
-- 4-tier membership (Bronze/Silver/Gold/Platinum) with multipliers
-- Rewards system (free items, discounts, experiences)
-- Events & Experiences with ticketing
-
-### Forecasting & Optimization
-- 7-day demand forecast with busy levels
-- Table turn-time optimization
-- Smart rostering (AI staff suggestions)
-
-### Automation Engine
-- Rule-based triggers (low stock, kitchen backlog, no-show, margin drop)
-- Live alerts from real-time data
-- Toggle/CRUD rules
-
-### Predictive Customer Matching
-- Match orders to likely customers based on order history patterns
-- Auto-link orders for loyalty point earning
-
-### PWA
-- Service worker for offline caching
-- Installable web app manifest
-
-## Key API Endpoints (50+)
-Full CRUD for: reservations, floor-plans, waitlist, kitchen/orders, feedback, automation/rules, loyalty/rewards, events
-Analytics: pre-shift/today, analytics/command-center, analytics/menu-engineering, analytics/what-if, analytics/demand-forecast, analytics/table-turns, staff/smart-roster
-Intelligence: orders/predict-customer, orders/link-customer, menu/qr-data
-
-## Testing
-- 4 iterations, all 100% pass rate
-- 111+ backend tests passed
-- All 19 frontend pages verified working
+## Backlog
+- P2: Android APK via Capacitor WebView wrapper (deferred)

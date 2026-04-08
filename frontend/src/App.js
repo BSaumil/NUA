@@ -24,6 +24,16 @@ import AutomationEngine from './pages/AutomationEngine';
 import LoyaltyEvents from './pages/LoyaltyEvents';
 import Forecasting from './pages/Forecasting';
 import WhatIfSimulator from './pages/WhatIfSimulator';
+import BookingPortal from './pages/BookingPortal';
+
+function StaffLayout({ children }) {
+  return (
+    <div className="flex">
+      <Sidebar />
+      <div className="ml-64 flex-1 p-8 min-h-screen bg-gray-50">{children}</div>
+    </div>
+  );
+}
 
 function App() {
   return (
@@ -31,32 +41,37 @@ function App() {
       <POSProvider>
         <div className="App">
           <BrowserRouter>
-            <div className="flex">
-              <Sidebar />
-              <div className="ml-64 flex-1 p-8 min-h-screen bg-gray-50">
-                <Routes>
-                  <Route path="/" element={<Dashboard />} />
-                  <Route path="/pre-shift" element={<PreShift />} />
-                  <Route path="/command-center" element={<CommandCenter />} />
-                  <Route path="/pos" element={<POSTerminal />} />
-                  <Route path="/reservations" element={<Reservations />} />
-                  <Route path="/floor-plan" element={<FloorPlan />} />
-                  <Route path="/waitlist" element={<WaitlistPage />} />
-                  <Route path="/kitchen" element={<Kitchen />} />
-                  <Route path="/menu-engineering" element={<MenuEngineering />} />
-                  <Route path="/what-if" element={<WhatIfSimulator />} />
-                  <Route path="/products" element={<Products />} />
-                  <Route path="/customers" element={<Customers />} />
-                  <Route path="/loyalty" element={<LoyaltyEvents />} />
-                  <Route path="/inventory" element={<Inventory />} />
-                  <Route path="/forecasting" element={<Forecasting />} />
-                  <Route path="/automation" element={<AutomationEngine />} />
-                  <Route path="/accounting" element={<Accounting />} />
-                  <Route path="/bas-gst" element={<BASGST />} />
-                  <Route path="/settings" element={<Settings />} />
-                </Routes>
-              </div>
-            </div>
+            <Routes>
+              {/* Public route — no sidebar */}
+              <Route path="/booking" element={<BookingPortal />} />
+
+              {/* Staff routes — with sidebar */}
+              <Route path="/*" element={
+                <StaffLayout>
+                  <Routes>
+                    <Route path="/" element={<Dashboard />} />
+                    <Route path="/pre-shift" element={<PreShift />} />
+                    <Route path="/command-center" element={<CommandCenter />} />
+                    <Route path="/pos" element={<POSTerminal />} />
+                    <Route path="/reservations" element={<Reservations />} />
+                    <Route path="/floor-plan" element={<FloorPlan />} />
+                    <Route path="/waitlist" element={<WaitlistPage />} />
+                    <Route path="/kitchen" element={<Kitchen />} />
+                    <Route path="/menu-engineering" element={<MenuEngineering />} />
+                    <Route path="/what-if" element={<WhatIfSimulator />} />
+                    <Route path="/products" element={<Products />} />
+                    <Route path="/customers" element={<Customers />} />
+                    <Route path="/loyalty" element={<LoyaltyEvents />} />
+                    <Route path="/inventory" element={<Inventory />} />
+                    <Route path="/forecasting" element={<Forecasting />} />
+                    <Route path="/automation" element={<AutomationEngine />} />
+                    <Route path="/accounting" element={<Accounting />} />
+                    <Route path="/bas-gst" element={<BASGST />} />
+                    <Route path="/settings" element={<Settings />} />
+                  </Routes>
+                </StaffLayout>
+              } />
+            </Routes>
             <Toaster />
           </BrowserRouter>
         </div>

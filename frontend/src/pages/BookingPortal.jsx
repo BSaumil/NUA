@@ -75,17 +75,17 @@ export default function BookingPortal() {
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex justify-center gap-2 mt-8">
+        <div className="flex flex-wrap justify-center gap-2 mt-6 sm:mt-8">
           {[
-            { id: 'reserve', label: 'Reserve a Table', icon: CalendarDays },
-            { id: 'waitlist', label: 'Join Waitlist', icon: ClipboardList },
-            { id: 'events', label: 'Events', icon: Ticket },
-            { id: 'menu', label: 'View Menu', icon: UtensilsCrossed },
+            { id: 'reserve', label: 'Reserve', fullLabel: 'Reserve a Table', icon: CalendarDays },
+            { id: 'waitlist', label: 'Waitlist', fullLabel: 'Join Waitlist', icon: ClipboardList },
+            { id: 'events', label: 'Events', fullLabel: 'Events', icon: Ticket },
+            { id: 'menu', label: 'Menu', fullLabel: 'View Menu', icon: UtensilsCrossed },
           ].map(t => (
             <button key={t.id} onClick={() => { setTab(t.id); reset(); }}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium transition-all ${tab === t.id ? 'bg-white text-gray-900' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
+              className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-2 sm:py-2.5 rounded-full text-xs sm:text-sm font-medium transition-all ${tab === t.id ? 'bg-white text-gray-900' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
               data-testid={`portal-tab-${t.id}`}>
-              <t.icon size={16} /> {t.label}
+              <t.icon size={14} className="sm:w-4 sm:h-4" /> <span className="hidden sm:inline">{t.fullLabel}</span><span className="sm:hidden">{t.label}</span>
             </button>
           ))}
         </div>
@@ -99,7 +99,7 @@ export default function BookingPortal() {
               {step === 'select' && (
                 <div className="space-y-6">
                   <h2 className="text-xl font-bold text-gray-900">Find a Table</h2>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="text-xs font-medium text-gray-500 mb-1.5 block">Date</label>
                       <Input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
@@ -123,7 +123,7 @@ export default function BookingPortal() {
                     {slots.length === 0 ? (
                       <p className="text-sm text-gray-400 text-center py-6">No slots available for this date/party size</p>
                     ) : (
-                      <div className="grid grid-cols-4 gap-2 max-h-48 overflow-y-auto">
+                      <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-48 overflow-y-auto">
                         {slots.map(s => (
                           <button key={s.time} onClick={() => setForm(f => ({ ...f, time: s.time }))}
                             className={`px-3 py-2.5 rounded-lg text-sm font-medium border transition-all ${form.time === s.time ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'}`}
