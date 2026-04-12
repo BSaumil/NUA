@@ -1,6 +1,11 @@
+from dotenv import load_dotenv
+from pathlib import Path
+load_dotenv(Path(__file__).parent / '.env')
+
 from fastapi import FastAPI, APIRouter
 from starlette.middleware.cors import CORSMiddleware
 import logging
+import os
 
 from database import db, client
 
@@ -16,14 +21,17 @@ from routes.loyalty import router as loyalty_router
 from routes.public import router as public_router
 from routes.table_ordering import router as table_ordering_router
 from routes.integrations import router as integrations_router
+from routes.auth import router as auth_router, seed_admin
+from routes.ai_pantry import router as ai_pantry_router
+from routes.members import router as members_router
+from routes.multi_tenant import router as multi_tenant_router, seed_default_business
 
-# Create the main app
 app = FastAPI()
 
-# Create router with /api prefix
 api_router = APIRouter(prefix="/api")
 
 # Include all route modules
+api_router.include_router(auth_router)
 api_router.include_router(products_router)
 api_router.include_router(transactions_router)
 api_router.include_router(customers_router)
@@ -36,30 +44,27 @@ api_router.include_router(loyalty_router)
 api_router.include_router(public_router)
 api_router.include_router(table_ordering_router)
 api_router.include_router(integrations_router)
+api_router.include_router(ai_pantry_router)
+api_router.include_router(members_router)
+api_router.include_router(multi_tenant_router)
 
-# Root endpoint
 @api_router.get("/")
 async def root():
     return {
         "name": "Ananta POS API",
-        "version": "3.0.0",
-        "description": "Complete Point of Sale System with Accounting, BAS/GST, Reservations, Kitchen, and Analytics",
+        "version": "4.0.0",
+        "status": "Production Ready",
         "features": [
-            "Sales & Checkout", "Inventory Management", "Customer Loyalty",
-            "Staff Management", "Accounting & Tax", "Gift Cards", "Refunds",
-            "Suppliers", "Expenses", "Table Management", "Offline Support",
-            "Split Payments", "QR/UPI Payments", "Tipping", "Product Modifiers",
-            "Multi-location", "EFTPOS Integration", "Reservations", "Floor Plans",
-            "Waitlist", "Kitchen Display", "Menu Engineering", "AI Command Center",
-            "Automation Engine", "Demand Forecasting", "Public Booking Portal",
+            "Staff Auth & RBAC", "AI Smart Pantry", "Member Portal & Vouchers",
+            "Multi-Business Management", "Stripe Payments", "Table-Side QR Ordering",
+            "18+ Hospitality Integrations", "Kitchen Display", "Reservations & Floor Plans",
+            "Menu Engineering", "Demand Forecasting", "Automation Engine",
         ],
-        "status": "Production Ready"
     }
 
-# Include router in app
 app.include_router(api_router)
 
-# CORS
+frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
@@ -68,12 +73,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+@app.on_event("startup")
+async def startup():
+    await seed_admin()
+    await seed_default_business()
+    logger.info("Admin seeded, default business created")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

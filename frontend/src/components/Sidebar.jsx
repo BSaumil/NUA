@@ -1,120 +1,85 @@
 import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import {
-  LayoutDashboard,
-  ShoppingCart,
-  Package,
-  Users,
-  BarChart3,
-  FileText,
-  Settings,
-  Store,
-  CalendarDays,
-  Map,
-  ClipboardList,
-  ChefHat,
-  Sun,
-  Brain,
-  UtensilsCrossed,
-  Zap,
-  Award,
-  TrendingUp,
-  FlaskConical
-} from 'lucide-react';
-import { Plug } from 'lucide-react';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { useTheme } from '../contexts/ThemeContext';
+import { useAuth } from '../contexts/AuthContext';
+import {
+  LayoutDashboard, ShoppingCart, Package, Users, Warehouse,
+  Calculator, FileText, Settings, Utensils, MapPin, Clock,
+  ChefHat, BarChart3, Zap, Award, TrendingUp,
+  FlaskConical, Sunrise, Brain, Plug, Users2, LogOut, ShieldCheck, Store
+} from 'lucide-react';
 
-const menuItems = [
-  { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { path: '/pre-shift', icon: Sun, label: 'Pre-Shift Brief' },
-  { path: '/command-center', icon: Brain, label: 'AI Command Center' },
-  { path: '/pos', icon: ShoppingCart, label: 'POS Terminal' },
-  { path: '/reservations', icon: CalendarDays, label: 'Reservations' },
-  { path: '/floor-plan', icon: Map, label: 'Floor Plan' },
-  { path: '/waitlist', icon: ClipboardList, label: 'Waitlist' },
-  { path: '/kitchen', icon: ChefHat, label: 'Kitchen (KDS)' },
-  { path: '/menu-engineering', icon: UtensilsCrossed, label: 'Menu Engineering' },
-  { path: '/what-if', icon: FlaskConical, label: 'What-If Simulator' },
-  { path: '/products', icon: Package, label: 'Products' },
-  { path: '/customers', icon: Users, label: 'Customers' },
-  { path: '/loyalty', icon: Award, label: 'Loyalty & Events' },
-  { path: '/inventory', icon: Store, label: 'Inventory' },
-  { path: '/forecasting', icon: TrendingUp, label: 'Forecasting' },
-  { path: '/automation', icon: Zap, label: 'Automation' },
-  { path: '/accounting', icon: BarChart3, label: 'Accounting' },
-  { path: '/bas-gst', icon: FileText, label: 'BAS/GST' },
-  { path: '/integrations', icon: Plug, label: 'Integrations' },
-  { path: '/settings', icon: Settings, label: 'Settings' }
+const ALL_NAV = [
+  { path: '/', icon: LayoutDashboard, label: 'Dashboard', access: ['owner', 'manager'] },
+  { path: '/pre-shift', icon: Sunrise, label: 'Pre-Shift', access: ['owner', 'manager', 'kitchen'] },
+  { path: '/command-center', icon: Brain, label: 'Command Center', access: ['owner', 'manager'] },
+  { path: '/pos', icon: ShoppingCart, label: 'POS Terminal', access: ['owner', 'manager', 'cashier'] },
+  { path: '/reservations', icon: Utensils, label: 'Reservations', access: ['owner', 'manager', 'cashier'] },
+  { path: '/floor-plan', icon: MapPin, label: 'Floor Plan', access: ['owner', 'manager', 'cashier'] },
+  { path: '/waitlist', icon: Clock, label: 'Waitlist', access: ['owner', 'manager', 'cashier'] },
+  { path: '/kitchen', icon: ChefHat, label: 'Kitchen', access: ['owner', 'manager', 'kitchen'] },
+  { path: '/menu-engineering', icon: FlaskConical, label: 'Menu Engineering', access: ['owner', 'manager'] },
+  { path: '/what-if', icon: FlaskConical, label: 'What-If', access: ['owner', 'manager'] },
+  { path: '/products', icon: Package, label: 'Products', access: ['owner', 'manager', 'cashier'] },
+  { path: '/customers', icon: Users, label: 'Customers', access: ['owner', 'manager', 'cashier'] },
+  { path: '/loyalty', icon: Award, label: 'Loyalty & Events', access: ['owner', 'manager'] },
+  { path: '/inventory', icon: Warehouse, label: 'Inventory', access: ['owner', 'manager'] },
+  { path: '/ai-pantry', icon: Brain, label: 'AI Smart Pantry', access: ['owner', 'manager'] },
+  { path: '/forecasting', icon: TrendingUp, label: 'Forecasting', access: ['owner', 'manager'] },
+  { path: '/automation', icon: Zap, label: 'Automation', access: ['owner', 'manager'] },
+  { path: '/accounting', icon: Calculator, label: 'Accounting', access: ['owner'] },
+  { path: '/bas-gst', icon: FileText, label: 'BAS/GST', access: ['owner'] },
+  { path: '/staff', icon: Users2, label: 'Staff', access: ['owner', 'manager'] },
+  { path: '/integrations', icon: Plug, label: 'Integrations', access: ['owner', 'manager'] },
+  { path: '/settings', icon: Settings, label: 'Settings', access: ['owner', 'manager'] },
 ];
 
 const Sidebar = () => {
-  const location = useLocation();
   const { theme } = useTheme();
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+
+  const role = user?.role || 'cashier';
+  const navItems = ALL_NAV.filter(item => item.access.includes(role));
+
+  const handleLogout = async () => {
+    await logout();
+    navigate('/');
+  };
 
   return (
-    <div
-      className="w-64 h-screen fixed left-0 top-0 border-r flex flex-col transition-all duration-300"
-      style={{ backgroundColor: theme.sidebar }}
-    >
-      {/* Logo */}
-      <div className="p-6 border-b">
-        <div className="flex items-center gap-2">
-          <div
-            className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-xl"
-            style={{ backgroundColor: theme.primary }}
-          >
-            A
+    <div className="fixed left-0 top-0 h-full w-64 bg-white border-r border-gray-200 flex flex-col z-50" data-testid="sidebar">
+      <div className="p-4 border-b border-gray-200">
+        <h1 className="text-xl font-bold" style={{ color: theme.primary }}>Ananta POS</h1>
+        {user && (
+          <div className="flex items-center gap-2 mt-2">
+            <div className={`w-2 h-2 rounded-full ${user.status === 'active' ? 'bg-green-500' : 'bg-gray-300'}`} />
+            <span className="text-xs text-gray-500">{user.name}</span>
+            <span className="text-[10px] ml-auto px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-medium uppercase">{role}</span>
           </div>
-          <div>
-            <h1 className="text-xl font-bold" style={{ color: theme.text }}>Ananta POS</h1>
-            <p className="text-xs text-gray-500">Pro Edition</p>
-          </div>
-        </div>
+        )}
       </div>
-
-      {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto py-4">
-        {menuItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = location.pathname === item.path;
-
-          return (
-            <Link
-              key={item.path}
-              to={item.path}
-              className="flex items-center gap-3 px-6 py-3 transition-all duration-200 hover:bg-gray-100 relative group"
-              style={{
-                backgroundColor: isActive ? `${theme.primary}15` : 'transparent',
-                color: isActive ? theme.primary : theme.text
-              }}
-            >
-              {isActive && (
-                <div
-                  className="absolute left-0 top-0 bottom-0 w-1 rounded-r"
-                  style={{ backgroundColor: theme.primary }}
-                />
-              )}
-              <Icon size={20} />
-              <span className="font-medium">{item.label}</span>
-            </Link>
-          );
-        })}
+      <nav className="flex-1 overflow-y-auto p-3 space-y-0.5">
+        {navItems.map(item => (
+          <NavLink key={item.path} to={item.path} end={item.path === '/'}
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all ${
+                isActive ? 'text-white font-medium' : 'text-gray-600 hover:bg-gray-50'
+              }`
+            }
+            style={({ isActive }) => isActive ? { backgroundColor: theme.primary } : {}}
+            data-testid={`nav-${item.path.replace('/', '') || 'dashboard'}`}>
+            <item.icon size={18} />
+            <span>{item.label}</span>
+          </NavLink>
+        ))}
       </nav>
-
-      {/* User info */}
-      <div className="p-4 border-t">
-        <div className="flex items-center gap-3">
-          <div
-            className="w-10 h-10 rounded-full flex items-center justify-center text-white font-medium"
-            style={{ backgroundColor: theme.primary }}
-          >
-            JD
-          </div>
-          <div className="flex-1">
-            <p className="font-medium text-sm" style={{ color: theme.text }}>John Doe</p>
-            <p className="text-xs text-gray-500">Admin</p>
-          </div>
-        </div>
+      <div className="p-3 border-t border-gray-200">
+        <button onClick={handleLogout}
+          className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm text-gray-500 hover:bg-red-50 hover:text-red-600 transition-colors"
+          data-testid="logout-btn">
+          <LogOut size={18} /> Sign Out
+        </button>
       </div>
     </div>
   );

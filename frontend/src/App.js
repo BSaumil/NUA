@@ -1,10 +1,12 @@
 import React from 'react';
 import './App.css';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { POSProvider } from './contexts/POSContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Toaster } from './components/ui/sonner';
 import Sidebar from './components/Sidebar';
+import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import POSTerminal from './pages/POSTerminal';
 import Products from './pages/Products';
@@ -28,6 +30,9 @@ import BookingPortal from './pages/BookingPortal';
 import TableOrder from './pages/TableOrder';
 import PaymentSuccess from './pages/PaymentSuccess';
 import Integrations from './pages/Integrations';
+import StaffManagement from './pages/StaffManagement';
+import AIPantry from './pages/AIPantry';
+import MemberPortal from './pages/MemberPortal';
 
 function StaffLayout({ children }) {
   return (
@@ -38,49 +43,60 @@ function StaffLayout({ children }) {
   );
 }
 
+function ProtectedRoutes() {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="animate-pulse text-gray-500 text-lg">Loading...</div></div>;
+  if (!user) return <Login />;
+  return (
+    <StaffLayout>
+      <Routes>
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/pre-shift" element={<PreShift />} />
+        <Route path="/command-center" element={<CommandCenter />} />
+        <Route path="/pos" element={<POSTerminal />} />
+        <Route path="/reservations" element={<Reservations />} />
+        <Route path="/floor-plan" element={<FloorPlan />} />
+        <Route path="/waitlist" element={<WaitlistPage />} />
+        <Route path="/kitchen" element={<Kitchen />} />
+        <Route path="/menu-engineering" element={<MenuEngineering />} />
+        <Route path="/what-if" element={<WhatIfSimulator />} />
+        <Route path="/products" element={<Products />} />
+        <Route path="/customers" element={<Customers />} />
+        <Route path="/loyalty" element={<LoyaltyEvents />} />
+        <Route path="/inventory" element={<Inventory />} />
+        <Route path="/forecasting" element={<Forecasting />} />
+        <Route path="/automation" element={<AutomationEngine />} />
+        <Route path="/accounting" element={<Accounting />} />
+        <Route path="/bas-gst" element={<BASGST />} />
+        <Route path="/integrations" element={<Integrations />} />
+        <Route path="/staff" element={<StaffManagement />} />
+        <Route path="/ai-pantry" element={<AIPantry />} />
+        <Route path="/settings" element={<Settings />} />
+      </Routes>
+    </StaffLayout>
+  );
+}
+
 function App() {
   return (
     <ThemeProvider>
       <POSProvider>
-        <div className="App">
-          <BrowserRouter>
-            <Routes>
-              {/* Public routes — no sidebar */}
-              <Route path="/booking" element={<BookingPortal />} />
-              <Route path="/table/:tableId" element={<TableOrder />} />
-              <Route path="/payment-success" element={<PaymentSuccess />} />
-
-              {/* Staff routes — with sidebar */}
-              <Route path="/*" element={
-                <StaffLayout>
-                  <Routes>
-                    <Route path="/" element={<Dashboard />} />
-                    <Route path="/pre-shift" element={<PreShift />} />
-                    <Route path="/command-center" element={<CommandCenter />} />
-                    <Route path="/pos" element={<POSTerminal />} />
-                    <Route path="/reservations" element={<Reservations />} />
-                    <Route path="/floor-plan" element={<FloorPlan />} />
-                    <Route path="/waitlist" element={<WaitlistPage />} />
-                    <Route path="/kitchen" element={<Kitchen />} />
-                    <Route path="/menu-engineering" element={<MenuEngineering />} />
-                    <Route path="/what-if" element={<WhatIfSimulator />} />
-                    <Route path="/products" element={<Products />} />
-                    <Route path="/customers" element={<Customers />} />
-                    <Route path="/loyalty" element={<LoyaltyEvents />} />
-                    <Route path="/inventory" element={<Inventory />} />
-                    <Route path="/forecasting" element={<Forecasting />} />
-                    <Route path="/automation" element={<AutomationEngine />} />
-                    <Route path="/accounting" element={<Accounting />} />
-                    <Route path="/bas-gst" element={<BASGST />} />
-                    <Route path="/settings" element={<Settings />} />
-                    <Route path="/integrations" element={<Integrations />} />
-                  </Routes>
-                </StaffLayout>
-              } />
-            </Routes>
-            <Toaster />
-          </BrowserRouter>
-        </div>
+        <AuthProvider>
+          <div className="App">
+            <BrowserRouter>
+              <Routes>
+                {/* Public routes — no sidebar, no auth */}
+                <Route path="/booking" element={<BookingPortal />} />
+                <Route path="/table/:tableId" element={<TableOrder />} />
+                <Route path="/join" element={<MemberPortal />} />
+                <Route path="/payment-success" element={<PaymentSuccess />} />
+                {/* Staff routes — auth required */}
+                <Route path="/*" element={<ProtectedRoutes />} />
+              </Routes>
+              <Toaster />
+            </BrowserRouter>
+          </div>
+        </AuthProvider>
       </POSProvider>
     </ThemeProvider>
   );
