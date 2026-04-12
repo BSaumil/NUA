@@ -1,83 +1,82 @@
 # Ananta POS - Product Requirements Document
 
 ## Original Problem Statement
-Pixel-perfect clone of a Square POS system with comprehensive accounting capabilities, including direct BAS and GST filing. Evolved into a full restaurant management suite with OpenTable-style features, table-side ordering, and 18+ hospitality integrations.
-
-## Core Features
-- Fast checkout with 6 payment methods (Card, Cash, QR Code, UPI, Stripe, Split Payments)
-- Digital receipts, custom promotions, offline capability
-- LAN printer configuration, EFTPOS integration
-- Full accounting with BAS/GST filing
+Full-featured Square POS clone with comprehensive restaurant management, evolved into an all-in-one hospitality platform eliminating 3rd-party dependencies. Now includes EatClub-style member marketing, AI-powered supply chain, staff RBAC, and multi-business support.
 
 ## Tech Stack
 - Frontend: React.js, Tailwind CSS, Shadcn UI, qrcode.react, PWA
-- Backend: FastAPI (Python), Modular Routes Architecture (12 route files)
+- Backend: FastAPI (Python), 16 modular route files
 - Database: MongoDB (AsyncIOMotorClient)
-- Payments: Stripe (emergentintegrations library)
+- Payments: Stripe (emergentintegrations)
+- AI: GPT 5.2 (emergentintegrations)
+- Auth: JWT + bcrypt, role-based access control
 
-## Architecture (v3.1.0 — Modular)
+## Architecture (v4.0.0)
 ```
-/app/backend/
-  server.py              — Slim orchestrator
-  database.py            — Shared MongoDB connection
-  routes/
-    products.py          — Products, Categories, Modifiers
-    transactions.py      — Transactions, Promotions, Gift Cards, Refunds
-    customers.py         — Customers, CRM Profiles, Feedback
-    reservations.py      — Reservations, Floor Plans, Waitlist
-    kitchen.py           — Kitchen Display, Prep Management
-    analytics.py         — Pre-Shift, Command Center, Menu Engineering, What-If, Forecasting, Roster, Predictive
-    automation.py        — Automation Rules & Alerts
-    settings.py          — Locations, Users, Printers, Offline, Tables, EFTPOS, Staff
-    loyalty.py           — Loyalty Rewards, Events, QR Menu
-    public.py            — Public Booking Portal, QR/UPI/Split Payments
-    table_ordering.py    — Table-Side QR Ordering (public, mobile-first)
-    integrations.py      — Integrations Hub + Stripe Checkout
+/app/backend/routes/
+  auth.py             — JWT auth, RBAC, staff management, owner reports, seeding
+  products.py         — Products, Categories, Modifiers
+  transactions.py     — Transactions, Promotions, Gift Cards, Refunds
+  customers.py        — Customers, CRM, Feedback
+  reservations.py     — Reservations, Floor Plans, Waitlist
+  kitchen.py          — Kitchen Display, Prep Management
+  analytics.py        — Pre-Shift, Command Center, Menu Engineering, Forecasting, Roster
+  automation.py       — Automation Rules & Alerts
+  settings.py         — Locations, Users, Printers, Offline, EFTPOS, Staff
+  loyalty.py          — Loyalty Rewards, Events, QR Menu
+  public.py           — Booking Portal, QR/UPI/Split Payments
+  table_ordering.py   — Table-Side QR Ordering
+  integrations.py     — 18 Integrations Hub + Stripe Checkout
+  ai_pantry.py        — AI Smart Pantry (GPT 5.2)
+  members.py          — EatClub-style Member Portal, Vouchers, Social Sharing
+  multi_tenant.py     — Multi-Business Management
 ```
 
 ## Completed Phases
-- Phase 1: Reservations, Floor Plan, Waitlist (DONE)
-- Phase 2: Guest CRM & 360 Profiles (DONE)
-- Phase 3: Kitchen Display System (DONE)
-- Phase 4: Pre-Shift Dashboard, AI Command Center, Menu Engineering, Automation Engine (DONE)
-- Phase 5: Loyalty, Forecasting, What-If Simulator, QR Menu, PWA (DONE)
-- Phase 6: Booking Portal, QR/UPI/Split Payments, Backend Refactoring (DONE)
-- Phase 7: Table-Side QR Ordering, Integrations Hub (18 apps), Stripe Payments (DONE - April 2026)
+- Phase 1-5: Core POS, Reservations, CRM, KDS, Analytics, Loyalty, PWA
+- Phase 6: Booking Portal, QR/UPI/Split Payments, Backend Refactoring
+- Phase 7: Table-Side QR Ordering, 18 Integrations Hub, Stripe
+- Phase 8 (Current): Staff Auth & RBAC, AI Smart Pantry, Member Portal, Multi-Business
 
-## Phase 7 Details
+## Phase 8 Details
 
-### Table-Side QR Ordering (/table/:tableId)
-- Public page, mobile-first dark theme
-- Customer scans QR on table, sees menu with categories and images
-- Add items to cart, provide name/notes, place order directly to kitchen
-- Live order status tracking (new → preparing → ready → served)
-- Orders appear in Kitchen Display (KDS) with table number
-- Staff can get QR codes for all 12 tables via API
+### Staff Auth & RBAC
+- JWT auth with httpOnly cookies + Bearer tokens
+- 4 roles: Owner (full access), Manager (no pay rates), Cashier (POS only), Kitchen (KDS only)
+- Brute force protection (5 attempts, 15min lockout)
+- Staff management (add/edit/delete)
+- Owner-only financial reports (Revenue, COGS, Roster Cost, P&L)
+- Sidebar dynamically filters based on role
 
-### Integrations Hub (/integrations)
-18 integrations across 8 categories:
-- **Delivery**: Uber Eats, DoorDash, Menulog
-- **Middleware**: Doshii (connects 20+ apps)
-- **Payments**: Stripe (working), Square, CommBank Smart
-- **Accounting**: Xero, MYOB, QuickBooks
-- **Rostering**: Deputy, Tanda
-- **Reservations**: OpenTable, ResDiary
-- **In-Venue Ordering**: Mr Yum, HungryHungry
-- **Loyalty & Marketing**: Marsello, Stamp Me
+### AI Smart Pantry
+- GPT 5.2 analyzes menu descriptions, sales data, and reservations
+- Generates weekly ordering list with quantities and costs
+- Wastage insights and recommendations
+- History of previous generations
+- Owner/Manager access only
 
-Connect/Disconnect/Sync workflows with API key management.
+### EatClub-Style Member Portal (/join)
+- Public signup with welcome bonus (50 points + 15% voucher)
+- Member login and dashboard
+- Voucher system (percentage/fixed/free item)
+- Referral codes with social sharing (WhatsApp, Facebook, Twitter)
+- Tier system (Bronze/Silver/Gold/Platinum)
 
-### Stripe Payment Integration
-- Real Stripe Checkout via emergentintegrations library
-- Creates checkout sessions, redirects to Stripe hosted page
-- Payment Success page with status polling
-- Payment transactions stored in MongoDB
+### Multi-Business
+- Create and manage multiple businesses
+- Per-business data export
+- Business summary stats
+- Owner-only access
 
-## Testing Status
-- 6 test iterations, all 100% pass rate
-- Iteration 6: 21 backend + all frontend tests passing
-- No known regressions
+## Auth Credentials
+- Owner: owner@ananta.com / AnantaOwner2026!
+- Manager: manager@ananta.com / Staff2026!
+- Cashier: cashier@ananta.com / Staff2026!
+- Kitchen: kitchen@ananta.com / Staff2026!
+
+## Testing: 7 iterations, all 100% pass
 
 ## Backlog
-- P2: Android APK via Capacitor WebView wrapper (deferred)
-- P3: Real API integration for Uber Eats/DoorDash when merchant keys available
+- P2: Android APK via Capacitor
+- P3: Email marketing campaign builder
+- P3: Real API integrations for Uber Eats/DoorDash when keys available
