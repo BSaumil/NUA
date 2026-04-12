@@ -2,7 +2,10 @@
   "name": "frontend",
   "version": "0.1.0",
   "private": true,
+  "homepage": "./",
   "dependencies": {
+    "@capacitor/cli": "6",
+    "@capacitor/core": "6",
     "@hookform/resolvers": "^5.0.1",
     "@radix-ui/react-accordion": "^1.2.8",
     "@radix-ui/react-alert-dialog": "^1.1.11",
@@ -58,8 +61,12 @@
   "scripts": {
     "start": "craco start",
     "build": "craco build",
-    "test": "craco test"
+    "test": "craco test",
+    "electron-dev": "concurrently \"cross-env BROWSER=none craco start\" \"wait-on http://localhost:3000 && cross-env ELECTRON_START_URL=http://localhost:3000 electron electron/main.js\"",
+    "electron-build": "craco build && electron-builder --win --publish never",
+    "android-build": "craco build && npx cap sync android"
   },
+  "main": "electron/main.js",
   "browserslist": {
     "production": [
       ">0.2%",
@@ -77,13 +84,37 @@
     "@craco/craco": "^7.1.0",
     "@eslint/js": "9.23.0",
     "autoprefixer": "^10.4.20",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "33",
+    "electron-builder": "25",
     "eslint": "9.23.0",
     "eslint-plugin-import": "2.31.0",
     "eslint-plugin-jsx-a11y": "6.10.2",
     "eslint-plugin-react": "7.37.4",
     "globals": "15.15.0",
     "postcss": "^8.4.49",
-    "tailwindcss": "^3.4.17"
+    "tailwindcss": "^3.4.17",
+    "wait-on": "^9.0.5"
+  },
+  "build": {
+    "appId": "com.nuva.pos",
+    "productName": "NUVA POS",
+    "files": ["build/**/*", "electron/**/*"],
+    "directories": {
+      "buildResources": "public"
+    },
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "public/favicon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "public/favicon.ico",
+      "uninstallerIcon": "public/favicon.ico",
+      "installerHeaderIcon": "public/favicon.ico"
+    }
   },
   "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }

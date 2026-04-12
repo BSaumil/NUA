@@ -1,16 +1,23 @@
-import React, { useState } from 'react';
-import { Palette, MapPin, Users as UsersIcon, Building } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Palette, MapPin, Users as UsersIcon, Building, GraduationCap } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { useTheme } from '../contexts/ThemeContext';
 import { locations, users } from '../mockData';
 import { useToast } from '../hooks/use-toast';
+import { advancedAPI } from '../services/api';
 
 const Settings = () => {
   const { theme, updateTheme, resetTheme } = useTheme();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('theme');
+  const [trainingMode, setTrainingMode] = useState(false);
+  const [trainingLoading, setTrainingLoading] = useState(false);
+
+  useEffect(() => {
+    advancedAPI.getTrainingMode().then(r => setTrainingMode(r.data?.enabled || false)).catch(() => {});
+  }, []);
 
   const handleThemeUpdate = (key, value) => {
     updateTheme({ [key]: value });
@@ -22,6 +29,7 @@ const Settings = () => {
 
   const tabs = [
     { id: 'theme', label: 'Theme', icon: Palette },
+    { id: 'training', label: 'Training Mode', icon: GraduationCap },
     { id: 'locations', label: 'Locations', icon: MapPin },
     { id: 'users', label: 'Users & Roles', icon: UsersIcon },
     { id: 'business', label: 'Business Info', icon: Building }
@@ -55,6 +63,48 @@ const Settings = () => {
           );
         })}
       </div>
+
+      {/* Training Mode */}
+      {activeTab === 'training' && (
+        <Card>
+          <CardHeader><CardTitle>Training Mode</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-gray-500">
+              When enabled, POS transactions are simulated — no real charges are processed.
+              Ideal for onboarding new staff or testing workflows.
+            </p>
+            <div className="flex items-center justify-between p-4 rounded-lg border">
+              <div>
+                <p className="font-semibold">{trainingMode ? 'Training Mode is ON' : 'Training Mode is OFF'}</p>
+                <p className="text-sm text-gray-500">{trainingMode ? 'All POS transactions are simulated' : 'POS is processing real transactions'}</p>
+              </div>
+              <Button
+                data-testid="toggle-training-mode"
+                disabled={trainingLoading}
+                onClick={async () => {
+                  setTrainingLoading(true);
+                  try {
+                    const res = await advancedAPI.setTrainingMode(!trainingMode);
+                    setTrainingMode(res.data.enabled);
+                    toast({ title: res.data.enabled ? 'Training Mode Enabled' : 'Training Mode Disabled', description: res.data.message });
+                  } catch { toast({ title: 'Error', description: 'Failed to toggle training mode', variant: 'destructive' }); }
+                  setTrainingLoading(false);
+                }}
+                style={{ backgroundColor: trainingMode ? '#ef4444' : theme.primary }}
+                className="text-white"
+              >
+                {trainingMode ? 'Disable' : 'Enable'}
+              </Button>
+            </div>
+            {trainingMode && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                A yellow banner will appear on the POS Terminal reminding staff that transactions are simulated.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
 
       {/* Theme Settings */}
       {activeTab === 'theme' && (

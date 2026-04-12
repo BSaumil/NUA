@@ -9,6 +9,7 @@ import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { toast } from 'sonner';
+import { advancedAPI } from '../services/api';
 import axios from 'axios';
 
 const API = process.env.REACT_APP_BACKEND_URL;
@@ -26,8 +27,8 @@ export default function EmailMarketing() {
   const fetchData = async () => {
     try {
       const [camp, stats] = await Promise.all([
-        axios.get(`${API}/api/marketing/campaigns`, { headers: authHeader() }),
-        axios.get(`${API}/api/members/stats`).catch(() => ({ data: null })),
+        advancedAPI.getCampaigns(),
+        axios.get(`${API}/api/members/stats`, { headers: authHeader() }).catch(() => ({ data: null })),
       ]);
       setCampaigns(camp.data);
       setMemberStats(stats.data);
@@ -36,7 +37,7 @@ export default function EmailMarketing() {
 
   const handleCreate = async () => {
     try {
-      await axios.post(`${API}/api/marketing/campaigns`, form, { headers: authHeader() });
+      await advancedAPI.createCampaign(form);
       toast.success('Campaign created');
       setShowCreate(false);
       setForm({ name: '', subject: '', body: '', targetTier: '' });
@@ -46,7 +47,7 @@ export default function EmailMarketing() {
 
   const handleSend = async (id) => {
     try {
-      const res = await axios.post(`${API}/api/marketing/campaigns/${id}/send`, {}, { headers: authHeader() });
+      const res = await advancedAPI.sendCampaign(id);
       toast.success(res.data.message);
       fetchData();
     } catch { toast.error('Failed to send'); }
@@ -54,7 +55,7 @@ export default function EmailMarketing() {
 
   const handleDelete = async (id) => {
     try {
-      await axios.delete(`${API}/api/marketing/campaigns/${id}`, { headers: authHeader() });
+      await advancedAPI.deleteCampaign(id);
       toast.success('Campaign deleted');
       fetchData();
     } catch {}

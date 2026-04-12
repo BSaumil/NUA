@@ -33,6 +33,9 @@ import Integrations from './pages/Integrations';
 import StaffManagement from './pages/StaffManagement';
 import AIPantry from './pages/AIPantry';
 import MemberPortal from './pages/MemberPortal';
+import EmailMarketing from './pages/EmailMarketing';
+import EndOfDay from './pages/EndOfDay';
+import TipManagement from './pages/TipManagement';
 
 function StaffLayout({ children }) {
   return (
@@ -71,6 +74,9 @@ function ProtectedRoutes() {
         <Route path="/integrations" element={<Integrations />} />
         <Route path="/staff" element={<StaffManagement />} />
         <Route path="/ai-pantry" element={<AIPantry />} />
+        <Route path="/email-marketing" element={<EmailMarketing />} />
+        <Route path="/end-of-day" element={<EndOfDay />} />
+        <Route path="/tip-management" element={<TipManagement />} />
         <Route path="/settings" element={<Settings />} />
       </Routes>
     </StaffLayout>

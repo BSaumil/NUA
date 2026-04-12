@@ -7,10 +7,7 @@ import { Card, CardContent } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { useTheme } from '../contexts/ThemeContext';
 import { toast } from 'sonner';
-import axios from 'axios';
-
-const API = process.env.REACT_APP_BACKEND_URL;
-const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
+import { advancedAPI } from '../services/api';
 
 export default function EndOfDay() {
   const { theme } = useTheme();
@@ -23,8 +20,8 @@ export default function EndOfDay() {
   const fetchReport = async () => {
     try {
       const [eod, tips] = await Promise.all([
-        axios.get(`${API}/api/reports/end-of-day`, { headers: authHeader() }),
-        axios.get(`${API}/api/tips/summary`, { headers: authHeader() }).catch(() => ({ data: null })),
+        advancedAPI.getEndOfDayReport(),
+        advancedAPI.getTipsSummary().catch(() => ({ data: null })),
       ]);
       setReport(eod.data);
       setTipSummary(tips.data);

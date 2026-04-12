@@ -13,7 +13,7 @@ import {
 } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { usePOS } from '../contexts/POSContext';
-import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI } from '../services/api';
+import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI } from '../services/api';
 import { useToast } from '../hooks/use-toast';
 
 const POSTerminal = () => {
@@ -26,6 +26,7 @@ const POSTerminal = () => {
   const [promotions, setPromotions] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [trainingMode, setTrainingMode] = useState(false);
 
   // Payment flow state
   const [paymentView, setPaymentView] = useState('methods'); // methods | qr | upi | split | processing
@@ -52,6 +53,8 @@ const POSTerminal = () => {
       setProducts(productsRes.data);
       setPromotions(promotionsRes.data);
       setCustomers(customersRes.data);
+      // Check training mode
+      advancedAPI.getTrainingMode().then(r => setTrainingMode(r.data?.enabled || false)).catch(() => {});
     } catch (error) {
       console.error('Error fetching data:', error);
       toast({ title: "Error", description: "Failed to load data.", variant: "destructive" });
@@ -69,6 +72,12 @@ const POSTerminal = () => {
   // ---- Standard checkout ----
   const handleCheckout = async (paymentMethod) => {
     if (loading) return;
+    if (trainingMode) {
+      toast({ title: "Training Mode", description: "Transaction simulated — no real charge was made.", variant: "default" });
+      resetPayment();
+      clearCart();
+      return;
+    }
     setLoading(true);
     try {
       await transactionsAPI.create({
@@ -205,6 +214,13 @@ const POSTerminal = () => {
 
   return (
     <div className="flex h-screen gap-6" data-testid="pos-terminal">
+      {/* Training Mode Banner */}
+      {trainingMode && (
+        <div className="fixed top-0 left-64 right-0 z-40 bg-amber-500 text-white text-center py-2 text-sm font-semibold"
+          data-testid="training-mode-banner">
+          TRAINING MODE — Transactions are simulated, no real charges
+        </div>
+      )}
       {/* Products Grid */}
       <div className="flex-1 flex flex-col">
         <div className="mb-6">

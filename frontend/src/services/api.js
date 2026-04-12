@@ -9,6 +9,13 @@ const api = axios.create({
   },
 });
 
+// Attach auth token to every request
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('nuva_token');
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
 // Products API
 export const productsAPI = {
   getAll: (params) => api.get('/products', { params }),
@@ -239,6 +246,25 @@ export const integrationsAPI = {
   connect: (slug, data) => api.post(`/integrations/${slug}/connect`, data),
   disconnect: (slug) => api.post(`/integrations/${slug}/disconnect`),
   sync: (slug) => api.post(`/integrations/${slug}/sync`),
+};
+
+// Advanced Features — Tips, Training Mode, EOD Reports, Email Marketing
+export const advancedAPI = {
+  // Tips
+  addTip: (data) => api.post('/tips/add', data),
+  getTips: () => api.get('/tips'),
+  getTipsSummary: () => api.get('/tips/summary'),
+  distributeTipPool: () => api.post('/tips/pool-distribute'),
+  // Training Mode
+  getTrainingMode: () => api.get('/settings/training-mode'),
+  setTrainingMode: (enabled) => api.post('/settings/training-mode', { enabled }),
+  // End-of-Day
+  getEndOfDayReport: () => api.get('/reports/end-of-day'),
+  // Email Marketing
+  getCampaigns: () => api.get('/marketing/campaigns'),
+  createCampaign: (data) => api.post('/marketing/campaigns', data),
+  sendCampaign: (id) => api.post(`/marketing/campaigns/${id}/send`),
+  deleteCampaign: (id) => api.delete(`/marketing/campaigns/${id}`),
 };
 
 export default api;

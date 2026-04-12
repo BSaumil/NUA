@@ -6,7 +6,8 @@ import {
   LayoutDashboard, ShoppingCart, Package, Users, Warehouse,
   Calculator, FileText, Settings, Utensils, MapPin, Clock,
   ChefHat, BarChart3, Zap, Award, TrendingUp,
-  FlaskConical, Sunrise, Brain, Plug, Users2, LogOut, ShieldCheck, Store
+  FlaskConical, Sunrise, Brain, Plug, Users2, LogOut, ShieldCheck, Store,
+  Mail, ClipboardList, DollarSign
 } from 'lucide-react';
 
 const ALL_NAV = [
@@ -30,6 +31,9 @@ const ALL_NAV = [
   { path: '/accounting', icon: Calculator, label: 'Accounting', access: ['owner'] },
   { path: '/bas-gst', icon: FileText, label: 'BAS/GST', access: ['owner'] },
   { path: '/staff', icon: Users2, label: 'Staff', access: ['owner', 'manager'] },
+  { path: '/email-marketing', icon: Mail, label: 'Email Marketing', access: ['owner', 'manager'] },
+  { path: '/tip-management', icon: DollarSign, label: 'Tip Management', access: ['owner'] },
+  { path: '/end-of-day', icon: ClipboardList, label: 'End of Day', access: ['owner', 'manager'] },
   { path: '/integrations', icon: Plug, label: 'Integrations', access: ['owner', 'manager'] },
   { path: '/settings', icon: Settings, label: 'Settings', access: ['owner', 'manager'] },
 ];
