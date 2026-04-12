@@ -87,3 +87,12 @@ android-sdk/ -e
 *.env.*
 frontend/node_modules/.cache/default-development/0.pack
 frontend/node_modules/electron/dist/electron
+-e 
+# Environment and credential files
+.env
+.env.*
+*.env
+credentials.json
+*.pem
+*.key
+.credentials
