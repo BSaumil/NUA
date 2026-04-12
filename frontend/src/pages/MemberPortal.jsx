@@ -33,7 +33,7 @@ export default function MemberPortal() {
       setMember(res.data.member);
       setToken(res.data.token);
       setView('dashboard');
-      toast.success('Welcome to Ananta! 50 bonus points + 15% off voucher');
+      toast.success('Welcome to NUVA! 50 bonus points + 15% off voucher');
     } catch (err) {
       setError(typeof err.response?.data?.detail === 'string' ? err.response.data.detail : 'Signup failed');
     }
@@ -73,7 +73,7 @@ export default function MemberPortal() {
     <div className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-emerald-950 text-white" data-testid="member-portal">
       {/* Header */}
       <header className="p-4 text-center border-b border-gray-800">
-        <h1 className="text-2xl font-bold tracking-tight">Ananta Members</h1>
+        <h1 className="text-2xl font-bold tracking-tight">NUVA Members</h1>
         <p className="text-sm text-gray-400">Exclusive rewards, vouchers & perks</p>
       </header>
 
@@ -186,15 +186,15 @@ export default function MemberPortal() {
                 <p className="text-xs text-gray-400 mb-3">Share your code — both you and your friend get bonus points!</p>
                 <div className="flex gap-2">
                   <Button size="sm" variant="outline" className="flex-1 text-xs border-gray-700"
-                    onClick={() => { loadShareLinks(); window.open(`https://wa.me/?text=Join me at Ananta! Use code ${member.referralCode}`, '_blank'); }}>
+                    onClick={() => { loadShareLinks(); window.open(`https://wa.me/?text=Join me at NUVA! Use code ${member.referralCode}`, '_blank'); }}>
                     <MessageCircle size={14} className="mr-1" /> WhatsApp
                   </Button>
                   <Button size="sm" variant="outline" className="flex-1 text-xs border-gray-700"
-                    onClick={() => window.open(`https://www.facebook.com/sharer/sharer.php?u=ananta.com/join?ref=${member.referralCode}`, '_blank')}>
+                    onClick={() => window.open(`https://www.facebook.com/sharer/sharer.php?u=nuva.com/join?ref=${member.referralCode}`, '_blank')}>
                     <Facebook size={14} className="mr-1" /> Facebook
                   </Button>
                   <Button size="sm" variant="outline" className="flex-1 text-xs border-gray-700"
-                    onClick={() => window.open(`https://twitter.com/intent/tweet?text=Join me at Ananta! Code: ${member.referralCode}`, '_blank')}>
+                    onClick={() => window.open(`https://twitter.com/intent/tweet?text=Join me at NUVA! Code: ${member.referralCode}`, '_blank')}>
                     <Twitter size={14} className="mr-1" /> Twitter
                   </Button>
                 </div>

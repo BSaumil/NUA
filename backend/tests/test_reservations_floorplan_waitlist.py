@@ -1,5 +1,5 @@
 """
-Backend API Tests for Ananta POS - Reservations, Floor Plans, and Waitlist
+Backend API Tests for NUVA POS - Reservations, Floor Plans, and Waitlist
 Tests all CRUD operations and special actions for Phase 1 features
 """
 import pytest

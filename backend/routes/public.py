@@ -85,8 +85,8 @@ async def generate_payment_qr(data: dict):
     amount = data.get("amount", 0)
     transaction_id = data.get("transactionId", f"TXN-{str(uuid.uuid4())[:8].upper()}")
     method = data.get("method", "upi")
-    merchant_upi = data.get("merchantUpi", "ananta@upi")
-    merchant_name = data.get("merchantName", "Ananta Restaurant")
+    merchant_upi = data.get("merchantUpi", "nuva@upi")
+    merchant_name = data.get("merchantName", "NUVA Restaurant")
     note = data.get("note", f"Payment for order {transaction_id}")
     upi_string = f"upi://pay?pa={merchant_upi}&pn={merchant_name}&am={amount:.2f}&tn={note}&tr={transaction_id}"
     payment_record = {

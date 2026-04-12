@@ -1,9 +1,9 @@
 {
   "name": "ananta-pos-desktop",
   "version": "2.0.1",
-  "description": "Ananta POS - Complete Point of Sale System for Windows",
+  "description": "NUVA POS - Complete Point of Sale System for Windows",
   "main": "electron/main.js",
-  "author": "Ananta POS Team",
+  "author": "NUVA POS Team",
   "license": "Proprietary",
   "scripts": {
     "start": "react-scripts start",
@@ -17,8 +17,8 @@
   },
   "build": {
     "appId": "com.anantapos.desktop",
-    "productName": "Ananta POS",
-    "copyright": "Copyright © 2025 Ananta POS",
+    "productName": "NUVA POS",
+    "copyright": "Copyright © 2025 NUVA POS",
     "directories": {
       "output": "dist",
       "buildResources": "assets"
@@ -61,7 +61,7 @@
       "allowElevation": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Ananta POS",
+      "shortcutName": "NUVA POS",
       "installerIcon": "assets/installer-icon.ico",
       "uninstallerIcon": "assets/uninstaller-icon.ico",
       "installerHeader": "assets/installer-header.bmp",

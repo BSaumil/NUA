@@ -246,8 +246,8 @@ async def get_labor_cost_report(request: Request):
 
 # --- Seeding ---
 async def seed_admin():
-    email = os.environ.get("ADMIN_EMAIL", "owner@ananta.com")
-    password = os.environ.get("ADMIN_PASSWORD", "AnantaOwner2026!")
+    email = os.environ.get("ADMIN_EMAIL", "owner@nuva.com")
+    password = os.environ.get("ADMIN_PASSWORD", "NuvaOwner2026!")
     existing = await db.auth_users.find_one({"email": email})
     if not existing:
         import uuid
@@ -261,9 +261,9 @@ async def seed_admin():
         await db.auth_users.update_one({"email": email}, {"$set": {"password_hash": hash_password(password)}})
     # Seed demo staff
     demo_staff = [
-        {"name": "Sarah Manager", "email": "manager@ananta.com", "role": "manager", "payRate": 35},
-        {"name": "Tom Cashier", "email": "cashier@ananta.com", "role": "cashier", "payRate": 25},
-        {"name": "Chef Kim", "email": "kitchen@ananta.com", "role": "kitchen", "payRate": 30},
+        {"name": "Sarah Manager", "email": "manager@nuva.com", "role": "manager", "payRate": 35},
+        {"name": "Tom Cashier", "email": "cashier@nuva.com", "role": "cashier", "payRate": 25},
+        {"name": "Chef Kim", "email": "kitchen@nuva.com", "role": "kitchen", "payRate": 30},
     ]
     for s in demo_staff:
         exists = await db.auth_users.find_one({"email": s["email"]})

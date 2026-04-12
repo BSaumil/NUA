@@ -30,7 +30,7 @@ export default function Login() {
       <Card className="w-full max-w-sm border-gray-800 bg-gray-900/80 backdrop-blur">
         <CardContent className="p-8">
           <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold text-white tracking-tight">Ananta</h1>
+            <h1 className="text-3xl font-bold text-white tracking-tight">NUVA</h1>
             <p className="text-gray-400 text-sm mt-1">Staff Portal</p>
           </div>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -55,7 +55,7 @@ export default function Login() {
             </Button>
           </form>
           <div className="mt-6 pt-4 border-t border-gray-800">
-            <p className="text-xs text-gray-500 text-center">Demo: owner@ananta.com / AnantaOwner2026!</p>
+            <p className="text-xs text-gray-500 text-center">Demo: owner@nuva.com / NuvaOwner2026!</p>
           </div>
         </CardContent>
       </Card>

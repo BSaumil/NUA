@@ -80,7 +80,7 @@ function startBackend() {
     
     // Set environment variables for backend
     const env = Object.assign({}, process.env, {
-      MONGO_URL: 'mongodb://127.0.0.1:27017/ananta_pos',
+      MONGO_URL: 'mongodb://127.0.0.1:27017/nuva_pos',
       PORT: BACKEND_PORT.toString(),
       ENVIRONMENT: 'production'
     });
@@ -118,7 +118,7 @@ function createWindow() {
     height: 1080,
     minWidth: 1024,
     minHeight: 768,
-    title: 'Ananta POS',
+    title: 'NUVA POS',
     icon: path.join(__dirname, '..', 'assets', 'icon.ico'),
     webPreferences: {
       nodeIntegration: false,

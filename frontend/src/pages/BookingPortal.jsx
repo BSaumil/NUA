@@ -70,7 +70,7 @@ export default function BookingPortal() {
       {/* Header */}
       <div className="max-w-4xl mx-auto pt-10 pb-6 px-4">
         <div className="text-center">
-          <h1 className="text-4xl font-bold text-white tracking-tight">Ananta</h1>
+          <h1 className="text-4xl font-bold text-white tracking-tight">NUVA</h1>
           <p className="text-gray-400 mt-1 text-sm">Restaurant & Bar</p>
         </div>
 

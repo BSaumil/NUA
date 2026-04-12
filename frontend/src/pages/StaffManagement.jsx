@@ -14,7 +14,7 @@ import { toast } from 'sonner';
 import axios from 'axios';
 
 const API = process.env.REACT_APP_BACKEND_URL;
-const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('ananta_token')}` });
+const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
 
 const ROLE_COLORS = {
   owner: 'bg-purple-100 text-purple-700 border-purple-300',

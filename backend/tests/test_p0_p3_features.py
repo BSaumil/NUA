@@ -1,5 +1,5 @@
 """
-Test P0-P3 Features for Ananta POS
+Test P0-P3 Features for NUVA POS
 - Loyalty & Events (Tiers, Rewards, Events)
 - Forecasting (Demand, Table Turns, Smart Roster)
 - What-If Simulator
@@ -382,7 +382,7 @@ class TestQRMenuData:
         assert "categories" in data
         assert "totalItems" in data
         
-        assert data["restaurantName"] == "Ananta"
+        assert data["restaurantName"] == "NUVA"
         
         categories = data["categories"]
         assert isinstance(categories, list)

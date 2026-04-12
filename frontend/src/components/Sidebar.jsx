@@ -50,7 +50,7 @@ const Sidebar = () => {
   return (
     <div className="fixed left-0 top-0 h-full w-64 bg-white border-r border-gray-200 flex flex-col z-50" data-testid="sidebar">
       <div className="p-4 border-b border-gray-200">
-        <h1 className="text-xl font-bold" style={{ color: theme.primary }}>Ananta POS</h1>
+        <h1 className="text-xl font-bold" style={{ color: theme.primary }}>NUVA POS</h1>
         {user && (
           <div className="flex items-center gap-2 mt-2">
             <div className={`w-2 h-2 rounded-full ${user.status === 'active' ? 'bg-green-500' : 'bg-gray-300'}`} />

@@ -1,5 +1,5 @@
 """
-Test Suite for Ananta POS Phase 4 Features:
+Test Suite for NUVA POS Phase 4 Features:
 - Pre-Shift Dashboard API
 - AI Command Center API
 - Menu Engineering API

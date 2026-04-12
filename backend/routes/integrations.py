@@ -36,7 +36,7 @@ async def create_stripe_checkout(data: dict, http_request: Request):
         currency="aud",
         success_url=success_url,
         cancel_url=cancel_url,
-        metadata={"orderId": order_id, "source": "ananta_pos"},
+        metadata={"orderId": order_id, "source": "nuva_pos"},
     )
 
     session = await stripe_checkout.create_checkout_session(checkout_request)
@@ -150,7 +150,7 @@ async def get_integrations():
         {"slug": "tanda", "name": "Tanda", "category": "Rostering", "description": "Workforce management with live POS data", "status": saved_map.get("tanda", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "API Token", "website": "https://www.tanda.co"},
         # Reservations
         {"slug": "opentable", "name": "OpenTable", "category": "Reservations", "description": "Sync OpenTable bookings with your floor plan", "status": saved_map.get("opentable", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "Restaurant ID", "website": "https://restaurant.opentable.com"},
-        {"slug": "resdiary", "name": "ResDiary", "category": "Reservations", "description": "Manage ResDiary reservations in Ananta", "status": saved_map.get("resdiary", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "API Key", "website": "https://www.resdiary.com"},
+        {"slug": "resdiary", "name": "ResDiary", "category": "Reservations", "description": "Manage ResDiary reservations in NUVA", "status": saved_map.get("resdiary", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "API Key", "website": "https://www.resdiary.com"},
         # In-Venue
         {"slug": "mryum", "name": "Mr Yum", "category": "In-Venue Ordering", "description": "In-venue mobile ordering synced to kitchen", "status": saved_map.get("mryum", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "Venue Token", "website": "https://www.mryum.com"},
         {"slug": "hungryhungry", "name": "HungryHungry", "category": "In-Venue Ordering", "description": "Order & pay at table integration", "status": saved_map.get("hungryhungry", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "API Key", "website": "https://www.hungryhungry.com"},

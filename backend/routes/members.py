@@ -47,7 +47,7 @@ async def member_signup(req: MemberSignup, response: Response):
                 "code": f"WELCOME{str(uuid.uuid4())[:4].upper()}",
             }
         ],
-        "referralCode": f"ANANTA-{str(uuid.uuid4())[:6].upper()}",
+        "referralCode": f"NUVA-{str(uuid.uuid4())[:6].upper()}",
         "joinedAt": datetime.now(timezone.utc).isoformat(),
         "status": "active",
     }
@@ -158,12 +158,12 @@ async def get_share_link(member_id: str):
     base = "/join"
     return {
         "bookingLink": f"{base}?ref={ref_code}",
-        "shareText": f"Join me at Ananta! Sign up with my code {ref_code} and get 15% off your first meal.",
+        "shareText": f"Join me at NUVA! Sign up with my code {ref_code} and get 15% off your first meal.",
         "referralCode": ref_code,
         "socialLinks": {
-            "facebook": f"https://www.facebook.com/sharer/sharer.php?u=ananta.com{base}?ref={ref_code}",
-            "twitter": f"https://twitter.com/intent/tweet?text=Join%20me%20at%20Ananta!%20Use%20code%20{ref_code}&url=ananta.com{base}",
-            "whatsapp": f"https://wa.me/?text=Join%20me%20at%20Ananta!%20Sign%20up%20with%20code%20{ref_code}%20and%20get%2015%25%20off!",
+            "facebook": f"https://www.facebook.com/sharer/sharer.php?u=nuva.com{base}?ref={ref_code}",
+            "twitter": f"https://twitter.com/intent/tweet?text=Join%20me%20at%20NUVA!%20Use%20code%20{ref_code}&url=nuva.com{base}",
+            "whatsapp": f"https://wa.me/?text=Join%20me%20at%20NUVA!%20Sign%20up%20with%20code%20{ref_code}%20and%20get%2015%25%20off!",
         }
     }
 

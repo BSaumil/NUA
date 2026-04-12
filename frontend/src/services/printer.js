@@ -33,7 +33,7 @@ class PrinterService {
     receipt += this.ESC_POS.ALIGN_CENTER;
     receipt += this.ESC_POS.BOLD_ON;
     receipt += this.ESC_POS.DOUBLE_HEIGHT;
-    receipt += `${businessInfo.name || 'Ananta POS'}\n`;
+    receipt += `${businessInfo.name || 'NUVA POS'}\n`;
     receipt += this.ESC_POS.NORMAL_SIZE;
     receipt += this.ESC_POS.BOLD_OFF;
     
@@ -191,7 +191,7 @@ class PrinterService {
         </style>
       </head>
       <body>
-        <div class="center bold large">Ananta POS</div>
+        <div class="center bold large">NUVA POS</div>
         <div class="center">123 Main St, Sydney NSW 2000</div>
         <div class="center">Tel: +61 2 9876 5432</div>
         <div class="separator"></div>

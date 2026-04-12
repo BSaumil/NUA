@@ -9,7 +9,7 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   const checkAuth = useCallback(async () => {
-    const token = localStorage.getItem('ananta_token');
+    const token = localStorage.getItem('nuva_token');
     if (!token) { setUser(false); setLoading(false); return; }
     try {
       const res = await axios.get(`${API}/api/auth/me`, {
@@ -17,7 +17,7 @@ export function AuthProvider({ children }) {
       });
       setUser(res.data);
     } catch {
-      localStorage.removeItem('ananta_token');
+      localStorage.removeItem('nuva_token');
       setUser(false);
     }
     setLoading(false);
@@ -27,14 +27,14 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     const res = await axios.post(`${API}/api/auth/login`, { email, password }, { withCredentials: true });
-    localStorage.setItem('ananta_token', res.data.token);
+    localStorage.setItem('nuva_token', res.data.token);
     setUser(res.data.user);
     return res.data.user;
   };
 
   const logout = async () => {
     try { await axios.post(`${API}/api/auth/logout`, {}, { withCredentials: true }); } catch {}
-    localStorage.removeItem('ananta_token');
+    localStorage.removeItem('nuva_token');
     setUser(false);
   };
 

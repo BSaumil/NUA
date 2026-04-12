@@ -25,6 +25,7 @@ from routes.auth import router as auth_router, seed_admin
 from routes.ai_pantry import router as ai_pantry_router
 from routes.members import router as members_router
 from routes.multi_tenant import router as multi_tenant_router, seed_default_business
+from routes.advanced_features import router as advanced_features_router
 
 app = FastAPI()
 
@@ -47,12 +48,13 @@ api_router.include_router(integrations_router)
 api_router.include_router(ai_pantry_router)
 api_router.include_router(members_router)
 api_router.include_router(multi_tenant_router)
+api_router.include_router(advanced_features_router)
 
 @api_router.get("/")
 async def root():
     return {
-        "name": "Ananta POS API",
-        "version": "4.0.0",
+        "name": "NUVA POS API",
+        "version": "5.0.0",
         "status": "Production Ready",
         "features": [
             "Staff Auth & RBAC", "AI Smart Pantry", "Member Portal & Vouchers",
