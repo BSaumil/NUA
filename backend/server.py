@@ -47,8 +47,8 @@ api_router.include_router(table_ordering_router)
 api_router.include_router(integrations_router)
 api_router.include_router(ai_pantry_router)
 api_router.include_router(members_router)
+api_router.include_router(advanced_features_router)  # Must be before multi_tenant to avoid /business/settings conflict
 api_router.include_router(multi_tenant_router)
-api_router.include_router(advanced_features_router)
 
 @api_router.get("/")
 async def root():

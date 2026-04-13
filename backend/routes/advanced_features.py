@@ -5,6 +5,19 @@ import uuid
 
 router = APIRouter()
 
+# ============ BUSINESS SETTINGS ============
+@router.get("/business/settings")
+async def get_business_settings():
+    biz = await db.business_settings.find_one({"key": "main"}, {"_id": 0})
+    return biz or {"name": "NUVA POS", "abn": "", "address": "", "phone": "", "email": "", "taxId": ""}
+
+@router.post("/business/settings")
+async def save_business_settings(data: dict):
+    data["key"] = "main"
+    await db.business_settings.update_one({"key": "main"}, {"$set": data}, upsert=True)
+    return {"message": "Business settings saved"}
+
+
 # ============ TIP MANAGEMENT (Toast-style) ============
 @router.post("/tips/add")
 async def add_tip(data: dict):
@@ -91,24 +104,71 @@ async def toggle_training_mode(data: dict, request: Request):
     )
     return {"enabled": enabled, "message": f"Training mode {'enabled' if enabled else 'disabled'}"}
 
-# ============ END-OF-DAY REPORTS (Square-style) ============
+# ============ END-OF-DAY REPORTS (Square-style, Comprehensive) ============
 @router.get("/reports/end-of-day")
-async def get_end_of_day_report(request: Request):
+async def get_end_of_day_report(request: Request, period: str = "today", start_date: str = None, end_date: str = None):
     from routes.auth import get_current_user
     user = await get_current_user(request)
     if user["role"] not in ("owner", "manager"):
         raise HTTPException(status_code=403, detail="Owner/Manager access only")
 
-    txns = await db.transactions.find({}, {"_id": 0}).to_list(10000)
+    # Build date filter
+    query = {}
+    now = datetime.now(timezone.utc)
+    if period == "today":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = now
+    elif period == "yesterday":
+        start = (now - __import__('datetime').timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        end = start.replace(hour=23, minute=59, second=59)
+    elif period == "week":
+        start = (now - __import__('datetime').timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)
+        end = now
+    elif period == "month":
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        end = now
+    elif period == "quarter":
+        q_month = ((now.month - 1) // 3) * 3 + 1
+        start = now.replace(month=q_month, day=1, hour=0, minute=0, second=0, microsecond=0)
+        end = now
+    elif period == "custom" and start_date and end_date:
+        start = datetime.fromisoformat(start_date).replace(tzinfo=timezone.utc)
+        end = datetime.fromisoformat(end_date).replace(tzinfo=timezone.utc)
+    else:
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = now
+
+    # Get all transactions (filter by date if they have datetime timestamps)
+    all_txns = await db.transactions.find({}, {"_id": 0}).to_list(50000)
+    txns = []
+    for t in all_txns:
+        ts = t.get("timestamp")
+        if ts:
+            if hasattr(ts, 'replace'):
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                if start <= ts <= end:
+                    txns.append(t)
+            else:
+                txns.append(t)
+        else:
+            txns.append(t)
+
+    # If no date filtering worked (all timestamps are strings etc), use all
+    if len(txns) == 0 and len(all_txns) > 0:
+        txns = all_txns
+
     total_sales = sum(t.get("total", 0) for t in txns)
     total_txns = len(txns)
     avg_ticket = total_sales / max(total_txns, 1)
 
+    # By payment method
     by_payment = {}
     for t in txns:
         m = t.get("paymentMethod", "Unknown")
         by_payment[m] = by_payment.get(m, 0) + t.get("total", 0)
 
+    # By hour
     by_hour = {}
     for t in txns:
         ts = t.get("timestamp")
@@ -116,25 +176,62 @@ async def get_end_of_day_report(request: Request):
             h = ts.hour
             by_hour[h] = by_hour.get(h, 0) + t.get("total", 0)
 
+    # By category
+    by_category = {}
+    product_sales = {}
+    for t in txns:
+        for item in t.get("items", []):
+            cat = item.get("category", "Uncategorized")
+            pid = item.get("productId", "")
+            qty = item.get("quantity", 0)
+            rev = item.get("price", 0) * qty
+            by_category[cat] = by_category.get(cat, {"qty": 0, "revenue": 0})
+            by_category[cat]["qty"] += qty
+            by_category[cat]["revenue"] += rev
+            if pid not in product_sales:
+                product_sales[pid] = {"name": item.get("productName", ""), "category": cat, "qty": 0, "revenue": 0}
+            product_sales[pid]["qty"] += qty
+            product_sales[pid]["revenue"] += rev
+
+    top_items = sorted(product_sales.values(), key=lambda x: x["revenue"], reverse=True)[:15]
+
+    # Refunds & tips
     refunds = await db.refunds.find({}, {"_id": 0}).to_list(1000)
     total_refunds = sum(r.get("amount", 0) for r in refunds)
     tips = await db.tips.find({}, {"_id": 0}).to_list(10000)
     total_tips = sum(t.get("amount", 0) for t in tips)
     total_gst = sum(t.get("gst", 0) for t in txns)
 
-    product_sales = {}
-    for t in txns:
-        for item in t.get("items", []):
-            pid = item.get("productId", "")
-            if pid not in product_sales:
-                product_sales[pid] = {"name": item.get("productName", ""), "qty": 0, "revenue": 0}
-            product_sales[pid]["qty"] += item.get("quantity", 0)
-            product_sales[pid]["revenue"] += item.get("price", 0) * item.get("quantity", 0)
+    # Customer analytics
+    customer_ids = [t.get("customerId") for t in txns if t.get("customerId")]
+    unique_customers = len(set(customer_ids))
+    customers = await db.customers.find({}, {"_id": 0}).to_list(10000)
+    cust_map = {c.get("id"): c for c in customers}
+    new_customers = 0
+    returning_customers = 0
+    for cid in set(customer_ids):
+        c = cust_map.get(cid, {})
+        if c.get("visits", 0) <= 1:
+            new_customers += 1
+        else:
+            returning_customers += 1
+    walk_ins = total_txns - len(customer_ids)
+    total_covers = total_txns  # each txn = 1 cover approx
 
-    top_items = sorted(product_sales.values(), key=lambda x: x["revenue"], reverse=True)[:10]
+    # Spending habits
+    spend_by_customer = {}
+    for t in txns:
+        cid = t.get("customerId", "walk-in")
+        spend_by_customer[cid] = spend_by_customer.get(cid, 0) + t.get("total", 0)
+    avg_customer_spend = sum(spend_by_customer.values()) / max(len(spend_by_customer), 1)
+    top_spenders = sorted(
+        [{"id": k, "name": cust_map.get(k, {}).get("name", "Walk-in"), "total": round(v, 2)} for k, v in spend_by_customer.items()],
+        key=lambda x: x["total"], reverse=True
+    )[:10]
 
     return {
-        "date": datetime.now(timezone.utc).strftime('%Y-%m-%d'),
+        "period": period,
+        "dateRange": {"start": start.isoformat(), "end": end.isoformat()},
         "summary": {
             "totalSales": round(total_sales, 2), "totalTransactions": total_txns,
             "avgTicket": round(avg_ticket, 2), "totalRefunds": round(total_refunds, 2),
@@ -143,7 +240,17 @@ async def get_end_of_day_report(request: Request):
         },
         "byPaymentMethod": [{"method": m, "total": round(v, 2)} for m, v in sorted(by_payment.items(), key=lambda x: x[1], reverse=True)],
         "byHour": [{"hour": h, "total": round(v, 2)} for h, v in sorted(by_hour.items())],
+        "byCategory": [{"category": k, "qty": v["qty"], "revenue": round(v["revenue"], 2)} for k, v in sorted(by_category.items(), key=lambda x: x[1]["revenue"], reverse=True)],
         "topItems": top_items,
+        "customerAnalytics": {
+            "totalCovers": total_covers,
+            "uniqueCustomers": unique_customers,
+            "walkIns": walk_ins,
+            "newCustomers": new_customers,
+            "returningCustomers": returning_customers,
+            "avgCustomerSpend": round(avg_customer_spend, 2),
+            "topSpenders": top_spenders,
+        },
     }
 
 # ============ EMAIL MARKETING CAMPAIGNS ============

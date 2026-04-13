@@ -1,0 +1,144 @@
+{
+  "iteration": 9,
+  "date": "2026-04-13",
+  "focus": "Major Bug Fixes: Products CRUD, Inventory Stock Adjustment, Forecasting, Settings (Locations/Staff/Business), Accounting (Transactions/Refunds), End of Day Reports",
+  "summary": "Tested all major bug fixes from iteration 9. Fixed 1 backend routing issue (business/settings endpoint conflict). All 42 backend tests pass. All frontend features working correctly with proper RBAC enforcement.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_results": {
+    "backend": {
+      "TestAuth": {
+        "test_owner_login": "PASS - Returns user with role=owner and JWT token",
+        "test_manager_login": "PASS - Returns user with role=manager",
+        "test_cashier_login": "PASS - Returns user with role=cashier"
+      },
+      "TestProductsCRUD": {
+        "test_get_products": "PASS - Returns product list",
+        "test_create_product": "PASS - Creates product with all fields",
+        "test_update_product": "PASS - Updates product name/price",
+        "test_delete_product": "PASS - Deletes product and verifies removal"
+      },
+      "TestPromotionsCRUD": {
+        "test_get_promotions": "PASS - Returns promotion list",
+        "test_create_promotion": "PASS - Creates promotion with discount/schedule",
+        "test_update_promotion": "PASS - Updates discount and active status",
+        "test_delete_promotion": "PASS - Deletes promotion"
+      },
+      "TestInventoryStockAdjustment": {
+        "test_adjust_stock_positive": "PASS - Adds stock with reason",
+        "test_adjust_stock_negative": "PASS - Removes stock with reason",
+        "test_adjust_stock_below_zero_fails": "PASS - Rejects negative stock"
+      },
+      "TestForecasting": {
+        "test_demand_forecast": "PASS - Returns 7-day forecast with covers/staff/busyLevel",
+        "test_table_turns": "PASS - Returns avgTurnTime and optimization data",
+        "test_smart_roster": "PASS - Returns roster suggestions"
+      },
+      "TestSettingsLocations": {
+        "test_get_locations": "PASS - Returns location list",
+        "test_create_location": "PASS - Creates location",
+        "test_update_location": "PASS - Updates address",
+        "test_delete_location": "PASS - Deletes location"
+      },
+      "TestSettingsStaff": {
+        "test_get_staff": "PASS - Returns 4 staff (owner, manager, cashier, kitchen)",
+        "test_update_staff": "PASS - Updates pay rate"
+      },
+      "TestSettingsBusiness": {
+        "test_get_business_settings": "PASS - Returns business info",
+        "test_save_business_settings": "PASS - Saves and persists ABN/address/phone"
+      },
+      "TestSettingsTrainingMode": {
+        "test_get_training_mode": "PASS - Returns enabled status",
+        "test_toggle_training_mode": "PASS - Toggles on/off"
+      },
+      "TestAccountingTransactions": {
+        "test_get_transactions": "PASS - Returns transaction list",
+        "test_get_transaction_detail": "PASS - Returns detail with refunds array",
+        "test_create_refund": "PASS - Creates refund with reason/method"
+      },
+      "TestEndOfDayReports": {
+        "test_eod_report_today": "PASS - Returns today's summary with customerAnalytics",
+        "test_eod_report_week": "PASS - Returns week data",
+        "test_eod_report_month": "PASS - Returns month data with byPaymentMethod/byCategory/topItems",
+        "test_eod_report_quarter": "PASS - Returns quarter data",
+        "test_eod_customer_analytics": "PASS - Returns covers/walkIns/newCustomers/returningCustomers/avgSpend/topSpenders",
+        "test_eod_hourly_breakdown": "PASS - Returns sales by hour"
+      },
+      "TestRBACRestrictions": {
+        "test_cashier_denied_eod_report": "PASS - Cashier gets 403",
+        "test_cashier_denied_tips_summary": "PASS - Cashier gets 403",
+        "test_cashier_denied_training_mode_toggle": "PASS - Cashier gets 403"
+      }
+    },
+    "frontend": {
+      "Login": "PASS - Owner/Manager/Cashier login working",
+      "Products_page": "PASS - Add/Edit/Delete products working, Promotions tab working",
+      "Inventory_page": "PASS - Real API data, Stock Adjustment dialog working",
+      "Forecasting_page": "PASS - No crash, 7-day forecast cards, Table Turns, Smart Roster tabs",
+      "Settings_Locations_tab": "PASS - Real API data, Add/Edit/Delete locations",
+      "Settings_Staff_tab": "PASS - Real API data (4 staff), Edit staff working",
+      "Settings_Business_tab": "PASS - Editable fields, Save Changes button",
+      "Settings_Training_Mode_tab": "PASS - Toggle button working",
+      "Accounting_page": "PASS - Transaction table, View/Receipt/Refund action buttons",
+      "Accounting_Transaction_Detail": "PASS - Dialog shows items, subtotal, GST, total, refunds",
+      "Accounting_Receipt_Dialog": "PASS - Formatted receipt with Print button",
+      "Accounting_Refund_Dialog": "PASS - Amount/reason/method fields, Process Refund button",
+      "EndOfDay_page": "PASS - Period selectors (today/week/month/quarter/custom)",
+      "EndOfDay_Overview": "PASS - Gross Sales, Net Sales, Avg Ticket, GST, Payment Methods, Refunds, Tips",
+      "EndOfDay_Item_Sales": "PASS - Product-level sales table",
+      "EndOfDay_Categories": "PASS - Category breakdown with bar chart",
+      "EndOfDay_Customers": "PASS - Covers, walk-ins, new vs returning, top spenders",
+      "EndOfDay_Hourly": "PASS - Sales by hour breakdown",
+      "Cashier_RBAC": "PASS - Accounting/Settings/EndOfDay/TipManagement/EmailMarketing hidden"
+    }
+  },
+  "bugs_fixed_by_testing_agent": [
+    {
+      "file": "/app/backend/server.py",
+      "issue": "Route conflict: /api/business/settings was being caught by multi_tenant router's /business/{business_id} route",
+      "fix": "Reordered routers - advanced_features_router now included before multi_tenant_router"
+    }
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_iteration9_bugfixes.py",
+    "/app/test_reports/pytest/pytest_iteration9.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "All major bug fixes verified working: Products CRUD, Inventory Stock Adjustment, Forecasting field mappings, Settings real API, Accounting transactions/refunds, EOD comprehensive reports",
+    "RBAC properly enforced - cashier cannot access restricted features",
+    "Product create requires 'image' field - this is by design in the Pydantic model",
+    "Email sending remains MOCKED (campaigns stored in DB but no actual emails sent)"
+  ],
+  "updated_files": [
+    "/app/backend/server.py",
+    "/app/backend/tests/test_iteration9_bugfixes.py"
+  ],
+  "success_rate": {
+    "backend": "100% (42/42 tests passed)",
+    "frontend": "100% (all features working)"
+  },
+  "test_credentials": {
+    "owner": "owner@nuva.com / NuvaOwner2026!",
+    "manager": "manager@nuva.com / Staff2026!",
+    "cashier": "cashier@nuva.com / Staff2026!",
+    "kitchen": "kitchen@nuva.com / Staff2026!"
+  },
+  "seed_data_creation": "Test products, promotions, locations, and refunds created during testing (prefixed with TEST_) - cleaned up after tests",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 9 tested major bug fixes. All features working: Products/Promotions CRUD, Inventory stock adjustment, Forecasting (fixed field name mismatches), Settings (Locations/Staff/Business with real API), Accounting (transactions/receipts/refunds), EOD Reports (comprehensive with date ranges and customer analytics). Fixed route conflict for /api/business/settings. Auth token stored in localStorage as 'nuva_token'. API base URL: https://pos-checkout-16.preview.emergentagent.com",
+  "mocked_apis": {
+    "email_marketing": "Email sending is MOCKED - campaigns stored in DB but no actual emails sent",
+    "receipt_email": "Receipt email button shows toast only, no actual email sent",
+    "stripe": "Uses test key sk_test_emergent"
+  }
+}

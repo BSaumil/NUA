@@ -27,6 +27,23 @@ async def create_promotion(promotion: PromotionCreate):
     await db.promotions.insert_one(promo_obj.dict())
     return promo_obj
 
+@router.put("/promotions/{promo_id}")
+async def update_promotion(promo_id: str, data: dict):
+    allowed = {"name", "type", "discount", "active", "schedule", "products", "category", "originalPrice", "discountedPrice"}
+    update_data = {k: v for k, v in data.items() if k in allowed}
+    result = await db.promotions.find_one_and_update({"id": promo_id}, {"$set": update_data}, return_document=True)
+    if not result:
+        raise HTTPException(status_code=404, detail="Promotion not found")
+    result.pop("_id", None)
+    return result
+
+@router.delete("/promotions/{promo_id}")
+async def delete_promotion(promo_id: str):
+    result = await db.promotions.delete_one({"id": promo_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Promotion not found")
+    return {"message": "Promotion deleted"}
+
 # ============ TRANSACTIONS API ============
 @router.get("/transactions", response_model=List[Transaction])
 async def get_transactions(
@@ -121,6 +138,18 @@ async def create_transaction(transaction: TransactionCreate):
         )
 
     return Transaction(**txn_dict)
+
+
+@router.get("/transactions/{txn_id}")
+async def get_transaction_detail(txn_id: str):
+    txn = await db.transactions.find_one({"id": txn_id}, {"_id": 0})
+    if not txn:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    # Attach any refunds for this transaction
+    refunds = await db.refunds.find({"originalTransactionId": txn_id}, {"_id": 0}).to_list(100)
+    txn["refunds"] = refunds
+    return txn
+
 
 @router.get("/transactions/hourly")
 async def get_hourly_transactions():

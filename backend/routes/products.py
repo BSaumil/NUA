@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from typing import List, Optional
+from datetime import datetime, timezone
 from database import db
 from models.product import Product, ProductCreate, ProductUpdate
 from models.category import Category, CategoryCreate
@@ -43,6 +44,27 @@ async def delete_product(product_id: str):
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Product not found")
     return {"message": "Product deleted"}
+
+@router.post("/products/{product_id}/adjust-stock")
+async def adjust_stock(product_id: str, data: dict):
+    adjustment = data.get("adjustment", 0)
+    reason = data.get("reason", "Manual adjustment")
+    product = await db.products.find_one({"id": product_id})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    new_stock = product.get("stock", 0) + adjustment
+    if new_stock < 0:
+        raise HTTPException(status_code=400, detail="Stock cannot go below zero")
+    await db.products.update_one({"id": product_id}, {"$set": {"stock": new_stock}})
+    await db.stock_adjustments.insert_one({
+        "productId": product_id, "productName": product.get("name", ""),
+        "previousStock": product.get("stock", 0), "adjustment": adjustment,
+        "newStock": new_stock, "reason": reason,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"message": "Stock adjusted", "newStock": new_stock}
+
+
 
 # ============ CATEGORIES API ============
 @router.get("/categories", response_model=List[Category])

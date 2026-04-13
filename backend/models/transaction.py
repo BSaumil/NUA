@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Any
 from datetime import datetime
 import uuid
 
@@ -32,24 +32,25 @@ class Transaction(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     items: List[TransactionItem]
     subtotal: float
-    discount: Optional[TransactionDiscount] = None
+    discount: Any = None
     discountAmount: float = 0.0
     tipAmount: float = 0.0
     gst: float
     total: float
-    paymentMethod: str  # For single payment
-    paymentSplits: List[PaymentSplit] = []  # For split payments
+    paymentMethod: str
+    paymentSplits: List[PaymentSplit] = []
     isSplitPayment: bool = False
     customerId: Optional[str] = None
     customerName: Optional[str] = None
     location: str
     cashier: str
     status: str = "completed"
+    receiptNumber: Optional[str] = None
     printed: bool = False
     emailReceipt: Optional[str] = None
     smsReceipt: Optional[str] = None
     tableNumber: Optional[int] = None
-    orderType: str = "retail"  # retail, dine_in, takeaway, delivery
+    orderType: str = "retail"
 
 class TransactionCreate(BaseModel):
     items: List[TransactionItem]

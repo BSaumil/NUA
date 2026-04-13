@@ -27,6 +27,23 @@ async def create_location(location: LocationCreate):
     await db.locations.insert_one(loc_obj.dict())
     return loc_obj
 
+@router.put("/locations/{location_id}")
+async def update_location(location_id: str, data: dict):
+    allowed = {"name", "address", "phone", "status"}
+    update_data = {k: v for k, v in data.items() if k in allowed}
+    result = await db.locations.find_one_and_update({"id": location_id}, {"$set": update_data}, return_document=True)
+    if not result:
+        raise HTTPException(status_code=404, detail="Location not found")
+    result.pop("_id", None)
+    return result
+
+@router.delete("/locations/{location_id}")
+async def delete_location(location_id: str):
+    result = await db.locations.delete_one({"id": location_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Location not found")
+    return {"message": "Location deleted"}
+
 # ============ USERS API ============
 @router.get("/users", response_model=List[User])
 async def get_users():

@@ -1,202 +1,229 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Plus, Edit, Trash2, Tag, Package } from 'lucide-react';
+import { Search, Plus, Edit, Trash2, Tag, Package, X } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent } from '../components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
-import { productsAPI, promotionsAPI } from '../services/api';
+import { productsAPI, promotionsAPI, categoriesAPI } from '../services/api';
+import { toast } from 'sonner';
+
+const EMPTY_PRODUCT = { name: '', category: 'Beverages', price: '', cost: '', stock: '', sku: '', image: '', gstRate: 10 };
+const EMPTY_PROMO = { name: '', type: 'category', discount: '', schedule: '', active: true, category: '', products: [] };
 
 const Products = () => {
   const { theme } = useTheme();
   const [searchTerm, setSearchTerm] = useState('');
-  const [view, setView] = useState('products'); // 'products' or 'promotions'
+  const [view, setView] = useState('products');
   const [products, setProducts] = useState([]);
   const [promotions, setPromotions] = useState([]);
-  
-  useEffect(() => {
-    fetchData();
-  }, []);
-  
+  const [showProductDialog, setShowProductDialog] = useState(false);
+  const [showPromoDialog, setShowPromoDialog] = useState(false);
+  const [editingProduct, setEditingProduct] = useState(null);
+  const [editingPromo, setEditingPromo] = useState(null);
+  const [productForm, setProductForm] = useState(EMPTY_PRODUCT);
+  const [promoForm, setPromoForm] = useState(EMPTY_PROMO);
+
+  useEffect(() => { fetchData(); }, []);
+
   const fetchData = async () => {
     try {
-      const [productsRes, promotionsRes] = await Promise.all([
-        productsAPI.getAll(),
-        promotionsAPI.getAll()
-      ]);
-      setProducts(productsRes.data);
-      setPromotions(promotionsRes.data);
-    } catch (error) {
-      console.error('Error fetching data:', error);
-    }
+      const [p, pr] = await Promise.all([productsAPI.getAll(), promotionsAPI.getAll()]);
+      setProducts(p.data);
+      setPromotions(pr.data);
+    } catch { toast.error('Failed to load data'); }
   };
 
-  const filteredProducts = products.filter(p =>
-    p.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // === Product CRUD ===
+  const openAddProduct = () => { setEditingProduct(null); setProductForm(EMPTY_PRODUCT); setShowProductDialog(true); };
+  const openEditProduct = (p) => {
+    setEditingProduct(p);
+    setProductForm({ name: p.name, category: p.category, price: p.price, cost: p.cost, stock: p.stock, sku: p.sku, image: p.image, gstRate: p.gstRate });
+    setShowProductDialog(true);
+  };
+  const saveProduct = async () => {
+    const data = { ...productForm, price: parseFloat(productForm.price), cost: parseFloat(productForm.cost), stock: parseInt(productForm.stock), gstRate: parseFloat(productForm.gstRate) };
+    try {
+      if (editingProduct) { await productsAPI.update(editingProduct.id, data); toast.success('Product updated'); }
+      else { await productsAPI.create(data); toast.success('Product created'); }
+      setShowProductDialog(false); fetchData();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to save product'); }
+  };
+  const deleteProduct = async (id) => {
+    if (!window.confirm('Delete this product?')) return;
+    try { await productsAPI.delete(id); toast.success('Product deleted'); fetchData(); } catch { toast.error('Failed to delete'); }
+  };
+
+  // === Promotion CRUD ===
+  const openAddPromo = () => { setEditingPromo(null); setPromoForm(EMPTY_PROMO); setShowPromoDialog(true); };
+  const openEditPromo = (p) => {
+    setEditingPromo(p);
+    setPromoForm({ name: p.name, type: p.type, discount: p.discount, schedule: p.schedule, active: p.active, category: p.category || '', products: p.products || [] });
+    setShowPromoDialog(true);
+  };
+  const savePromo = async () => {
+    const data = { ...promoForm, discount: parseFloat(promoForm.discount) };
+    try {
+      if (editingPromo) { await promotionsAPI.update(editingPromo.id, data); toast.success('Promotion updated'); }
+      else { await promotionsAPI.create(data); toast.success('Promotion created'); }
+      setShowPromoDialog(false); fetchData();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to save promotion'); }
+  };
+  const deletePromo = async (id) => {
+    if (!window.confirm('Delete this promotion?')) return;
+    try { await promotionsAPI.delete(id); toast.success('Promotion deleted'); fetchData(); } catch { toast.error('Failed to delete'); }
+  };
+
+  const filteredProducts = products.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()));
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
+    <div className="space-y-6" data-testid="products-page">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold" style={{ color: theme.text }}>Products & Promotions</h1>
           <p className="text-gray-500 mt-1">Manage your catalog, pricing, and special offers</p>
         </div>
-        <Button style={{ backgroundColor: theme.primary }}>
-          <Plus className="mr-2" size={18} />
-          Add Product
-        </Button>
+        {view === 'products' ? (
+          <Button style={{ backgroundColor: theme.primary }} onClick={openAddProduct} data-testid="add-product-btn">
+            <Plus className="mr-2" size={18} /> Add Product
+          </Button>
+        ) : (
+          <Button style={{ backgroundColor: theme.primary }} onClick={openAddPromo} data-testid="add-promo-btn">
+            <Plus className="mr-2" size={18} /> Create Promotion
+          </Button>
+        )}
       </div>
 
-      {/* View Tabs */}
       <div className="flex gap-2">
-        <Button
-          variant={view === 'products' ? 'default' : 'outline'}
-          onClick={() => setView('products')}
-          style={{
-            backgroundColor: view === 'products' ? theme.primary : 'transparent',
-            color: view === 'products' ? 'white' : theme.text
-          }}
-        >
-          <Package className="mr-2" size={18} />
-          Products
+        <Button variant={view === 'products' ? 'default' : 'outline'} onClick={() => setView('products')}
+          style={{ backgroundColor: view === 'products' ? theme.primary : 'transparent', color: view === 'products' ? 'white' : theme.text }}>
+          <Package className="mr-2" size={18} /> Products ({products.length})
         </Button>
-        <Button
-          variant={view === 'promotions' ? 'default' : 'outline'}
-          onClick={() => setView('promotions')}
-          style={{
-            backgroundColor: view === 'promotions' ? theme.primary : 'transparent',
-            color: view === 'promotions' ? 'white' : theme.text
-          }}
-        >
-          <Tag className="mr-2" size={18} />
-          Promotions
+        <Button variant={view === 'promotions' ? 'default' : 'outline'} onClick={() => setView('promotions')}
+          style={{ backgroundColor: view === 'promotions' ? theme.primary : 'transparent', color: view === 'promotions' ? 'white' : theme.text }}>
+          <Tag className="mr-2" size={18} /> Promotions ({promotions.length})
         </Button>
       </div>
 
-      {/* Products View */}
       {view === 'products' && (
         <>
-          {/* Search */}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
-            <Input
-              placeholder="Search products by name or SKU..."
-              className="pl-10"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
+            <Input placeholder="Search products..." className="pl-10" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} data-testid="product-search" />
           </div>
-
-          {/* Products Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {filteredProducts.map(product => (
-              <Card key={product.id} className="hover:shadow-lg transition-shadow duration-300">
+              <Card key={product.id} className="hover:shadow-lg transition-shadow" data-testid={`product-card-${product.id}`}>
                 <CardContent className="p-4">
-                  <img
-                    src={product.image}
-                    alt={product.name}
-                    className="w-full h-40 object-cover rounded-lg mb-4"
-                  />
-                  <div className="space-y-2">
-                    <h3 className="font-bold text-lg" style={{ color: theme.text }}>{product.name}</h3>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-500">{product.category}</span>
-                      <span className="text-xs bg-gray-100 px-2 py-1 rounded">{product.sku}</span>
+                  <img src={product.image} alt={product.name} className="w-full h-40 object-cover rounded-lg mb-4" />
+                  <h3 className="font-bold text-lg" style={{ color: theme.text }}>{product.name}</h3>
+                  <div className="flex items-center justify-between mt-1">
+                    <span className="text-sm text-gray-500">{product.category}</span>
+                    <span className="text-xs bg-gray-100 px-2 py-1 rounded font-mono">{product.sku}</span>
+                  </div>
+                  <div className="flex items-center justify-between mt-2">
+                    <div>
+                      <p className="text-2xl font-bold" style={{ color: theme.primary }}>${Number(product.price).toFixed(2)}</p>
+                      <p className="text-xs text-gray-500">Cost: ${Number(product.cost).toFixed(2)}</p>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-2xl font-bold" style={{ color: theme.primary }}>${product.price}</p>
-                        <p className="text-xs text-gray-500">Cost: ${product.cost}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm font-medium">Stock: {product.stock}</p>
-                        <p className="text-xs text-gray-500">GST: {product.gstRate}%</p>
-                      </div>
+                    <div className="text-right">
+                      <p className="text-sm font-medium">Stock: {product.stock}</p>
+                      <p className="text-xs text-gray-500">GST: {product.gstRate}%</p>
                     </div>
-                    <div className="flex gap-2 pt-2">
-                      <Button variant="outline" size="sm" className="flex-1">
-                        <Edit size={14} className="mr-1" />
-                        Edit
-                      </Button>
-                      <Button variant="outline" size="sm" className="text-red-500">
-                        <Trash2 size={14} />
-                      </Button>
-                    </div>
+                  </div>
+                  <div className="flex gap-2 pt-3">
+                    <Button variant="outline" size="sm" className="flex-1" onClick={() => openEditProduct(product)} data-testid={`edit-product-${product.id}`}>
+                      <Edit size={14} className="mr-1" /> Edit
+                    </Button>
+                    <Button variant="outline" size="sm" className="text-red-500 hover:bg-red-50" onClick={() => deleteProduct(product.id)} data-testid={`delete-product-${product.id}`}>
+                      <Trash2 size={14} />
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
             ))}
+            {filteredProducts.length === 0 && <p className="col-span-full text-center text-gray-400 py-12">No products found. Add your first product above.</p>}
           </div>
         </>
       )}
 
-      {/* Promotions View */}
       {view === 'promotions' && (
         <div className="space-y-4">
-          <Button style={{ backgroundColor: theme.primary }} className="mb-4">
-            <Plus className="mr-2" size={18} />
-            Create Promotion
-          </Button>
-
           {promotions.map(promo => (
-            <Card key={promo.id}>
+            <Card key={promo.id} data-testid={`promo-card-${promo.id}`}>
               <CardContent className="p-6">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-3">
                       <h3 className="text-xl font-bold" style={{ color: theme.text }}>{promo.name}</h3>
-                      <span
-                        className="px-3 py-1 rounded-full text-xs font-medium"
-                        style={{
-                          backgroundColor: promo.active ? '#dcfce7' : '#fee2e2',
-                          color: promo.active ? '#15803d' : '#991b1b'
-                        }}
-                      >
+                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${promo.active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                         {promo.active ? 'Active' : 'Inactive'}
                       </span>
                     </div>
                     <div className="grid grid-cols-3 gap-4 text-sm">
-                      <div>
-                        <p className="text-gray-500">Type</p>
-                        <p className="font-medium capitalize">{promo.type}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-500">Discount</p>
-                        <p className="font-medium" style={{ color: theme.accent }}>{promo.discount}%</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-500">Schedule</p>
-                        <p className="font-medium">{promo.schedule}</p>
-                      </div>
+                      <div><p className="text-gray-500">Type</p><p className="font-medium capitalize">{promo.type}</p></div>
+                      <div><p className="text-gray-500">Discount</p><p className="font-medium" style={{ color: theme.accent }}>{promo.discount}%</p></div>
+                      <div><p className="text-gray-500">Schedule</p><p className="font-medium">{promo.schedule}</p></div>
                     </div>
-                    {promo.type === 'bundle' && (
-                      <div className="mt-3">
-                        <p className="text-sm text-gray-500">Bundle Items:</p>
-                        <p className="font-medium">
-                          {promo.products.map(pid => products.find(p => p.id === pid)?.name).join(' + ')}
-                        </p>
-                        <p className="text-sm mt-1">
-                          <span className="line-through text-gray-400">${promo.originalPrice}</span>
-                          <span className="ml-2 font-bold" style={{ color: theme.primary }}>${promo.discountedPrice}</span>
-                        </p>
-                      </div>
-                    )}
                   </div>
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm">
-                      <Edit size={14} />
-                    </Button>
-                    <Button variant="outline" size="sm" className="text-red-500">
-                      <Trash2 size={14} />
-                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => openEditPromo(promo)} data-testid={`edit-promo-${promo.id}`}><Edit size={14} /></Button>
+                    <Button variant="outline" size="sm" className="text-red-500" onClick={() => deletePromo(promo.id)} data-testid={`delete-promo-${promo.id}`}><Trash2 size={14} /></Button>
                   </div>
                 </div>
               </CardContent>
             </Card>
           ))}
+          {promotions.length === 0 && <Card className="border-dashed"><CardContent className="p-12 text-center"><Tag size={40} className="mx-auto mb-3 text-gray-300" /><p className="text-gray-500">No promotions yet</p></CardContent></Card>}
         </div>
       )}
+
+      {/* Product Dialog */}
+      <Dialog open={showProductDialog} onOpenChange={setShowProductDialog}>
+        <DialogContent className="max-w-md" data-testid="product-dialog">
+          <DialogHeader><DialogTitle>{editingProduct ? 'Edit Product' : 'Add Product'}</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-2 max-h-[60vh] overflow-y-auto">
+            <Input placeholder="Product name" value={productForm.name} onChange={e => setProductForm({ ...productForm, name: e.target.value })} data-testid="product-name-input" />
+            <select className="w-full p-2 border rounded-md text-sm" value={productForm.category} onChange={e => setProductForm({ ...productForm, category: e.target.value })} data-testid="product-category-select">
+              <option value="Beverages">Beverages</option><option value="Food">Food</option><option value="Bakery">Bakery</option><option value="Alcohol">Alcohol</option><option value="Other">Other</option>
+            </select>
+            <div className="grid grid-cols-2 gap-2">
+              <Input type="number" step="0.01" placeholder="Price" value={productForm.price} onChange={e => setProductForm({ ...productForm, price: e.target.value })} data-testid="product-price-input" />
+              <Input type="number" step="0.01" placeholder="Cost" value={productForm.cost} onChange={e => setProductForm({ ...productForm, cost: e.target.value })} data-testid="product-cost-input" />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Input type="number" placeholder="Stock" value={productForm.stock} onChange={e => setProductForm({ ...productForm, stock: e.target.value })} data-testid="product-stock-input" />
+              <Input placeholder="SKU" value={productForm.sku} onChange={e => setProductForm({ ...productForm, sku: e.target.value })} data-testid="product-sku-input" />
+            </div>
+            <Input placeholder="Image URL" value={productForm.image} onChange={e => setProductForm({ ...productForm, image: e.target.value })} data-testid="product-image-input" />
+            <Input type="number" step="0.1" placeholder="GST Rate %" value={productForm.gstRate} onChange={e => setProductForm({ ...productForm, gstRate: e.target.value })} />
+            <Button className="w-full" style={{ backgroundColor: theme.primary }} onClick={saveProduct} data-testid="save-product-btn">
+              {editingProduct ? 'Update Product' : 'Create Product'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Promotion Dialog */}
+      <Dialog open={showPromoDialog} onOpenChange={setShowPromoDialog}>
+        <DialogContent className="max-w-md" data-testid="promo-dialog">
+          <DialogHeader><DialogTitle>{editingPromo ? 'Edit Promotion' : 'Create Promotion'}</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-2">
+            <Input placeholder="Promotion name" value={promoForm.name} onChange={e => setPromoForm({ ...promoForm, name: e.target.value })} data-testid="promo-name-input" />
+            <select className="w-full p-2 border rounded-md text-sm" value={promoForm.type} onChange={e => setPromoForm({ ...promoForm, type: e.target.value })}>
+              <option value="category">Category Discount</option><option value="bundle">Bundle Deal</option>
+            </select>
+            <Input type="number" step="0.1" placeholder="Discount %" value={promoForm.discount} onChange={e => setPromoForm({ ...promoForm, discount: e.target.value })} data-testid="promo-discount-input" />
+            <Input placeholder="Schedule (e.g. Mon-Fri 11am-2pm)" value={promoForm.schedule} onChange={e => setPromoForm({ ...promoForm, schedule: e.target.value })} data-testid="promo-schedule-input" />
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={promoForm.active} onChange={e => setPromoForm({ ...promoForm, active: e.target.checked })} /> Active
+            </label>
+            <Button className="w-full" style={{ backgroundColor: theme.primary }} onClick={savePromo} data-testid="save-promo-btn">
+              {editingPromo ? 'Update Promotion' : 'Create Promotion'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

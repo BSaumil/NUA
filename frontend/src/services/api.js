@@ -22,6 +22,7 @@ export const productsAPI = {
   create: (data) => api.post('/products', data),
   update: (id, data) => api.put(`/products/${id}`, data),
   delete: (id) => api.delete(`/products/${id}`),
+  adjustStock: (id, data) => api.post(`/products/${id}/adjust-stock`, data),
 };
 
 // Promotions API
@@ -29,6 +30,8 @@ export const promotionsAPI = {
   getAll: () => api.get('/promotions'),
   getActive: () => api.get('/promotions/active'),
   create: (data) => api.post('/promotions', data),
+  update: (id, data) => api.put(`/promotions/${id}`, data),
+  delete: (id) => api.delete(`/promotions/${id}`),
 };
 
 // Customers API
@@ -51,6 +54,13 @@ export const transactionsAPI = {
   getAll: (params) => api.get('/transactions', { params }),
   create: (data) => api.post('/transactions', data),
   getHourly: () => api.get('/transactions/hourly'),
+  getDetail: (id) => api.get(`/transactions/${id}`),
+};
+
+// Refunds API
+export const refundsAPI = {
+  getAll: () => api.get('/refunds'),
+  create: (data) => api.post('/refunds', data),
 };
 
 // Accounting API
@@ -70,6 +80,8 @@ export const basGstAPI = {
 export const locationsAPI = {
   getAll: () => api.get('/locations'),
   create: (data) => api.post('/locations', data),
+  update: (id, data) => api.put(`/locations/${id}`, data),
+  delete: (id) => api.delete(`/locations/${id}`),
 };
 
 // Users API
@@ -259,7 +271,7 @@ export const advancedAPI = {
   getTrainingMode: () => api.get('/settings/training-mode'),
   setTrainingMode: (enabled) => api.post('/settings/training-mode', { enabled }),
   // End-of-Day
-  getEndOfDayReport: () => api.get('/reports/end-of-day'),
+  getEndOfDayReport: (params) => api.get('/reports/end-of-day', { params }),
   // Email Marketing
   getCampaigns: () => api.get('/marketing/campaigns'),
   createCampaign: (data) => api.post('/marketing/campaigns', data),
