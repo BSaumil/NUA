@@ -33,6 +33,7 @@ import Integrations from './pages/Integrations';
 import StaffManagement from './pages/StaffManagement';
 import AIPantry from './pages/AIPantry';
 import MemberPortal from './pages/MemberPortal';
+import StaffRoster from './pages/StaffRoster';
 import EmailMarketing from './pages/EmailMarketing';
 import EndOfDay from './pages/EndOfDay';
 import TipManagement from './pages/TipManagement';
@@ -73,6 +74,7 @@ function ProtectedRoutes() {
         <Route path="/bas-gst" element={<BASGST />} />
         <Route path="/integrations" element={<Integrations />} />
         <Route path="/staff" element={<StaffManagement />} />
+        <Route path="/staff-roster" element={<StaffRoster />} />
         <Route path="/ai-pantry" element={<AIPantry />} />
         <Route path="/email-marketing" element={<EmailMarketing />} />
         <Route path="/end-of-day" element={<EndOfDay />} />

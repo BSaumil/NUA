@@ -128,7 +128,7 @@ async def get_staff_commissions(period: Optional[str] = None):
     commissions = await db.staff_commissions.find(query).to_list(1000)
     return commissions
 
-@router.post("/staff/clock-in")
+@router.post("/staff/legacy-clock-in")
 async def staff_clock_in(user_id: str, location: str):
     user = await db.users.find_one({"id": user_id})
     if not user:
@@ -137,7 +137,7 @@ async def staff_clock_in(user_id: str, location: str):
     await db.staff_shifts.insert_one(shift.dict())
     return shift
 
-@router.post("/staff/clock-out/{shift_id}")
+@router.post("/staff/legacy-clock-out/{shift_id}")
 async def staff_clock_out(shift_id: str, break_minutes: int = 0):
     shift = await db.staff_shifts.find_one({"id": shift_id})
     if not shift:

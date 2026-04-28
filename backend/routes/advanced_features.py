@@ -3,6 +3,9 @@ from database import db
 from datetime import datetime, timezone
 import uuid
 
+import os
+
+
 router = APIRouter()
 
 # ============ BUSINESS SETTINGS ============
@@ -328,3 +331,54 @@ async def delete_campaign(campaign_id: str, request: Request):
         raise HTTPException(status_code=403, detail="Owner/Manager access only")
     await db.campaigns.delete_one({"id": campaign_id})
     return {"message": "Campaign deleted"}
+
+
+# ============ AI EOD INSIGHTS ============
+@router.post("/reports/ai-insights")
+async def generate_ai_insights(data: dict, request: Request):
+    from routes.auth import get_current_user
+    user = await get_current_user(request)
+    if user["role"] not in ("owner", "manager"):
+        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+
+    report_data = data.get("reportData", {})
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        api_key = os.environ.get("EMERGENT_LLM_KEY", "")
+        chat = LlmChat(api_key=api_key, session_id=f"eod-{uuid.uuid4()}", system_message="You are an expert restaurant business analyst. Provide concise, actionable insights from POS data. Use bullet points. Be specific with numbers. Keep response under 300 words.")
+        chat.with_model("openai", "gpt-5.2")
+
+        summary = report_data.get("summary", {})
+        prompt = f"""Analyze this restaurant's End-of-Day report and provide actionable insights:
+
+Sales: ${summary.get('totalSales', 0):.2f} | Net: ${summary.get('netSales', 0):.2f} | Transactions: {summary.get('totalTransactions', 0)}
+Avg Ticket: ${summary.get('avgTicket', 0):.2f} | GST: ${summary.get('totalGST', 0):.2f}
+Refunds: ${summary.get('totalRefunds', 0):.2f} | Tips: ${summary.get('totalTips', 0):.2f}
+
+Payment Methods: {report_data.get('byPaymentMethod', [])}
+Top Items: {report_data.get('topItems', [])[:5]}
+Categories: {report_data.get('byCategory', [])}
+Customer Analytics: {report_data.get('customerAnalytics', {})}
+Hourly Sales: {report_data.get('byHour', [])}
+
+Provide:
+1. Key Performance Highlights (2-3 bullets)
+2. Areas of Concern (if any)
+3. Actionable Recommendations (2-3 specific suggestions)
+4. Staffing Insight based on hourly data
+5. Customer Retention Insight"""
+
+        msg = UserMessage(text=prompt)
+        response = await chat.send_message(msg)
+
+        insight = {
+            "id": f"AI-{str(uuid.uuid4())[:8].upper()}",
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            "insights": response,
+            "period": data.get("period", "today"),
+        }
+        await db.ai_insights.insert_one(insight)
+        insight.pop("_id", None)
+        return insight
+    except Exception as e:
+        return {"insights": f"AI insights unavailable: {str(e)}", "generatedAt": datetime.now(timezone.utc).isoformat()}

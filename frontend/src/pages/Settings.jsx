@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Palette, MapPin, Users as UsersIcon, Building, GraduationCap, Plus, Edit, Trash2, Save } from 'lucide-react';
+import { Palette, MapPin, Users as UsersIcon, Building, GraduationCap, Plus, Edit, Trash2, Save, Receipt } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { Badge } from '../components/ui/badge';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
-import { locationsAPI, advancedAPI } from '../services/api';
+import { locationsAPI, advancedAPI, staffMgmtAPI } from '../services/api';
 import { toast } from 'sonner';
 import axios from 'axios';
 
@@ -32,12 +32,13 @@ const Settings = () => {
   const [staffForm, setStaffForm] = useState({ name: '', email: '', password: '', role: 'cashier', payRate: '' });
   // Business
   const [bizForm, setBizForm] = useState({ name: 'NUVA POS', abn: '', address: '', phone: '', email: '', taxId: '' });
+  // Receipt
+  const [receiptSettings, setReceiptSettings] = useState({ logoUrl: '', showPaymentQR: true, showSocialQR: true, showPromoQR: true, socialMediaUrl: '', promoText: '', businessName: 'NUVA POS', businessAddress: '', businessPhone: '' });
 
   useEffect(() => {
     advancedAPI.getTrainingMode().then(r => setTrainingMode(r.data?.enabled || false)).catch(() => {});
-    fetchLocations();
-    fetchStaff();
-    fetchBusiness();
+    fetchLocations(); fetchStaff(); fetchBusiness();
+    staffMgmtAPI.getReceiptSettings().then(r => { if (r.data && Object.keys(r.data).length) setReceiptSettings(r.data); }).catch(() => {});
   }, []);
 
   const fetchLocations = async () => {
@@ -99,6 +100,7 @@ const Settings = () => {
 
   const tabs = [
     { id: 'theme', label: 'Theme', icon: Palette },
+    { id: 'receipt', label: 'Receipt', icon: Receipt },
     { id: 'training', label: 'Training Mode', icon: GraduationCap },
     { id: 'locations', label: 'Locations', icon: MapPin },
     { id: 'users', label: 'Staff', icon: UsersIcon },
@@ -139,6 +141,29 @@ const Settings = () => {
           </div>
         </CardContent></Card>
       )}
+
+      {/* Receipt Settings */}
+      {activeTab === 'receipt' && (
+        <Card><CardHeader><CardTitle>Receipt Customization</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-gray-500">Configure what appears on printed receipts.</p>
+          <div><label className="text-sm font-medium mb-1 block">Business Logo URL</label><Input placeholder="https://..." value={receiptSettings.logoUrl} onChange={e => setReceiptSettings({ ...receiptSettings, logoUrl: e.target.value })} data-testid="receipt-logo-url" /></div>
+          <div><label className="text-sm font-medium mb-1 block">Business Name on Receipt</label><Input value={receiptSettings.businessName} onChange={e => setReceiptSettings({ ...receiptSettings, businessName: e.target.value })} /></div>
+          <div><label className="text-sm font-medium mb-1 block">Business Address</label><Input value={receiptSettings.businessAddress} onChange={e => setReceiptSettings({ ...receiptSettings, businessAddress: e.target.value })} /></div>
+          <div><label className="text-sm font-medium mb-1 block">Business Phone</label><Input value={receiptSettings.businessPhone} onChange={e => setReceiptSettings({ ...receiptSettings, businessPhone: e.target.value })} /></div>
+          <hr />
+          <h4 className="font-semibold text-sm">QR Codes on Receipt</h4>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={receiptSettings.showPaymentQR} onChange={e => setReceiptSettings({ ...receiptSettings, showPaymentQR: e.target.checked })} data-testid="receipt-payment-qr" /> Show Payment QR Code</label>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={receiptSettings.showSocialQR} onChange={e => setReceiptSettings({ ...receiptSettings, showSocialQR: e.target.checked })} data-testid="receipt-social-qr" /> Show Social Media QR Code</label>
+          {receiptSettings.showSocialQR && <Input placeholder="Social media URL (for QR)" value={receiptSettings.socialMediaUrl} onChange={e => setReceiptSettings({ ...receiptSettings, socialMediaUrl: e.target.value })} data-testid="receipt-social-url" />}
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={receiptSettings.showPromoQR} onChange={e => setReceiptSettings({ ...receiptSettings, showPromoQR: e.target.checked })} data-testid="receipt-promo-qr" /> Show Promotion QR Code</label>
+          {receiptSettings.showPromoQR && <Input placeholder="Promotion text or URL" value={receiptSettings.promoText} onChange={e => setReceiptSettings({ ...receiptSettings, promoText: e.target.value })} data-testid="receipt-promo-text" />}
+          <Button style={{ backgroundColor: theme.primary }} onClick={async () => {
+            try { await staffMgmtAPI.saveReceiptSettings(receiptSettings); toast.success('Receipt settings saved'); } catch { toast.error('Failed'); }
+          }} data-testid="save-receipt-btn"><Save size={16} className="mr-1" /> Save Receipt Settings</Button>
+        </CardContent></Card>
+      )}
+
 
       {/* Theme */}
       {activeTab === 'theme' && (
@@ -198,6 +223,7 @@ const Settings = () => {
               <th className="text-left p-4 text-sm font-medium text-gray-500">Name</th>
               <th className="text-left p-4 text-sm font-medium text-gray-500">Email</th>
               <th className="text-left p-4 text-sm font-medium text-gray-500">Role</th>
+              {user?.role === 'owner' && <th className="text-center p-4 text-sm font-medium text-gray-500">PIN</th>}
               <th className="text-center p-4 text-sm font-medium text-gray-500">Status</th>
               {user?.role === 'owner' && <th className="text-right p-4 text-sm font-medium text-gray-500">Pay Rate</th>}
               {user?.role === 'owner' && <th className="text-center p-4 text-sm font-medium text-gray-500">Actions</th>}
@@ -208,6 +234,16 @@ const Settings = () => {
                   <td className="p-4 font-medium">{s.name}</td>
                   <td className="p-4 text-sm text-gray-600">{s.email}</td>
                   <td className="p-4"><Badge variant="outline" className="capitalize">{s.role}</Badge></td>
+                  {user?.role === 'owner' && <td className="p-4 text-center">
+                    {s.pin ? <span className="font-mono text-sm bg-gray-100 px-2 py-0.5 rounded">{s.pin}</span> : (
+                      <Button variant="ghost" size="sm" className="text-xs" onClick={async () => {
+                        const pin = prompt('Set 2-4 digit PIN for ' + s.name + ':');
+                        if (pin && /^\d{2,4}$/.test(pin)) {
+                          try { await staffMgmtAPI.setPin(s.id, pin); toast.success('PIN set'); fetchStaff(); } catch (e) { toast.error(e.response?.data?.detail || 'Failed'); }
+                        } else if (pin) toast.error('PIN must be 2-4 digits');
+                      }} data-testid={`set-pin-${s.id}`}>Set PIN</Button>
+                    )}
+                  </td>}
                   <td className="p-4 text-center">
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${s.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                       {(s.status || 'active').toUpperCase()}

@@ -260,23 +260,48 @@ export const integrationsAPI = {
   sync: (slug) => api.post(`/integrations/${slug}/sync`),
 };
 
-// Advanced Features — Tips, Training Mode, EOD Reports, Email Marketing
+// Advanced Features — Tips, Training Mode, EOD Reports, Email Marketing, AI Insights
 export const advancedAPI = {
-  // Tips
   addTip: (data) => api.post('/tips/add', data),
   getTips: () => api.get('/tips'),
   getTipsSummary: () => api.get('/tips/summary'),
   distributeTipPool: () => api.post('/tips/pool-distribute'),
-  // Training Mode
   getTrainingMode: () => api.get('/settings/training-mode'),
   setTrainingMode: (enabled) => api.post('/settings/training-mode', { enabled }),
-  // End-of-Day
   getEndOfDayReport: (params) => api.get('/reports/end-of-day', { params }),
-  // Email Marketing
+  getAIInsights: (data) => api.post('/reports/ai-insights', data),
   getCampaigns: () => api.get('/marketing/campaigns'),
   createCampaign: (data) => api.post('/marketing/campaigns', data),
   sendCampaign: (id) => api.post(`/marketing/campaigns/${id}/send`),
   deleteCampaign: (id) => api.delete(`/marketing/campaigns/${id}`),
+};
+
+// Staff Management — PIN, Timecards, Roster, Payrun
+export const staffMgmtAPI = {
+  pinLogin: (pin) => api.post('/auth/pin-login', { pin }),
+  setPin: (staffId, pin) => api.post(`/auth/staff/${staffId}/set-pin`, { pin }),
+  clockIn: () => api.post('/staff/clock-in'),
+  clockOut: (data) => api.post('/staff/clock-out', data || {}),
+  myStatus: () => api.get('/staff/my-status'),
+  getTimecards: (params) => api.get('/staff/timecards', { params }),
+  getRoster: (params) => api.get('/staff/roster', { params }),
+  createRosterShift: (data) => api.post('/staff/roster', data),
+  deleteRosterShift: (id) => api.delete(`/staff/roster/${id}`),
+  calculatePayrun: (params) => api.get('/payrun/calculate', { params }),
+  processPayrun: (data) => api.post('/payrun/process', data),
+  getPayrunHistory: () => api.get('/payrun/history'),
+  getStaffReports: (params) => api.get('/staff/reports', { params }),
+  getReceiptSettings: () => api.get('/receipt/settings'),
+  saveReceiptSettings: (data) => api.post('/receipt/settings', data),
+};
+
+// Menu Features — AI Import, Price Adjust, Ghost Discount, What-If Advanced
+export const menuFeaturesAPI = {
+  aiImportMenu: (data) => api.post('/menu/ai-import', data),
+  bulkPriceAdjust: (data) => api.post('/menu/price-adjust', data),
+  ghostDiscount: (data) => api.post('/pos/ghost-discount', data),
+  getGhostDiscounts: () => api.get('/pos/ghost-discounts'),
+  whatIfAdvanced: (data) => api.post('/analytics/what-if-advanced', data),
 };
 
 export default api;

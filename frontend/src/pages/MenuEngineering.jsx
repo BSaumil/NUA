@@ -1,13 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import {
   Star, TrendingUp, TrendingDown, HelpCircle, XCircle, DollarSign,
-  Percent, BarChart3, ArrowUpRight, ArrowDownRight
+  Percent, BarChart3, ArrowUpRight, ArrowDownRight, Upload, Loader2, Sliders
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { useTheme } from '../contexts/ThemeContext';
-import { analyticsAPI } from '../services/api';
+import { analyticsAPI, menuFeaturesAPI } from '../services/api';
+import { toast } from 'sonner';
 
 const CLASS_CONFIG = {
   star: { label: 'Star', icon: Star, color: '#F59E0B', bg: '#FFFBEB', desc: 'High popularity, high profit' },
@@ -20,10 +24,49 @@ export default function MenuEngineering() {
   const { theme } = useTheme();
   const [data, setData] = useState(null);
   const [tab, setTab] = useState('matrix');
+  const [showImport, setShowImport] = useState(false);
+  const [showPriceAdjust, setShowPriceAdjust] = useState(false);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const [priceForm, setPriceForm] = useState({ category: '', type: 'percentage', amount: '', direction: 'increase' });
 
   useEffect(() => {
     analyticsAPI.getMenuEngineering().then(r => setData(r.data)).catch(console.error);
   }, []);
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setImportLoading(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async (ev) => {
+        const base64 = ev.target.result.split(',')[1] || ev.target.result;
+        const fileType = file.type.includes('pdf') ? 'pdf' : 'image';
+        const res = await menuFeaturesAPI.aiImportMenu({ fileData: base64, fileType });
+        setImportResult(res.data);
+        if (res.data.count > 0) {
+          toast.success(`Imported ${res.data.count} menu items!`);
+          analyticsAPI.getMenuEngineering().then(r => setData(r.data)).catch(() => {});
+        }
+        setImportLoading(false);
+      };
+      reader.readAsDataURL(file);
+    } catch { setImportLoading(false); toast.error('Failed to import'); }
+  };
+
+  const handlePriceAdjust = async () => {
+    if (!priceForm.amount) { toast.error('Enter an amount'); return; }
+    try {
+      const res = await menuFeaturesAPI.bulkPriceAdjust({
+        category: priceForm.category || null,
+        type: priceForm.type, amount: parseFloat(priceForm.amount), direction: priceForm.direction,
+      });
+      toast.success(res.data.message);
+      setShowPriceAdjust(false);
+      analyticsAPI.getMenuEngineering().then(r => setData(r.data)).catch(() => {});
+    } catch { toast.error('Failed'); }
+  };
 
   if (!data) return <div className="flex items-center justify-center h-64 text-gray-400">Analyzing menu performance...</div>;
 
@@ -33,9 +76,19 @@ export default function MenuEngineering() {
   return (
     <div className="space-y-6" data-testid="menu-engineering-page">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold" style={{ color: theme.text }}>Menu Engineering</h1>
-        <p className="text-sm text-gray-500 mt-1">Profit optimization & performance analysis</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold" style={{ color: theme.text }}>Menu Engineering</h1>
+          <p className="text-sm text-gray-500 mt-1">Profit optimization, AI menu import & price management</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setShowPriceAdjust(true)} data-testid="price-adjust-btn">
+            <Sliders size={16} className="mr-1" /> Adjust Prices
+          </Button>
+          <Button style={{ backgroundColor: theme.primary }} onClick={() => setShowImport(true)} data-testid="ai-import-btn">
+            <Upload size={16} className="mr-1" /> AI Menu Import
+          </Button>
+        </div>
       </div>
 
       {/* Matrix Summary */}
@@ -162,6 +215,52 @@ export default function MenuEngineering() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* AI Import Dialog */}
+      <Dialog open={showImport} onOpenChange={setShowImport}>
+        <DialogContent className="max-w-md" data-testid="ai-import-dialog">
+          <DialogHeader><DialogTitle>AI Menu Import</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-gray-500">Upload a PDF or JPEG of your menu. AI will extract items, categories, and prices automatically.</p>
+            <div className="border-2 border-dashed rounded-lg p-6 text-center">
+              <Upload size={32} className="mx-auto mb-2 text-gray-400" />
+              <p className="text-sm text-gray-600 mb-2">Drop your menu file here or click to browse</p>
+              <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={handleFileUpload} className="w-full text-sm" data-testid="menu-file-input" />
+            </div>
+            {importLoading && <div className="flex items-center justify-center gap-2 text-sm text-gray-500"><Loader2 size={16} className="animate-spin" /> AI is analyzing your menu...</div>}
+            {importResult && (
+              <div className={`p-3 rounded-lg text-sm ${importResult.count > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                {importResult.message}
+                {importResult.count > 0 && <p className="mt-1 text-xs">Items are now available in Products & POS.</p>}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Price Adjustment Dialog */}
+      <Dialog open={showPriceAdjust} onOpenChange={setShowPriceAdjust}>
+        <DialogContent className="max-w-sm" data-testid="price-adjust-dialog">
+          <DialogHeader><DialogTitle>Bulk Price Adjustment</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-gray-500">Adjust prices across categories — ideal for inflation updates.</p>
+            <select className="w-full p-2 border rounded-md text-sm" value={priceForm.category} onChange={e => setPriceForm({ ...priceForm, category: e.target.value })} data-testid="adjust-category">
+              <option value="">All Categories</option>
+              <option value="Beverages">Beverages</option><option value="Food">Food</option><option value="Bakery">Bakery</option><option value="Alcohol">Alcohol</option><option value="Desserts">Desserts</option><option value="Mains">Mains</option>
+            </select>
+            <div className="grid grid-cols-2 gap-2">
+              <select className="p-2 border rounded-md text-sm" value={priceForm.type} onChange={e => setPriceForm({ ...priceForm, type: e.target.value })} data-testid="adjust-type">
+                <option value="percentage">Percentage (%)</option><option value="fixed">Fixed ($)</option>
+              </select>
+              <select className="p-2 border rounded-md text-sm" value={priceForm.direction} onChange={e => setPriceForm({ ...priceForm, direction: e.target.value })} data-testid="adjust-direction">
+                <option value="increase">Increase</option><option value="decrease">Decrease</option>
+              </select>
+            </div>
+            <Input type="number" step="0.1" placeholder={priceForm.type === 'percentage' ? 'e.g. 5 for 5%' : 'e.g. 1.50'} value={priceForm.amount} onChange={e => setPriceForm({ ...priceForm, amount: e.target.value })} data-testid="adjust-amount" />
+            <Button className="w-full" style={{ backgroundColor: theme.primary }} onClick={handlePriceAdjust} data-testid="apply-adjust-btn">Apply Adjustment</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

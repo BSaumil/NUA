@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   FileText, DollarSign, CreditCard, Clock, TrendingUp, Receipt, BarChart3,
-  Users, UserPlus, UserCheck, ShoppingBag, PieChart, CalendarDays
+  Users, UserPlus, UserCheck, ShoppingBag, PieChart, CalendarDays, Sparkles, Loader2
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -29,6 +29,8 @@ export default function EndOfDay() {
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
   const [activeSection, setActiveSection] = useState('overview');
+  const [aiInsights, setAiInsights] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
 
   useEffect(() => { fetchReport(); }, [period]);
 
@@ -61,7 +63,17 @@ export default function EndOfDay() {
     { id: 'categories', label: 'Categories', icon: PieChart },
     { id: 'customers', label: 'Customers', icon: Users },
     { id: 'hourly', label: 'Hourly', icon: Clock },
+    { id: 'ai', label: 'AI Insights', icon: Sparkles },
   ];
+
+  const generateAIInsights = async () => {
+    setAiLoading(true);
+    try {
+      const res = await advancedAPI.getAIInsights({ reportData: report, period });
+      setAiInsights(res.data);
+    } catch { toast.error('Failed to generate insights'); }
+    setAiLoading(false);
+  };
 
   return (
     <div data-testid="end-of-day-page">
@@ -302,6 +314,34 @@ export default function EndOfDay() {
             {(report.byHour || []).length === 0 && <p className="text-gray-400 text-center py-8">No hourly data</p>}
           </div>
         </CardContent></Card>
+      )}
+      {/* === AI INSIGHTS === */}
+      {activeSection === 'ai' && (
+        <div className="space-y-4">
+          {!aiInsights ? (
+            <Card><CardContent className="p-8 text-center">
+              <Sparkles size={40} className="mx-auto mb-4 text-amber-500" />
+              <h3 className="font-semibold text-lg mb-2">AI-Powered Business Insights</h3>
+              <p className="text-gray-500 text-sm mb-4">Get GPT-powered analysis of your sales data with actionable recommendations.</p>
+              <Button onClick={generateAIInsights} disabled={aiLoading} style={{ backgroundColor: theme.primary }} data-testid="generate-ai-btn">
+                {aiLoading ? <><Loader2 size={16} className="mr-2 animate-spin" /> Analyzing...</> : <><Sparkles size={16} className="mr-2" /> Generate Insights</>}
+              </Button>
+            </CardContent></Card>
+          ) : (
+            <Card><CardContent className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold flex items-center gap-2"><Sparkles size={18} className="text-amber-500" /> AI Analysis</h3>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-400">{new Date(aiInsights.generatedAt).toLocaleString()}</span>
+                  <Button size="sm" variant="outline" onClick={generateAIInsights} disabled={aiLoading}>Regenerate</Button>
+                </div>
+              </div>
+              <div className="prose prose-sm max-w-none text-gray-700 whitespace-pre-wrap" data-testid="ai-insights-content">
+                {aiInsights.insights}
+              </div>
+            </CardContent></Card>
+          )}
+        </div>
       )}
     </div>
   );

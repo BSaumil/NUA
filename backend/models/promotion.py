@@ -7,13 +7,19 @@ class Promotion(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
     type: str  # bundle or category
-    products: Optional[List[str]] = None  # for bundle type
-    category: Optional[str] = None  # for category type
+    products: Optional[List[str]] = None
+    category: Optional[str] = None
     originalPrice: Optional[float] = None
     discountedPrice: Optional[float] = None
     discount: float
     active: bool = True
-    schedule: str
+    schedule: str = ""
+    # Enhanced scheduling
+    startDate: Optional[str] = None
+    endDate: Optional[str] = None
+    activeDays: List[str] = []  # ["Monday","Tuesday",...]
+    startTime: Optional[str] = None  # "11:00"
+    endTime: Optional[str] = None    # "14:00"
     createdAt: datetime = Field(default_factory=datetime.utcnow)
 
 class PromotionCreate(BaseModel):
@@ -25,4 +31,9 @@ class PromotionCreate(BaseModel):
     discountedPrice: Optional[float] = None
     discount: float
     active: bool = True
-    schedule: str
+    schedule: str = ""
+    startDate: Optional[str] = None
+    endDate: Optional[str] = None
+    activeDays: List[str] = []
+    startTime: Optional[str] = None
+    endTime: Optional[str] = None

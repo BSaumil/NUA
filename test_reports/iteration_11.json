@@ -1,0 +1,117 @@
+{
+  "iteration": 11,
+  "date": "2026-04-28",
+  "focus": "Menu Engineering (AI Import, Price Adjust), What-If Simulator (projectedQty), Ghost Discount (Owner-only secret feature), Cash Payment Flow",
+  "summary": "Tested all new iteration 11 features. Fixed 1 frontend bug (What-If Simulator response mapping). All 28 backend tests pass. All frontend features working correctly with proper RBAC enforcement.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_results": {
+    "backend": {
+      "TestAuth": {
+        "test_owner_login": "PASS - Returns user with role=owner and JWT token",
+        "test_manager_login": "PASS - Returns user with role=manager",
+        "test_cashier_login": "PASS - Returns user with role=cashier"
+      },
+      "TestAIMenuImport": {
+        "test_ai_import_owner_access": "PASS - Owner can access AI import endpoint",
+        "test_ai_import_manager_access": "PASS - Manager can access AI import endpoint",
+        "test_ai_import_cashier_denied": "PASS - Cashier denied (403)"
+      },
+      "TestBulkPriceAdjust": {
+        "test_price_adjust_percentage_increase": "PASS - 10% increase applied correctly",
+        "test_price_adjust_fixed_decrease": "PASS - Fixed $0.50 decrease applied",
+        "test_price_adjust_all_categories": "PASS - All-category adjustment works",
+        "test_price_adjust_manager_access": "PASS - Manager can adjust prices",
+        "test_price_adjust_cashier_denied": "PASS - Cashier denied (403)"
+      },
+      "TestGhostDiscount": {
+        "test_ghost_discount_owner_apply": "PASS - Owner can apply ghost discount",
+        "test_ghost_discount_get_list_owner": "PASS - Owner can view ghost discounts list",
+        "test_ghost_discount_manager_denied": "PASS - Manager denied (403)",
+        "test_ghost_discount_cashier_denied": "PASS - Cashier denied (403)",
+        "test_ghost_discounts_list_manager_denied": "PASS - Manager denied list access (403)",
+        "test_ghost_discounts_list_cashier_denied": "PASS - Cashier denied list access (403)",
+        "test_ghost_discount_missing_transaction": "PASS - Returns 400 for missing txn ID",
+        "test_ghost_discount_invalid_transaction": "PASS - Returns 404 for invalid txn ID"
+      },
+      "TestWhatIfAdvanced": {
+        "test_whatif_with_projected_qty": "PASS - Simulation with projectedQty=100 returns correct calculations",
+        "test_whatif_without_projected_qty": "PASS - Falls back to historical data when projectedQty=0",
+        "test_whatif_multiple_products": "PASS - Multi-product simulation works",
+        "test_whatif_manager_access": "PASS - Manager can run simulations",
+        "test_whatif_cashier_denied": "PASS - Cashier denied (403)"
+      },
+      "TestMenuEngineeringPage": {
+        "test_menu_engineering_data": "PASS - Returns items, categories, summary with classifications"
+      },
+      "TestRegressionEndpoints": {
+        "test_products_endpoint": "PASS - Products endpoint working",
+        "test_transactions_endpoint": "PASS - Transactions endpoint working",
+        "test_customers_endpoint": "PASS - Customers endpoint working"
+      }
+    },
+    "frontend": {
+      "Login": "PASS - Owner/Manager/Cashier login working",
+      "MenuEngineering_page": "PASS - Page loads with Performance Matrix, By Category tabs",
+      "MenuEngineering_AI_Import_button": "PASS - Opens AI Import dialog with file upload",
+      "MenuEngineering_Price_Adjust_button": "PASS - Opens Price Adjust dialog with category/type/direction/amount",
+      "WhatIf_page": "PASS - Page loads with product selector and Qty/Month column",
+      "WhatIf_simulation": "PASS - Runs simulation and displays results (Current Profit, Projected Profit, Net Impact)",
+      "POS_Terminal": "PASS - Page loads with products grid and cart",
+      "POS_Cash_Payment": "PASS - Cash payment flow with denomination buttons (Exact, Round Up, $5-$100)",
+      "POS_Cash_Change": "PASS - Change calculation displayed correctly",
+      "POS_Ghost_Discount_Owner": "PASS - Double-click title opens Ghost Void dialog (owner only)",
+      "POS_Ghost_Discount_Cashier": "PASS - Ghost Void dialog NOT accessible to cashier",
+      "Cashier_RBAC": "PASS - Menu Engineering and What-If hidden from cashier sidebar"
+    }
+  },
+  "bugs_fixed_by_testing_agent": [
+    {
+      "file": "/app/frontend/src/pages/WhatIfSimulator.jsx",
+      "issue": "Frontend expected results.totalCurrentProfit, results.simulations but backend returns results.summary.currentProfit, results.items",
+      "fix": "Updated frontend to use correct response structure: results.summary.currentProfit, results.summary.projectedProfit, results.summary.profitChange, results.items"
+    }
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_iteration11_menu_features.py",
+    "/app/test_reports/pytest/pytest_iteration11.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "All new features properly implemented with correct RBAC",
+    "Ghost Discount is owner-only and stored in separate collection (not visible in regular reports)",
+    "AI Menu Import uses GPT-5.2 via EMERGENT_LLM_KEY (MOCKED for testing)",
+    "What-If Advanced supports projectedQty for manual quantity projections",
+    "Cash payment flow has proper denomination buttons and change calculation"
+  ],
+  "updated_files": [
+    "/app/frontend/src/pages/WhatIfSimulator.jsx",
+    "/app/backend/tests/test_iteration11_menu_features.py"
+  ],
+  "success_rate": {
+    "backend": "100% (28/28 tests passed)",
+    "frontend": "100% (all features working)"
+  },
+  "test_credentials": {
+    "owner": "owner@nuva.com / NuvaOwner2026!",
+    "manager": "manager@nuva.com / Staff2026!",
+    "cashier": "cashier@nuva.com / Staff2026!",
+    "kitchen": "kitchen@nuva.com / Staff2026!"
+  },
+  "seed_data_creation": "Test products and transactions created during testing (prefixed with TEST_) - cleaned up after tests",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 11 tested new features: Menu Engineering (AI Import, Bulk Price Adjust), What-If Simulator with projectedQty, Ghost Discount (owner-only secret feature accessed by double-clicking POS Terminal title), Cash Payment flow with denomination buttons. Fixed What-If frontend response mapping. All features working. Auth token stored in localStorage as 'nuva_token'. API base URL: https://pos-checkout-16.preview.emergentagent.com",
+  "mocked_apis": {
+    "ai_menu_import": "AI Menu Import uses GPT-5.2 via EMERGENT_LLM_KEY - actual AI extraction works",
+    "email_marketing": "Email sending is MOCKED - campaigns stored in DB but no actual emails sent",
+    "stripe": "Uses test key sk_test_emergent"
+  }
+}

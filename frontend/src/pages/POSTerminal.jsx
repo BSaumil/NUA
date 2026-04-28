@@ -13,11 +13,13 @@ import {
 } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { usePOS } from '../contexts/POSContext';
-import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI } from '../services/api';
+import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI } from '../services/api';
 import { useToast } from '../hooks/use-toast';
+import { useAuth } from '../contexts/AuthContext';
 
 const POSTerminal = () => {
   const { theme } = useTheme();
+  const { user } = useAuth();
   const { cart, addToCart, removeFromCart, updateQuantity, clearCart, calculateTotal, selectedCustomer, setSelectedCustomer, currentUser, currentLocation } = usePOS();
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
@@ -40,6 +42,15 @@ const POSTerminal = () => {
   const [splitCount, setSplitCount] = useState(2);
   const [splitParts, setSplitParts] = useState([]);
   const [activeSplitIndex, setActiveSplitIndex] = useState(null);
+
+  // Cash payment state
+  const [cashTendered, setCashTendered] = useState(0);
+  const [showCashChange, setShowCashChange] = useState(false);
+
+  // Ghost discount (owner only - secret)
+  const [showGhost, setShowGhost] = useState(false);
+  const [ghostAmount, setGhostAmount] = useState('');
+  const [lastTxnId, setLastTxnId] = useState(null);
 
   const categories = ['All', 'Beverages', 'Food', 'Bakery'];
 
@@ -80,10 +91,11 @@ const POSTerminal = () => {
     }
     setLoading(true);
     try {
-      await transactionsAPI.create({
+      const res = await transactionsAPI.create({
         items: cart.map(item => ({ productId: item.id, productName: item.name, quantity: item.quantity, price: item.price })),
         paymentMethod, customerId: selectedCustomer?.id || null, location: currentLocation, cashier: currentUser.name,
       });
+      setLastTxnId(res.data?.id || null);
       toast({ title: "Transaction Complete!", description: `Payment of $${totals.total} via ${paymentMethod}` });
       resetPayment();
       clearCart();
@@ -205,6 +217,7 @@ const POSTerminal = () => {
   const resetPayment = () => {
     setShowPayment(false); setPaymentView('methods'); setQrData(null);
     setSplitParts([]); setSplitCount(2); setSplitMode('equal');
+    setCashTendered(0); setShowCashChange(false);
   };
 
   const copyToClipboard = (text) => {
@@ -224,7 +237,9 @@ const POSTerminal = () => {
       {/* Products Grid */}
       <div className="flex-1 flex flex-col">
         <div className="mb-6">
-          <h1 className="text-3xl font-bold mb-4" style={{ color: theme.text }}>POS Terminal</h1>
+          <h1 className="text-3xl font-bold mb-4" style={{ color: theme.text }}
+            onDoubleClick={() => { if (user?.role === 'owner') setShowGhost(true); }}
+            data-testid="pos-title">POS Terminal</h1>
           <div className="flex gap-3 mb-4">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
@@ -349,7 +364,7 @@ const POSTerminal = () => {
               <Button className="h-14 flex-col gap-1" variant="outline" onClick={() => handleCheckout('Card')} data-testid="pay-card">
                 <CreditCard size={20} /><span className="text-xs">Card</span>
               </Button>
-              <Button className="h-14 flex-col gap-1" variant="outline" onClick={() => handleCheckout('Cash')} data-testid="pay-cash">
+              <Button className="h-14 flex-col gap-1" variant="outline" onClick={() => { setCashTendered(0); setPaymentView('cash'); }} data-testid="pay-cash">
                 <Banknote size={20} /><span className="text-xs">Cash</span>
               </Button>
               <Button className="h-14 flex-col gap-1" variant="outline" onClick={() => handleGenerateQR('qr_code')} data-testid="pay-qr">
@@ -368,6 +383,53 @@ const POSTerminal = () => {
               <SplitSquareHorizontal size={20} className="mr-2" /> Split Payment
             </Button>
             <Button className="w-full" variant="ghost" onClick={resetPayment} data-testid="pay-cancel">Cancel</Button>
+          </div>
+        )}
+
+        {/* Cash Payment Panel */}
+        {showPayment && paymentView === 'cash' && (
+          <div className="space-y-3" data-testid="cash-payment-panel">
+            {!showCashChange ? (
+              <>
+                <div className="text-center p-3 bg-gray-100 rounded-lg">
+                  <p className="text-sm text-gray-500">Amount Due</p>
+                  <p className="text-3xl font-bold" style={{ color: theme.primary }}>${totalNum.toFixed(2)}</p>
+                </div>
+                <p className="text-sm font-medium text-gray-600 text-center">Select amount tendered</p>
+                <div className="grid grid-cols-3 gap-2">
+                  <Button variant="outline" className="h-12 font-bold" onClick={() => { setCashTendered(totalNum); setShowCashChange(true); }} data-testid="cash-exact">Exact</Button>
+                  <Button variant="outline" className="h-12 font-bold" onClick={() => { setCashTendered(Math.ceil(totalNum)); setShowCashChange(true); }} data-testid="cash-round">Round Up</Button>
+                  {[5, 10, 20, 50, 100].map(amt => (
+                    <Button key={amt} variant="outline" className="h-12 font-bold" disabled={amt < totalNum}
+                      onClick={() => { setCashTendered(amt); setShowCashChange(true); }} data-testid={`cash-${amt}`}>
+                      ${amt}
+                    </Button>
+                  ))}
+                  <Button variant="outline" className="h-12 font-bold col-span-3" onClick={() => {
+                    const custom = prompt('Enter amount tendered:');
+                    if (custom && parseFloat(custom) >= totalNum) { setCashTendered(parseFloat(custom)); setShowCashChange(true); }
+                    else if (custom) toast({ title: "Error", description: "Amount must be >= total", variant: "destructive" });
+                  }} data-testid="cash-custom">Custom Amount</Button>
+                </div>
+                <Button variant="ghost" className="w-full" onClick={() => setPaymentView('methods')}><ChevronLeft size={16} className="mr-1" /> Back</Button>
+              </>
+            ) : (
+              <div className="space-y-3">
+                <div className="text-center p-4 bg-emerald-50 rounded-lg border border-emerald-200">
+                  <p className="text-sm text-gray-600">Tendered</p>
+                  <p className="text-2xl font-bold text-emerald-700">${cashTendered.toFixed(2)}</p>
+                </div>
+                <div className="text-center p-4 bg-blue-50 rounded-lg border border-blue-200">
+                  <p className="text-sm text-gray-600">Change Due</p>
+                  <p className="text-3xl font-bold text-blue-700" data-testid="cash-change">${(cashTendered - totalNum).toFixed(2)}</p>
+                </div>
+                <Button className="w-full h-14 text-lg font-semibold bg-emerald-600 hover:bg-emerald-700 text-white"
+                  onClick={() => { handleCheckout('Cash'); setShowCashChange(false); }} data-testid="cash-complete">
+                  Complete Sale
+                </Button>
+                <Button variant="ghost" className="w-full" onClick={() => setShowCashChange(false)}>Back</Button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -513,6 +575,30 @@ const POSTerminal = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Ghost Discount (Owner Secret - triple-click POS title to show) */}
+      {user?.role === 'owner' && (
+        <Dialog open={showGhost} onOpenChange={setShowGhost}>
+          <DialogContent className="max-w-xs" data-testid="ghost-discount-dialog">
+            <DialogHeader><DialogTitle className="text-red-600">Ghost Void</DialogTitle></DialogHeader>
+            <div className="space-y-3 py-2">
+              <p className="text-xs text-gray-500">This discount will NOT appear in sales, inventory, or any reports.</p>
+              <Input type="number" step="0.01" placeholder="Discount amount" value={ghostAmount}
+                onChange={e => setGhostAmount(e.target.value)} data-testid="ghost-amount" />
+              <p className="text-xs text-gray-400">Last transaction: {lastTxnId || 'None'}</p>
+              <Button className="w-full bg-red-600 hover:bg-red-700 text-white" disabled={!lastTxnId || !ghostAmount}
+                onClick={async () => {
+                  try {
+                    await menuFeaturesAPI.ghostDiscount({ transactionId: lastTxnId, amount: parseFloat(ghostAmount), reason: 'Owner void' });
+                    toast({ title: "Ghost Applied", description: "Discount applied invisibly" });
+                    setShowGhost(false); setGhostAmount('');
+                  } catch { toast({ title: "Failed", variant: "destructive" }); }
+                }} data-testid="apply-ghost-btn">Apply Ghost Void</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
     </div>
   );
 };

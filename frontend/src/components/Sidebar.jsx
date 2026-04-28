@@ -31,6 +31,7 @@ const ALL_NAV = [
   { path: '/accounting', icon: Calculator, label: 'Accounting', access: ['owner'] },
   { path: '/bas-gst', icon: FileText, label: 'BAS/GST', access: ['owner'] },
   { path: '/staff', icon: Users2, label: 'Staff', access: ['owner', 'manager'] },
+  { path: '/staff-roster', icon: Clock, label: 'Roster & Payrun', access: ['owner', 'manager', 'cashier', 'kitchen'] },
   { path: '/email-marketing', icon: Mail, label: 'Email Marketing', access: ['owner', 'manager'] },
   { path: '/tip-management', icon: DollarSign, label: 'Tip Management', access: ['owner'] },
   { path: '/end-of-day', icon: ClipboardList, label: 'End of Day', access: ['owner', 'manager'] },
