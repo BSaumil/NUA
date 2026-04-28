@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Palette, MapPin, Users as UsersIcon, Building, GraduationCap, Plus, Edit, Trash2, Save, Receipt } from 'lucide-react';
+import { Palette, MapPin, Users as UsersIcon, Building, GraduationCap, Plus, Edit, Trash2, Save, Receipt, Shield, Monitor, Zap } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { Badge } from '../components/ui/badge';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
-import { locationsAPI, advancedAPI, staffMgmtAPI } from '../services/api';
+import { locationsAPI, advancedAPI, staffMgmtAPI, enterpriseAPI } from '../services/api';
 import { toast } from 'sonner';
 import axios from 'axios';
 
@@ -34,11 +34,27 @@ const Settings = () => {
   const [bizForm, setBizForm] = useState({ name: 'NUVA POS', abn: '', address: '', phone: '', email: '', taxId: '' });
   // Receipt
   const [receiptSettings, setReceiptSettings] = useState({ logoUrl: '', showPaymentQR: true, showSocialQR: true, showPromoQR: true, socialMediaUrl: '', promoText: '', businessName: 'NUVA POS', businessAddress: '', businessPhone: '' });
+  // Permissions
+  const [allPerms, setAllPerms] = useState([]);
+  const [selectedStaffPerms, setSelectedStaffPerms] = useState(null);
+  const [editingPerms, setEditingPerms] = useState([]);
+  // Surcharge
+  const [surchargeSettings, setSurchargeSettings] = useState({ enabled: false, weekendSurcharge: 0, publicHolidaySurcharge: 0, publicHolidays: [], weekendDays: ['Saturday', 'Sunday'] });
+  // Hardware
+  const [printers, setPrinters] = useState([]);
+  const [scanners, setScanners] = useState([]);
+  // Auto reports
+  const [reportConfig, setReportConfig] = useState({ enabled: false, frequency: 'daily', time: '23:00', reportTypes: ['detailed'], recipientEmail: '', includeAIInsights: true });
 
   useEffect(() => {
     advancedAPI.getTrainingMode().then(r => setTrainingMode(r.data?.enabled || false)).catch(() => {});
     fetchLocations(); fetchStaff(); fetchBusiness();
     staffMgmtAPI.getReceiptSettings().then(r => { if (r.data && Object.keys(r.data).length) setReceiptSettings(r.data); }).catch(() => {});
+    enterpriseAPI.getAllPermissions().then(r => setAllPerms(r.data)).catch(() => {});
+    enterpriseAPI.getSurchargeSettings().then(r => { if (r.data) setSurchargeSettings(r.data); }).catch(() => {});
+    enterpriseAPI.getPrinters().then(r => setPrinters(r.data)).catch(() => {});
+    enterpriseAPI.getScanners().then(r => setScanners(r.data)).catch(() => {});
+    enterpriseAPI.getReportConfig().then(r => { if (r.data) setReportConfig(r.data); }).catch(() => {});
   }, []);
 
   const fetchLocations = async () => {
@@ -101,10 +117,13 @@ const Settings = () => {
   const tabs = [
     { id: 'theme', label: 'Theme', icon: Palette },
     { id: 'receipt', label: 'Receipt', icon: Receipt },
+    { id: 'permissions', label: 'Permissions', icon: Shield },
+    { id: 'surcharge', label: 'Surcharges', icon: Zap },
+    { id: 'hardware', label: 'Hardware', icon: Monitor },
     { id: 'training', label: 'Training Mode', icon: GraduationCap },
     { id: 'locations', label: 'Locations', icon: MapPin },
     { id: 'users', label: 'Staff', icon: UsersIcon },
-    { id: 'business', label: 'Business Info', icon: Building }
+    { id: 'business', label: 'Business', icon: Building },
   ];
 
   return (
@@ -120,6 +139,133 @@ const Settings = () => {
           </button>);
         })}
       </div>
+
+
+      {/* Permissions */}
+      {activeTab === 'permissions' && user?.role === 'owner' && (
+        <div className="space-y-4">
+          <Card><CardHeader><CardTitle>Staff Permission Control</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-gray-500">Select a staff member to customize their feature access. Custom permissions override default role-based access.</p>
+            <select className="w-full p-2 border rounded-md text-sm" data-testid="perm-staff-select"
+              onChange={async (e) => {
+                const sid = e.target.value;
+                if (!sid) { setSelectedStaffPerms(null); return; }
+                try {
+                  const r = await enterpriseAPI.getStaffPermissions(sid);
+                  setSelectedStaffPerms(r.data);
+                  setEditingPerms(r.data.customPermissions || []);
+                } catch {}
+              }}>
+              <option value="">Select staff member...</option>
+              {staff.filter(s => s.role !== 'owner').map(s => <option key={s.id} value={s.id}>{s.name} ({s.role})</option>)}
+            </select>
+            {selectedStaffPerms && (
+              <div>
+                <p className="text-sm font-medium mb-2">{selectedStaffPerms.name} — {selectedStaffPerms.role}</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {allPerms.map(p => (
+                    <label key={p} className="flex items-center gap-2 text-sm p-2 rounded border hover:bg-gray-50 cursor-pointer">
+                      <input type="checkbox" checked={editingPerms.includes(p)}
+                        onChange={(e) => {
+                          if (e.target.checked) setEditingPerms([...editingPerms, p]);
+                          else setEditingPerms(editingPerms.filter(x => x !== p));
+                        }} />
+                      <span className="capitalize">{p.replace(/-/g, ' ')}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <Button size="sm" variant="outline" onClick={() => setEditingPerms([...allPerms])}>Select All</Button>
+                  <Button size="sm" variant="outline" onClick={() => setEditingPerms([])}>Clear All</Button>
+                  <Button size="sm" style={{ backgroundColor: theme.primary }} data-testid="save-perms-btn"
+                    onClick={async () => {
+                      try {
+                        await enterpriseAPI.setStaffPermissions(selectedStaffPerms.staffId, editingPerms);
+                        toast.success('Permissions saved'); fetchStaff();
+                      } catch { toast.error('Failed'); }
+                    }}>Save Permissions</Button>
+                </div>
+              </div>
+            )}
+          </CardContent></Card>
+        </div>
+      )}
+
+      {/* Surcharges */}
+      {activeTab === 'surcharge' && user?.role === 'owner' && (
+        <Card><CardHeader><CardTitle>Auto Surcharging</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-gray-500">Automatically apply surcharges on weekends and public holidays.</p>
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input type="checkbox" checked={surchargeSettings.enabled} onChange={e => setSurchargeSettings({ ...surchargeSettings, enabled: e.target.checked })} data-testid="surcharge-enabled" />
+            Enable Auto Surcharging
+          </label>
+          <div className="grid grid-cols-2 gap-4">
+            <div><label className="text-sm font-medium mb-1 block">Weekend Surcharge %</label><Input type="number" step="0.5" value={surchargeSettings.weekendSurcharge} onChange={e => setSurchargeSettings({ ...surchargeSettings, weekendSurcharge: parseFloat(e.target.value) || 0 })} data-testid="weekend-surcharge" /></div>
+            <div><label className="text-sm font-medium mb-1 block">Public Holiday Surcharge %</label><Input type="number" step="0.5" value={surchargeSettings.publicHolidaySurcharge} onChange={e => setSurchargeSettings({ ...surchargeSettings, publicHolidaySurcharge: parseFloat(e.target.value) || 0 })} data-testid="holiday-surcharge" /></div>
+          </div>
+          <div><label className="text-sm font-medium mb-1 block">Weekend Days</label>
+            <div className="flex flex-wrap gap-1.5">
+              {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map(d => (
+                <button key={d} type="button" onClick={() => {
+                  const days = surchargeSettings.weekendDays.includes(d) ? surchargeSettings.weekendDays.filter(x => x !== d) : [...surchargeSettings.weekendDays, d];
+                  setSurchargeSettings({ ...surchargeSettings, weekendDays: days });
+                }} className={`px-2.5 py-1 text-xs rounded-full font-medium ${surchargeSettings.weekendDays.includes(d) ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}>{d.slice(0,3)}</button>
+              ))}
+            </div>
+          </div>
+          <div><label className="text-sm font-medium mb-1 block">Public Holidays (YYYY-MM-DD, comma separated)</label>
+            <Input placeholder="2026-01-01, 2026-01-26, 2026-04-25" value={(surchargeSettings.publicHolidays || []).join(', ')} onChange={e => setSurchargeSettings({ ...surchargeSettings, publicHolidays: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })} data-testid="public-holidays" />
+          </div>
+          <Button style={{ backgroundColor: theme.primary }} onClick={async () => {
+            try { await enterpriseAPI.saveSurchargeSettings(surchargeSettings); toast.success('Surcharge settings saved'); } catch { toast.error('Failed'); }
+          }} data-testid="save-surcharge-btn"><Save size={16} className="mr-1" /> Save Surcharge Settings</Button>
+        </CardContent></Card>
+      )}
+
+      {/* Hardware */}
+      {activeTab === 'hardware' && (
+        <div className="space-y-4">
+          <Card><CardHeader><CardTitle>Printer Configuration</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            {printers.map(p => (
+              <div key={p.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div><p className="font-medium text-sm">{p.name}</p><p className="text-xs text-gray-500">{p.type} — {p.connectionType} {p.ipAddress ? `(${p.ipAddress})` : ''}</p></div>
+                <Button variant="ghost" size="sm" className="text-red-500" onClick={async () => { await enterpriseAPI.deletePrinter(p.id); const r = await enterpriseAPI.getPrinters(); setPrinters(r.data); }}><Trash2 size={14} /></Button>
+              </div>
+            ))}
+            <Button variant="outline" size="sm" onClick={async () => {
+              const name = prompt('Printer name:');
+              if (!name) return;
+              const type = prompt('Type (receipt/kitchen/label):') || 'receipt';
+              const conn = prompt('Connection (usb/network/bluetooth):') || 'network';
+              const ip = conn === 'network' ? prompt('IP Address:') || '' : '';
+              await enterpriseAPI.addPrinter({ name, type, connectionType: conn, ipAddress: ip });
+              const r = await enterpriseAPI.getPrinters(); setPrinters(r.data);
+              toast.success('Printer added');
+            }} data-testid="add-printer-btn"><Plus size={14} className="mr-1" /> Add Printer</Button>
+          </CardContent></Card>
+
+          <Card><CardHeader><CardTitle>Scanner Configuration</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            {scanners.map(s => (
+              <div key={s.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div><p className="font-medium text-sm">{s.name}</p><p className="text-xs text-gray-500">{s.type} — {s.connectionType}</p></div>
+              </div>
+            ))}
+            <Button variant="outline" size="sm" onClick={async () => {
+              const name = prompt('Scanner name:');
+              if (!name) return;
+              const type = prompt('Type (barcode/qr):') || 'barcode';
+              await enterpriseAPI.addScanner({ name, type, connectionType: 'usb' });
+              const r = await enterpriseAPI.getScanners(); setScanners(r.data);
+              toast.success('Scanner added');
+            }} data-testid="add-scanner-btn"><Plus size={14} className="mr-1" /> Add Scanner</Button>
+          </CardContent></Card>
+        </div>
+      )}
+
 
       {/* Training Mode */}
       {activeTab === 'training' && (

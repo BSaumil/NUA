@@ -8,7 +8,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { productsAPI, promotionsAPI, categoriesAPI } from '../services/api';
 import { toast } from 'sonner';
 
-const EMPTY_PRODUCT = { name: '', category: 'Beverages', price: '', cost: '', stock: '', sku: '', image: '', gstRate: 10 };
+const EMPTY_PRODUCT = { name: '', category: 'Beverages', price: '', cost: '', stock: '', sku: '', image: '', gstRate: 10, locations: ['Main'], onlineChannels: [], seoDescription: '', description: '' };
 const EMPTY_PROMO = { name: '', type: 'category', discount: '', schedule: '', active: true, category: '', products: [], startDate: '', endDate: '', activeDays: [], startTime: '', endTime: '' };
 
 const Products = () => {
@@ -38,7 +38,7 @@ const Products = () => {
   const openAddProduct = () => { setEditingProduct(null); setProductForm(EMPTY_PRODUCT); setShowProductDialog(true); };
   const openEditProduct = (p) => {
     setEditingProduct(p);
-    setProductForm({ name: p.name, category: p.category, price: p.price, cost: p.cost, stock: p.stock, sku: p.sku, image: p.image, gstRate: p.gstRate });
+    setProductForm({ name: p.name, category: p.category, price: p.price, cost: p.cost, stock: p.stock, sku: p.sku, image: p.image, gstRate: p.gstRate, locations: p.locations || ['Main'], onlineChannels: p.onlineChannels || [], seoDescription: p.seoDescription || '', description: p.description || '' });
     setShowProductDialog(true);
   };
   const saveProduct = async () => {
@@ -197,6 +197,25 @@ const Products = () => {
             </div>
             <Input placeholder="Image URL" value={productForm.image} onChange={e => setProductForm({ ...productForm, image: e.target.value })} data-testid="product-image-input" />
             <Input type="number" step="0.1" placeholder="GST Rate %" value={productForm.gstRate} onChange={e => setProductForm({ ...productForm, gstRate: e.target.value })} />
+            <textarea className="w-full min-h-[60px] p-2 border rounded-md text-sm resize-none" placeholder="Item description..." value={productForm.description} onChange={e => setProductForm({ ...productForm, description: e.target.value })} data-testid="product-desc" />
+            <textarea className="w-full min-h-[40px] p-2 border rounded-md text-sm resize-none" placeholder="SEO description (for online channels)..." value={productForm.seoDescription} onChange={e => setProductForm({ ...productForm, seoDescription: e.target.value })} data-testid="product-seo" />
+            <div>
+              <label className="text-xs font-medium text-gray-500 mb-1 block">Locations</label>
+              <Input placeholder="Comma-separated: Main, Branch 1" value={(productForm.locations || []).join(', ')} onChange={e => setProductForm({ ...productForm, locations: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })} data-testid="product-locations" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-500 mb-1 block">Online Channels</label>
+              <div className="flex flex-wrap gap-1.5">
+                {['Website', 'Uber Eats', 'DoorDash', 'Menulog', 'Deliveroo', 'Google Food'].map(ch => (
+                  <button key={ch} type="button" onClick={() => {
+                    const chs = (productForm.onlineChannels || []).includes(ch) ? productForm.onlineChannels.filter(c => c !== ch) : [...(productForm.onlineChannels || []), ch];
+                    setProductForm({ ...productForm, onlineChannels: chs });
+                  }} className={`px-2 py-1 text-xs rounded-full font-medium ${(productForm.onlineChannels || []).includes(ch) ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                    {ch}
+                  </button>
+                ))}
+              </div>
+            </div>
             <Button className="w-full" style={{ backgroundColor: theme.primary }} onClick={saveProduct} data-testid="save-product-btn">
               {editingProduct ? 'Update Product' : 'Create Product'}
             </Button>

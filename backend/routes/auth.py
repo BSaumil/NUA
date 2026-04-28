@@ -154,7 +154,12 @@ async def register(req: RegisterRequest, response: Response):
 @router.get("/me")
 async def me(request: Request):
     user = await get_current_user(request)
-    user["permissions"] = ROLE_PERMISSIONS.get(user["role"], [])
+    # Custom permissions override default role permissions
+    custom = user.get("customPermissions", [])
+    if custom:
+        user["permissions"] = custom
+    else:
+        user["permissions"] = ROLE_PERMISSIONS.get(user["role"], [])
     return user
 
 @router.post("/logout")

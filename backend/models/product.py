@@ -26,6 +26,11 @@ class Product(BaseModel):
     image: str
     gstRate: float = 10.0
     modifiers: List[ProductModifier] = []
+    # Enhanced fields
+    locations: List[str] = ["Main"]
+    onlineChannels: List[str] = []  # uber_eats, doordash, website, etc.
+    seoDescription: str = ""
+    description: str = ""
     createdAt: datetime = Field(default_factory=datetime.utcnow)
     updatedAt: datetime = Field(default_factory=datetime.utcnow)
 
@@ -39,6 +44,10 @@ class ProductCreate(BaseModel):
     image: str
     gstRate: float = 10.0
     modifiers: List[ProductModifier] = []
+    locations: List[str] = ["Main"]
+    onlineChannels: List[str] = []
+    seoDescription: str = ""
+    description: str = ""
 
 class ProductUpdate(BaseModel):
     name: Optional[str] = None
@@ -50,3 +59,7 @@ class ProductUpdate(BaseModel):
     image: Optional[str] = None
     gstRate: Optional[float] = None
     modifiers: Optional[List[ProductModifier]] = None
+    locations: Optional[List[str]] = None
+    onlineChannels: Optional[List[str]] = None
+    seoDescription: Optional[str] = None
+    description: Optional[str] = None

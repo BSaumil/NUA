@@ -45,7 +45,19 @@ const Sidebar = () => {
   const navigate = useNavigate();
 
   const role = user?.role || 'cashier';
-  const navItems = ALL_NAV.filter(item => item.access.includes(role));
+  const customPerms = user?.customPermissions || user?.permissions || [];
+  const hasCustomPerms = Array.isArray(customPerms) && customPerms.length > 0 && !customPerms.includes('*');
+
+  const navItems = ALL_NAV.filter(item => {
+    if (role === 'owner') return true;
+    // If user has custom permissions set by owner, use those
+    if (hasCustomPerms) {
+      const permKey = item.path.replace('/', '') || 'dashboard';
+      return customPerms.includes(permKey);
+    }
+    // Fallback to role-based
+    return item.access.includes(role);
+  });
 
   const handleLogout = async () => {
     await logout();

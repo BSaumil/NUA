@@ -1,0 +1,113 @@
+{
+  "iteration": 12,
+  "date": "2026-04-28",
+  "focus": "Enterprise Features: Granular Permissions (26), Auto Surcharging, Live Sales, Hardware Integrations, Automated Reports, Products Enhanced Fields",
+  "summary": "Tested all iteration 12 enterprise features. All 31 backend tests pass. All frontend features working correctly with proper RBAC enforcement. Custom permissions system working - cashier sidebar filtered based on owner-set permissions.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_results": {
+    "backend": {
+      "TestAuth": {
+        "test_owner_login": "PASS - Returns user with role=owner and JWT token",
+        "test_manager_login": "PASS - Returns user with role=manager",
+        "test_cashier_login": "PASS - Returns user with role=cashier"
+      },
+      "TestPermissions": {
+        "test_get_all_permissions_returns_26": "PASS - Returns 26 granular permissions",
+        "test_get_staff_permissions_owner": "PASS - Owner can get staff permissions",
+        "test_set_staff_permissions_owner": "PASS - Owner can set custom permissions",
+        "test_set_staff_permissions_manager_denied": "PASS - Manager denied (403)",
+        "test_auth_me_returns_custom_permissions": "PASS - /auth/me returns customPermissions"
+      },
+      "TestSurcharging": {
+        "test_get_surcharge_settings": "PASS - Returns config with enabled, weekendSurcharge, publicHolidaySurcharge",
+        "test_save_surcharge_settings_owner": "PASS - Owner can save surcharge settings",
+        "test_save_surcharge_settings_manager_denied": "PASS - Manager denied (403)",
+        "test_check_surcharge": "PASS - Returns current surcharge percent and reason"
+      },
+      "TestLiveSales": {
+        "test_live_sales_owner": "PASS - Returns totalSales, transactionCount, avgTicket, byHour, recentTransactions",
+        "test_live_sales_manager": "PASS - Manager can access live sales",
+        "test_live_sales_cashier_denied": "PASS - Cashier denied (403)"
+      },
+      "TestReports": {
+        "test_generate_itemised_report": "PASS - Returns items with name, qty, revenue, profit, margin",
+        "test_generate_category_report": "PASS - Returns categories breakdown",
+        "test_generate_detailed_report": "PASS - Returns full P&L with revenue, expenses, grossProfit, netProfit",
+        "test_generate_report_manager": "PASS - Manager can generate reports",
+        "test_generate_report_cashier_denied": "PASS - Cashier denied (403)"
+      },
+      "TestUpsells": {
+        "test_get_upsells": "PASS - Returns upsell suggestions based on cart items"
+      },
+      "TestHardware": {
+        "test_get_printers": "PASS - Returns printer list",
+        "test_add_printer_owner": "PASS - Owner can add printer",
+        "test_add_printer_manager": "PASS - Manager can add printer",
+        "test_get_scanners": "PASS - Returns scanner list",
+        "test_add_scanner_owner": "PASS - Owner can add scanner"
+      },
+      "TestReportConfig": {
+        "test_get_report_config_owner": "PASS - Owner can get automated report config",
+        "test_save_report_config_owner": "PASS - Owner can save report config",
+        "test_get_report_config_manager_denied": "PASS - Manager denied (403)"
+      },
+      "TestRBACEnforcement": {
+        "test_cashier_denied_surcharge_save": "PASS - Cashier denied (403)",
+        "test_cashier_denied_permissions_set": "PASS - Cashier denied (403)"
+      }
+    },
+    "frontend": {
+      "Login": "PASS - Owner/Manager/Cashier login working",
+      "Settings_Permissions_tab": "PASS - Staff selector, 26 checkboxes, Select All/Clear All/Save buttons",
+      "Settings_Surcharges_tab": "PASS - Enable toggle, weekend %, holiday %, day selection, holiday dates, save button",
+      "Settings_Hardware_tab": "PASS - Add Printer button, Add Scanner button, lists display",
+      "Settings_Receipt_tab": "PASS - Logo URL, Payment/Social/Promo QR toggles, save button",
+      "Products_dialog": "PASS - Locations field, Online Channels (Website/Uber Eats/DoorDash/Menulog/Deliveroo/Google Food), SEO description, Description",
+      "Cashier_custom_permissions": "PASS - Sidebar shows only 4 items (Dashboard, POS, Products, Customers) based on custom permissions",
+      "Manager_restricted_access": "PASS - Permissions and Surcharges content hidden from manager"
+    }
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration12_enterprise.py",
+    "/app/test_reports/pytest/pytest_iteration12.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "All 26 granular permissions properly implemented covering all sidebar items",
+    "Custom permissions override role-based defaults in Sidebar.jsx",
+    "Surcharge settings stored in settings collection with key 'surcharge_config'",
+    "Hardware integrations (printers/scanners) stored in separate collections",
+    "Products enhanced with locations, onlineChannels, seoDescription, description fields",
+    "RBAC properly enforced - owner-only features hidden from manager/cashier"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration12_enterprise.py"
+  ],
+  "success_rate": {
+    "backend": "100% (31/31 tests passed)",
+    "frontend": "100% (all features working)"
+  },
+  "test_credentials": {
+    "owner": "owner@nuva.com / NuvaOwner2026!",
+    "manager": "manager@nuva.com / Staff2026!",
+    "cashier": "cashier@nuva.com / Staff2026!",
+    "kitchen": "kitchen@nuva.com / Staff2026!"
+  },
+  "seed_data_creation": "Test printers and scanners created during testing (prefixed with TEST_) - cleaned up after tests",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 12 tested enterprise features: 26 granular permissions, auto surcharging (weekend/holiday), live sales reporting, hardware integrations (printers/scanners), automated reports (itemised/category/detailed), products enhanced with locations/onlineChannels/seoDescription. Custom permissions system works: owner sets via POST /api/permissions/staff/{id}, /auth/me returns customPermissions, Sidebar.jsx filters nav items. Cashier currently has custom permissions ['pos','customers','products','dashboard']. All features working. Auth token stored in localStorage as 'nuva_token'. API base URL: https://pos-checkout-16.preview.emergentagent.com",
+  "mocked_apis": {
+    "email_delivery": "Email delivery is MOCKED - campaigns stored in DB but no actual emails sent",
+    "auto_report_scheduler": "Automated report scheduler cron job is MOCKED - config stored but doesn't actually run",
+    "stripe": "Uses test key sk_test_emergent"
+  }
+}

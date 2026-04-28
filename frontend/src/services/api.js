@@ -304,4 +304,30 @@ export const menuFeaturesAPI = {
   whatIfAdvanced: (data) => api.post('/analytics/what-if-advanced', data),
 };
 
+// Enterprise Features — Surcharging, Live Sales, Permissions, Reports, Hardware
+export const enterpriseAPI = {
+  // Surcharging
+  getSurchargeSettings: () => api.get('/surcharge/settings'),
+  saveSurchargeSettings: (data) => api.post('/surcharge/settings', data),
+  checkSurcharge: () => api.get('/surcharge/check'),
+  // Live Sales
+  getLiveSales: () => api.get('/live-sales'),
+  // Permissions
+  getAllPermissions: () => api.get('/permissions/all'),
+  getStaffPermissions: (staffId) => api.get(`/permissions/staff/${staffId}`),
+  setStaffPermissions: (staffId, permissions) => api.post(`/permissions/staff/${staffId}`, { permissions }),
+  // Upsells
+  getUpsells: (items) => api.get('/pos/upsells', { params: { items: items.join(',') } }),
+  // Reports
+  getReportConfig: () => api.get('/reports/automated-config'),
+  saveReportConfig: (data) => api.post('/reports/automated-config', data),
+  generateReport: (data) => api.post('/reports/generate', data),
+  // Hardware
+  getPrinters: () => api.get('/hardware/printers'),
+  addPrinter: (data) => api.post('/hardware/printers', data),
+  deletePrinter: (id) => api.delete(`/hardware/printers/${id}`),
+  getScanners: () => api.get('/hardware/scanners'),
+  addScanner: (data) => api.post('/hardware/scanners', data),
+};
+
 export default api;
