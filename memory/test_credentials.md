@@ -6,6 +6,12 @@
 - **Cashier**: cashier@nuva.com / Staff2026! (POS, tables, customers only)
 - **Kitchen**: kitchen@nuva.com / Staff2026! (Kitchen Display + Pre-Shift only)
 
+## PIN Login
+- Set via Settings > Staff tab (Owner only)
+- Test PIN for cashier: 1234 (if previously set during testing)
+
 ## Member Accounts (EatClub-style)
 - Created via /join portal, not shared with staff auth
-- Test member: alice@test.com (created during testing)
+
+## Secret Features
+- **Ghost Discount**: Double-click "POS Terminal" title (owner only)
