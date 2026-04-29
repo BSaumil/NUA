@@ -1,59 +1,69 @@
 # NUVA POS — Product Requirements Document
 
 ## Original Problem Statement
-Full-featured Square POS clone evolved into an enterprise-grade all-in-one hospitality platform with AI-powered features, comprehensive staff management, granular permissions, and advanced POS capabilities.
+Enterprise-grade all-in-one hospitality POS platform with AI-powered features, gamification, comprehensive staff management, category-wise printer routing, and advanced analytics.
 
 ## Tech Stack
-- Frontend: React.js, Tailwind CSS, Shadcn UI, qrcode.react, PWA
-- Backend: FastAPI (Python), 20 modular route files
+- Frontend: React.js, Tailwind CSS, Shadcn UI, PWA
+- Backend: FastAPI (Python), 21 modular route files
 - Database: MongoDB (AsyncIOMotorClient)
 - Payments: Stripe (emergentintegrations)
-- AI: GPT 5.2 (emergentintegrations) — Menu Import, Pantry, EOD Insights
-- Auth: JWT + bcrypt + PIN login, granular permission RBAC
-- Desktop: Electron (Windows .exe) | Mobile: Capacitor (Android APK)
+- AI: GPT 5.2 (emergentintegrations) — Menu Import, Pantry, EOD Insights, Quarterly Alternatives
+- Auth: JWT + bcrypt + PIN login, 26 granular permissions
+- Desktop: Electron (.exe) | Mobile: Capacitor (APK)
 
-## Completed Features (v7.0.0)
+## Architecture (v8.0.0 — 21 route files)
+```
+/app/backend/routes/
+  auth.py, products.py, transactions.py, customers.py, reservations.py, kitchen.py,
+  analytics.py, automation.py, settings.py, loyalty.py, public.py, table_ordering.py,
+  integrations.py, ai_pantry.py, members.py, multi_tenant.py, advanced_features.py,
+  staff_management.py, menu_features.py, enterprise_features.py, gamification.py
+```
 
-### Core POS
-- Product grid with search, categories, cart
-- Payment: Card, Cash (denominations), QR, UPI, Stripe, Split
-- Cash flow: Exact/Round/$5-$100/Custom + change display
-- Training Mode, Ghost Discount/Void (owner secret)
+## Key Features (Cumulative)
+
+### POS Terminal
+- Product grid, categories, search, cart
+- Payment: Card, Cash (denominations + change), QR, UPI, Stripe, Split
 - Auto surcharging (weekend + public holiday)
-- Smart kiosk upsells (AI-powered)
+- Training Mode, Ghost Discount/Void
+- Smart kiosk upsells, auto print routing on checkout
 
-### Products & Menu
-- Full CRUD with locations, online channels, SEO description
-- Online channels: Website, Uber Eats, DoorDash, Menulog, Deliveroo, Google Food
+### Staff & Gamification
+- PIN Login (2-4 digit) + Email/Password
+- **Staff Leaderboard** — Performance score (sales/txns/tips/efficiency), podium top 3
+- **Smart Tip Distribution** — weighted by hours worked + performance (not equal split)
+- Timecards, Roster, Payrun (auto-logs to Accounting)
+- Staff Reports (weekly/monthly/quarterly/yearly)
+- 26 Granular Permissions (owner assigns per staff)
+
+### Category-wise Print Routing
+- 8 default routes: Beverages/Alcohol→Bar Printer, Pizza→Pizza Station, Food/Mains/etc→Kitchen
+- Priority levels (P1=Rush, P2=Normal, P3=Low)
+- Orders auto-route to correct printers on POS checkout
+- Live print queue with Done/Complete buttons
+- Configurable by owner/manager
+
+### Quarterly Menu Review
+- Top sellers / Worst sellers / Low-margin underperformers
+- **AI Alternative Suggestions** (GPT-5.2) for underperforming items
+- Replacement recommendations with pricing and reasoning
+
+### Menu Engineering & Products
 - AI Menu Import (PDF/JPEG → auto-create products)
 - Bulk Price Adjustment (category, percentage/fixed, inflation)
-- Enhanced Promotions (date range, day selection, time window)
-
-### Staff Management
-- PIN Login (2-4 digit) + Email/Password
-- Timecards (Clock In/Out with break tracking)
-- Staff Roster scheduling
-- Payrun (gross, super 11.5%, tax, net → auto-logs to Accounting)
-- Staff Reports (weekly/monthly/quarterly/yearly)
-- 26 Granular Permissions (owner assigns per staff member)
+- Products: locations, online channels, SEO description
+- Promotions: date range, day selection, time window
 
 ### Analytics & Reporting
-- Live Sales Dashboard (real-time)
-- End-of-Day Reports (6 periods, 6 sections incl. AI insights)
-- Automated Reporting config (daily/weekly/monthly, itemised/category/detailed)
-- Profit-Cost Reporting
-- Menu Engineering (Stars/Puzzles/Workhorses/Dogs)
-- What-If Simulator (manual quantity projections)
-
-### Settings
-- Theme, Receipt (logo/QR toggles), Permissions, Surcharges, Hardware, Training Mode, Locations, Staff, Business
-
-### Hardware
-- Any printer integration (USB/Network/Bluetooth)
-- Any scanner integration (Barcode/QR)
+- Live Sales Dashboard, EOD Reports (6 periods + AI insights)
+- Automated Reporting config (itemised/category/detailed)
+- Profit-Cost Reporting, Menu Engineering Matrix
+- What-If Simulator with manual quantity projection
 
 ### Other
-- 18+ Integrations Hub, Reservations, Floor Plans, KDS, Booking Portal, Member Portal, Table-Side QR Ordering, Multi-tenant, Email Marketing, Tip Management
+- 18+ Integrations, Reservations, KDS, Floor Plans, Booking Portal, Member Portal, QR Ordering, Multi-tenant, Email Marketing, Tip Management, Hardware Integrations
 
 ## Auth Credentials
 - Owner: owner@nuva.com / NuvaOwner2026!
@@ -61,9 +71,9 @@ Full-featured Square POS clone evolved into an enterprise-grade all-in-one hospi
 - Cashier: cashier@nuva.com / Staff2026!
 - Kitchen: kitchen@nuva.com / Staff2026!
 
-## Testing: 12 iterations, all pass
+## Testing: 13 iterations, all pass (32 backend tests in latest)
 
 ## Backlog
-- P1: SendGrid integration for real email delivery (user will provide key later)
+- P1: SendGrid integration (user provides key later)
 - P2: Autonomous nightly EOD cron job
-- P3: Real Uber Eats/DoorDash API integrations
+- P3: Real delivery API integrations
