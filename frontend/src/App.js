@@ -34,6 +34,9 @@ import StaffManagement from './pages/StaffManagement';
 import AIPantry from './pages/AIPantry';
 import MemberPortal from './pages/MemberPortal';
 import StaffRoster from './pages/StaffRoster';
+import StaffLeaderboard from './pages/StaffLeaderboard';
+import PrintRouting from './pages/PrintRouting';
+import QuarterlyReview from './pages/QuarterlyReview';
 import EmailMarketing from './pages/EmailMarketing';
 import EndOfDay from './pages/EndOfDay';
 import TipManagement from './pages/TipManagement';
@@ -75,6 +78,9 @@ function ProtectedRoutes() {
         <Route path="/integrations" element={<Integrations />} />
         <Route path="/staff" element={<StaffManagement />} />
         <Route path="/staff-roster" element={<StaffRoster />} />
+        <Route path="/leaderboard" element={<StaffLeaderboard />} />
+        <Route path="/print-routing" element={<PrintRouting />} />
+        <Route path="/quarterly-review" element={<QuarterlyReview />} />
         <Route path="/ai-pantry" element={<AIPantry />} />
         <Route path="/email-marketing" element={<EmailMarketing />} />
         <Route path="/end-of-day" element={<EndOfDay />} />

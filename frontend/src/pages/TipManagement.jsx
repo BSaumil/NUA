@@ -46,8 +46,12 @@ export default function TipManagement() {
   const handleDistribute = async () => {
     setDistributing(true);
     try {
-      const res = await advancedAPI.distributeTipPool();
-      toast.success(`Distributed $${res.data.distributed} to ${res.data.staffCount} staff ($${res.data.perPerson} each)`);
+      const res = await gamificationAPI.smartDistributeTips();
+      if (res.data.distributions) {
+        toast.success(`Smart distributed $${res.data.poolTotal} to ${res.data.distributions.length} staff (weighted by hours + performance)`);
+      } else {
+        toast.info(res.data.message || 'No pooled tips to distribute');
+      }
       fetchData();
     } catch { toast.error('Failed to distribute'); }
     setDistributing(false);

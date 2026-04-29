@@ -7,7 +7,7 @@ import {
   Calculator, FileText, Settings, Utensils, MapPin, Clock,
   ChefHat, BarChart3, Zap, Award, TrendingUp,
   FlaskConical, Sunrise, Brain, Plug, Users2, LogOut, ShieldCheck, Store,
-  Mail, ClipboardList, DollarSign
+  Mail, ClipboardList, DollarSign, Trophy, Printer, PieChart
 } from 'lucide-react';
 
 const ALL_NAV = [
@@ -32,6 +32,9 @@ const ALL_NAV = [
   { path: '/bas-gst', icon: FileText, label: 'BAS/GST', access: ['owner'] },
   { path: '/staff', icon: Users2, label: 'Staff', access: ['owner', 'manager'] },
   { path: '/staff-roster', icon: Clock, label: 'Roster & Payrun', access: ['owner', 'manager', 'cashier', 'kitchen'] },
+  { path: '/leaderboard', icon: Trophy, label: 'Leaderboard', access: ['owner', 'manager', 'cashier', 'kitchen'] },
+  { path: '/print-routing', icon: Printer, label: 'Print Routing', access: ['owner', 'manager', 'kitchen'] },
+  { path: '/quarterly-review', icon: PieChart, label: 'Quarterly Review', access: ['owner', 'manager'] },
   { path: '/email-marketing', icon: Mail, label: 'Email Marketing', access: ['owner', 'manager'] },
   { path: '/tip-management', icon: DollarSign, label: 'Tip Management', access: ['owner'] },
   { path: '/end-of-day', icon: ClipboardList, label: 'End of Day', access: ['owner', 'manager'] },
@@ -50,12 +53,10 @@ const Sidebar = () => {
 
   const navItems = ALL_NAV.filter(item => {
     if (role === 'owner') return true;
-    // If user has custom permissions set by owner, use those
     if (hasCustomPerms) {
       const permKey = item.path.replace('/', '') || 'dashboard';
       return customPerms.includes(permKey);
     }
-    // Fallback to role-based
     return item.access.includes(role);
   });
 

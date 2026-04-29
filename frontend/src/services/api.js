@@ -330,4 +330,17 @@ export const enterpriseAPI = {
   addScanner: (data) => api.post('/hardware/scanners', data),
 };
 
+// Gamification — Leaderboard, Smart Tips, Quarterly Review, Print Routing
+export const gamificationAPI = {
+  getLeaderboard: () => api.get('/staff/leaderboard'),
+  smartDistributeTips: () => api.post('/tips/smart-distribute'),
+  getQuarterlyReview: () => api.get('/reports/quarterly-review'),
+  getAIAlternatives: (items) => api.post('/reports/quarterly-review/ai-alternatives', { items }),
+  getPrintRouting: () => api.get('/print-routing/config'),
+  savePrintRouting: (data) => api.post('/print-routing/config', data),
+  sendToPrinters: (data) => api.post('/print-routing/send', data),
+  getPrintQueue: (printer) => api.get('/print-routing/queue', { params: { printer } }),
+  completePrintJob: (id) => api.post(`/print-routing/complete/${id}`),
+};
+
 export default api;
