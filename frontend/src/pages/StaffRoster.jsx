@@ -179,9 +179,8 @@ export default function StaffRoster() {
           {canManage && <TabsTrigger value="reports">Reports</TabsTrigger>}
         </TabsList>
 
-        {/* ROSTER */}
+        {/* ROSTER — Week View */}
         <TabsContent value="roster" className="mt-4 space-y-4">
-          {/* Budget Summary (owner/manager only) */}
           {canManage && roster.length > 0 && (
             <div className="grid grid-cols-3 gap-4">
               <Card><CardContent className="p-4 text-center"><p className="text-sm text-gray-500">Total Shifts</p><p className="text-2xl font-bold" style={{ color: theme.primary }}>{roster.length}</p></CardContent></Card>
@@ -191,48 +190,54 @@ export default function StaffRoster() {
           )}
 
           <div className="flex justify-between items-center">
-            <h3 className="font-semibold">Scheduled Shifts</h3>
+            <h3 className="font-semibold">Weekly Roster</h3>
             <div className="flex gap-2">
               {roster.length > 0 && <Button size="sm" variant="outline" onClick={printRoster} data-testid="print-roster-btn"><Printer size={14} className="mr-1" /> Print Roster</Button>}
               {canManage && <Button size="sm" style={{ backgroundColor: theme.primary }} onClick={() => setShowWeekRoster(true)} data-testid="add-week-roster-btn"><Plus size={14} className="mr-1" /> Add Week Roster</Button>}
             </div>
           </div>
 
+          {/* Week Grid View */}
           <Card><CardContent className="p-0"><div className="overflow-x-auto">
             <table className="w-full text-sm" data-testid="roster-table">
               <thead className="bg-gray-50"><tr>
-                <th className="text-left p-3 font-medium text-gray-500">Staff</th>
-                <th className="text-left p-3 font-medium text-gray-500">Position</th>
-                <th className="text-left p-3 font-medium text-gray-500">Day/Date</th>
-                <th className="text-left p-3 font-medium text-gray-500">Start</th>
-                <th className="text-left p-3 font-medium text-gray-500">End</th>
-                <th className="text-right p-3 font-medium text-gray-500">Hours</th>
-                {canManage && <th className="text-right p-3 font-medium text-gray-500">Cost</th>}
-                {canManage && <th className="text-center p-3 font-medium text-gray-500">Actions</th>}
+                {DAYS.map(d => (
+                  <th key={d} className="text-center p-3 font-medium text-gray-500 min-w-[140px]">{d.slice(0, 3)}</th>
+                ))}
               </tr></thead>
-              <tbody>
-                {roster.map(s => {
-                  const staffMember = staff.find(st => st.id === s.staffId) || {};
-                  const start = s.startTime?.split(':').map(Number) || [0, 0];
-                  const end = s.endTime?.split(':').map(Number) || [0, 0];
-                  const hours = Math.max((end[0] + end[1] / 60) - (start[0] + start[1] / 60), 0);
-                  const cost = hours * (staffMember.payRate || 0);
+              <tbody><tr className="align-top">
+                {DAYS.map(day => {
+                  const dayShifts = roster.filter(s => {
+                    const d = s.date || '';
+                    return d === day || d.includes(day);
+                  });
                   return (
-                    <tr key={s.id} className="border-t hover:bg-gray-50" data-testid={`roster-row-${s.id}`}>
-                      <td className="p-3 font-medium">{s.staffName}</td>
-                      <td className="p-3"><Badge variant="outline" className="text-xs">{s.notes || s.role || '-'}</Badge></td>
-                      <td className="p-3 text-sm">{s.date}</td>
-                      <td className="p-3">{s.startTime}</td>
-                      <td className="p-3">{s.endTime}</td>
-                      <td className="p-3 text-right font-medium">{hours.toFixed(1)}h</td>
-                      {canManage && <td className="p-3 text-right font-mono text-emerald-600">${cost.toFixed(2)}</td>}
-                      {canManage && <td className="p-3 text-center"><Button variant="ghost" size="sm" className="text-red-500" onClick={() => handleDeleteShift(s.id)}><Trash2 size={14} /></Button></td>}
-                    </tr>
+                    <td key={day} className="p-2 border-r last:border-r-0 min-w-[140px]" data-testid={`roster-day-${day.toLowerCase()}`}>
+                      <div className="space-y-1.5">
+                        {dayShifts.map(s => {
+                          const staffMember = staff.find(st => st.id === s.staffId) || {};
+                          const start = s.startTime?.split(':').map(Number) || [0, 0];
+                          const end = s.endTime?.split(':').map(Number) || [0, 0];
+                          const hours = Math.max((end[0] + end[1] / 60) - (start[0] + start[1] / 60), 0);
+                          return (
+                            <div key={s.id} className="p-2 rounded-lg text-xs border bg-white hover:shadow-sm group" data-testid={`roster-shift-${s.id}`}>
+                              <div className="flex items-center justify-between">
+                                <p className="font-semibold truncate">{s.staffName}</p>
+                                {canManage && <button className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-opacity" onClick={() => handleDeleteShift(s.id)}><Trash2 size={11} /></button>}
+                              </div>
+                              <Badge variant="outline" className="text-[9px] mt-0.5">{s.notes || s.role || '-'}</Badge>
+                              <p className="text-gray-500 mt-0.5">{s.startTime} - {s.endTime}</p>
+                              <p className="text-gray-400 text-[10px]">{hours.toFixed(1)}h</p>
+                            </div>
+                          );
+                        })}
+                        {dayShifts.length === 0 && <p className="text-gray-300 text-center text-[10px] py-4">No shifts</p>}
+                      </div>
+                    </td>
                   );
                 })}
-              </tbody>
+              </tr></tbody>
             </table>
-            {roster.length === 0 && <p className="text-center text-gray-400 py-8">No shifts scheduled. Click "Add Week Roster" to get started.</p>}
           </div></CardContent></Card>
         </TabsContent>
 

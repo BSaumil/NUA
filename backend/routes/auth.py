@@ -209,7 +209,7 @@ async def update_staff(staff_id: str, data: dict, request: Request):
     user = await get_current_user(request)
     if user["role"] != "owner":
         raise HTTPException(status_code=403, detail="Owner access only")
-    allowed = {"name", "role", "status", "payRate", "businessId"}
+    allowed = {"name", "role", "status", "payRate", "salaryType", "businessId", "pin"}
     update_data = {k: v for k, v in data.items() if k in allowed}
     result = await db.auth_users.find_one_and_update(
         {"id": staff_id}, {"$set": update_data}, return_document=True
@@ -219,6 +219,54 @@ async def update_staff(staff_id: str, data: dict, request: Request):
     result.pop("_id", None)
     result.pop("password_hash", None)
     return result
+
+@router.post("/staff/add")
+async def add_staff_simple(data: dict, request: Request):
+    """Add staff without requiring email/password - PIN only"""
+    user = await get_current_user(request)
+    if user["role"] != "owner":
+        raise HTTPException(status_code=403, detail="Owner access only")
+    import uuid
+    name = data.get("name", "")
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required")
+    staff_id = str(uuid.uuid4())
+    email = data.get("email", "").lower().strip()
+    password = data.get("password", "")
+    user_doc = {
+        "id": staff_id, "name": name,
+        "email": email or f"staff-{staff_id[:8]}@nuva.local",
+        "role": data.get("role", "cashier"),
+        "payRate": float(data.get("payRate", 0)),
+        "salaryType": data.get("salaryType", "hourly"),
+        "pin": data.get("pin", ""),
+        "status": "active", "businessId": "default",
+        "createdAt": datetime.now(timezone.utc).isoformat(),
+    }
+    if password:
+        user_doc["password_hash"] = hash_password(password)
+    else:
+        user_doc["password_hash"] = ""
+    await db.auth_users.insert_one(user_doc)
+    user_doc.pop("_id", None)
+    user_doc.pop("password_hash", None)
+    return user_doc
+
+# Custom roles management
+@router.get("/roles")
+async def get_custom_roles():
+    s = await db.settings.find_one({"key": "custom_roles"}, {"_id": 0})
+    defaults = ["cashier", "kitchen", "manager", "barista", "bar", "floor", "host", "dishwasher"]
+    return s.get("value", defaults) if s else defaults
+
+@router.post("/roles")
+async def save_custom_roles(data: dict, request: Request):
+    user = await get_current_user(request)
+    if user["role"] != "owner":
+        raise HTTPException(status_code=403, detail="Owner access only")
+    roles = data.get("roles", [])
+    await db.settings.update_one({"key": "custom_roles"}, {"$set": {"key": "custom_roles", "value": roles}}, upsert=True)
+    return {"message": f"{len(roles)} roles saved", "roles": roles}
 
 @router.delete("/staff/{staff_id}")
 async def delete_staff(staff_id: str, request: Request):

@@ -1,0 +1,132 @@
+{
+  "iteration": 18,
+  "date": "2026-01-04",
+  "focus": "NUVA POS Staff System Changes: Name-only staff creation, Salary Types, Custom Roles, Week-wise Roster",
+  "summary": "Tested all iteration 18 staff system changes. Backend: 18/19 tests passed (95%). Frontend: All features working correctly. Staff can be added with just name (email auto-generated), salary type dropdown (Hourly/Daily/Annually) works, custom roles section allows adding/removing roles, roster displays week-wise with Mon-Sun columns, shift cards appear in correct day columns.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "N/A - Data issue",
+        "issue": "manager@nuva.com has role 'cashier' instead of 'manager' in database - likely from previous testing",
+        "priority": "LOW"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_results": {
+    "backend": {
+      "TestAuth": {
+        "test_owner_login": "PASS",
+        "test_manager_login": "FAIL - manager@nuva.com has role 'cashier' (data issue)",
+        "test_cashier_login": "PASS"
+      },
+      "TestStaffAddWithNameOnly": {
+        "test_add_staff_with_name_only": "PASS - Email auto-generated as staff-{uuid}@nuva.local",
+        "test_add_staff_with_name_and_pin": "PASS",
+        "test_add_staff_with_optional_email_password": "PASS",
+        "test_add_staff_name_required": "PASS - Returns 400 without name"
+      },
+      "TestSalaryType": {
+        "test_add_staff_with_hourly_salary": "PASS",
+        "test_add_staff_with_daily_salary": "PASS",
+        "test_add_staff_with_annually_salary": "PASS",
+        "test_update_staff_salary_type": "PASS"
+      },
+      "TestCustomRoles": {
+        "test_get_roles": "PASS - Returns default 8 roles + custom roles",
+        "test_save_custom_roles_owner": "PASS",
+        "test_save_custom_roles_manager_denied": "PASS (403)",
+        "test_add_staff_with_custom_role": "PASS"
+      },
+      "TestRosterWeekView": {
+        "test_create_shift_with_day_name": "PASS - date field stores day name (Monday, Tuesday, etc.)",
+        "test_get_roster_grouped_by_day": "PASS",
+        "test_create_week_roster_multiple_days": "PASS - 3 shifts created for Mon/Wed/Fri"
+      },
+      "TestStaffListPayRateColumn": {
+        "test_staff_list_includes_salary_type": "PASS"
+      }
+    },
+    "frontend": {
+      "Owner_login": "PASS",
+      "Settings_Staff_tab": {
+        "add_staff_button": "PASS - data-testid='add-staff-btn'",
+        "staff_table": "PASS - data-testid='staff-table'",
+        "custom_roles_section": "PASS - Shows role tags with x delete button",
+        "new_role_input": "PASS - data-testid='new-role-input'",
+        "add_role_button": "PASS - data-testid='add-role-btn'"
+      },
+      "Add_Staff_dialog": {
+        "dialog_opens": "PASS - data-testid='staff-dialog'",
+        "name_input": "PASS - placeholder 'Full name *'",
+        "email_optional": "PASS - placeholder 'Email (optional)'",
+        "password_optional": "PASS - placeholder 'Password (optional — use PIN instead)'",
+        "pin_input": "PASS - data-testid='staff-pin-input'",
+        "role_dropdown": "PASS - Includes Owner, Manager, and all custom roles",
+        "salary_type_dropdown": "PASS - Options: Hourly, Daily, Annually",
+        "pay_rate_input": "PASS - data-testid='staff-payrate-input'",
+        "save_button": "PASS - data-testid='save-staff-btn'"
+      },
+      "Staff_table_pay_rate_column": "PASS - Shows $amount/abbreviation (e.g., $150/da for daily)",
+      "Custom_roles_in_dropdown": "PASS - Role dropdown includes: cashier, kitchen, manager, barista, bar, floor, host, dishwasher, pizza, delivery, pizza_maker",
+      "Roster_page": {
+        "page_loads": "PASS - data-testid='staff-roster-page'",
+        "roster_table": "PASS - data-testid='roster-table'",
+        "day_columns": "PASS - Mon, Tue, Wed, Thu, Fri, Sat, Sun columns visible",
+        "add_week_roster_button": "PASS - data-testid='add-week-roster-btn'",
+        "print_roster_button": "PASS - Appears when shifts exist"
+      },
+      "Add_Week_Roster_dialog": {
+        "dialog_opens": "PASS - data-testid='week-roster-dialog'",
+        "staff_dropdown": "PASS - data-testid='week-staff-select'",
+        "position_dropdown": "PASS - data-testid='week-position-select' with 8 positions",
+        "day_checkboxes": "PASS - All 7 days with data-testid='week-day-{day}'",
+        "time_inputs": "PASS - Appear when day is checked",
+        "cost_preview": "PASS - Shows Total Hours, Rate, Estimated Cost",
+        "save_button": "PASS - data-testid='save-week-roster-btn'"
+      },
+      "Shift_cards_in_day_columns": "PASS - Tina's Kitchen shift appears in Monday column",
+      "Budget_summary": "PASS - Shows Total Shifts (1), Total Hours (8.0h), Weekly Budget ($200.00)"
+    }
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration18_staff_changes.py",
+    "/app/test_reports/pytest/pytest_iteration18.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "POST /api/auth/staff/add correctly allows creating staff with just name - email auto-generated as staff-{uuid}@nuva.local",
+    "salaryType field stored and returned correctly (hourly/daily/annually)",
+    "PUT /api/auth/staff/{id} accepts salaryType field for updates",
+    "GET /api/auth/roles returns default 8 roles + custom roles from settings collection",
+    "POST /api/auth/roles saves custom roles (owner only, returns 403 for others)",
+    "Roster uses DAYS array ['Monday'...'Sunday'] as columns",
+    "Shifts grouped by matching s.date field to day name",
+    "Pay Rate column shows salary type abbreviation (e.g., $25/ho, $150/da, $65000/an)"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration18_staff_changes.py"
+  ],
+  "success_rate": {
+    "backend": "95% (18/19 tests passed - 1 data issue)",
+    "frontend": "100% (all features working)"
+  },
+  "test_credentials": {
+    "owner": "owner@nuva.com / NuvaOwner2026!",
+    "manager": "manager@nuva.com / Staff2026! (NOTE: has role 'cashier' in DB)",
+    "cashier": "cashier@nuva.com / Staff2026!"
+  },
+  "seed_data_creation": "Test staff and shifts created and cleaned up during testing (TEST_ prefixed items). One Kitchen shift created for Tina on Monday during UI testing.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 18 tested staff system changes. Staff can be added with just name (email auto-generated). Salary type dropdown works (Hourly/Daily/Annually). Custom roles stored in settings collection with key 'custom_roles'. Roster displays week-wise with Mon-Sun columns. Shift cards show in correct day column. Maria was added during previous testing (barista, PIN:99). Custom roles include: pizza, delivery, pizza_maker. API base URL: https://pos-checkout-16.preview.emergentagent.com",
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "mocked_apis_list": []
+  }
+}

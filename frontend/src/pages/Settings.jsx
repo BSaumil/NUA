@@ -29,7 +29,9 @@ const Settings = () => {
   const [staff, setStaff] = useState([]);
   const [showStaffDialog, setShowStaffDialog] = useState(false);
   const [editingStaff, setEditingStaff] = useState(null);
-  const [staffForm, setStaffForm] = useState({ name: '', email: '', password: '', role: 'cashier', payRate: '' });
+  const [staffForm, setStaffForm] = useState({ name: '', email: '', password: '', role: 'cashier', payRate: '', salaryType: 'hourly', pin: '' });
+  const [customRoles, setCustomRoles] = useState([]);
+  const [newRole, setNewRole] = useState('');
   // Business
   const [bizForm, setBizForm] = useState({ name: 'NUVA POS', abn: '', address: '', phone: '', email: '', taxId: '' });
   // Receipt
@@ -61,6 +63,7 @@ const Settings = () => {
     enterpriseAPI.getScanners().then(r => setScanners(r.data)).catch(() => {});
     enterpriseAPI.getReportConfig().then(r => { if (r.data) setReportConfig(r.data); }).catch(() => {});
     gamificationAPI.getPrintRouting().then(r => { if (r.data) setPrintRouting(r.data); }).catch(() => {});
+    axios.get(`${API}/api/auth/roles`, { headers: authHeader() }).then(r => setCustomRoles(r.data)).catch(() => {});
     // Load business hours from business settings
     axios.get(`${API}/api/business/settings`, { headers: authHeader() }).then(r => {
       if (r.data?.hours) setBizHours(prev => ({ ...prev, ...r.data.hours }));
@@ -96,17 +99,22 @@ const Settings = () => {
   };
 
   // Staff CRUD
-  const openAddStaff = () => { setEditingStaff(null); setStaffForm({ name: '', email: '', password: '', role: 'cashier', payRate: '' }); setShowStaffDialog(true); };
-  const openEditStaff = (s) => { setEditingStaff(s); setStaffForm({ name: s.name, email: s.email, password: '', role: s.role, payRate: s.payRate || '' }); setShowStaffDialog(true); };
+  const openAddStaff = () => { setEditingStaff(null); setStaffForm({ name: '', email: '', password: '', role: 'cashier', payRate: '', salaryType: 'hourly', pin: '' }); setShowStaffDialog(true); };
+  const openEditStaff = (s) => { setEditingStaff(s); setStaffForm({ name: s.name, email: s.email, password: '', role: s.role, payRate: s.payRate || '', salaryType: s.salaryType || 'hourly', pin: s.pin || '' }); setShowStaffDialog(true); };
   const saveStaff = async () => {
+    if (!staffForm.name) { toast.error('Name is required'); return; }
     try {
       if (editingStaff) {
-        const data = { name: staffForm.name, role: staffForm.role, payRate: parseFloat(staffForm.payRate) || 0 };
+        const data = { name: staffForm.name, role: staffForm.role, payRate: parseFloat(staffForm.payRate) || 0, salaryType: staffForm.salaryType, pin: staffForm.pin };
         await axios.put(`${API}/api/auth/staff/${editingStaff.id}`, data, { headers: authHeader() });
         toast.success('Staff updated');
       } else {
-        await axios.post(`${API}/api/auth/register`, { ...staffForm, payRate: parseFloat(staffForm.payRate) || 0 }, { headers: authHeader() });
-        toast.success('Staff member created');
+        await axios.post(`${API}/api/auth/staff/add`, {
+          name: staffForm.name, email: staffForm.email || '', password: staffForm.password || '',
+          role: staffForm.role, payRate: parseFloat(staffForm.payRate) || 0,
+          salaryType: staffForm.salaryType, pin: staffForm.pin,
+        }, { headers: authHeader() });
+        toast.success('Staff member added');
       }
       setShowStaffDialog(false); fetchStaff();
     } catch (e) { toast.error(e.response?.data?.detail || 'Failed to save staff'); }
@@ -406,7 +414,7 @@ const Settings = () => {
                       {(s.status || 'active').toUpperCase()}
                     </span>
                   </td>
-                  {user?.role === 'owner' && <td className="p-4 text-right font-mono">${s.payRate || 0}/hr</td>}
+                  {user?.role === 'owner' && <td className="p-4 text-right font-mono text-sm">${s.payRate || 0}<span className="text-gray-400 text-[10px] ml-0.5">/{(s.salaryType || 'hourly').slice(0, 2)}</span></td>}
                   {user?.role === 'owner' && <td className="p-4 text-center">
                     <div className="flex justify-center gap-2">
                       <Button variant="outline" size="sm" onClick={() => openEditStaff(s)} data-testid={`edit-staff-${s.id}`}><Edit size={14} /></Button>
@@ -417,6 +425,32 @@ const Settings = () => {
               ))}
             </tbody>
           </table></div></CardContent></Card>
+
+          {/* Custom Roles */}
+          {user?.role === 'owner' && (
+            <Card><CardContent className="p-4">
+              <h3 className="font-semibold text-sm mb-3">Custom Roles</h3>
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {customRoles.map(r => (
+                  <span key={r} className="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 rounded-full text-xs font-medium capitalize">
+                    {r}
+                    <button onClick={() => { const updated = customRoles.filter(x => x !== r); setCustomRoles(updated); axios.post(`${API}/api/auth/roles`, { roles: updated }, { headers: authHeader() }).then(() => toast.success('Role removed')); }} className="text-gray-400 hover:text-red-500 ml-0.5">&times;</button>
+                  </span>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <Input placeholder="New role name" className="h-8 text-sm" value={newRole} onChange={e => setNewRole(e.target.value)} data-testid="new-role-input" />
+                <Button size="sm" variant="outline" className="h-8" onClick={() => {
+                  if (!newRole.trim()) return;
+                  const role = newRole.trim().toLowerCase();
+                  if (customRoles.includes(role)) { toast.error('Role exists'); return; }
+                  const updated = [...customRoles, role];
+                  setCustomRoles(updated); setNewRole('');
+                  axios.post(`${API}/api/auth/roles`, { roles: updated }, { headers: authHeader() }).then(() => toast.success('Role added'));
+                }} data-testid="add-role-btn"><Plus size={14} /></Button>
+              </div>
+            </CardContent></Card>
+          )}
         </div>
       )}
 
@@ -505,15 +539,36 @@ const Settings = () => {
       <Dialog open={showStaffDialog} onOpenChange={setShowStaffDialog}>
         <DialogContent className="max-w-sm" data-testid="staff-dialog">
           <DialogHeader><DialogTitle>{editingStaff ? 'Edit Staff' : 'Add Staff Member'}</DialogTitle></DialogHeader>
-          <div className="space-y-3 py-2">
-            <Input placeholder="Full name" value={staffForm.name} onChange={e => setStaffForm({ ...staffForm, name: e.target.value })} data-testid="staff-name-input" />
-            {!editingStaff && <Input placeholder="Email" value={staffForm.email} onChange={e => setStaffForm({ ...staffForm, email: e.target.value })} data-testid="staff-email-input" />}
-            {!editingStaff && <Input type="password" placeholder="Password" value={staffForm.password} onChange={e => setStaffForm({ ...staffForm, password: e.target.value })} data-testid="staff-password-input" />}
-            <select className="w-full p-2 border rounded-md text-sm" value={staffForm.role} onChange={e => setStaffForm({ ...staffForm, role: e.target.value })} data-testid="staff-role-select">
-              <option value="cashier">Cashier</option><option value="kitchen">Kitchen</option><option value="manager">Manager</option><option value="owner">Owner</option>
-            </select>
-            <Input type="number" step="0.01" placeholder="Pay rate ($/hr)" value={staffForm.payRate} onChange={e => setStaffForm({ ...staffForm, payRate: e.target.value })} data-testid="staff-payrate-input" />
-            <Button className="w-full" style={{ backgroundColor: theme.primary }} onClick={saveStaff} data-testid="save-staff-btn">{editingStaff ? 'Update' : 'Create'} Staff</Button>
+          <div className="space-y-3 py-2 max-h-[65vh] overflow-y-auto">
+            <Input placeholder="Full name *" value={staffForm.name} onChange={e => setStaffForm({ ...staffForm, name: e.target.value })} data-testid="staff-name-input" />
+            <Input placeholder="Email (optional)" value={staffForm.email} onChange={e => setStaffForm({ ...staffForm, email: e.target.value })} data-testid="staff-email-input" />
+            {!editingStaff && <Input type="password" placeholder="Password (optional — use PIN instead)" value={staffForm.password} onChange={e => setStaffForm({ ...staffForm, password: e.target.value })} data-testid="staff-password-input" />}
+            <Input placeholder="PIN code (2-4 digits)" maxLength={4} value={staffForm.pin} onChange={e => setStaffForm({ ...staffForm, pin: e.target.value.replace(/\D/g, '').slice(0, 4) })} data-testid="staff-pin-input" />
+            <div>
+              <label className="text-xs font-medium text-gray-500 mb-1 block">Role</label>
+              <div className="flex gap-2">
+                <select className="flex-1 p-2 border rounded-md text-sm" value={staffForm.role} onChange={e => setStaffForm({ ...staffForm, role: e.target.value })} data-testid="staff-role-select">
+                  <option value="owner">Owner</option>
+                  <option value="manager">Manager</option>
+                  {customRoles.map(r => <option key={r} value={r} className="capitalize">{r}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Salary Type</label>
+                <select className="w-full p-2 border rounded-md text-sm" value={staffForm.salaryType} onChange={e => setStaffForm({ ...staffForm, salaryType: e.target.value })} data-testid="staff-salary-type">
+                  <option value="hourly">Hourly</option>
+                  <option value="daily">Daily</option>
+                  <option value="annually">Annually</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Pay Rate ($)</label>
+                <Input type="number" step="0.01" placeholder="0.00" value={staffForm.payRate} onChange={e => setStaffForm({ ...staffForm, payRate: e.target.value })} data-testid="staff-payrate-input" />
+              </div>
+            </div>
+            <Button className="w-full" style={{ backgroundColor: theme.primary }} onClick={saveStaff} data-testid="save-staff-btn">{editingStaff ? 'Update' : 'Add'} Staff</Button>
           </div>
         </DialogContent>
       </Dialog>
