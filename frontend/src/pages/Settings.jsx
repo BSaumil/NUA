@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Palette, MapPin, Users as UsersIcon, Building, GraduationCap, Plus, Edit, Trash2, Save, Receipt, Shield, Monitor, Zap } from 'lucide-react';
+import { Palette, MapPin, Users as UsersIcon, Building, GraduationCap, Plus, Edit, Trash2, Save, Receipt, Shield, Monitor, Zap, Printer, Globe, Clock } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { Badge } from '../components/ui/badge';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
-import { locationsAPI, advancedAPI, staffMgmtAPI, enterpriseAPI } from '../services/api';
+import { locationsAPI, advancedAPI, staffMgmtAPI, enterpriseAPI, gamificationAPI } from '../services/api';
 import { toast } from 'sonner';
 import axios from 'axios';
 
@@ -45,6 +45,11 @@ const Settings = () => {
   const [scanners, setScanners] = useState([]);
   // Auto reports
   const [reportConfig, setReportConfig] = useState({ enabled: false, frequency: 'daily', time: '23:00', reportTypes: ['detailed'], recipientEmail: '', includeAIInsights: true });
+  // Print Routing
+  const [printRouting, setPrintRouting] = useState(null);
+  const [newRoute, setNewRoute] = useState({ category: '', printer: '', priority: 2 });
+  // Business hours
+  const [bizHours, setBizHours] = useState({ openTime: '07:00', closeTime: '23:00', onlineOpenTime: '08:00', onlineCloseTime: '22:00', googleBusinessUrl: '', googleSync: false });
 
   useEffect(() => {
     advancedAPI.getTrainingMode().then(r => setTrainingMode(r.data?.enabled || false)).catch(() => {});
@@ -55,6 +60,11 @@ const Settings = () => {
     enterpriseAPI.getPrinters().then(r => setPrinters(r.data)).catch(() => {});
     enterpriseAPI.getScanners().then(r => setScanners(r.data)).catch(() => {});
     enterpriseAPI.getReportConfig().then(r => { if (r.data) setReportConfig(r.data); }).catch(() => {});
+    gamificationAPI.getPrintRouting().then(r => { if (r.data) setPrintRouting(r.data); }).catch(() => {});
+    // Load business hours from business settings
+    axios.get(`${API}/api/business/settings`, { headers: authHeader() }).then(r => {
+      if (r.data?.hours) setBizHours(prev => ({ ...prev, ...r.data.hours }));
+    }).catch(() => {});
   }, []);
 
   const fetchLocations = async () => {
@@ -117,10 +127,11 @@ const Settings = () => {
   const tabs = [
     { id: 'theme', label: 'Theme', icon: Palette },
     { id: 'receipt', label: 'Receipt', icon: Receipt },
+    { id: 'print-routing', label: 'Print Routing', icon: Printer },
     { id: 'permissions', label: 'Permissions', icon: Shield },
     { id: 'surcharge', label: 'Surcharges', icon: Zap },
     { id: 'hardware', label: 'Hardware', icon: Monitor },
-    { id: 'training', label: 'Training Mode', icon: GraduationCap },
+    { id: 'training', label: 'Training', icon: GraduationCap },
     { id: 'locations', label: 'Locations', icon: MapPin },
     { id: 'users', label: 'Staff', icon: UsersIcon },
     { id: 'business', label: 'Business', icon: Building },
@@ -410,19 +421,71 @@ const Settings = () => {
       )}
 
       {/* Business Info */}
-      {activeTab === 'business' && (
-        <Card><CardHeader><CardTitle>Business Information</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          <div><label className="text-sm font-medium mb-1 block">Business Name</label><Input value={bizForm.name} onChange={e => setBizForm({ ...bizForm, name: e.target.value })} data-testid="biz-name" /></div>
-          <div><label className="text-sm font-medium mb-1 block">ABN</label><Input placeholder="12 345 678 901" value={bizForm.abn} onChange={e => setBizForm({ ...bizForm, abn: e.target.value })} /></div>
-          <div><label className="text-sm font-medium mb-1 block">Business Address</label><Input value={bizForm.address} onChange={e => setBizForm({ ...bizForm, address: e.target.value })} /></div>
-          <div className="grid grid-cols-2 gap-4">
-            <div><label className="text-sm font-medium mb-1 block">Phone</label><Input value={bizForm.phone} onChange={e => setBizForm({ ...bizForm, phone: e.target.value })} /></div>
-            <div><label className="text-sm font-medium mb-1 block">Email</label><Input value={bizForm.email} onChange={e => setBizForm({ ...bizForm, email: e.target.value })} /></div>
+      {/* Print Routing */}
+      {activeTab === 'print-routing' && printRouting && (
+        <Card><CardHeader><CardTitle>Category Print Routing</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-gray-500">Route order items to Kitchen, Bar, or Pizza printers by category.</p>
+          {(printRouting.routes || []).map((r, i) => (
+            <div key={i} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg">
+              <Badge variant="outline" className="text-xs">{r.category}</Badge>
+              <span className="text-gray-400">→</span>
+              <span className="text-sm font-medium flex-1">{r.printer}</span>
+              <Badge className={`text-[10px] ${r.priority === 1 ? 'bg-red-100 text-red-700' : r.priority === 2 ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>P{r.priority}</Badge>
+              <Button variant="ghost" size="sm" className="text-red-500 h-7 w-7 p-0" onClick={() => {
+                const routes = [...printRouting.routes]; routes.splice(i, 1); setPrintRouting({ ...printRouting, routes });
+              }}><Trash2 size={12} /></Button>
+            </div>
+          ))}
+          <div className="flex gap-2 pt-2 border-t">
+            <Input placeholder="Category" className="flex-1 h-8 text-sm" value={newRoute.category} onChange={e => setNewRoute({ ...newRoute, category: e.target.value })} data-testid="new-pr-category" />
+            <Input placeholder="Printer" className="flex-1 h-8 text-sm" value={newRoute.printer} onChange={e => setNewRoute({ ...newRoute, printer: e.target.value })} data-testid="new-pr-printer" />
+            <select className="h-8 text-sm border rounded px-2" value={newRoute.priority} onChange={e => setNewRoute({ ...newRoute, priority: parseInt(e.target.value) })}>
+              <option value={1}>P1</option><option value={2}>P2</option><option value={3}>P3</option>
+            </select>
+            <Button size="sm" variant="outline" className="h-8" onClick={() => { if (!newRoute.category || !newRoute.printer) return; setPrintRouting({ ...printRouting, routes: [...(printRouting.routes || []), { ...newRoute }] }); setNewRoute({ category: '', printer: '', priority: 2 }); }} data-testid="add-pr-route-btn"><Plus size={14} /></Button>
           </div>
-          <div><label className="text-sm font-medium mb-1 block">Tax Registration</label><Input value={bizForm.taxId} onChange={e => setBizForm({ ...bizForm, taxId: e.target.value })} /></div>
-          <Button style={{ backgroundColor: theme.primary }} onClick={saveBusiness} data-testid="save-biz-btn"><Save size={16} className="mr-1" /> Save Changes</Button>
+          <div><label className="text-xs font-medium text-gray-500">Default Printer</label><Input className="h-8 text-sm mt-1" value={printRouting.defaultPrinter || ''} onChange={e => setPrintRouting({ ...printRouting, defaultPrinter: e.target.value })} /></div>
+          <Button style={{ backgroundColor: theme.primary }} onClick={async () => {
+            try { await gamificationAPI.savePrintRouting(printRouting); toast.success('Print routing saved'); } catch { toast.error('Failed'); }
+          }} data-testid="save-pr-btn"><Save size={16} className="mr-1" /> Save Print Routing</Button>
         </CardContent></Card>
+      )}
+
+      {activeTab === 'business' && (
+        <div className="space-y-4">
+          <Card><CardHeader><CardTitle>Business Information</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <div><label className="text-sm font-medium mb-1 block">Business Name</label><Input value={bizForm.name} onChange={e => setBizForm({ ...bizForm, name: e.target.value })} data-testid="biz-name" /></div>
+            <div><label className="text-sm font-medium mb-1 block">ABN</label><Input placeholder="12 345 678 901" value={bizForm.abn} onChange={e => setBizForm({ ...bizForm, abn: e.target.value })} /></div>
+            <div><label className="text-sm font-medium mb-1 block">Business Address</label><Input value={bizForm.address} onChange={e => setBizForm({ ...bizForm, address: e.target.value })} /></div>
+            <div className="grid grid-cols-2 gap-4">
+              <div><label className="text-sm font-medium mb-1 block">Phone</label><Input value={bizForm.phone} onChange={e => setBizForm({ ...bizForm, phone: e.target.value })} /></div>
+              <div><label className="text-sm font-medium mb-1 block">Email</label><Input value={bizForm.email} onChange={e => setBizForm({ ...bizForm, email: e.target.value })} /></div>
+            </div>
+            <div><label className="text-sm font-medium mb-1 block">Tax Registration</label><Input value={bizForm.taxId} onChange={e => setBizForm({ ...bizForm, taxId: e.target.value })} /></div>
+            <Button style={{ backgroundColor: theme.primary }} onClick={saveBusiness} data-testid="save-biz-btn"><Save size={16} className="mr-1" /> Save Changes</Button>
+          </CardContent></Card>
+
+          <Card><CardHeader><CardTitle>Business Hours</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div><label className="text-sm font-medium mb-1 block">Opening Time</label><Input type="time" value={bizHours.openTime} onChange={e => setBizHours({ ...bizHours, openTime: e.target.value })} data-testid="biz-open-time" /></div>
+              <div><label className="text-sm font-medium mb-1 block">Closing Time</label><Input type="time" value={bizHours.closeTime} onChange={e => setBizHours({ ...bizHours, closeTime: e.target.value })} data-testid="biz-close-time" /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div><label className="text-sm font-medium mb-1 block">Online Ordering Opens</label><Input type="time" value={bizHours.onlineOpenTime} onChange={e => setBizHours({ ...bizHours, onlineOpenTime: e.target.value })} data-testid="biz-online-open" /></div>
+              <div><label className="text-sm font-medium mb-1 block">Online Ordering Closes</label><Input type="time" value={bizHours.onlineCloseTime} onChange={e => setBizHours({ ...bizHours, onlineCloseTime: e.target.value })} data-testid="biz-online-close" /></div>
+            </div>
+            <hr />
+            <h4 className="font-semibold text-sm flex items-center gap-2"><Globe size={16} /> Google Business Sync</h4>
+            <div><label className="text-sm font-medium mb-1 block">Google Business Profile URL</label><Input placeholder="https://business.google.com/..." value={bizHours.googleBusinessUrl} onChange={e => setBizHours({ ...bizHours, googleBusinessUrl: e.target.value })} data-testid="google-biz-url" /></div>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={bizHours.googleSync} onChange={e => setBizHours({ ...bizHours, googleSync: e.target.checked })} data-testid="google-sync" /> Sync hours with Google Business</label>
+            <Button style={{ backgroundColor: theme.primary }} onClick={async () => {
+              try { await axios.post(`${API}/api/business/settings`, { ...bizForm, hours: bizHours }, { headers: authHeader() }); toast.success('Business hours & Google sync saved'); } catch { toast.error('Failed'); }
+            }} data-testid="save-hours-btn"><Save size={16} className="mr-1" /> Save Hours & Sync</Button>
+          </CardContent></Card>
+        </div>
       )}
 
       {/* Location Dialog */}

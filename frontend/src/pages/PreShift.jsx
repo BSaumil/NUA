@@ -40,14 +40,6 @@ export default function PreShift() {
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <Card className="border-0 shadow-sm px-4 py-2">
-            <div className="text-center">
-              <p className="text-2xl font-bold" style={{ color: theme.primary }}>${(data.revenueToday || 0).toFixed(0)}</p>
-              <p className="text-[10px] text-gray-500">Revenue Today</p>
-            </div>
-          </Card>
-        </div>
       </div>
 
       {/* Quick Stats */}
