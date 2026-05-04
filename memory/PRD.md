@@ -1,33 +1,16 @@
-# NUVA POS — PRD v11.0
+# NUVA POS — PRD v12.0
 
 ## Architecture: 22 backend routes, React + FastAPI + MongoDB + GPT-5.2
 
-## Sidebar (Grouped Dropdowns)
-- Dashboard (owner/manager) | Pre-Shift | Command Center | POS Terminal
-- **Reservations** > Bookings, Floor Plan, Waitlist, Table Layout, Settings & Rules, Experience, Clubmember, **Analytics**
-- Kitchen
-- **Menu Engineering** > Menu Matrix, What-If, Products, Inventory, AI Smart Pantry, Forecasting, Quarterly Review
-- **Team** > Staff, Roster & Payrun, Leaderboard, Tip Management
-- **Customers** > Customer List, Loyalty & Events, Email Marketing
-- Automation
-- **Accounting** > Transactions, BAS/GST, End of Day, Integrations
-- Settings (Theme, Receipt, Print Routing, Permissions, Surcharges, Hardware, Training, Locations, Staff, Business+Google Sync)
-
-## Key Updates (v11)
-- **Booking Analytics** — No-show rates, avg party size by shift, peak booking days, covers breakdown
-- **Clubmember Social Integration** — Connect Instagram/Facebook/TikTok/Twitter/Google accounts for auto-posting offers
-- **Editable Loyalty Tiers** — Owner can edit name, minPoints, multiplier, perks for Bronze/Silver/Gold/Platinum
-- **Editable Rewards** — Full CRUD with start/end date+time
-- **Editable Events** — Full CRUD with edit button on each event card
-- **Email Testing** — All test emails go to sambhatt7@gmail.com, configurable by owner
-- **Staff Sidebar Fixed** — Login response now includes permissions, cashier properly restricted
+## Roster Enhancement (v12)
+- **Add Week Roster**: Select staff + position (Barista/Bar/Floor/Kitchen/Register/Manager/Host/Dishwasher) + select days (Mon-Sun) with individual time ranges → creates all shifts at once
+- **Budget Summary**: Total Shifts, Total Hours, Weekly Budget (hours × payRate)
+- **Print Roster**: Opens formatted print window with ONLY staff names, positions, days, times — NO wages, NO tips, NO costs
+- **Position Column**: Each shift shows assigned position (Badge)
+- **Cost Column**: Owner/Manager only — calculates hours × payRate per shift
 
 ## Credentials
 Owner: owner@nuva.com / NuvaOwner2026! | Manager: manager@nuva.com / Staff2026! | Cashier: cashier@nuva.com / Staff2026!
 
-## Testing: 16 iterations, all pass (30 backend tests in latest)
-
-## Backlog
-- P1: SendGrid real email delivery (user provides key later)
-- P2: Autonomous nightly EOD cron
-- P3: Real delivery platform APIs
+## Testing: 17 iterations, all pass
+## Backlog: P1 SendGrid | P2 Nightly EOD cron | P3 Delivery APIs
