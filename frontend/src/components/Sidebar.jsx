@@ -26,6 +26,7 @@ const NAV_STRUCTURE = [
       { path: '/booking-settings', label: 'Settings & Rules' },
       { path: '/booking-experience', label: 'Experience' },
       { path: '/clubmember', label: 'Clubmember' },
+      { path: '/booking-analytics', label: 'Analytics' },
     ],
   },
   { path: '/kitchen', icon: ChefHat, label: 'Kitchen', access: ['owner', 'manager', 'kitchen'] },
@@ -79,7 +80,8 @@ const Sidebar = () => {
   const [openGroups, setOpenGroups] = useState({});
 
   const role = user?.role || 'cashier';
-  const customPerms = user?.customPermissions || user?.permissions || [];
+  // Use customPermissions if non-empty, otherwise fall back to permissions
+  const customPerms = (user?.customPermissions?.length > 0) ? user.customPermissions : (user?.permissions || []);
   const hasCustomPerms = Array.isArray(customPerms) && customPerms.length > 0 && !customPerms.includes('*');
 
   const toggleGroup = (label) => {

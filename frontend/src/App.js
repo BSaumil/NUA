@@ -39,6 +39,7 @@ import QuarterlyReview from './pages/QuarterlyReview';
 import TableLayout from './pages/TableLayout';
 import BookingSettings from './pages/BookingSettings';
 import BookingExperience from './pages/BookingExperience';
+import BookingAnalytics from './pages/BookingAnalytics';
 import Clubmember from './pages/Clubmember';
 import EmailMarketing from './pages/EmailMarketing';
 import EndOfDay from './pages/EndOfDay';
@@ -76,6 +77,7 @@ function ProtectedRoutes() {
         <Route path="/booking-settings" element={<BookingSettings />} />
         <Route path="/booking-experience" element={<BookingExperience />} />
         <Route path="/clubmember" element={<Clubmember />} />
+        <Route path="/booking-analytics" element={<BookingAnalytics />} />
         <Route path="/kitchen" element={<Kitchen />} />
         <Route path="/menu-engineering" element={<MenuEngineering />} />
         <Route path="/what-if" element={<WhatIfSimulator />} />

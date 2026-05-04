@@ -193,14 +193,6 @@ export const simulatorAPI = {
 };
 
 // Loyalty Program
-export const loyaltyAPI = {
-  getRewards: () => api.get('/loyalty/rewards'),
-  createReward: (data) => api.post('/loyalty/rewards', data),
-  deleteReward: (id) => api.delete(`/loyalty/rewards/${id}`),
-  redeem: (customerId, rewardId) => api.post('/loyalty/redeem', null, { params: { customer_id: customerId, reward_id: rewardId } }),
-  getTiers: () => api.get('/loyalty/tiers'),
-};
-
 // Events & Experiences
 export const eventsAPI = {
   getAll: (params) => api.get('/events', { params }),
@@ -343,7 +335,7 @@ export const gamificationAPI = {
   completePrintJob: (id) => api.post(`/print-routing/complete/${id}`),
 };
 
-// Reservation Features — Table Combos, Booking Rules, Schedule, Experiences, Clubmember
+// Reservation Features — Table Combos, Booking Rules, Schedule, Experiences, Clubmember, Analytics
 export const reservationFeaturesAPI = {
   getTableCombos: () => api.get('/tables/combinations'),
   createTableCombo: (data) => api.post('/tables/combinations', data),
@@ -360,6 +352,23 @@ export const reservationFeaturesAPI = {
   createClubOffer: (data) => api.post('/clubmember/offers', data),
   updateClubOffer: (id, data) => api.put(`/clubmember/offers/${id}`, data),
   deleteClubOffer: (id) => api.delete(`/clubmember/offers/${id}`),
+  getBookingAnalytics: () => api.get('/booking/analytics'),
+  getSocialAccounts: () => api.get('/clubmember/social-accounts'),
+  addSocialAccount: (data) => api.post('/clubmember/social-accounts', data),
+  removeSocialAccount: (id) => api.delete(`/clubmember/social-accounts/${id}`),
+  sendTestEmail: (data) => api.post('/email/test', data),
+  getEmailSettings: () => api.get('/email/settings'),
+  saveEmailSettings: (data) => api.post('/email/settings', data),
+};
+
+// Loyalty API (enhanced)
+export const loyaltyAPI = {
+  getTiers: () => api.get('/loyalty/tiers'),
+  updateTier: (id, data) => api.put(`/loyalty/tiers/${id}`, data),
+  getRewards: () => api.get('/loyalty/rewards'),
+  createReward: (data) => api.post('/loyalty/rewards', data),
+  updateReward: (id, data) => api.put(`/loyalty/rewards/${id}`, data),
+  deleteReward: (id) => api.delete(`/loyalty/rewards/${id}`),
 };
 
 export default api;

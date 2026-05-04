@@ -202,3 +202,130 @@ async def claim_club_offer(offer_id: str, data: dict):
     await db.club_claims.insert_one(claim)
     claim.pop("_id", None)
     return claim
+
+
+# ============ BOOKING ANALYTICS ============
+@router.get("/booking/analytics")
+async def get_booking_analytics(request: Request):
+    from routes.auth import get_current_user
+    user = await get_current_user(request)
+    if user["role"] not in ("owner", "manager"):
+        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+
+    reservations = await db.reservations.find({}, {"_id": 0}).to_list(50000)
+    total = len(reservations)
+    no_shows = len([r for r in reservations if r.get("status") == "no_show"])
+    no_show_rate = round((no_shows / max(total, 1)) * 100, 1)
+    avg_party = round(sum(r.get("partySize", 2) for r in reservations) / max(total, 1), 1)
+
+    # By shift
+    by_shift = {}
+    for r in reservations:
+        t = r.get("time", "12:00")
+        if t < "11:00":
+            shift = "Breakfast"
+        elif t < "15:00":
+            shift = "Lunch"
+        else:
+            shift = "Dinner"
+        by_shift[shift] = by_shift.get(shift, {"count": 0, "covers": 0})
+        by_shift[shift]["count"] += 1
+        by_shift[shift]["covers"] += r.get("partySize", 2)
+
+    # Peak days
+    by_day = {}
+    for r in reservations:
+        day = r.get("date", "")
+        if day:
+            from datetime import datetime as dt
+            try:
+                day_name = dt.fromisoformat(day).strftime("%A")
+            except:
+                day_name = "Unknown"
+            by_day[day_name] = by_day.get(day_name, 0) + 1
+
+    peak_days = sorted(by_day.items(), key=lambda x: x[1], reverse=True)[:3]
+
+    return {
+        "totalBookings": total, "noShows": no_shows, "noShowRate": no_show_rate,
+        "avgPartySize": avg_party,
+        "byShift": [{"shift": k, "bookings": v["count"], "covers": v["covers"]} for k, v in by_shift.items()],
+        "peakDays": [{"day": d, "bookings": c} for d, c in peak_days],
+    }
+
+# ============ SOCIAL MEDIA ACCOUNTS (for Clubmember posting) ============
+@router.get("/clubmember/social-accounts")
+async def get_social_accounts(request: Request):
+    from routes.auth import get_current_user
+    user = await get_current_user(request)
+    if user["role"] != "owner":
+        raise HTTPException(status_code=403, detail="Owner access only")
+    accounts = await db.social_accounts.find({}, {"_id": 0}).to_list(20)
+    return accounts
+
+@router.post("/clubmember/social-accounts")
+async def add_social_account(data: dict, request: Request):
+    from routes.auth import get_current_user
+    user = await get_current_user(request)
+    if user["role"] != "owner":
+        raise HTTPException(status_code=403, detail="Owner access only")
+    account = {
+        "id": f"SOC-{str(uuid.uuid4())[:8].upper()}",
+        "platform": data.get("platform", ""),
+        "accountName": data.get("accountName", ""),
+        "accessToken": data.get("accessToken", ""),
+        "connected": True,
+        "createdAt": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.social_accounts.insert_one(account)
+    account.pop("_id", None)
+    return account
+
+@router.delete("/clubmember/social-accounts/{account_id}")
+async def remove_social_account(account_id: str, request: Request):
+    from routes.auth import get_current_user
+    user = await get_current_user(request)
+    if user["role"] != "owner":
+        raise HTTPException(status_code=403, detail="Owner access only")
+    await db.social_accounts.delete_one({"id": account_id})
+    return {"message": "Account removed"}
+
+# ============ TEST EMAIL ============
+@router.post("/email/test")
+async def send_test_email(data: dict, request: Request):
+    from routes.auth import get_current_user
+    user = await get_current_user(request)
+    if user["role"] not in ("owner", "manager"):
+        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+    recipient = data.get("to", "sambhatt7@gmail.com")
+    subject = data.get("subject", "NUVA POS Test Email")
+    body = data.get("body", "This is a test email from NUVA POS system.")
+
+    # Store email record
+    email_record = {
+        "id": f"EMAIL-{str(uuid.uuid4())[:8].upper()}",
+        "to": recipient, "subject": subject, "body": body,
+        "status": "sent", "sentAt": datetime.now(timezone.utc).isoformat(),
+        "sentBy": user["id"],
+    }
+    await db.email_log.insert_one(email_record)
+    email_record.pop("_id", None)
+    return {"message": f"Test email logged (recipient: {recipient})", "emailId": email_record["id"]}
+
+@router.get("/email/settings")
+async def get_email_settings(request: Request):
+    from routes.auth import get_current_user
+    user = await get_current_user(request)
+    if user["role"] != "owner":
+        raise HTTPException(status_code=403, detail="Owner access only")
+    s = await db.settings.find_one({"key": "email_config"}, {"_id": 0})
+    return s.get("value", {}) if s else {"testEmail": "sambhatt7@gmail.com", "senderName": "NUVA POS", "senderEmail": ""}
+
+@router.post("/email/settings")
+async def save_email_settings(data: dict, request: Request):
+    from routes.auth import get_current_user
+    user = await get_current_user(request)
+    if user["role"] != "owner":
+        raise HTTPException(status_code=403, detail="Owner access only")
+    await db.settings.update_one({"key": "email_config"}, {"$set": {"key": "email_config", "value": data}}, upsert=True)
+    return {"message": "Email settings saved"}

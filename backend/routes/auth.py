@@ -125,6 +125,12 @@ async def login(req: LoginRequest, request: Request, response: Response):
     _set_tokens(response, access, refresh)
     user.pop("_id", None)
     user.pop("password_hash", None)
+    # Add permissions to login response
+    custom = user.get("customPermissions", [])
+    if custom:
+        user["permissions"] = custom
+    else:
+        user["permissions"] = ROLE_PERMISSIONS.get(user["role"], [])
     return {"user": user, "token": access}
 
 @router.post("/register")

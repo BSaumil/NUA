@@ -3,6 +3,7 @@ from typing import List, Optional
 from datetime import datetime
 from database import db
 from models.loyalty import LoyaltyReward, LoyaltyRedemption, Event, EventCreate
+from fastapi import HTTPException
 import uuid
 
 router = APIRouter()
@@ -49,12 +50,39 @@ async def redeem_loyalty_reward(customer_id: str, reward_id: str):
 
 @router.get("/loyalty/tiers")
 async def get_loyalty_tiers():
-    return [
-        {"name": "Bronze", "minPoints": 0, "multiplier": 1.0, "perks": ["1x points earning", "Birthday reward"]},
-        {"name": "Silver", "minPoints": 500, "multiplier": 1.25, "perks": ["1.25x points", "3% discount", "Priority waitlist"]},
-        {"name": "Gold", "minPoints": 2000, "multiplier": 1.5, "perks": ["1.5x points", "Free dessert monthly", "VIP section access", "Early event booking"]},
-        {"name": "Platinum", "minPoints": 5000, "multiplier": 2.0, "perks": ["2x points", "10% discount", "Personal host", "Chef's table access", "Complimentary valet"]},
-    ]
+    tiers = await db.loyalty_tiers.find({}, {"_id": 0}).to_list(20)
+    if not tiers:
+        # Seed defaults
+        defaults = [
+            {"id": "tier-bronze", "name": "Bronze", "minPoints": 0, "multiplier": 1.0, "perks": ["1x points earning", "Birthday reward"]},
+            {"id": "tier-silver", "name": "Silver", "minPoints": 500, "multiplier": 1.25, "perks": ["1.25x points", "3% discount", "Priority waitlist"]},
+            {"id": "tier-gold", "name": "Gold", "minPoints": 2000, "multiplier": 1.5, "perks": ["1.5x points", "Free dessert monthly", "VIP section access", "Early event booking"]},
+            {"id": "tier-platinum", "name": "Platinum", "minPoints": 5000, "multiplier": 2.0, "perks": ["2x points", "10% discount", "Personal host", "Chef's table access", "Complimentary valet"]},
+        ]
+        for d in defaults:
+            await db.loyalty_tiers.insert_one(d)
+        return defaults
+    return tiers
+
+@router.put("/loyalty/tiers/{tier_id}")
+async def update_loyalty_tier(tier_id: str, data: dict):
+    allowed = {"name", "minPoints", "multiplier", "perks"}
+    update = {k: v for k, v in data.items() if k in allowed}
+    result = await db.loyalty_tiers.find_one_and_update({"id": tier_id}, {"$set": update}, return_document=True)
+    if not result:
+        raise HTTPException(status_code=404, detail="Tier not found")
+    result.pop("_id", None)
+    return result
+
+@router.put("/loyalty/rewards/{reward_id}")
+async def update_loyalty_reward(reward_id: str, data: dict):
+    allowed = {"name", "description", "pointsCost", "rewardType", "discountAmount", "startDate", "startTime", "endDate", "endTime"}
+    update = {k: v for k, v in data.items() if k in allowed}
+    result = await db.loyalty_rewards.find_one_and_update({"id": reward_id}, {"$set": update}, return_document=True)
+    if not result:
+        raise HTTPException(status_code=404, detail="Reward not found")
+    result.pop("_id", None)
+    return result
 
 # ============ EVENTS & EXPERIENCES API ============
 @router.get("/events")
