@@ -1,14 +1,17 @@
 # Test Credentials
 
 ## Staff Accounts (JWT Auth)
-- **Owner**: owner@nuva.com / NuvaOwner2026! (full access - all 26 permissions)
-- **Manager**: manager@nuva.com / Staff2026! (most features except accounting/payrun/permissions)
-- **Cashier**: cashier@nuva.com / Staff2026! (custom permissions set: pos, customers, products, dashboard)
-- **Kitchen**: kitchen@nuva.com / Staff2026! (Kitchen Display + Pre-Shift only)
+- **Owner**: owner@nuva.com / NuvaOwner2026! (full access)
+- **Manager**: manager@nuva.com / Staff2026! (name: Tina)
+- **Cashier**: cashier@nuva.com / Staff2026! (name: Vik)
+- **Kitchen**: kitchen@nuva.com / Staff2026! (name: Jim)
 
 ## PIN Login
-- Set via Settings > Staff tab (Owner only)
-- PIN must be 2-4 digits, unique per staff member
+- Owner PIN: 25
+- Manager PIN: 00
+- Cashier PIN: 11
+- Kitchen PIN: 22
+- Maria (barista) PIN: 99
 
 ## Secret Features
 - **Ghost Discount**: Double-click "POS Terminal" title (owner only)

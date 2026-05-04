@@ -1,16 +1,17 @@
-# NUVA POS — PRD v12.0
+# NUVA POS — PRD v13.0
 
-## Architecture: 22 backend routes, React + FastAPI + MongoDB + GPT-5.2
+## Staff System (v13)
+- **Add Staff**: Only name required. Email/password optional (auto-generates email if blank). PIN-only login supported.
+- **Salary Types**: Hourly, Daily, or Annually — selectable per staff member
+- **Custom Roles**: Owner can add unlimited custom roles (default 8 + add more). Roles appear in dropdown.
+- **Roster Week View**: Mon-Sun columns, each day shows shift cards (staff name, position badge, times). Budget summary shows total shifts/hours/cost.
+- **Print Roster**: Shows ONLY names, positions, days, times — no wages/tips/costs
 
-## Roster Enhancement (v12)
-- **Add Week Roster**: Select staff + position (Barista/Bar/Floor/Kitchen/Register/Manager/Host/Dishwasher) + select days (Mon-Sun) with individual time ranges → creates all shifts at once
-- **Budget Summary**: Total Shifts, Total Hours, Weekly Budget (hours × payRate)
-- **Print Roster**: Opens formatted print window with ONLY staff names, positions, days, times — NO wages, NO tips, NO costs
-- **Position Column**: Each shift shows assigned position (Badge)
-- **Cost Column**: Owner/Manager only — calculates hours × payRate per shift
+## Custom Roles Available
+cashier, kitchen, manager, barista, bar, floor, host, dishwasher, pizza, delivery (+ owner can add more)
 
 ## Credentials
 Owner: owner@nuva.com / NuvaOwner2026! | Manager: manager@nuva.com / Staff2026! | Cashier: cashier@nuva.com / Staff2026!
 
-## Testing: 17 iterations, all pass
+## Testing: 18 iterations, all pass
 ## Backlog: P1 SendGrid | P2 Nightly EOD cron | P3 Delivery APIs
