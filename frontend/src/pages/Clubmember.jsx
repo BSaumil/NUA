@@ -1,0 +1,115 @@
+import React, { useState, useEffect } from 'react';
+import { Tag, Plus, Edit, Trash2, Clock, Users, Percent } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Badge } from '../components/ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { useTheme } from '../contexts/ThemeContext';
+import { reservationFeaturesAPI } from '../services/api';
+import { toast } from 'sonner';
+
+export default function Clubmember() {
+  const { theme } = useTheme();
+  const [offers, setOffers] = useState([]);
+  const [showDialog, setShowDialog] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState({ title: '', description: '', discount: 20, startDate: '', startTime: '00:00', endDate: '', endTime: '23:59', totalSlots: 10, active: true, socialPlatforms: ['instagram', 'facebook'] });
+
+  useEffect(() => { fetchData(); }, []);
+  const fetchData = async () => { try { const r = await reservationFeaturesAPI.getClubOffers(); setOffers(r.data); } catch {} };
+
+  const openAdd = () => { setEditing(null); setForm({ title: '', description: '', discount: 20, startDate: '', startTime: '00:00', endDate: '', endTime: '23:59', totalSlots: 10, active: true, socialPlatforms: ['instagram', 'facebook'] }); setShowDialog(true); };
+  const openEdit = (o) => { setEditing(o); setForm({ title: o.title, description: o.description, discount: o.discount, startDate: o.startDate || '', startTime: o.startTime || '00:00', endDate: o.endDate || '', endTime: o.endTime || '23:59', totalSlots: o.totalSlots, active: o.active, socialPlatforms: o.socialPlatforms || [] }); setShowDialog(true); };
+
+  const handleSave = async () => {
+    if (!form.title) { toast.error('Title required'); return; }
+    const data = { ...form, discount: parseInt(form.discount), totalSlots: parseInt(form.totalSlots) };
+    try {
+      if (editing) { await reservationFeaturesAPI.updateClubOffer(editing.id, data); toast.success('Offer updated'); }
+      else { await reservationFeaturesAPI.createClubOffer(data); toast.success('Offer created'); }
+      setShowDialog(false); fetchData();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed'); }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Delete this offer?')) return;
+    try { await reservationFeaturesAPI.deleteClubOffer(id); toast.success('Deleted'); fetchData(); } catch {}
+  };
+
+  const platforms = ['instagram', 'facebook', 'tiktok', 'twitter', 'google'];
+
+  return (
+    <div className="space-y-6" data-testid="clubmember-page">
+      <div className="flex items-center justify-between">
+        <div><h1 className="text-2xl font-bold" style={{ color: theme.text }}>Clubmember Offers</h1><p className="text-sm text-gray-500">Social media booking rewards (EatClub-style). 20-50% discounts with limited slots.</p></div>
+        <Button style={{ backgroundColor: theme.primary }} onClick={openAdd} data-testid="add-offer-btn"><Plus size={16} className="mr-1" /> New Offer</Button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {offers.map(offer => {
+          const remaining = offer.totalSlots - (offer.claimedSlots || 0);
+          return (
+            <Card key={offer.id} className={`${!offer.active ? 'opacity-60' : ''}`} data-testid={`offer-${offer.id}`}>
+              <CardContent className="p-5">
+                <div className="flex items-start justify-between mb-3">
+                  <Badge className="bg-red-100 text-red-700 text-lg font-bold">{offer.discount}% OFF</Badge>
+                  <Badge className={offer.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}>{offer.active ? 'Live' : 'Paused'}</Badge>
+                </div>
+                <h3 className="font-bold text-lg mb-1">{offer.title}</h3>
+                <p className="text-sm text-gray-500 mb-3">{offer.description}</p>
+                <div className="grid grid-cols-2 gap-2 text-sm mb-3">
+                  <div className="flex items-center gap-1 text-gray-600"><Clock size={13} /><span>{offer.startDate || 'Open'} → {offer.endDate || 'Ongoing'}</span></div>
+                  <div className="flex items-center gap-1 text-gray-600"><Users size={13} /><span>{remaining}/{offer.totalSlots} left</span></div>
+                </div>
+                <div className="w-full h-2 bg-gray-200 rounded-full mb-3">
+                  <div className="h-full rounded-full bg-red-500" style={{ width: `${((offer.claimedSlots || 0) / Math.max(offer.totalSlots, 1)) * 100}%` }} />
+                </div>
+                <div className="flex flex-wrap gap-1 mb-3">
+                  {(offer.socialPlatforms || []).map(p => <Badge key={p} variant="outline" className="text-[10px] capitalize">{p}</Badge>)}
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => openEdit(offer)} data-testid={`edit-offer-${offer.id}`}><Edit size={14} /></Button>
+                  <Button variant="outline" size="sm" className="text-red-500" onClick={() => handleDelete(offer.id)}><Trash2 size={14} /></Button>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+        {offers.length === 0 && <Card className="col-span-3 border-dashed"><CardContent className="p-12 text-center"><Tag size={40} className="mx-auto mb-3 text-gray-300" /><p className="text-gray-500">No club offers yet. Create your first social media reward!</p></CardContent></Card>}
+      </div>
+
+      <Dialog open={showDialog} onOpenChange={setShowDialog}>
+        <DialogContent className="max-w-md" data-testid="offer-dialog">
+          <DialogHeader><DialogTitle>{editing ? 'Edit Offer' : 'New Club Offer'}</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-2 max-h-[60vh] overflow-y-auto">
+            <Input placeholder="Offer title" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} data-testid="offer-title" />
+            <textarea className="w-full min-h-[50px] p-2 border rounded-md text-sm" placeholder="Description..." value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
+            <div>
+              <label className="text-xs font-medium text-gray-500 mb-1 block">Discount (20-50%)</label>
+              <div className="flex items-center gap-2">
+                <input type="range" min="20" max="50" step="5" value={form.discount} onChange={e => setForm({ ...form, discount: e.target.value })} className="flex-1" data-testid="offer-discount" />
+                <span className="text-lg font-bold" style={{ color: theme.primary }}>{form.discount}%</span>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div><label className="text-xs text-gray-500">Start Date</label><Input type="date" value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })} data-testid="offer-start-date" /></div>
+              <div><label className="text-xs text-gray-500">Start Time</label><Input type="time" value={form.startTime} onChange={e => setForm({ ...form, startTime: e.target.value })} /></div>
+              <div><label className="text-xs text-gray-500">End Date</label><Input type="date" value={form.endDate} onChange={e => setForm({ ...form, endDate: e.target.value })} data-testid="offer-end-date" /></div>
+              <div><label className="text-xs text-gray-500">End Time</label><Input type="time" value={form.endTime} onChange={e => setForm({ ...form, endTime: e.target.value })} /></div>
+            </div>
+            <Input type="number" placeholder="Total slots available" value={form.totalSlots} onChange={e => setForm({ ...form, totalSlots: e.target.value })} data-testid="offer-slots" />
+            <div><label className="text-xs font-medium text-gray-500 mb-1 block">Social Platforms</label>
+              <div className="flex flex-wrap gap-1.5">{platforms.map(p => (
+                <button key={p} type="button" onClick={() => { const sp = form.socialPlatforms.includes(p) ? form.socialPlatforms.filter(x => x !== p) : [...form.socialPlatforms, p]; setForm({ ...form, socialPlatforms: sp }); }}
+                  className={`px-2.5 py-1 text-xs rounded-full font-medium capitalize ${form.socialPlatforms.includes(p) ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}>{p}</button>
+              ))}</div>
+            </div>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} /> Active</label>
+            <Button className="w-full" style={{ backgroundColor: theme.primary }} onClick={handleSave} data-testid="save-offer-btn">{editing ? 'Update' : 'Create'} Offer</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

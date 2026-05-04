@@ -1,0 +1,110 @@
+{
+  "iteration": 15,
+  "date": "2026-01-04",
+  "focus": "NUVA POS Reservation System Expansion - Table Layout, Booking Settings, Experiences, Clubmember, Staff Redirect",
+  "summary": "Tested all iteration 15 reservation expansion features. Backend: 26/26 tests passed (100%). Frontend: All features working correctly. Sidebar shows 7 reservation sub-items. Table Layout shows table grid with existing combinations. Booking Settings has Rules and Schedule tabs with all required fields. Experience page shows experience cards with CRUD. Clubmember page shows EatClub-style offers with discount badges, slots remaining, platform badges. Cashier correctly redirected to /pos and Dashboard hidden from sidebar.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Cashier Sidebar", "issues": ["Menu Engineering dropdown visible to cashier - may be intentional via custom permissions but should verify if cashier should see menu items"]}
+    ]
+  },
+  "test_results": {
+    "backend": {
+      "TestAuth": {
+        "test_owner_login": "PASS",
+        "test_manager_login": "PASS",
+        "test_cashier_login": "PASS"
+      },
+      "TestTableCombinations": {
+        "test_get_table_combinations": "PASS",
+        "test_create_table_combination_owner": "PASS",
+        "test_create_table_combination_manager": "PASS",
+        "test_create_table_combination_cashier_denied": "PASS (403)"
+      },
+      "TestBookingRules": {
+        "test_get_booking_rules": "PASS - maxOnlinePartySize=12, bookingWindow=60min",
+        "test_save_booking_rules_owner": "PASS",
+        "test_save_booking_rules_manager_denied": "PASS (403)",
+        "test_save_booking_rules_cashier_denied": "PASS (403)"
+      },
+      "TestBookingSchedule": {
+        "test_get_booking_schedule_default_shifts": "PASS - 3 shifts (Breakfast/Lunch/Dinner)",
+        "test_save_booking_schedule_owner": "PASS"
+      },
+      "TestBookingExperiences": {
+        "test_get_experiences": "PASS",
+        "test_create_experience_owner": "PASS",
+        "test_create_experience_manager": "PASS",
+        "test_create_experience_cashier_denied": "PASS (403)"
+      },
+      "TestClubmemberOffers": {
+        "test_get_club_offers": "PASS",
+        "test_create_club_offer_owner": "PASS",
+        "test_create_club_offer_discount_validation_min": "PASS (400 for <20%)",
+        "test_create_club_offer_discount_validation_max": "PASS (400 for >50%)",
+        "test_create_club_offer_manager_denied": "PASS (403)",
+        "test_create_club_offer_cashier_denied": "PASS (403)"
+      },
+      "TestClubmemberClaim": {
+        "test_claim_club_offer": "PASS (public endpoint)",
+        "test_claim_nonexistent_offer": "PASS (404)"
+      }
+    },
+    "frontend": {
+      "Owner_login": "PASS",
+      "Sidebar_7_reservation_items": "PASS - Bookings, Floor Plan, Waitlist, Table Layout, Settings & Rules, Experience, Clubmember",
+      "Table_Layout_page": "PASS - Table grid (12 tables), existing combinations section, multi-select instructions",
+      "Table_Layout_combinations": "PASS - Shows 'Corner Section' combo (Tables 1,2,3 | Max 12 covers)",
+      "Booking_Settings_Rules_tab": "PASS - Max Party Size, Max Advance Days, Booking Window (30min/1hr), Cancellation Window, Auto-confirm, Require deposit",
+      "Booking_Settings_Schedule_tab": "PASS - 3 shifts (Breakfast 7-11, Lunch 11:30-3, Dinner 5-10), Add Shift button, Save Schedule button",
+      "Experience_page": "PASS - Shows 'Sunset Wine Tasting' ($85/pp, 20 max, Fri/Sat, Active)",
+      "Experience_dialog": "PASS - Name, description, price, max bookings, day selection, date range, active toggle",
+      "Clubmember_page": "PASS - Shows 'Sunday Special' (30% OFF, Live, 15/15 left, Instagram/Facebook badges)",
+      "Clubmember_dialog": "PASS - Title, description, discount slider (20-50%), dates, times, slots, platform selection",
+      "Cashier_redirect_to_pos": "PASS - Redirected to /pos after login",
+      "Cashier_dashboard_hidden": "PASS - Dashboard link NOT visible in sidebar",
+      "Cashier_sidebar_items": "PASS - Shows Pre-Shift, POS Terminal, Reservations, Menu Engineering, Customers"
+    }
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration15_reservation_expansion.py",
+    "/app/test_reports/pytest/pytest_iteration15.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "All 7 reservation sub-items correctly implemented in Sidebar NAV_STRUCTURE",
+    "Table Layout correctly fetches tables from floor plans and displays combinations",
+    "Booking Rules correctly enforces owner-only access for saving",
+    "Booking Schedule returns 3 default shifts when none stored in DB",
+    "Clubmember offers correctly validate 20-50% discount range",
+    "Claim endpoint is public (no auth required) as designed",
+    "Staff redirect to /pos working via App.js isStaff check",
+    "Dashboard hidden from cashier via NAV_STRUCTURE access control"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration15_reservation_expansion.py"
+  ],
+  "success_rate": {
+    "backend": "100% (26/26 tests passed)",
+    "frontend": "100% (all features working)"
+  },
+  "test_credentials": {
+    "owner": "owner@nuva.com / NuvaOwner2026!",
+    "manager": "manager@nuva.com / Staff2026!",
+    "cashier": "cashier@nuva.com / Staff2026!",
+    "kitchen": "kitchen@nuva.com / Staff2026!"
+  },
+  "seed_data_creation": "Test data created and cleaned up during pytest run (TEST_ prefixed items)",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 15 tested reservation system expansion. All 7 reservation sub-items working: Bookings, Floor Plan, Waitlist, Table Layout, Settings & Rules, Experience, Clubmember. Table combinations CRUD working. Booking rules (owner-only save) and schedule (3 default shifts) working. Experiences CRUD working. Clubmember offers with 20-50% discount validation working. Claim endpoint is public. Cashier redirects to /pos and cannot see Dashboard. API base URL: https://pos-checkout-16.preview.emergentagent.com. Auth token stored in localStorage as 'nuva_token'.",
+  "mocked_apis": {
+    "email_delivery": "Email delivery is MOCKED - campaigns stored in DB but no actual emails sent"
+  }
+}

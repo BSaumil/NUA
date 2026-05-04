@@ -36,6 +36,10 @@ import MemberPortal from './pages/MemberPortal';
 import StaffRoster from './pages/StaffRoster';
 import StaffLeaderboard from './pages/StaffLeaderboard';
 import QuarterlyReview from './pages/QuarterlyReview';
+import TableLayout from './pages/TableLayout';
+import BookingSettings from './pages/BookingSettings';
+import BookingExperience from './pages/BookingExperience';
+import Clubmember from './pages/Clubmember';
 import EmailMarketing from './pages/EmailMarketing';
 import EndOfDay from './pages/EndOfDay';
 import TipManagement from './pages/TipManagement';
@@ -53,16 +57,25 @@ function ProtectedRoutes() {
   const { user, loading } = useAuth();
   if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="animate-pulse text-gray-500 text-lg">Loading...</div></div>;
   if (!user) return <Login />;
+
+  // Staff (cashier/kitchen) land on POS, not Dashboard
+  const isStaff = user.role === 'cashier' || user.role === 'kitchen';
+  const defaultRoute = isStaff ? '/pos' : '/';
+
   return (
     <StaffLayout>
       <Routes>
-        <Route path="/" element={<Dashboard />} />
+        <Route path="/" element={isStaff ? <Navigate to="/pos" replace /> : <Dashboard />} />
         <Route path="/pre-shift" element={<PreShift />} />
         <Route path="/command-center" element={<CommandCenter />} />
         <Route path="/pos" element={<POSTerminal />} />
         <Route path="/reservations" element={<Reservations />} />
         <Route path="/floor-plan" element={<FloorPlan />} />
         <Route path="/waitlist" element={<WaitlistPage />} />
+        <Route path="/table-layout" element={<TableLayout />} />
+        <Route path="/booking-settings" element={<BookingSettings />} />
+        <Route path="/booking-experience" element={<BookingExperience />} />
+        <Route path="/clubmember" element={<Clubmember />} />
         <Route path="/kitchen" element={<Kitchen />} />
         <Route path="/menu-engineering" element={<MenuEngineering />} />
         <Route path="/what-if" element={<WhatIfSimulator />} />

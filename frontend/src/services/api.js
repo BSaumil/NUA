@@ -343,4 +343,23 @@ export const gamificationAPI = {
   completePrintJob: (id) => api.post(`/print-routing/complete/${id}`),
 };
 
+// Reservation Features — Table Combos, Booking Rules, Schedule, Experiences, Clubmember
+export const reservationFeaturesAPI = {
+  getTableCombos: () => api.get('/tables/combinations'),
+  createTableCombo: (data) => api.post('/tables/combinations', data),
+  deleteTableCombo: (id) => api.delete(`/tables/combinations/${id}`),
+  getBookingRules: () => api.get('/booking/rules'),
+  saveBookingRules: (data) => api.post('/booking/rules', data),
+  getBookingSchedule: () => api.get('/booking/schedule'),
+  saveBookingSchedule: (shifts) => api.post('/booking/schedule', { shifts }),
+  getExperiences: () => api.get('/booking/experiences'),
+  createExperience: (data) => api.post('/booking/experiences', data),
+  updateExperience: (id, data) => api.put(`/booking/experiences/${id}`, data),
+  deleteExperience: (id) => api.delete(`/booking/experiences/${id}`),
+  getClubOffers: () => api.get('/clubmember/offers'),
+  createClubOffer: (data) => api.post('/clubmember/offers', data),
+  updateClubOffer: (id, data) => api.put(`/clubmember/offers/${id}`, data),
+  deleteClubOffer: (id) => api.delete(`/clubmember/offers/${id}`),
+};
+
 export default api;
