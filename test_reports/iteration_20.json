@@ -1,0 +1,34 @@
+{
+  "summary": "Frontend-only testing of iteration-20 navigation refactor (BottomDock + POS reflow + Payment Link QR). Most of the new UX scaffolding is wired correctly: sidebar is removed, BottomDock is global with role-based quick actions + More splash, all 4 roles default-land on /pos, POS now groups products by category in the All view with a wider 440px cart panel, and Payment Links has a working QR modal with download/copy. HOWEVER, the headline feature of this iteration — left-swipe-delete / right-swipe-repeat on cart items — is COMPLETELY non-functional: the SwipeableCartItem component is defined but never used in the cart render. In addition, several role quick-action dock buttons are hidden because the customPermissions filter in BottomDock excludes paths that the seeded staff users don't have explicit permission strings for.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "POSTerminal cart", "issue": "CRITICAL — SwipeableCartItem (lines 21-108) is defined but NEVER used. The cart panel at line 469-483 still renders a plain <Card> with old quantity buttons (no data-testid on +/-, no Trash icon swipe, no hint text). Therefore cart-item-wrapper-{id}, cart-plus-{id}, cart-minus-{id}, swipe-delete-bg-{id}, swipe-repeat-bg-{id}, and the '← swipe delete · repeat swipe →' hint are ALL absent. Left-swipe-delete and right-swipe-repeat features do not work AT ALL.", "selector": "[data-testid^='cart-item-wrapper-']", "priority": "CRITICAL"},
+      {"component": "BottomDock quick actions", "issue": "HIGH — Manager dock missing dock-reservations and dock-staff-roster; Cashier dock missing dock-loyalty; Kitchen dock missing dock-inventory and dock-ai-pantry. Root cause: when user.customPermissions is set, the .filter() at line 127-131 evaluates `customPerms.includes(q.path.replace('/', ''))` and the seeded staff users don't have those exact path-keys in their permissions array. So the role's Quick Action set is silently truncated to whichever paths happen to be in customPerms. Owner is unaffected (early return).", "selector": "[data-testid='dock-reservations']", "priority": "HIGH"},
+      {"component": "Product image", "issue": "Console warning on every page load — 'An empty string was passed to the src attribute'. A product (likely Smoothies — seen rendering as text alt in screenshot) has an empty image URL.", "selector": "img with empty src", "priority": "LOW"}
+    ],
+    "integration_issues": [
+      {"flow": "Cart swipe gesture", "issue": "Cannot be tested at all — the swipe component is not mounted. Even the manual unit-level swipe logic in SwipeableCartItem looks correct, but it is unreachable from the running UI.", "affected_selectors": ["[data-testid^='cart-item-wrapper-']", "[data-testid^='swipe-delete-bg-']", "[data-testid^='swipe-repeat-bg-']"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "URGENT: In /app/frontend/src/pages/POSTerminal.jsx around line 469-483, replace the inline <Card data-testid='cart-item-${item.id}'>...</Card> render with <SwipeableCartItem item={item} onUpdateQty={updateQuantity} onRemove={removeFromCart} onRepeat={(it)=>updateQuantity(it.id, it.quantity+1)} theme={theme} />. Without this fix the entire iteration-20 swipe feature is dead.",
+    "Fix BottomDock role-action filter (lines 127-131): for QUICK_ACTIONS the role is the source of truth — drop the customPerms filter for quick actions, OR ensure seeded manager/cashier/kitchen users have the path-keys (reservations, staff-roster, loyalty, inventory, ai-pantry, etc.) in their customPermissions list. Same fix is needed for `isAllowed` so splash tiles also show Bookings/Loyalty/etc. for staff users.",
+    "Fix product image with empty src (likely Smoothies — set placeholder or skip <img> if !item.image)."
+  ],
+  "critical_code_review_comments": [
+    "POSTerminal.jsx is now 752 lines — exceeds the 700-line guideline. Worth splitting cart panel + payment modals into sub-components.",
+    "Dead-code component SwipeableCartItem ships in the bundle but provides no value because it's never rendered. Either wire it up (preferred) or remove.",
+    "BottomDock customPermissions filter conflates 'role-based default' with 'fine-grained access control'. Quick actions should be derived from role; only the More splash should respect granular permissions."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "70%"},
+  "test_credentials": "Used owner@nuva.com / NuvaOwner2026!, manager@nuva.com / Staff2026!, cashier@nuva.com / Staff2026!, kitchen@nuva.com / Staff2026! (all from /app/memory/test_credentials.md, all working)",
+  "seed_data_creation": "Created 1 payment link via UI (Generate Link button) to validate QR modal — link persisted, QR opened with SVG, Download QR + Copy Link buttons present.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Verified working: (1) all roles land on /pos after login; (2) Sidebar fully removed from layout — no [data-testid='sidebar'] anywhere; (3) BottomDock testid='bottom-dock' visible on every authenticated page; (4) More splash testid='more-splash' opens, X close + backdrop click both dismiss, tile click navigates; (5) Owner sees 38 splash tiles, Cashier hides Accounting+Dashboard tiles, Manager hides Accounting+BAS-GST — RBAC works for splash; (6) POS All view shows 3 grouped sections (BEVERAGES, BAKERY, FOOD) with data-testid='pos-category-section-{cat}'; (7) Cart panel w-[440px] confirmed; (8) Payment Links page QR button (data-testid='qr-{id}') opens qr-modal with QRCodeSVG + download-qr-btn + copy-qr-btn; (9) dock-logout works → returns to login. After main agent fixes the SwipeableCartItem usage, retest swipe-left (delete) and swipe-right (repeat) gestures using mouse.move + mouse.down + step-by-step mouse.move loop (12 steps × 12px = 144px > 80px threshold) on cart-item-wrapper-{id} starting from x = box.x+100 to avoid the data-no-swipe quantity button area on the right.",
+  "rca_of_the_issue": "1) Swipe feature dead — the developer extracted SwipeableCartItem at the top of POSTerminal.jsx but forgot to replace the inline cart Card with it; the file still has the old plain <Card data-testid={`cart-item-${item.id}`}> at line 470 inside the cart.map(). One-line fix. 2) Role dock truncated — BottomDock.jsx line 127-131 filters QUICK_ACTIONS by customPermissions when hasCustomPerms is true, but seed staff users have a partial customPermissions array that omits some role-default paths, causing silent removal. Fix is either to drop the filter for quick actions (role is enough) or to expand seeded customPermissions to include the per-role default paths."
+}

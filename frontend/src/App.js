@@ -5,7 +5,7 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import { POSProvider } from './contexts/POSContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Toaster } from './components/ui/sonner';
-import Sidebar from './components/Sidebar';
+import BottomDock from './components/BottomDock';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import POSTerminal from './pages/POSTerminal';
@@ -52,9 +52,9 @@ import PaymentLinks from './pages/PaymentLinks';
 
 function StaffLayout({ children }) {
   return (
-    <div className="flex">
-      <Sidebar />
-      <div className="ml-64 flex-1 p-8 min-h-screen bg-gray-50">{children}</div>
+    <div className="min-h-screen bg-gray-50 pb-20">
+      <div className="px-6 py-6 max-w-screen-2xl mx-auto">{children}</div>
+      <BottomDock />
     </div>
   );
 }
@@ -64,14 +64,12 @@ function ProtectedRoutes() {
   if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="animate-pulse text-gray-500 text-lg">Loading...</div></div>;
   if (!user) return <Login />;
 
-  // Staff (cashier/kitchen) land on POS, not Dashboard
-  const isStaff = user.role === 'cashier' || user.role === 'kitchen';
-  const defaultRoute = isStaff ? '/pos' : '/';
-
+  // ALL staff (including owner) land on POS by default. Use "More" dock to access dashboard / other pages.
   return (
     <StaffLayout>
       <Routes>
-        <Route path="/" element={isStaff ? <Navigate to="/pos" replace /> : <Dashboard />} />
+        <Route path="/" element={<Navigate to="/pos" replace />} />
+        <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/pre-shift" element={<PreShift />} />
         <Route path="/command-center" element={<CommandCenter />} />
         <Route path="/pos" element={<POSTerminal />} />

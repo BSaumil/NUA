@@ -17,6 +17,96 @@ import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, 
 import { useToast } from '../hooks/use-toast';
 import { useAuth } from '../contexts/AuthContext';
 
+// ===== Swipeable Cart Item: left-swipe deletes, right-swipe repeats =====
+function SwipeableCartItem({ item, onUpdateQty, onRemove, onRepeat, theme }) {
+  const [dragX, setDragX] = useState(0);
+  const startXRef = React.useRef(null);
+  const isDraggingRef = React.useRef(false);
+  const THRESHOLD = 80; // pixels to commit action
+
+  const onPointerDown = (e) => {
+    // ignore drags initiated on quantity buttons
+    if (e.target.closest('[data-no-swipe]')) return;
+    startXRef.current = e.clientX;
+    isDraggingRef.current = true;
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onPointerMove = (e) => {
+    if (!isDraggingRef.current || startXRef.current === null) return;
+    const dx = e.clientX - startXRef.current;
+    setDragX(dx);
+  };
+  const onPointerUp = (e) => {
+    if (!isDraggingRef.current) return;
+    isDraggingRef.current = false;
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch {}
+    const dx = dragX;
+    if (dx <= -THRESHOLD) {
+      // Animate out then delete
+      setDragX(-400);
+      setTimeout(() => onRemove(item.id), 180);
+    } else if (dx >= THRESHOLD) {
+      // Trigger repeat then bounce back
+      onRepeat(item);
+      setDragX(0);
+    } else {
+      setDragX(0);
+    }
+    startXRef.current = null;
+  };
+
+  const bgIntensity = Math.min(Math.abs(dragX) / THRESHOLD, 1);
+
+  return (
+    <div className="relative overflow-hidden rounded-lg" data-testid={`cart-item-wrapper-${item.id}`}>
+      {/* Background hint — left side (right-swipe = repeat) */}
+      <div
+        className="absolute inset-y-0 left-0 flex items-center pl-4 text-white font-bold text-xs"
+        style={{ backgroundColor: '#10b981', opacity: dragX > 0 ? bgIntensity : 0, width: '100%' }}
+        data-testid={`swipe-repeat-bg-${item.id}`}
+      >
+        <span>+1 REPEAT →</span>
+      </div>
+      {/* Background hint — right side (left-swipe = delete) */}
+      <div
+        className="absolute inset-y-0 right-0 flex items-center justify-end pr-4 text-white font-bold text-xs"
+        style={{ backgroundColor: '#ef4444', opacity: dragX < 0 ? bgIntensity : 0, width: '100%' }}
+        data-testid={`swipe-delete-bg-${item.id}`}
+      >
+        <span>← DELETE</span>
+      </div>
+      <Card
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        style={{ transform: `translateX(${dragX}px)`, transition: isDraggingRef.current ? 'none' : 'transform 0.2s ease-out', touchAction: 'pan-y' }}
+        className="relative bg-white cursor-grab active:cursor-grabbing select-none"
+        data-testid={`cart-item-${item.id}`}
+      >
+        <CardContent className="p-3">
+          <div className="flex items-center gap-3">
+            <img src={item.image} alt={item.name} className="w-14 h-14 object-cover rounded-md flex-shrink-0" draggable={false} />
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-sm truncate">{item.name}</p>
+              <p className="text-xs text-gray-500">${item.price.toFixed(2)} each</p>
+            </div>
+            <div className="flex items-center gap-1.5" data-no-swipe>
+              <Button size="sm" variant="outline" onClick={() => onUpdateQty(item.id, item.quantity - 1)} className="w-7 h-7 p-0" data-testid={`cart-minus-${item.id}`}><Minus size={12} /></Button>
+              <span className="font-semibold w-6 text-center text-sm">{item.quantity}</span>
+              <Button size="sm" variant="outline" onClick={() => onUpdateQty(item.id, item.quantity + 1)} className="w-7 h-7 p-0" data-testid={`cart-plus-${item.id}`}><Plus size={12} /></Button>
+            </div>
+          </div>
+          <div className="flex items-center justify-between mt-1.5">
+            <span className="text-[10px] text-gray-300 italic">← swipe delete · repeat swipe →</span>
+            <span className="font-bold" style={{ color: theme.primary }}>${(item.price * item.quantity).toFixed(2)}</span>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 const POSTerminal = () => {
   const { theme } = useTheme();
   const { user } = useAuth();
@@ -52,7 +142,7 @@ const POSTerminal = () => {
   const [ghostAmount, setGhostAmount] = useState('');
   const [lastTxnId, setLastTxnId] = useState(null);
 
-  const categories = ['All', 'Beverages', 'Food', 'Bakery'];
+  const [categories, setCategories] = useState(['All']);
 
   useEffect(() => { fetchData(); }, []);
 
@@ -64,6 +154,12 @@ const POSTerminal = () => {
       setProducts(productsRes.data);
       setPromotions(promotionsRes.data);
       setCustomers(customersRes.data);
+      // Fetch dynamic category list
+      try {
+        const r = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/categories`);
+        const cats = await r.json();
+        if (Array.isArray(cats)) setCategories(['All', ...cats.filter(c => c.active !== false).sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99)).map(c => c.name)]);
+      } catch {}
       // Check training mode
       advancedAPI.getTrainingMode().then(r => setTrainingMode(r.data?.enabled || false)).catch(() => {});
     } catch (error) {
@@ -76,6 +172,17 @@ const POSTerminal = () => {
     (selectedCategory === 'All' || p.category === selectedCategory) &&
     p.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  // Group products by category for "All" view (category-wise display)
+  const groupedByCategory = React.useMemo(() => {
+    const groups = {};
+    filteredProducts.forEach(p => {
+      const cat = p.category || 'Uncategorized';
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(p);
+    });
+    return groups;
+  }, [filteredProducts]);
 
   const totals = calculateTotal();
   const totalNum = parseFloat(totals.total) || 0;
@@ -228,72 +335,108 @@ const POSTerminal = () => {
   };
 
   return (
-    <div className="flex h-screen gap-6" data-testid="pos-terminal">
+    <div className="flex gap-4 h-[calc(100vh-7rem)]" data-testid="pos-terminal">
       {/* Training Mode Banner */}
       {trainingMode && (
-        <div className="fixed top-0 left-64 right-0 z-40 bg-amber-500 text-white text-center py-2 text-sm font-semibold"
+        <div className="fixed top-0 left-0 right-0 z-40 bg-amber-500 text-white text-center py-2 text-sm font-semibold"
           data-testid="training-mode-banner">
           TRAINING MODE — Transactions are simulated, no real charges
         </div>
       )}
-      {/* Products Grid */}
-      <div className="flex-1 flex flex-col">
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold mb-4" style={{ color: theme.text }}
+      {/* Products Grid — smaller cards, category-wise */}
+      <div className="flex-1 flex flex-col min-w-0">
+        <div className="mb-3">
+          <h1 className="text-xl font-bold mb-2" style={{ color: theme.text }}
             onDoubleClick={() => { if (user?.role === 'owner') setShowGhost(true); }}
             data-testid="pos-title">POS Terminal</h1>
-          <div className="flex gap-3 mb-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
-              <Input placeholder="Search products..." className="pl-10" value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)} data-testid="pos-search" />
-            </div>
+          <div className="relative mb-3">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={16} />
+            <Input placeholder="Search products..." className="pl-9 h-9" value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)} data-testid="pos-search" />
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-1.5 overflow-x-auto pb-1">
             {categories.map(cat => (
-              <Button key={cat} variant={selectedCategory === cat ? 'default' : 'outline'}
+              <button key={cat}
                 onClick={() => setSelectedCategory(cat)}
-                style={{ backgroundColor: selectedCategory === cat ? theme.primary : 'transparent', color: selectedCategory === cat ? 'white' : theme.text }}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-all ${selectedCategory === cat ? 'text-white shadow-sm' : 'bg-white text-gray-600 border hover:border-gray-400'}`}
+                style={selectedCategory === cat ? { backgroundColor: theme.primary } : {}}
                 data-testid={`pos-cat-${cat}`}>
                 {cat}
-              </Button>
+              </button>
             ))}
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto">
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {filteredProducts.map(product => (
-              <Card key={product.id} className="cursor-pointer hover:shadow-lg transition-all duration-300 hover:scale-105"
-                onClick={() => addToCart(product)} data-testid={`product-${product.id}`}>
-                <CardContent className="p-4">
-                  <img src={product.image} alt={product.name} className="w-full h-32 object-cover rounded-lg mb-3" />
-                  <h3 className="font-semibold mb-1" style={{ color: theme.text }}>{product.name}</h3>
-                  <p className="text-sm text-gray-500 mb-2">{product.category}</p>
-                  <p className="text-lg font-bold" style={{ color: theme.primary }}>${product.price.toFixed(2)}</p>
-                  <p className="text-xs text-gray-400">Stock: {product.stock}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+        <div className="flex-1 overflow-y-auto pr-1">
+          {selectedCategory === 'All' ? (
+            // Category-wise grouped view
+            <div className="space-y-5">
+              {Object.entries(groupedByCategory).map(([cat, prods]) => (
+                <div key={cat} data-testid={`pos-category-section-${cat}`}>
+                  <div className="flex items-center gap-2 mb-2 sticky top-0 bg-gray-50 py-1.5 z-[1]">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">{cat}</h3>
+                    <span className="text-[10px] text-gray-400">{prods.length} items</span>
+                    <div className="flex-1 border-b border-dashed"></div>
+                  </div>
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2">
+                    {prods.map(product => (
+                      <button key={product.id}
+                        onClick={() => addToCart(product)}
+                        className="bg-white rounded-lg border hover:shadow-md hover:-translate-y-0.5 transition-all overflow-hidden text-left active:scale-95"
+                        data-testid={`product-${product.id}`}>
+                        <img src={product.image} alt={product.name} className="w-full h-16 object-cover" />
+                        <div className="p-2">
+                          <h3 className="font-medium text-xs leading-tight line-clamp-1" style={{ color: theme.text }}>{product.name}</h3>
+                          <div className="flex items-center justify-between mt-1">
+                            <span className="text-sm font-bold" style={{ color: theme.primary }}>${product.price.toFixed(2)}</span>
+                            <span className="text-[9px] text-gray-400">{product.stock}</span>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            // Single category compact grid
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2">
+              {filteredProducts.map(product => (
+                <button key={product.id}
+                  onClick={() => addToCart(product)}
+                  className="bg-white rounded-lg border hover:shadow-md hover:-translate-y-0.5 transition-all overflow-hidden text-left active:scale-95"
+                  data-testid={`product-${product.id}`}>
+                  <img src={product.image} alt={product.name} className="w-full h-16 object-cover" />
+                  <div className="p-2">
+                    <h3 className="font-medium text-xs leading-tight line-clamp-1" style={{ color: theme.text }}>{product.name}</h3>
+                    <div className="flex items-center justify-between mt-1">
+                      <span className="text-sm font-bold" style={{ color: theme.primary }}>${product.price.toFixed(2)}</span>
+                      <span className="text-[9px] text-gray-400">{product.stock}</span>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         {/* Active Promotions */}
-        <div className="mt-4 p-4 bg-gradient-to-r from-yellow-50 to-orange-50 rounded-lg border border-yellow-200">
-          <h3 className="font-semibold mb-2" style={{ color: theme.text }}>Active Promotions</h3>
-          <div className="flex gap-3 overflow-x-auto">
-            {promotions.filter(p => p.active).map(promo => (
-              <div key={promo.id} className="bg-white p-3 rounded-lg border min-w-[250px]">
-                <p className="font-medium text-sm">{promo.name}</p>
-                <p className="text-xs text-gray-500">{promo.schedule}</p>
-                <p className="text-sm font-bold mt-1" style={{ color: theme.accent }}>{promo.discount}% OFF</p>
-              </div>
-            ))}
+        {promotions.filter(p => p.active).length > 0 && (
+          <div className="mt-2 p-2.5 bg-gradient-to-r from-yellow-50 to-orange-50 rounded-lg border border-yellow-200">
+            <div className="flex gap-2 overflow-x-auto items-center">
+              <h3 className="text-[10px] font-bold uppercase text-yellow-700 whitespace-nowrap">Promotions</h3>
+              {promotions.filter(p => p.active).map(promo => (
+                <div key={promo.id} className="bg-white px-3 py-1.5 rounded-md border text-xs whitespace-nowrap">
+                  <span className="font-medium">{promo.name}</span>
+                  <span className="ml-2 font-bold" style={{ color: theme.accent }}>{promo.discount}% OFF</span>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
-      {/* Cart Panel */}
-      <div className="w-96 flex flex-col border-l bg-gray-50 p-6" data-testid="pos-cart-panel">
-        <h2 className="text-2xl font-bold mb-4" style={{ color: theme.text }}>Current Order</h2>
+      {/* Cart Panel — bigger for easier billing */}
+      <div className="w-[440px] flex-shrink-0 flex flex-col border bg-white rounded-xl shadow-sm p-4" data-testid="pos-cart-panel">
+        <h2 className="text-xl font-bold mb-3" style={{ color: theme.text }}>Current Order</h2>
         {/* Customer Selection */}
         <Card className="mb-4"><CardContent className="p-4">
           <div className="flex items-center gap-2 mb-2">

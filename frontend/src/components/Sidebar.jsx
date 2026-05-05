@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 
 const NAV_STRUCTURE = [
-  { path: '/', icon: LayoutDashboard, label: 'Dashboard', access: ['owner', 'manager'] },
+  { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', access: ['owner', 'manager'] },
   { path: '/pre-shift', icon: Sunrise, label: 'Pre-Shift', access: ['owner', 'manager', 'kitchen'] },
   { path: '/command-center', icon: Brain, label: 'Command Center', access: ['owner', 'manager'] },
   { path: '/pos', icon: ShoppingCart, label: 'POS Terminal', access: ['owner', 'manager', 'cashier'] },
@@ -171,7 +171,7 @@ const Sidebar = () => {
           // Single item (no dropdown)
           const Icon = item.icon;
           return (
-            <NavLink key={item.path} to={item.path} end={item.path === '/'}
+            <NavLink key={item.path} to={item.path} end={item.path === '/dashboard'}
               className={({ isActive }) => `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all ${isActive ? 'text-white font-medium' : 'text-gray-600 hover:bg-gray-50'}`}
               style={({ isActive }) => isActive ? { backgroundColor: theme.primary } : {}}
               data-testid={`nav-${item.path.replace('/', '') || 'dashboard'}`}>
