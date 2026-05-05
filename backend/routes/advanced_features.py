@@ -12,7 +12,7 @@ router = APIRouter()
 @router.get("/business/settings")
 async def get_business_settings():
     biz = await db.business_settings.find_one({"key": "main"}, {"_id": 0})
-    return biz or {"name": "NUVA POS", "abn": "", "address": "", "phone": "", "email": "", "taxId": ""}
+    return biz or {"name": "NUA", "abn": "", "address": "", "phone": "", "email": "", "taxId": ""}
 
 @router.post("/business/settings")
 async def save_business_settings(data: dict):

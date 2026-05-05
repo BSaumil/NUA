@@ -35,11 +35,21 @@ const NAV_STRUCTURE = [
     children: [
       { path: '/menu-engineering', label: 'Menu Matrix' },
       { path: '/what-if', label: 'What-If Simulator' },
-      { path: '/products', label: 'Products' },
       { path: '/inventory', label: 'Inventory' },
       { path: '/ai-pantry', label: 'AI Smart Pantry' },
       { path: '/forecasting', label: 'Forecasting' },
       { path: '/quarterly-review', label: 'Quarterly Review' },
+    ],
+  },
+  {
+    icon: Package, label: 'Items', access: ['owner', 'manager', 'cashier'],
+    children: [
+      { path: '/products', label: 'Item Library' },
+      { path: '/categories', label: 'Categories' },
+      { path: '/modifiers', label: 'Modifiers' },
+      { path: '/discounts', label: 'Discounts & Offers' },
+      { path: '/comp-void', label: 'Comp / Void' },
+      { path: '/payment-links', label: 'Payment Links' },
     ],
   },
   {
@@ -114,7 +124,7 @@ const Sidebar = () => {
   return (
     <div className="fixed left-0 top-0 h-full w-64 bg-white border-r border-gray-200 flex flex-col z-50" data-testid="sidebar">
       <div className="p-4 border-b border-gray-200">
-        <h1 className="text-xl font-bold" style={{ color: theme.primary }}>NUVA POS</h1>
+        <h1 className="text-xl font-bold" style={{ color: theme.primary }}>NUA</h1>
         {user && (
           <div className="flex items-center gap-2 mt-2">
             <div className={`w-2 h-2 rounded-full ${user.status === 'active' ? 'bg-green-500' : 'bg-gray-300'}`} />

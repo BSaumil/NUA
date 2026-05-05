@@ -308,7 +308,7 @@ async def get_receipt_settings():
     return s.get("value", {}) if s else {
         "logoUrl": "", "showPaymentQR": True, "showSocialQR": True,
         "showPromoQR": True, "socialMediaUrl": "", "promoText": "",
-        "businessName": "NUVA POS", "businessAddress": "", "businessPhone": "",
+        "businessName": "NUA", "businessAddress": "", "businessPhone": "",
     }
 
 @router.post("/receipt/settings")

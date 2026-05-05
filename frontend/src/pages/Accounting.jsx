@@ -70,7 +70,7 @@ const Accounting = () => {
     const w = window.open('', '_blank', 'width=400,height=600');
     const t = selectedTxn;
     w.document.write(`<html><head><title>Receipt</title><style>body{font-family:monospace;max-width:320px;margin:20px auto;font-size:12px}h2{text-align:center;margin:0}hr{border:1px dashed #ccc}.row{display:flex;justify-content:space-between}.total{font-weight:bold;font-size:14px}</style></head><body>
-      <h2>NUVA POS</h2><p style="text-align:center">Receipt #${t.receiptNumber || t.id}</p><hr/>
+      <h2>NUA</h2><p style="text-align:center">Receipt #${t.receiptNumber || t.id}</p><hr/>
       <p>Date: ${new Date(t.timestamp).toLocaleString()}</p>
       <p>Cashier: ${t.cashier || 'Staff'}</p><hr/>
       ${(t.items || []).map(i => `<div class="row"><span>${i.productName} x${i.quantity}</span><span>$${(i.price * i.quantity).toFixed(2)}</span></div>`).join('')}
@@ -225,7 +225,7 @@ const Accounting = () => {
           {selectedTxn && (
             <div className="py-2">
               <div className="bg-white border rounded-lg p-6 font-mono text-sm space-y-2">
-                <p className="text-center font-bold text-lg">NUVA POS</p>
+                <p className="text-center font-bold text-lg">NUA</p>
                 <p className="text-center text-gray-500 text-xs">Receipt #{selectedTxn.receiptNumber || selectedTxn.id}</p>
                 <hr className="border-dashed" />
                 <p className="text-xs">{new Date(selectedTxn.timestamp).toLocaleString()}</p>

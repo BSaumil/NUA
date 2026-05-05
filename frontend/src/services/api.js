@@ -371,4 +371,25 @@ export const loyaltyAPI = {
   deleteReward: (id) => api.delete(`/loyalty/rewards/${id}`),
 };
 
+// Items System — Categories, Modifiers, Discounts, Comp/Void, Payment Links
+export const itemsSystemAPI = {
+  getCategories: () => api.get('/categories'),
+  createCategory: (data) => api.post('/categories', data),
+  updateCategory: (id, data) => api.put(`/categories/${id}`, data),
+  deleteCategory: (id) => api.delete(`/categories/${id}`),
+  getModifiers: () => api.get('/modifiers'),
+  createModifier: (data) => api.post('/modifiers', data),
+  updateModifier: (id, data) => api.put(`/modifiers/${id}`, data),
+  deleteModifier: (id) => api.delete(`/modifiers/${id}`),
+  getDiscounts: () => api.get('/discounts'),
+  createDiscount: (data) => api.post('/discounts', data),
+  updateDiscount: (id, data) => api.put(`/discounts/${id}`, data),
+  deleteDiscount: (id) => api.delete(`/discounts/${id}`),
+  createCompVoid: (data) => api.post('/comp-void', data),
+  getCompVoids: () => api.get('/comp-void'),
+  createPaymentLink: (data) => api.post('/payment-links', data),
+  getPaymentLinks: () => api.get('/payment-links'),
+  deletePaymentLink: (id) => api.delete(`/payment-links/${id}`),
+};
+
 export default api;

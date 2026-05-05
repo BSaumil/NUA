@@ -42,7 +42,7 @@ export default function Login() {
       <Card className="w-full max-w-sm border-gray-800 bg-gray-900/80 backdrop-blur">
         <CardContent className="p-8">
           <div className="text-center mb-6">
-            <h1 className="text-3xl font-bold text-white tracking-tight">NUVA</h1>
+            <h1 className="text-3xl font-bold text-white tracking-tight">NUA</h1>
             <p className="text-gray-400 text-sm mt-1">Staff Portal</p>
           </div>
 

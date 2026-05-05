@@ -33,9 +33,9 @@ const Settings = () => {
   const [customRoles, setCustomRoles] = useState([]);
   const [newRole, setNewRole] = useState('');
   // Business
-  const [bizForm, setBizForm] = useState({ name: 'NUVA POS', abn: '', address: '', phone: '', email: '', taxId: '' });
+  const [bizForm, setBizForm] = useState({ name: 'NUA', abn: '', address: '', phone: '', email: '', taxId: '' });
   // Receipt
-  const [receiptSettings, setReceiptSettings] = useState({ logoUrl: '', showPaymentQR: true, showSocialQR: true, showPromoQR: true, socialMediaUrl: '', promoText: '', businessName: 'NUVA POS', businessAddress: '', businessPhone: '' });
+  const [receiptSettings, setReceiptSettings] = useState({ logoUrl: '', showPaymentQR: true, showSocialQR: true, showPromoQR: true, socialMediaUrl: '', promoText: '', businessName: 'NUA', businessAddress: '', businessPhone: '' });
   // Permissions
   const [allPerms, setAllPerms] = useState([]);
   const [selectedStaffPerms, setSelectedStaffPerms] = useState(null);

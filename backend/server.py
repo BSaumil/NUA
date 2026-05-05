@@ -31,6 +31,7 @@ from routes.menu_features import router as menu_features_router
 from routes.enterprise_features import router as enterprise_router
 from routes.gamification import router as gamification_router
 from routes.reservation_features import router as reservation_features_router
+from routes.items_system import router as items_system_router
 
 app = FastAPI()
 
@@ -58,12 +59,13 @@ api_router.include_router(menu_features_router)
 api_router.include_router(enterprise_router)
 api_router.include_router(gamification_router)
 api_router.include_router(reservation_features_router)
+api_router.include_router(items_system_router)
 api_router.include_router(multi_tenant_router)
 
 @api_router.get("/")
 async def root():
     return {
-        "name": "NUVA POS API",
+        "name": "NUA API",
         "version": "5.0.0",
         "status": "Production Ready",
         "features": [

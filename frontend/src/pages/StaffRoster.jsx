@@ -133,7 +133,7 @@ export default function StaffRoster() {
       .pos{background:#e0f2fe;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500}
       @media print{body{margin:0}}
     </style></head><body>
-    <h1>NUVA POS — Staff Roster</h1>
+    <h1>NUA — Staff Roster</h1>
     <p style="text-align:center;color:#6b7280;font-size:11px">Printed: ${new Date().toLocaleDateString()}</p>`);
 
     Object.entries(grouped).sort().forEach(([day, shifts]) => {
