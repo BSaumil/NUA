@@ -133,6 +133,20 @@ async def create_roster_shift(data: dict, request: Request):
     shift.pop("_id", None)
     return shift
 
+@router.put("/staff/roster/{shift_id}")
+async def update_roster_shift(shift_id: str, data: dict, request: Request):
+    from routes.auth import get_current_user
+    user = await get_current_user(request)
+    if user["role"] not in ("owner", "manager"):
+        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+    allowed = {"date", "startTime", "endTime", "role", "notes", "staffId", "staffName", "weekStart"}
+    update = {k: v for k, v in data.items() if k in allowed}
+    result = await db.roster_shifts.find_one_and_update({"id": shift_id}, {"$set": update}, return_document=True)
+    if not result:
+        raise HTTPException(status_code=404, detail="Shift not found")
+    result.pop("_id", None)
+    return result
+
 @router.delete("/staff/roster/{shift_id}")
 async def delete_roster_shift(shift_id: str, request: Request):
     from routes.auth import get_current_user

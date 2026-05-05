@@ -66,26 +66,4 @@ async def adjust_stock(product_id: str, data: dict):
 
 
 
-# ============ CATEGORIES API ============
-@router.get("/categories", response_model=List[Category])
-async def get_categories():
-    categories = await db.categories.find().to_list(1000)
-    return [Category(**c) for c in categories]
-
-@router.post("/categories", response_model=Category)
-async def create_category(category: CategoryCreate):
-    cat_obj = Category(**category.dict())
-    await db.categories.insert_one(cat_obj.dict())
-    return cat_obj
-
-# ============ MODIFIERS API ============
-@router.get("/modifiers", response_model=List[Modifier])
-async def get_modifiers():
-    modifiers = await db.modifiers.find().to_list(1000)
-    return [Modifier(**m) for m in modifiers]
-
-@router.post("/modifiers", response_model=Modifier)
-async def create_modifier(modifier: ModifierCreate):
-    mod_obj = Modifier(**modifier.dict())
-    await db.modifiers.insert_one(mod_obj.dict())
-    return mod_obj
+# Categories & Modifiers moved to routes/items_system.py

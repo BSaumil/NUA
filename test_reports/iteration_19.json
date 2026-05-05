@@ -1,0 +1,88 @@
+{
+  "iteration": 19,
+  "date": "2026-01-05",
+  "focus": "Items module restructure (6 sub-pages) + Roster drag-and-drop (@dnd-kit) + PUT /api/staff/roster/{id}",
+  "summary": "Backend: 9/9 tests passed (100%). All Items-system endpoints (categories, modifiers, discounts, comp-void, payment-links CRUD) and the new PUT /staff/roster/{id} endpoint work correctly including 404 handling. Frontend: All 6 Items sub-pages render correctly, sidebar 'Items' group expands with all 6 children, NUA brand visible, /categories has correct data-testid. Roster page renders Mon-Sun columns with 14 shift cards, and each column shows daily cost at bottom via data-testid='day-cost-{monday..sunday}' with real dollar values. HOWEVER, drag-and-drop via simulated mouse/pointer events did NOT trigger handleDragEnd -> PUT call in browser automation: after drag from Monday to Wednesday, API still returned date='Monday' for the shift. Manual DnD likely works (PUT endpoint verified), but the activation distance / sensor behaviour of @dnd-kit PointerSensor with Playwright synthetic events warrants investigation.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "StaffRoster DraggableShift/DroppableDay",
+        "issue": "Drag-and-drop on roster shift cards did not persist the date change in automated testing. Simulated mouse down + stepped moves + mouse up between roster-shift-{id} and roster-day-wednesday did not trigger PUT /api/staff/roster/{id}. API confirms shift date remained 'Monday' after drag attempt. This may be a @dnd-kit PointerSensor activation constraint - users with real mouse should test manually, but main agent should verify handleDragEnd is wired correctly and consider adding a keyboard-accessible fallback or an 'activationConstraint' config (e.g. distance: 5) that is synthetic-event friendly.",
+        "selector": "[data-testid^='roster-shift-'] -> [data-testid='roster-day-wednesday']",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Roster drag-and-drop persistence",
+        "issue": "PUT /api/staff/roster/{id} was verified working via curl and pytest (backend 100%), but the UI drag did not invoke it during automated DnD. Need manual verification by main agent.",
+        "affected_selectors": ["[data-testid^='roster-shift-']", "[data-testid='roster-day-wednesday']"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_results": {
+    "backend_pytest": {
+      "TestCategories.test_list_categories": "PASS",
+      "TestCategories.test_create_update_delete_category": "PASS",
+      "TestModifiers.test_list_modifiers": "PASS",
+      "TestModifiers.test_create_update_delete_modifier": "PASS",
+      "TestDiscounts.test_create_list_delete_discount": "PASS",
+      "TestCompVoid.test_create_and_list_comp_void": "PASS",
+      "TestPaymentLinks.test_create_list_delete_link": "PASS",
+      "TestRosterPut.test_create_update_roster_shift": "PASS",
+      "TestRosterPut.test_put_non_existent_shift_returns_404": "PASS"
+    },
+    "frontend_ui": {
+      "Owner_login": "PASS",
+      "NUA_brand_in_sidebar": "PASS",
+      "Items_group_expands_with_6_sub_links": "PASS (Item Library, Categories, Modifiers, Discounts & Offers, Comp / Void, Payment Links)",
+      "/categories_loads": "PASS - data-testid='categories-page' present, 'New Category' button found",
+      "/modifiers_loads": "PASS",
+      "/discounts_loads": "PASS - page body includes 'Comp' and 'Void' (tab reference)",
+      "/comp-void_loads": "PASS - separate page loads (search/filter text not detected in body - verify UI has search/filter inputs)",
+      "/payment-links_loads": "PASS - 'Generate Link' button visible, 'Select item' dropdown + 'Custom price' input visible",
+      "Roster_page_loads": "PASS - data-testid='staff-roster-page'",
+      "Roster_day_columns_Mon_Sun": "PASS - roster-day-{day} selectors present",
+      "Roster_day_cost_testids": "PASS - day-cost-monday=$638, tuesday=$1464, wednesday=$1464, thursday=$1702, friday=$1464, saturday=$1889, sunday=$1839",
+      "14_existing_shift_cards_visible": "PASS",
+      "Roster_drag_and_drop_persistence": "FAIL - simulated drag did not fire handleDragEnd; shift date unchanged after attempted drag Monday->Wednesday"
+    }
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration19_items_roster.py",
+    "/app/test_reports/pytest/pytest_iteration19.xml"
+  ],
+  "action_items": [
+    "Manually verify drag-and-drop persistence in a real browser (move any shift between days and reload). If it fails manually, inspect StaffRoster.jsx handleDragEnd/useSensors and ensure PointerSensor has proper activationConstraint ({ distance: 5 }) and that the draggable card dispatches pointerdown on its entire surface.",
+    "Consider adding a data-testid='new-category-btn' / 'new-modifier-btn' / 'new-discount-btn' on respective 'New' buttons in Categories/Modifiers/Discounts pages to make testing more deterministic.",
+    "Comp/Void page: confirm search and filter inputs exist with data-testid (they were not detected by text search 'search'/'filter' in body). Add data-testid='comp-void-search' and 'comp-void-type-filter'."
+  ],
+  "critical_code_review_comments": [
+    "items_system.py cleanly separates concerns and correctly excludes Mongo _id via projection and .pop after inserts.",
+    "All write endpoints in items_system.py enforce owner/manager role correctly; discounts restrict to owner only which matches POS best practice.",
+    "staff_management.py PUT /staff/roster/{shift_id} uses a whitelist of allowed fields (good). Returns 404 on missing shift (good).",
+    "DraggableShift uses data-testid='roster-shift-{shift.id}' and DroppableDay uses data-testid='roster-day-{day_lowercase}' - consistent and testable.",
+    "day-cost-{day} testid correctly placed at bottom of each droppable day column (confirmed visually and by selector).",
+    "Minor: items_system.py lacks GET for single category/discount/modifier by id - not blocking since list+filter on client is typical, but would be useful for deep-link scenarios."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration19_items_roster.py"
+  ],
+  "success_rate": {
+    "backend": "100% (9/9 tests passed)",
+    "frontend": "90% (all page loads + testids OK; drag-and-drop persistence unverified by automation)"
+  },
+  "test_credentials": {
+    "owner": "owner@nuva.com / NuvaOwner2026!"
+  },
+  "seed_data_creation": "Test categories/modifiers/discounts/comp-void/payment-links/roster-shifts created with TEST_ prefix and cleaned up in each test. No residual seed data.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend pytest file at /app/backend/tests/test_iteration19_items_roster.py runs green end-to-end (9/9). Roster card testid pattern is 'roster-shift-{SHIFT_ID}' and day column testid is 'roster-day-{daylower}'. Day cost testid 'day-cost-{daylower}' confirmed working. DnD via Playwright mouse.move/down/up did NOT trigger handleDragEnd - if retesting DnD in automation, try dispatching native PointerEvents or use @dnd-kit KeyboardSensor tab+space+arrow+space sequence instead. Backend PUT /api/staff/roster/{id} is confirmed functioning via direct curl/requests (tested with Monday -> Wednesday transition and 404 on non-existent id).",
+  "rca_of_the_issue": "The Playwright-simulated drag on a @dnd-kit DraggableShift did not invoke the PUT /api/staff/roster/{id} handler. Backend endpoint works perfectly (verified by pytest). Most likely root cause: @dnd-kit PointerSensor's default activationConstraint and the way Playwright's mouse.down/move/up dispatches events may not cross the sensor activation threshold in the emulated environment. The bug (if any) is on the DnD sensor activation side, not on the API. Main agent should: (a) manually drag a card in browser to confirm it works, (b) if not, add useSensors with PointerSensor + activationConstraint: { distance: 5 } and ensure DndContext's handleDragEnd invokes staffMgmtAPI.updateRosterShift(id, { date: newDate }) followed by a re-fetch of roster."
+}

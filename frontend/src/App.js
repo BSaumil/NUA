@@ -44,6 +44,11 @@ import Clubmember from './pages/Clubmember';
 import EmailMarketing from './pages/EmailMarketing';
 import EndOfDay from './pages/EndOfDay';
 import TipManagement from './pages/TipManagement';
+import Categories from './pages/Categories';
+import Modifiers from './pages/Modifiers';
+import Discounts from './pages/Discounts';
+import CompVoid from './pages/CompVoid';
+import PaymentLinks from './pages/PaymentLinks';
 
 function StaffLayout({ children }) {
   return (
@@ -82,6 +87,11 @@ function ProtectedRoutes() {
         <Route path="/menu-engineering" element={<MenuEngineering />} />
         <Route path="/what-if" element={<WhatIfSimulator />} />
         <Route path="/products" element={<Products />} />
+        <Route path="/categories" element={<Categories />} />
+        <Route path="/modifiers" element={<Modifiers />} />
+        <Route path="/discounts" element={<Discounts />} />
+        <Route path="/comp-void" element={<CompVoid />} />
+        <Route path="/payment-links" element={<PaymentLinks />} />
         <Route path="/customers" element={<Customers />} />
         <Route path="/loyalty" element={<LoyaltyEvents />} />
         <Route path="/inventory" element={<Inventory />} />

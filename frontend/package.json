@@ -6,6 +6,9 @@
   "dependencies": {
     "@capacitor/cli": "6",
     "@capacitor/core": "6",
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@hookform/resolvers": "^5.0.1",
     "@radix-ui/react-accordion": "^1.2.8",
     "@radix-ui/react-alert-dialog": "^1.1.11",
@@ -100,12 +103,22 @@
   "build": {
     "appId": "com.nuva.pos",
     "productName": "NUVA POS",
-    "files": ["build/**/*", "electron/**/*"],
+    "files": [
+      "build/**/*",
+      "electron/**/*"
+    ],
     "directories": {
       "buildResources": "public"
     },
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "public/favicon.ico"
     },
     "nsis": {

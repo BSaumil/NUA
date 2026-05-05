@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Clock, LogIn, LogOut, Calendar, DollarSign, Users, FileText,
-  Plus, Trash2, BarChart3, Printer
+  Plus, Trash2, BarChart3, Printer, GripVertical, Move
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -14,9 +14,53 @@ import { useAuth } from '../contexts/AuthContext';
 import { staffMgmtAPI } from '../services/api';
 import { toast } from 'sonner';
 import axios from 'axios';
+import { DndContext, useDraggable, useDroppable, DragOverlay, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
+
+// ===== Draggable Shift Card (used inside week roster grid) =====
+function DraggableShift({ shift, hours, canManage, onDelete, theme }) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: shift.id, data: shift });
+  return (
+    <div
+      ref={setNodeRef}
+      draggable={canManage}
+      data-shift-id={shift.id}
+      className={`p-2 rounded-lg text-xs border bg-white hover:shadow-md group transition-all ${isDragging ? 'opacity-30' : ''} ${canManage ? 'cursor-grab active:cursor-grabbing' : ''}`}
+      data-testid={`roster-shift-${shift.id}`}
+    >
+      <div className="flex items-center justify-between gap-1">
+        {canManage && <GripVertical size={11} className="text-gray-300 flex-shrink-0" {...listeners} {...attributes} />}
+        <p className="font-semibold truncate flex-1">{shift.staffName}</p>
+        {canManage && <button className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-opacity" onClick={onDelete}><Trash2 size={11} /></button>}
+      </div>
+      <Badge variant="outline" className="text-[9px] mt-0.5">{shift.notes || shift.role || '-'}</Badge>
+      <p className="text-gray-500 mt-0.5">{shift.startTime} - {shift.endTime}</p>
+      <p className="text-gray-400 text-[10px]">{hours.toFixed(1)}h</p>
+    </div>
+  );
+}
+
+// ===== Droppable Day Column =====
+function DroppableDay({ day, children, dayCost, theme }) {
+  const { isOver, setNodeRef } = useDroppable({ id: `day-${day}` });
+  return (
+    <td
+      ref={setNodeRef}
+      className={`p-2 border-r last:border-r-0 min-w-[140px] align-top transition-colors ${isOver ? 'bg-blue-50 ring-2 ring-blue-300 ring-inset' : ''}`}
+      data-testid={`roster-day-${day.toLowerCase()}`}
+    >
+      <div className="space-y-1.5 min-h-[80px]">{children}</div>
+      {dayCost > 0 && (
+        <div className="mt-2 pt-2 border-t border-dashed text-[10px] text-gray-500 text-center" data-testid={`day-cost-${day.toLowerCase()}`}>
+          <span className="font-semibold" style={{ color: theme.primary }}>${dayCost.toFixed(0)}</span>
+        </div>
+      )}
+    </td>
+  );
+}
+
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const POSITIONS = ['Barista', 'Bar', 'Floor', 'Kitchen', 'Register', 'Manager', 'Host', 'Dishwasher'];
 
@@ -37,9 +81,11 @@ export default function StaffRoster() {
   const [reportPeriod, setReportPeriod] = useState('week');
   const [payPeriod, setPayPeriod] = useState('week');
   const [breakMins, setBreakMins] = useState('0');
+  const [activeDrag, setActiveDrag] = useState(null);
   // Week roster form
   const [showWeekRoster, setShowWeekRoster] = useState(false);
   const [weekForm, setWeekForm] = useState({ staffId: '', position: 'Floor', weekStart: '', shifts: {} });
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   useEffect(() => { fetchAll(); }, []);
   useEffect(() => { fetchReports(); }, [reportPeriod]);
@@ -69,6 +115,32 @@ export default function StaffRoster() {
   const handleClockIn = async () => { try { await staffMgmtAPI.clockIn(); toast.success('Clocked in!'); fetchAll(); } catch (e) { toast.error(e.response?.data?.detail || 'Failed'); } };
   const handleClockOut = async () => { try { await staffMgmtAPI.clockOut({ breakMinutes: parseInt(breakMins) || 0 }); toast.success('Clocked out!'); fetchAll(); } catch (e) { toast.error(e.response?.data?.detail || 'Failed'); } };
   const handleDeleteShift = async (id) => { try { await staffMgmtAPI.deleteRosterShift(id); toast.success('Shift removed'); fetchAll(); } catch {} };
+
+  // ===== Drag-and-Drop Handlers =====
+  const handleDragStart = (event) => { setActiveDrag(event.active.data.current); };
+  const handleDragEnd = async (event) => {
+    setActiveDrag(null);
+    const { active, over } = event;
+    if (!over) return;
+    const newDay = String(over.id).replace('day-', '');
+    const shift = active.data.current;
+    if (!shift || shift.date === newDay) return;
+    // Optimistic UI update
+    setRoster(prev => prev.map(s => s.id === shift.id ? { ...s, date: newDay } : s));
+    try {
+      await staffMgmtAPI.updateRosterShift(shift.id, { date: newDay });
+      toast.success(`${shift.staffName} moved to ${newDay}`);
+    } catch {
+      toast.error('Failed to move shift');
+      fetchAll(); // rollback
+    }
+  };
+
+  const calcShiftHours = (s) => {
+    const start = s.startTime?.split(':').map(Number) || [0, 0];
+    const end = s.endTime?.split(':').map(Number) || [0, 0];
+    return Math.max((end[0] + end[1] / 60) - (start[0] + start[1] / 60), 0);
+  };
 
   // Week Roster — add shifts for entire week at once
   const handleAddWeekRoster = async () => {
@@ -197,48 +269,57 @@ export default function StaffRoster() {
             </div>
           </div>
 
-          {/* Week Grid View */}
-          <Card><CardContent className="p-0"><div className="overflow-x-auto">
-            <table className="w-full text-sm" data-testid="roster-table">
-              <thead className="bg-gray-50"><tr>
-                {DAYS.map(d => (
-                  <th key={d} className="text-center p-3 font-medium text-gray-500 min-w-[140px]">{d.slice(0, 3)}</th>
-                ))}
-              </tr></thead>
-              <tbody><tr className="align-top">
-                {DAYS.map(day => {
-                  const dayShifts = roster.filter(s => {
-                    const d = s.date || '';
-                    return d === day || d.includes(day);
-                  });
-                  return (
-                    <td key={day} className="p-2 border-r last:border-r-0 min-w-[140px]" data-testid={`roster-day-${day.toLowerCase()}`}>
-                      <div className="space-y-1.5">
-                        {dayShifts.map(s => {
-                          const staffMember = staff.find(st => st.id === s.staffId) || {};
-                          const start = s.startTime?.split(':').map(Number) || [0, 0];
-                          const end = s.endTime?.split(':').map(Number) || [0, 0];
-                          const hours = Math.max((end[0] + end[1] / 60) - (start[0] + start[1] / 60), 0);
-                          return (
-                            <div key={s.id} className="p-2 rounded-lg text-xs border bg-white hover:shadow-sm group" data-testid={`roster-shift-${s.id}`}>
-                              <div className="flex items-center justify-between">
-                                <p className="font-semibold truncate">{s.staffName}</p>
-                                {canManage && <button className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-opacity" onClick={() => handleDeleteShift(s.id)}><Trash2 size={11} /></button>}
-                              </div>
-                              <Badge variant="outline" className="text-[9px] mt-0.5">{s.notes || s.role || '-'}</Badge>
-                              <p className="text-gray-500 mt-0.5">{s.startTime} - {s.endTime}</p>
-                              <p className="text-gray-400 text-[10px]">{hours.toFixed(1)}h</p>
-                            </div>
-                          );
-                        })}
+          {/* Week Grid View — Drag and Drop enabled */}
+          <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+            <Card><CardContent className="p-0"><div className="overflow-x-auto">
+              <table className="w-full text-sm" data-testid="roster-table">
+                <thead className="bg-gray-50"><tr>
+                  {DAYS.map(d => (
+                    <th key={d} className="text-center p-3 font-medium text-gray-500 min-w-[140px]">{d.slice(0, 3)}</th>
+                  ))}
+                </tr></thead>
+                <tbody><tr className="align-top">
+                  {DAYS.map(day => {
+                    const dayShifts = roster.filter(s => {
+                      const d = s.date || '';
+                      return d === day || d.includes(day);
+                    });
+                    const dayCost = dayShifts.reduce((sum, s) => {
+                      const sm = staff.find(st => st.id === s.staffId) || {};
+                      return sum + calcShiftHours(s) * (sm.payRate || 0);
+                    }, 0);
+                    return (
+                      <DroppableDay key={day} day={day} dayCost={dayCost} theme={theme}>
+                        {dayShifts.map(s => (
+                          <DraggableShift
+                            key={s.id}
+                            shift={s}
+                            hours={calcShiftHours(s)}
+                            canManage={canManage}
+                            theme={theme}
+                            onDelete={() => handleDeleteShift(s.id)}
+                          />
+                        ))}
                         {dayShifts.length === 0 && <p className="text-gray-300 text-center text-[10px] py-4">No shifts</p>}
-                      </div>
-                    </td>
-                  );
-                })}
-              </tr></tbody>
-            </table>
-          </div></CardContent></Card>
+                      </DroppableDay>
+                    );
+                  })}
+                </tr></tbody>
+              </table>
+            </div></CardContent></Card>
+            <DragOverlay>
+              {activeDrag ? (
+                <div className="p-2 rounded-lg text-xs border bg-white shadow-lg cursor-grabbing" style={{ borderColor: theme.primary }}>
+                  <p className="font-semibold">{activeDrag.staffName}</p>
+                  <Badge variant="outline" className="text-[9px] mt-0.5">{activeDrag.notes || activeDrag.role || '-'}</Badge>
+                  <p className="text-gray-500 mt-0.5">{activeDrag.startTime} - {activeDrag.endTime}</p>
+                </div>
+              ) : null}
+            </DragOverlay>
+          </DndContext>
+          {canManage && roster.length > 0 && (
+            <p className="text-xs text-gray-400 flex items-center gap-1 mt-2"><Move size={12} /> Tip: Drag a shift card to move it to a different day. Daily totals update automatically.</p>
+          )}
         </TabsContent>
 
         {/* TIMECARDS */}

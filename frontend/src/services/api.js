@@ -278,6 +278,7 @@ export const staffMgmtAPI = {
   getTimecards: (params) => api.get('/staff/timecards', { params }),
   getRoster: (params) => api.get('/staff/roster', { params }),
   createRosterShift: (data) => api.post('/staff/roster', data),
+  updateRosterShift: (id, data) => api.put(`/staff/roster/${id}`, data),
   deleteRosterShift: (id) => api.delete(`/staff/roster/${id}`),
   calculatePayrun: (params) => api.get('/payrun/calculate', { params }),
   processPayrun: (data) => api.post('/payrun/process', data),
