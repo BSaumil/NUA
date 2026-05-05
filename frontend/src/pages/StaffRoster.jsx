@@ -14,7 +14,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { staffMgmtAPI } from '../services/api';
 import { toast } from 'sonner';
 import axios from 'axios';
-import { DndContext, useDraggable, useDroppable, DragOverlay, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { DndContext, useDraggable, useDroppable, DragOverlay, PointerSensor, KeyboardSensor, useSensor, useSensors } from '@dnd-kit/core';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
@@ -85,7 +85,10 @@ export default function StaffRoster() {
   // Week roster form
   const [showWeekRoster, setShowWeekRoster] = useState(false);
   const [weekForm, setWeekForm] = useState({ staffId: '', position: 'Floor', weekStart: '', shifts: {} });
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor)
+  );
 
   useEffect(() => { fetchAll(); }, []);
   useEffect(() => { fetchReports(); }, [reportPeriod]);
