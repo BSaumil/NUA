@@ -334,4 +334,10 @@ async def seed_admin():
                 "role": s["role"], "businessId": "default", "payRate": s["payRate"],
                 "status": "active", "createdAt": datetime.now(timezone.utc).isoformat(),
             })
+        elif exists.get("role") != s["role"]:
+            # Heal seed data — ensure demo accounts always have their canonical role
+            await db.auth_users.update_one(
+                {"email": s["email"]},
+                {"$set": {"role": s["role"], "name": s["name"]}}
+            )
     await db.auth_users.create_index("email", unique=True)
