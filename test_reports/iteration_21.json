@@ -1,0 +1,55 @@
+{
+  "summary": "Retested all 3 fixes from iteration_20. ALL THREE CODE FIXES VERIFIED WORKING. (1) SwipeableCartItem now rendered — left-swipe deletes (2 items → 1), right-swipe increments quantity (1 → 2). (2) BottomDock no longer filters quick actions by customPermissions — owner/cashier/kitchen all show their full 4 role-default docks. (3) Empty img src warnings eliminated — placehold.co fallback applied. HOWEVER discovered seed data issue: manager@nuva.com is seeded with role='barista' (not 'manager'), so its dock correctly renders barista QUICK_ACTIONS — this is NOT a code bug in BottomDock; the role-based filter works as designed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "seed_data_issue": {
+    "user": "manager@nuva.com (Tina)",
+    "actual_role_in_db": "barista",
+    "expected_role": "manager",
+    "evidence": "/api/auth/me returned: {\"role\":\"barista\",\"customPermissions\":[\"pos\",\"waitlist\",\"reservations\",\"kitchen\"]}",
+    "impact": "Manager test user shows barista quick actions (POS, Drinks, Customers, Loyalty) instead of manager defaults (POS, Bookings, Kitchen, Roster). BottomDock code is correct — it renders QUICK_ACTIONS[role].",
+    "priority": "MEDIUM (seed/test-data, not code)"
+  },
+  "verification_results": {
+    "owner_default_route_pos": true,
+    "cart_item_wrapper_present": true,
+    "hint_text_visible_swipe_delete_repeat": true,
+    "cart_plus_minus_testids_present": true,
+    "left_swipe_deletes_item": true,
+    "right_swipe_increments_quantity": true,
+    "no_empty_src_console_warnings": true,
+    "owner_dock_complete": "dock-pos, dock-dashboard, dock-reservations, dock-products, dock-more all visible",
+    "cashier_dock_complete": "dock-pos, dock-reservations, dock-customers, dock-loyalty, dock-more all visible",
+    "kitchen_dock_complete": "dock-kitchen, dock-pre-shift, dock-inventory, dock-ai-pantry, dock-more all visible",
+    "manager_dock": "Renders barista defaults due to seed-data role mismatch (NOT code bug)",
+    "more_splash_opens_with_role_filtered_tiles": true,
+    "default_route_all_roles_pos": "owner/manager(barista)/cashier/kitchen all landed on /pos"
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Fix seed data: manager@nuva.com should have role='manager' (currently 'barista'). Update seed_admin / user seed script to ensure dedicated test users for each role.",
+    "Optional: After fix, re-run quick verification that manager dock renders dock-pos, dock-reservations, dock-kitchen, dock-staff-roster."
+  ],
+  "critical_code_review_comments": [
+    "POSTerminal.jsx file is 746 lines — exceeds the 700-line guideline. Consider extracting SwipeableCartItem (already a self-contained component), Cash/Split/QR/UPI dialog components into separate files.",
+    "BottomDock.jsx line 121 path.replace('/', '') only replaces FIRST '/' which is fine for single-segment paths like /staff-roster → 'staff-roster' but would silently break for nested routes. Use .replace(/^\\//, '') or .substring(1) for clarity.",
+    "POSTerminal SwipeableCartItem: catch block in onPointerUp (line 42) swallows error silently — should at least console.warn. Minor.",
+    "POSTerminal line 89 & 386 & 408: image fallback string is duplicated 3 times — extract to a const PLACEHOLDER_IMG."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "skipped", "frontend": "100% on code-fix verification (3/3 fixes working). 1 unrelated seed-data issue surfaced."},
+  "test_credentials_used": [
+    "owner@nuva.com / NuvaOwner2026! (role: owner) ✓",
+    "manager@nuva.com / Staff2026! (DB role: barista — seed mismatch)",
+    "cashier@nuva.com / Staff2026! (role: cashier) ✓",
+    "kitchen@nuva.com / Staff2026! (role: kitchen) ✓"
+  ],
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All three iteration_20 code fixes (SwipeableCartItem rendered, BottomDock role-based quick actions, empty img src) are verified WORKING via Playwright synthetic mouse swipe gestures (drag > 80px threshold). Manager seed user has role='barista' not 'manager' — main agent needs to fix seed data. Backend skipped per request."
+}

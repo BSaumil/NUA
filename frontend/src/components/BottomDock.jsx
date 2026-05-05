@@ -124,11 +124,8 @@ export default function BottomDock() {
     return item.access?.includes(role);
   };
 
-  const quick = (QUICK_ACTIONS[role] || QUICK_ACTIONS.cashier).filter(q => {
-    if (role === 'owner') return true;
-    if (hasCustomPerms) return customPerms.includes(q.path.replace('/', '') || 'dashboard');
-    return true;
-  }).slice(0, 4);
+  // Quick actions are role-based defaults — no permission filtering (use splash for granular access)
+  const quick = (QUICK_ACTIONS[role] || QUICK_ACTIONS.cashier).slice(0, 4);
 
   const handleLogout = async () => { setShowMore(false); await logout(); navigate('/'); };
 

@@ -86,7 +86,7 @@ function SwipeableCartItem({ item, onUpdateQty, onRemove, onRepeat, theme }) {
       >
         <CardContent className="p-3">
           <div className="flex items-center gap-3">
-            <img src={item.image} alt={item.name} className="w-14 h-14 object-cover rounded-md flex-shrink-0" draggable={false} />
+            <img src={item.image || 'https://placehold.co/56x56/e5e7eb/9ca3af?text=NUA'} alt={item.name} className="w-14 h-14 object-cover rounded-md flex-shrink-0" draggable={false} />
             <div className="flex-1 min-w-0">
               <p className="font-semibold text-sm truncate">{item.name}</p>
               <p className="text-xs text-gray-500">${item.price.toFixed(2)} each</p>
@@ -383,7 +383,7 @@ const POSTerminal = () => {
                         onClick={() => addToCart(product)}
                         className="bg-white rounded-lg border hover:shadow-md hover:-translate-y-0.5 transition-all overflow-hidden text-left active:scale-95"
                         data-testid={`product-${product.id}`}>
-                        <img src={product.image} alt={product.name} className="w-full h-16 object-cover" />
+                        <img src={product.image || 'https://placehold.co/200x100/e5e7eb/9ca3af?text=NUA'} alt={product.name} className="w-full h-16 object-cover" />
                         <div className="p-2">
                           <h3 className="font-medium text-xs leading-tight line-clamp-1" style={{ color: theme.text }}>{product.name}</h3>
                           <div className="flex items-center justify-between mt-1">
@@ -405,7 +405,7 @@ const POSTerminal = () => {
                   onClick={() => addToCart(product)}
                   className="bg-white rounded-lg border hover:shadow-md hover:-translate-y-0.5 transition-all overflow-hidden text-left active:scale-95"
                   data-testid={`product-${product.id}`}>
-                  <img src={product.image} alt={product.name} className="w-full h-16 object-cover" />
+                  <img src={product.image || 'https://placehold.co/200x100/e5e7eb/9ca3af?text=NUA'} alt={product.name} className="w-full h-16 object-cover" />
                   <div className="p-2">
                     <h3 className="font-medium text-xs leading-tight line-clamp-1" style={{ color: theme.text }}>{product.name}</h3>
                     <div className="flex items-center justify-between mt-1">
@@ -458,28 +458,23 @@ const POSTerminal = () => {
           )}
         </CardContent></Card>
 
-        {/* Cart Items */}
+        {/* Cart Items — swipe-left=delete · swipe-right=repeat */}
         <div className="flex-1 overflow-y-auto mb-4">
           {cart.length === 0 ? (
             <div className="text-center py-12 text-gray-400">
-              <ShoppingCart size={48} className="mx-auto mb-3 opacity-50" /><p>Cart is empty</p><p className="text-sm">Add products to start</p>
+              <ShoppingCart size={48} className="mx-auto mb-3 opacity-50" /><p>Cart is empty</p><p className="text-sm">Tap a product to add</p>
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2">
               {cart.map(item => (
-                <Card key={item.id} data-testid={`cart-item-${item.id}`}><CardContent className="p-3">
-                  <div className="flex items-center gap-3">
-                    <img src={item.image} alt={item.name} className="w-12 h-12 object-cover rounded" />
-                    <div className="flex-1"><p className="font-medium text-sm">{item.name}</p><p className="text-xs text-gray-500">${item.price.toFixed(2)} each</p></div>
-                    <div className="flex items-center gap-2">
-                      <Button size="sm" variant="outline" onClick={() => updateQuantity(item.id, item.quantity - 1)} className="w-8 h-8 p-0"><Minus size={14} /></Button>
-                      <span className="font-medium w-8 text-center">{item.quantity}</span>
-                      <Button size="sm" variant="outline" onClick={() => updateQuantity(item.id, item.quantity + 1)} className="w-8 h-8 p-0"><Plus size={14} /></Button>
-                      <Button size="sm" variant="ghost" onClick={() => removeFromCart(item.id)} className="w-8 h-8 p-0 text-red-500"><Trash2 size={14} /></Button>
-                    </div>
-                  </div>
-                  <div className="text-right mt-2"><span className="font-bold" style={{ color: theme.primary }}>${(item.price * item.quantity).toFixed(2)}</span></div>
-                </CardContent></Card>
+                <SwipeableCartItem
+                  key={item.id}
+                  item={item}
+                  theme={theme}
+                  onUpdateQty={updateQuantity}
+                  onRemove={removeFromCart}
+                  onRepeat={(it) => { addToCart(it); toast({ title: 'Repeated', description: `Added another ${it.name}` }); }}
+                />
               ))}
             </div>
           )}
