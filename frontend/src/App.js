@@ -55,6 +55,8 @@ import BookingHeatmap from './pages/BookingHeatmap';
 import CohortRetention from './pages/CohortRetention';
 import ShiftSwaps from './pages/ShiftSwaps';
 import SecurityCompliance from './pages/SecurityCompliance';
+import LoyaltyConfig from './pages/LoyaltyConfig';
+import AgentDashboard from './pages/AgentDashboard';
 import AskNuaPanel, { AskNuaButton } from './components/AskNua';
 import { useState as useGlobalState } from 'react';
 

@@ -393,7 +393,22 @@ export const itemsSystemAPI = {
   deletePaymentLink: (id) => api.delete(`/payment-links/${id}`),
 };
 
-// v15 — Tabs, Favorites, Variants, Voice, Ask NUA, Image gen, Anomaly, Auto-roster, Swap, Heatmap, Cohort, Audit, 2FA, GDPR, BAS e-file, i18n
+// v17 — Loyalty engine + AI Agent (Ash)
+export const loyaltyEngineAPI = {
+  getConfig: () => api.get('/loyalty/config'),
+  updateConfig: (data) => api.put('/loyalty/config', data),
+  earn: (data) => api.post('/loyalty/earn', data),
+  redeem: (data) => api.post('/loyalty/redeem', data),
+  getBalance: (customerId) => api.get(`/loyalty/balance/${customerId}`),
+  getLedger: (customerId) => api.get(`/loyalty/ledger/${customerId}`),
+};
+export const agentAPI = {
+  getSegments: () => api.get('/agent/segments'),
+  getDecisions: (limit = 100) => api.get('/agent/decisions', { params: { limit } }),
+  tick: () => api.post('/agent/tick'),
+  voiceCommand: (text, audioBase64, mime) => api.post('/agent/voice-command', { text, audioBase64, mime }),
+  getCatalog: () => api.get('/agent/voice-catalog'),
+};
 export const v15API = {
   getBadges: () => api.get('/dock/badges'),
   // Tabs (hold/recall)

@@ -1,62 +1,58 @@
-# NUA POS — PRD v16.0
+# NUA POS — PRD v17.0 (Loyalty + Ash Agent + Voice-Everywhere)
 
-## Brand
-NUA. POS-first UX. Bottom-dock primary nav. Sidebar deprecated.
+## v17 (Feb 2026) — Iteration 23
 
-## v16 (Feb 2026) — Phase A + C + D Mega-Drop
-**Backend**: New consolidated routes file `routes/v15_features.py` adds:
-- `GET /api/dock/badges` — live counters (reservations/kitchen/pos/waitlist)
-- `GET/POST/DELETE /api/pos/tabs` — Hold/Recall orders
-- `GET/POST /api/pos/favorites` — per-user quick keys
-- `PUT /api/products/{id}/variants` — variant matrix
-- `POST /api/items/bulk-import` — CSV import
-- `POST /api/pos/voice-order` — Whisper transcription + product matching
-- `POST /api/ai/ask-nua` — natural-language analytics (GPT-5.2)
-- `POST /api/items/generate-image` — Nano Banana marketing photos
-- `GET /api/analytics/inventory-anomalies` — sales velocity spike detection
-- `POST /api/staff/auto-roster` + `POST /api/staff/roster/commit-auto` — AI roster
-- `GET/POST /api/staff/shift-swaps` + approve/reject
-- `GET /api/analytics/booking-heatmap` — DOW × hour guest density
-- `GET /api/analytics/cohort-retention` — month-over-month return rate
-- `GET /api/audit/logs` — aggregated sensitive events
-- `POST /api/auth/2fa/{setup,verify,disable}` — TOTP scaffold
-- `GET /api/customers/{id}/gdpr-export` + DELETE for anonymize
-- `POST /api/bas-gst/efile/{report_id}` — ATO submission record
-- `GET /api/i18n/labels/{lang}` — 5-lang cart labels (en/es/fr/hi/zh)
-- **Rate limit middleware**: 120 req/min per (X-Tenant-Id, IP)
+### Backend (`routes/loyalty_engine.py`)
+- `GET/PUT /api/loyalty/config` — earnRate, redeemRate, minRedeem, categoryMultipliers
+- `POST /api/loyalty/earn` — credits points with category multipliers (idempotent by txnId)
+- `POST /api/loyalty/redeem` — burns points at checkout, returns face value
+- `GET /api/loyalty/balance/{customerId}` — current balance + canRedeem flag
+- `GET /api/loyalty/ledger/{customerId}` — full audit ledger
+- `GET /api/agent/decisions` — Ash's autonomous action log
+- `GET /api/agent/segments` — VIP / regular / at-risk / first-timer
+- `POST /api/agent/tick` — run all autonomous rules once
+- `POST /api/agent/voice-command` — text or audio → GPT-5.2 intent → instruction
+- `GET /api/agent/voice-catalog` — supported voice phrases per section
 
-**Frontend**: New components + pages:
-- `components/AskNua.jsx` — chat panel + global FAB
-- `components/VoiceOrderButton.jsx` — Whisper mic in POS header
-- `pages/AuditLog.jsx` — sensitive events viewer
-- `pages/InventoryAnomalies.jsx` — AI spike detector
-- `pages/BookingHeatmap.jsx` — busy times visualization
-- `pages/CohortRetention.jsx` — retention heatmap
-- `pages/ShiftSwaps.jsx` — staff swap requests
-- `pages/SecurityCompliance.jsx` — 2FA, dark mode, locale, GDPR
-- POSTerminal additions: Voice button, Hold/Recall Tabs, Loyalty preview chip, BNPL + Crypto pay buttons, multi-lang labels
-- StaffRoster: AI Auto-Roster button
-- Products: CSV import button
-- BottomDock: live badges polled every 30s; new splash tiles
-- ThemeContext: dark mode + language state
-- PWA: `manifest.json` + `service-worker.js` for offline-shell
+### Frontend
+- `pages/LoyaltyConfig.jsx` (`/loyalty-config`) — owner sets category multipliers
+- `pages/AgentDashboard.jsx` (`/agent`) — Ash decisions + segment counters + "Run Cycle"
+- `components/VoiceCommandCatalog.jsx` — modal listing voice commands per section
+- POSTerminal updates:
+  - Customer selection auto-loads loyalty balance + tier badge
+  - **Points & Pay block** appears when balance >= minRedeem (default 50)
+  - Live redemption-discount line in cart totals
+  - Transaction commit now records ledger (redeem first, then earn on net spend)
+- BottomDock splash: new "Analytics & AI" group includes Ash Agent + Audit + Anomalies + Heatmap + Cohort + Swaps + Security
+- "Customers" splash group adds "Loyalty Config"
+
+### Math example (verified via curl)
+- Cart: 2× Latte ($5 in Beverages) + 1× Croissant ($4 in Bakery)
+- Multipliers: Beverages 2x, Bakery 1.5x
+- Earned: (10 × 1 × 2) + (4 × 1 × 1.5) = **26 points** ✅
+- Balance 26 pts = $0.26 value, canRedeem = false (< 50 min)
+
+### Ash auto-decision rules
+1. At-Risk flag (no visit > 60 days)
+2. Birthday vouchers (next 7 days)
+3. Low-stock reorder alert (stock ≤ 5)
+4. Inventory anomaly detection (sales-velocity spike > 30%)
+5. Tonight blast suggestion (bookings today < 5 → suggest VIP outreach)
 
 ## Credentials
 Owner: owner@nuva.com / NuvaOwner2026!  
 Manager: manager@nuva.com / Staff2026!  
 Cashier: cashier@nuva.com / Staff2026!  
 Kitchen: kitchen@nuva.com / Staff2026!  
-2FA demo code: `123456`
+2FA demo: `123456`
 
-## Testing
-v16 backend curl-verified: badges, tabs, audit, Ask NUA (real GPT-5.2 reply), heatmap, i18n.  
-Frontend smoke-tested: POS, voice btn, Hold/Recall, Ask NUA FAB, BottomDock, all 6 new splash tiles render.
-
-## Pending (Phase B — requires user API keys)
-WhatsApp Business · Twilio SMS · Stripe Tap-to-Pay iOS · Stripe Crypto · Xero/QB · Uber Eats/DoorDash · Google Reserve · TikTok Shop.
+## Testing (Iteration 23)
+- curl-verified: loyalty config CRUD, earn (26 pts with multipliers), balance, agent tick (1 decision + 4 first-timers), voice command ("open dashboard" → navigate intent)
+- Playwright-verified: /loyalty-config + /agent + /pos with Voice btn all render
 
 ## Backlog
-- POSTerminal.jsx 800+ lines — split into sub-files (mechanical refactor)
-- WebSocket real-time orders (currently 30s polling)
-- Multi-region Atlas deployment notes
-- Full TOTP via pyotp (currently demo-accepts `123456`)
+- Phase B (user keys): WhatsApp · Twilio · Stripe Tap-to-Pay · Crypto USDC · Xero/QB · Uber Eats · DoorDash · Google Reserve · TikTok Shop
+- Phase E: deeper autonomy + voice per section (auto-publish AI roster, auto-confirm SMS, auto-tag VIPs, voice "void last item")
+- Phase F (Nomni gap): AI Phone Agent · auto-PO generation · live menu A/B · guest predictive ordering · dynamic surge pricing · AI cost coach
+- Phase G: split POSTerminal.jsx · structured routes · real TOTP · WebSocket real-time
+- Phase H: SOC2 audit log retention · IP allowlists · consent ledger · WCAG 2.2 AA

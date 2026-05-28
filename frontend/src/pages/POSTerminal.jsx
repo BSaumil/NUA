@@ -146,6 +146,10 @@ const POSTerminal = () => {
   const [showTabsDialog, setShowTabsDialog] = useState(false);
   const [openTabs, setOpenTabs] = useState([]);
   const [labels, setLabels] = useState({});
+  // v17: Points-and-Pay
+  const [pointsBalance, setPointsBalance] = useState(null);
+  const [pointsToRedeem, setPointsToRedeem] = useState(0);
+  const [loyaltyCfg, setLoyaltyCfg] = useState({ minRedeem: 50, redeemRate: 0.01 });
 
   const [categories, setCategories] = useState(['All']);
 
@@ -165,6 +169,8 @@ const POSTerminal = () => {
         const cats = await r.json();
         if (Array.isArray(cats)) setCategories(['All', ...cats.filter(c => c.active !== false).sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99)).map(c => c.name)]);
       } catch {}
+      // Fetch loyalty config
+      try { const r = await loyaltyEngineAPI.getConfig(); setLoyaltyCfg(r.data || { minRedeem: 50, redeemRate: 0.01 }); } catch {}
       // Fetch multi-lang labels
       try {
         const lang = localStorage.getItem('nua_lang') || 'en';
@@ -195,7 +201,9 @@ const POSTerminal = () => {
     return groups;
   }, [filteredProducts]);
 
-  const totals = calculateTotal();
+  const totalsRaw = calculateTotal();
+  const redeemDiscount = pointsToRedeem >= (loyaltyCfg.minRedeem || 50) ? pointsToRedeem * (loyaltyCfg.redeemRate || 0.01) : 0;
+  const totals = redeemDiscount > 0 ? { ...totalsRaw, total: Math.max(0, parseFloat(totalsRaw.total) - redeemDiscount).toFixed(2), pointsDiscount: redeemDiscount.toFixed(2) } : totalsRaw;
   const totalNum = parseFloat(totals.total) || 0;
 
   // ---- Standard checkout ----
@@ -210,15 +218,30 @@ const POSTerminal = () => {
     setLoading(true);
     try {
       const res = await transactionsAPI.create({
-        items: cart.map(item => ({ productId: item.id, productName: item.name, quantity: item.quantity, price: item.price })),
+        items: cart.map(item => ({ productId: item.id, productName: item.name, quantity: item.quantity, price: item.price, category: item.category })),
         paymentMethod, customerId: selectedCustomer?.id || null, location: currentLocation, cashier: currentUser.name,
+        pointsRedeemed: pointsToRedeem, pointsDiscount: redeemDiscount,
       });
       setLastTxnId(res.data?.id || null);
+      // Loyalty: redeem first (if applicable), then earn on net spend
+      if (selectedCustomer && pointsToRedeem >= (loyaltyCfg.minRedeem || 50)) {
+        try { await loyaltyEngineAPI.redeem({ customerId: selectedCustomer.id, points: pointsToRedeem, transactionId: res.data?.id }); } catch {}
+      }
+      if (selectedCustomer) {
+        try {
+          await loyaltyEngineAPI.earn({
+            customerId: selectedCustomer.id,
+            transactionId: res.data?.id,
+            items: cart.map(i => ({ category: i.category || 'Other', price: i.price, quantity: i.quantity })),
+          });
+        } catch {}
+      }
       toast({ title: "Transaction Complete!", description: `Payment of $${totals.total} via ${paymentMethod}` });
       // Auto-route items to category printers
       try { await gamificationAPI.sendToPrinters({ items: cart.map(i => ({ productName: i.name, category: i.category, quantity: i.quantity })), orderId: res.data?.id }); } catch {}
       resetPayment();
       clearCart();
+      setPointsToRedeem(0);
       const r = await productsAPI.getAll(); setProducts(r.data);
     } catch (error) {
       toast({ title: "Error", description: "Transaction failed.", variant: "destructive" });
@@ -474,13 +497,31 @@ const POSTerminal = () => {
             <span className="font-medium text-sm">Customer</span>
           </div>
           {selectedCustomer ? (
-            <div className="flex items-center justify-between">
-              <div><p className="font-medium">{selectedCustomer.name}</p><p className="text-xs text-gray-500">{selectedCustomer.membershipTier} Member</p></div>
-              <Button variant="ghost" size="sm" onClick={() => setSelectedCustomer(null)}>Remove</Button>
+            <div>
+              <div className="flex items-center justify-between">
+                <div><p className="font-medium">{selectedCustomer.name}</p><p className="text-xs text-gray-500">{selectedCustomer.membershipTier} Member {pointsBalance !== null && <span className="ml-1 text-amber-600 font-semibold">⭐ {pointsBalance} pts</span>}</p></div>
+                <Button variant="ghost" size="sm" onClick={() => { setSelectedCustomer(null); setPointsBalance(null); setPointsToRedeem(0); }}>Remove</Button>
+              </div>
+              {pointsBalance !== null && pointsBalance >= loyaltyCfg.minRedeem && (
+                <div className="mt-2 p-2 bg-amber-50 rounded text-xs space-y-1" data-testid="points-pay-block">
+                  <p className="text-amber-700 font-medium">Points & Pay (1 pt = ${loyaltyCfg.redeemRate} · min {loyaltyCfg.minRedeem})</p>
+                  <div className="flex gap-1 items-center">
+                    <Input type="number" min={loyaltyCfg.minRedeem} max={pointsBalance} step="10" value={pointsToRedeem || ''} placeholder={`${loyaltyCfg.minRedeem}-${pointsBalance}`} onChange={e => setPointsToRedeem(Math.min(pointsBalance, parseInt(e.target.value) || 0))} className="h-7 text-xs" data-testid="points-input" />
+                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setPointsToRedeem(pointsBalance)} data-testid="use-all-pts">All</Button>
+                  </div>
+                  {pointsToRedeem >= loyaltyCfg.minRedeem && <p className="text-green-700 font-semibold" data-testid="redeem-value">Discount: ${(pointsToRedeem * loyaltyCfg.redeemRate).toFixed(2)}</p>}
+                </div>
+              )}
             </div>
           ) : (
             <select className="w-full p-2 border rounded-md text-sm"
-              onChange={(e) => { const c = customers.find(c => c.id === e.target.value); setSelectedCustomer(c); }}
+              onChange={async (e) => {
+                const c = customers.find(c => c.id === e.target.value);
+                setSelectedCustomer(c);
+                if (c) {
+                  try { const r = await loyaltyEngineAPI.getBalance(c.id); setPointsBalance(r.data?.points || 0); } catch {}
+                }
+              }}
               data-testid="pos-customer-select">
               <option value="">Walk-in Customer</option>
               {customers.map(c => <option key={c.id} value={c.id}>{c.name} ({c.membershipTier})</option>)}
@@ -515,6 +556,11 @@ const POSTerminal = () => {
           <Card className="mb-4"><CardContent className="p-4 space-y-2">
             <div className="flex justify-between text-sm"><span>{labels.subtotal || 'Subtotal'}</span><span>${totals.subtotal}</span></div>
             <div className="flex justify-between text-sm"><span>{labels.tax || 'GST (10%)'}</span><span>${totals.gst}</span></div>
+            {totals.pointsDiscount && (
+              <div className="flex justify-between text-sm text-green-700" data-testid="points-discount-row">
+                <span>⭐ Points redeemed ({pointsToRedeem} pts)</span><span>-${totals.pointsDiscount}</span>
+              </div>
+            )}
             {selectedCustomer && (
               <div className="flex justify-between text-xs bg-amber-50 -mx-2 px-2 py-1 rounded" data-testid="loyalty-preview">
                 <span className="text-amber-700">⭐ Loyalty preview</span>

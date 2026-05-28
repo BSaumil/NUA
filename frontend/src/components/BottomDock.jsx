@@ -91,6 +91,7 @@ const ALL_FEATURES = [
   { group: 'Customers', items: [
     { path: '/customers', label: 'Customer List', icon: Users, access: ['owner', 'manager', 'cashier'] },
     { path: '/loyalty', label: 'Loyalty & Events', icon: Award, access: ['owner', 'manager', 'cashier'] },
+    { path: '/loyalty-config', label: 'Loyalty Config', icon: Tag, access: ['owner'] },
     { path: '/email-marketing', label: 'Email Marketing', icon: Mail, access: ['owner', 'manager'] },
   ]},
   { group: 'Accounting', items: [
@@ -102,6 +103,15 @@ const ALL_FEATURES = [
   { group: 'System', items: [
     { path: '/automation', label: 'Automation', icon: Zap, access: ['owner', 'manager'] },
     { path: '/settings', label: 'Settings', icon: Settings, access: ['owner', 'manager'] },
+  ]},
+  { group: 'Analytics & AI', items: [
+    { path: '/agent', label: 'Ash AI Agent', icon: Brain, access: ['owner', 'manager'] },
+    { path: '/audit-log', label: 'Audit Log', icon: ShieldAlert, access: ['owner', 'manager'] },
+    { path: '/anomalies', label: 'Inventory Anomalies', icon: AlertTriangle, access: ['owner', 'manager'] },
+    { path: '/booking-heatmap', label: 'Busy Heatmap', icon: Flame, access: ['owner', 'manager'] },
+    { path: '/cohort-retention', label: 'Cohort Retention', icon: Users, access: ['owner', 'manager'] },
+    { path: '/shift-swaps', label: 'Shift Swaps', icon: ArrowLeftRight, access: ['owner', 'manager', 'cashier', 'kitchen', 'barista'] },
+    { path: '/security', label: 'Security & GDPR', icon: Shield, access: ['owner', 'manager'] },
   ]},
 ];
 
