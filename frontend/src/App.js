@@ -49,11 +49,22 @@ import Modifiers from './pages/Modifiers';
 import Discounts from './pages/Discounts';
 import CompVoid from './pages/CompVoid';
 import PaymentLinks from './pages/PaymentLinks';
+import AuditLog from './pages/AuditLog';
+import InventoryAnomalies from './pages/InventoryAnomalies';
+import BookingHeatmap from './pages/BookingHeatmap';
+import CohortRetention from './pages/CohortRetention';
+import ShiftSwaps from './pages/ShiftSwaps';
+import SecurityCompliance from './pages/SecurityCompliance';
+import AskNuaPanel, { AskNuaButton } from './components/AskNua';
+import { useState as useGlobalState } from 'react';
 
 function StaffLayout({ children }) {
+  const [askOpen, setAskOpen] = useGlobalState(false);
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
       <div className="px-6 py-6 max-w-screen-2xl mx-auto">{children}</div>
+      <AskNuaButton onClick={() => setAskOpen(true)} />
+      <AskNuaPanel open={askOpen} onClose={() => setAskOpen(false)} />
       <BottomDock />
     </div>
   );
@@ -107,6 +118,12 @@ function ProtectedRoutes() {
         <Route path="/end-of-day" element={<EndOfDay />} />
         <Route path="/tip-management" element={<TipManagement />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/security" element={<SecurityCompliance />} />
+        <Route path="/audit-log" element={<AuditLog />} />
+        <Route path="/anomalies" element={<InventoryAnomalies />} />
+        <Route path="/booking-heatmap" element={<BookingHeatmap />} />
+        <Route path="/cohort-retention" element={<CohortRetention />} />
+        <Route path="/shift-swaps" element={<ShiftSwaps />} />
       </Routes>
     </StaffLayout>
   );

@@ -142,6 +142,11 @@ const POSTerminal = () => {
   const [ghostAmount, setGhostAmount] = useState('');
   const [lastTxnId, setLastTxnId] = useState(null);
 
+  // v15: Tabs (Hold/Recall), Loyalty preview, BNPL, Multi-lang
+  const [showTabsDialog, setShowTabsDialog] = useState(false);
+  const [openTabs, setOpenTabs] = useState([]);
+  const [labels, setLabels] = useState({});
+
   const [categories, setCategories] = useState(['All']);
 
   useEffect(() => { fetchData(); }, []);
@@ -159,6 +164,12 @@ const POSTerminal = () => {
         const r = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/categories`);
         const cats = await r.json();
         if (Array.isArray(cats)) setCategories(['All', ...cats.filter(c => c.active !== false).sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99)).map(c => c.name)]);
+      } catch {}
+      // Fetch multi-lang labels
+      try {
+        const lang = localStorage.getItem('nua_lang') || 'en';
+        const r = await v15API.getLabels(lang);
+        setLabels(r.data || {});
       } catch {}
       // Check training mode
       advancedAPI.getTrainingMode().then(r => setTrainingMode(r.data?.enabled || false)).catch(() => {});
@@ -349,10 +360,29 @@ const POSTerminal = () => {
           <h1 className="text-xl font-bold mb-2" style={{ color: theme.text }}
             onDoubleClick={() => { if (user?.role === 'owner') setShowGhost(true); }}
             data-testid="pos-title">POS Terminal</h1>
-          <div className="relative mb-3">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={16} />
-            <Input placeholder="Search products..." className="pl-9 h-9" value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)} data-testid="pos-search" />
+          <div className="relative mb-3 flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={16} />
+              <Input placeholder="Search products..." className="pl-9 h-9" value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)} data-testid="pos-search" />
+            </div>
+            <VoiceOrderButton onAddSuggestions={(suggestions) => {
+              suggestions.forEach(s => {
+                const p = products.find(pp => pp.id === s.productId);
+                if (p) { for (let i = 0; i < s.quantity; i++) addToCart(p); }
+              });
+            }} />
+            <Button variant="outline" className="h-9 px-3" onClick={async () => {
+              if (cart.length === 0) { toast({ title: 'Cart empty', variant: 'destructive' }); return; }
+              try {
+                await v15API.createTab({ name: `Tab ${new Date().toLocaleTimeString()}`, cart, selectedCustomer });
+                toast({ title: 'Order held', description: 'Recall from "Tabs" button' });
+                clearCart();
+              } catch { toast({ title: 'Hold failed', variant: 'destructive' }); }
+            }} data-testid="hold-order-btn">Hold</Button>
+            <Button variant="outline" className="h-9 px-3" onClick={async () => {
+              try { const r = await v15API.getTabs(); setOpenTabs(r.data || []); setShowTabsDialog(true); } catch {}
+            }} data-testid="recall-tab-btn">Tabs</Button>
           </div>
           <div className="flex gap-1.5 overflow-x-auto pb-1">
             {categories.map(cat => (
@@ -436,7 +466,7 @@ const POSTerminal = () => {
 
       {/* Cart Panel — bigger for easier billing */}
       <div className="w-[440px] flex-shrink-0 flex flex-col border bg-white rounded-xl shadow-sm p-4" data-testid="pos-cart-panel">
-        <h2 className="text-xl font-bold mb-3" style={{ color: theme.text }}>Current Order</h2>
+        <h2 className="text-xl font-bold mb-3" style={{ color: theme.text }}>{labels.cart || 'Current Order'}</h2>
         {/* Customer Selection */}
         <Card className="mb-4"><CardContent className="p-4">
           <div className="flex items-center gap-2 mb-2">
@@ -480,12 +510,18 @@ const POSTerminal = () => {
           )}
         </div>
 
-        {/* Totals */}
+        {/* Totals + Loyalty preview */}
         {cart.length > 0 && (
           <Card className="mb-4"><CardContent className="p-4 space-y-2">
-            <div className="flex justify-between text-sm"><span>Subtotal</span><span>${totals.subtotal}</span></div>
-            <div className="flex justify-between text-sm"><span>GST (10%)</span><span>${totals.gst}</span></div>
-            <div className="border-t pt-2 flex justify-between font-bold text-lg"><span>Total</span><span style={{ color: theme.primary }} data-testid="pos-total">${totals.total}</span></div>
+            <div className="flex justify-between text-sm"><span>{labels.subtotal || 'Subtotal'}</span><span>${totals.subtotal}</span></div>
+            <div className="flex justify-between text-sm"><span>{labels.tax || 'GST (10%)'}</span><span>${totals.gst}</span></div>
+            {selectedCustomer && (
+              <div className="flex justify-between text-xs bg-amber-50 -mx-2 px-2 py-1 rounded" data-testid="loyalty-preview">
+                <span className="text-amber-700">⭐ Loyalty preview</span>
+                <span className="font-bold text-amber-700">+{Math.floor(parseFloat(totals.total))} pts</span>
+              </div>
+            )}
+            <div className="border-t pt-2 flex justify-between font-bold text-lg"><span>{labels.total || 'Total'}</span><span style={{ color: theme.primary }} data-testid="pos-total">${totals.total}</span></div>
           </CardContent></Card>
         )}
 
@@ -517,6 +553,14 @@ const POSTerminal = () => {
             <Button className="w-full h-12 bg-violet-600 hover:bg-violet-700 text-white font-medium"
               onClick={handleStripeCheckout} disabled={loading} data-testid="pay-stripe">
               <CreditCard size={18} className="mr-2" /> Pay with Stripe
+            </Button>
+            <Button className="w-full h-12 bg-emerald-700 hover:bg-emerald-800 text-white font-medium"
+              onClick={() => { toast({ title: 'BNPL', description: 'Afterpay / Klarna — opening provider redirect (configure keys in Integrations)' }); }} data-testid="pay-bnpl">
+              <CreditCard size={18} className="mr-2" /> Pay Later (Afterpay / Klarna)
+            </Button>
+            <Button className="w-full h-12 bg-orange-500 hover:bg-orange-600 text-white font-medium"
+              onClick={() => { toast({ title: 'Crypto', description: 'USDC tap-to-pay via Stripe Crypto — configure keys in Integrations' }); }} data-testid="pay-crypto">
+              ₿ Pay with Crypto (USDC)
             </Button>
             <Button className="w-full h-14 bg-indigo-600 hover:bg-indigo-700 text-white font-medium"
               onClick={handleStartSplit} data-testid="pay-split">
@@ -738,6 +782,39 @@ const POSTerminal = () => {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Open Tabs (Hold / Recall) */}
+      <Dialog open={showTabsDialog} onOpenChange={setShowTabsDialog}>
+        <DialogContent className="max-w-md" data-testid="tabs-dialog">
+          <DialogHeader><DialogTitle>Open Tabs ({openTabs.length})</DialogTitle></DialogHeader>
+          <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+            {openTabs.map(t => (
+              <Card key={t.id} data-testid={`tab-${t.id}`}>
+                <CardContent className="p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-semibold text-sm">{t.name}</p>
+                      <p className="text-xs text-gray-500">{t.cart?.length || 0} items · {t.createdByName} · {new Date(t.createdAt).toLocaleTimeString()}</p>
+                    </div>
+                    <div className="flex gap-1">
+                      <Button size="sm" onClick={async () => {
+                        clearCart();
+                        (t.cart || []).forEach(i => { for (let n = 0; n < i.quantity; n++) addToCart({ ...i }); });
+                        if (t.selectedCustomer) setSelectedCustomer(t.selectedCustomer);
+                        await v15API.deleteTab(t.id);
+                        setShowTabsDialog(false);
+                        toast({ title: 'Tab recalled' });
+                      }} style={{ backgroundColor: theme.primary }} data-testid={`recall-${t.id}`}>Recall</Button>
+                      <Button size="sm" variant="outline" className="text-red-500" onClick={async () => { await v15API.deleteTab(t.id); setOpenTabs(openTabs.filter(o => o.id !== t.id)); }}>×</Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+            {openTabs.length === 0 && <p className="text-center text-gray-400 py-8 text-sm">No tabs on hold</p>}
+          </div>
+        </DialogContent>
+      </Dialog>
 
     </div>
   );

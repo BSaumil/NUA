@@ -32,6 +32,7 @@ from routes.enterprise_features import router as enterprise_router
 from routes.gamification import router as gamification_router
 from routes.reservation_features import router as reservation_features_router
 from routes.items_system import router as items_system_router
+from routes.v15_features import router as v15_router
 
 app = FastAPI()
 
@@ -60,6 +61,7 @@ api_router.include_router(enterprise_router)
 api_router.include_router(gamification_router)
 api_router.include_router(reservation_features_router)
 api_router.include_router(items_system_router)
+api_router.include_router(v15_router)
 api_router.include_router(multi_tenant_router)
 
 @api_router.get("/")
@@ -77,6 +79,36 @@ async def root():
     }
 
 app.include_router(api_router)
+
+# ============ Per-tenant rate limiter (lightweight in-memory) ============
+from collections import defaultdict
+from time import time
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """120 req/min per (tenant, IP). Excludes static & public booking."""
+    def __init__(self, app):
+        super().__init__(app)
+        self.buckets = defaultdict(list)
+        self.limit = 120
+        self.window = 60
+
+    async def dispatch(self, request, call_next):
+        path = request.url.path
+        if not path.startswith("/api/") or path.startswith("/api/public") or path.startswith("/api/table"):
+            return await call_next(request)
+        tenant = request.headers.get("X-Tenant-Id", "default")
+        ip = request.client.host if request.client else "?"
+        key = f"{tenant}:{ip}"
+        now = time()
+        self.buckets[key] = [t for t in self.buckets[key] if now - t < self.window]
+        if len(self.buckets[key]) >= self.limit:
+            return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded — 120 req/min per tenant"})
+        self.buckets[key].append(now)
+        return await call_next(request)
+
+app.add_middleware(RateLimitMiddleware)
 
 frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 app.add_middleware(

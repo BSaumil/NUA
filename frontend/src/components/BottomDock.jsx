@@ -1,13 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
+import { v15API } from '../services/api';
 import {
   LayoutDashboard, ShoppingCart, Package, Users, Warehouse, Calculator,
   Settings, Utensils, ChefHat, BarChart3, Zap, Award, TrendingUp,
   FlaskConical, Sunrise, Brain, Plug, Users2, LogOut, Mail, ClipboardList,
   Trophy, Printer, PieChart, MoreHorizontal, X, FileText, DollarSign, Tag,
-  Link2, Ban, Receipt, Calendar, MapPin, Clock, Sparkles, BookOpen
+  Link2, Ban, Receipt, Calendar, MapPin, Clock, Sparkles, BookOpen, Shield,
+  ShieldAlert, AlertTriangle, Flame, ArrowLeftRight
 } from 'lucide-react';
 
 // Role-default quick actions (left → right) on the bottom dock.
@@ -109,6 +111,15 @@ export default function BottomDock() {
   const navigate = useNavigate();
   const location = useLocation();
   const [showMore, setShowMore] = useState(false);
+  const [badges, setBadges] = useState({});
+
+  useEffect(() => {
+    if (!user) return;
+    const tick = async () => { try { const r = await v15API.getBadges(); setBadges(r.data || {}); } catch {} };
+    tick();
+    const id = setInterval(tick, 30000); // poll every 30s
+    return () => clearInterval(id);
+  }, [user]);
 
   if (!user) return null;
   const role = user.role || 'cashier';
@@ -142,15 +153,27 @@ export default function BottomDock() {
             {quick.map(q => {
               const Icon = q.icon;
               const isActive = location.pathname === q.path;
+              const badgeKey = q.path === '/reservations' ? 'reservations' :
+                                q.path === '/kitchen' ? 'kitchen' :
+                                q.path === '/pos' ? 'pos' :
+                                q.path === '/waitlist' ? 'waitlist' : null;
+              const count = badgeKey ? badges[badgeKey] : 0;
               return (
                 <button
                   key={q.path}
                   onClick={() => navigate(q.path)}
-                  className={`flex flex-col items-center gap-0.5 px-3 py-2 rounded-xl transition-all min-w-[64px] ${isActive ? 'text-white' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100'}`}
+                  className={`relative flex flex-col items-center gap-0.5 px-3 py-2 rounded-xl transition-all min-w-[64px] ${isActive ? 'text-white' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100'}`}
                   style={isActive ? { backgroundColor: theme.primary } : {}}
                   data-testid={`dock-${q.path.replace('/', '')}`}
                 >
-                  <Icon size={18} />
+                  <div className="relative">
+                    <Icon size={18} />
+                    {count > 0 && (
+                      <span className="absolute -top-2 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center" data-testid={`badge-${q.path.replace('/', '')}`}>
+                        {count > 99 ? '99+' : count}
+                      </span>
+                    )}
+                  </div>
                   <span className="text-[10px] font-medium">{q.label}</span>
                 </button>
               );

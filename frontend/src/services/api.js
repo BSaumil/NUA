@@ -393,4 +393,52 @@ export const itemsSystemAPI = {
   deletePaymentLink: (id) => api.delete(`/payment-links/${id}`),
 };
 
+// v15 — Tabs, Favorites, Variants, Voice, Ask NUA, Image gen, Anomaly, Auto-roster, Swap, Heatmap, Cohort, Audit, 2FA, GDPR, BAS e-file, i18n
+export const v15API = {
+  getBadges: () => api.get('/dock/badges'),
+  // Tabs (hold/recall)
+  getTabs: () => api.get('/pos/tabs'),
+  createTab: (data) => api.post('/pos/tabs', data),
+  deleteTab: (id) => api.delete(`/pos/tabs/${id}`),
+  // Favorites
+  getFavorites: () => api.get('/pos/favorites'),
+  saveFavorites: (productIds) => api.post('/pos/favorites', { productIds }),
+  // Variants
+  setVariants: (productId, data) => api.put(`/products/${productId}/variants`, data),
+  // CSV import
+  bulkImport: (rows) => api.post('/items/bulk-import', { rows }),
+  // Voice POS
+  voiceOrder: (audioBase64, mime) => api.post('/pos/voice-order', { audioBase64, mime }),
+  // Ask NUA
+  askNua: (question) => api.post('/ai/ask-nua', { question }),
+  // Item image gen
+  generateImage: (name, cuisine) => api.post('/items/generate-image', { name, cuisine }),
+  // Anomalies
+  getAnomalies: () => api.get('/analytics/inventory-anomalies'),
+  // Auto-roster
+  autoRoster: (weekStart) => api.post('/staff/auto-roster', { weekStart }),
+  commitAutoRoster: (shifts) => api.post('/staff/roster/commit-auto', { shifts }),
+  // Shift swap
+  getSwaps: () => api.get('/staff/shift-swaps'),
+  createSwap: (data) => api.post('/staff/shift-swaps', data),
+  approveSwap: (id) => api.post(`/staff/shift-swaps/${id}/approve`),
+  rejectSwap: (id) => api.post(`/staff/shift-swaps/${id}/reject`),
+  // Heatmap & cohort
+  getBookingHeatmap: () => api.get('/analytics/booking-heatmap'),
+  getCohortRetention: () => api.get('/analytics/cohort-retention'),
+  // Audit
+  getAuditLogs: (limit = 200) => api.get('/audit/logs', { params: { limit } }),
+  // 2FA
+  setup2FA: () => api.post('/auth/2fa/setup'),
+  verify2FA: (code) => api.post('/auth/2fa/verify', { code }),
+  disable2FA: () => api.post('/auth/2fa/disable'),
+  // GDPR
+  gdprExport: (customerId) => api.get(`/customers/${customerId}/gdpr-export`),
+  gdprErase: (customerId) => api.delete(`/customers/${customerId}/gdpr-erase`),
+  // BAS e-file
+  efileBas: (reportId, abn) => api.post(`/bas-gst/efile/${reportId}`, { abn }),
+  // i18n
+  getLabels: (lang) => api.get(`/i18n/labels/${lang}`),
+};
+
 export default api;

@@ -16,25 +16,37 @@ export const ThemeProvider = ({ children }) => {
     const saved = localStorage.getItem('posTheme');
     return saved ? JSON.parse(saved) : defaultTheme;
   });
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('nua_dark') === '1');
+  const [lang, setLang] = useState(() => localStorage.getItem('nua_lang') || 'en');
 
   useEffect(() => {
     localStorage.setItem('posTheme', JSON.stringify(theme));
-    // Apply theme to CSS variables
     Object.entries(theme).forEach(([key, value]) => {
       document.documentElement.style.setProperty(`--theme-${key}`, value);
     });
   }, [theme]);
 
-  const updateTheme = (updates) => {
-    setTheme(prev => ({ ...prev, ...updates }));
-  };
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+      document.body.style.backgroundColor = '#0a0e17';
+      document.body.style.color = '#e5e7eb';
+    } else {
+      document.documentElement.classList.remove('dark');
+      document.body.style.backgroundColor = '';
+      document.body.style.color = '';
+    }
+    localStorage.setItem('nua_dark', darkMode ? '1' : '0');
+  }, [darkMode]);
 
-  const resetTheme = () => {
-    setTheme(defaultTheme);
-  };
+  useEffect(() => { localStorage.setItem('nua_lang', lang); }, [lang]);
+
+  const updateTheme = (updates) => setTheme(prev => ({ ...prev, ...updates }));
+  const resetTheme = () => setTheme(defaultTheme);
+  const toggleDarkMode = () => setDarkMode(d => !d);
 
   return (
-    <ThemeContext.Provider value={{ theme, updateTheme, resetTheme }}>
+    <ThemeContext.Provider value={{ theme, updateTheme, resetTheme, darkMode, toggleDarkMode, lang, setLang }}>
       {children}
     </ThemeContext.Provider>
   );
@@ -42,8 +54,6 @@ export const ThemeProvider = ({ children }) => {
 
 export const useTheme = () => {
   const context = useContext(ThemeContext);
-  if (!context) {
-    throw new Error('useTheme must be used within ThemeProvider');
-  }
+  if (!context) throw new Error('useTheme must be used within ThemeProvider');
   return context;
 };

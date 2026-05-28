@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Clock, LogIn, LogOut, Calendar, DollarSign, Users, FileText,
-  Plus, Trash2, BarChart3, Printer, GripVertical, Move
+  Plus, Trash2, BarChart3, Printer, GripVertical, Move, Brain
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -268,6 +268,18 @@ export default function StaffRoster() {
             <h3 className="font-semibold">Weekly Roster</h3>
             <div className="flex gap-2">
               {roster.length > 0 && <Button size="sm" variant="outline" onClick={printRoster} data-testid="print-roster-btn"><Printer size={14} className="mr-1" /> Print Roster</Button>}
+              {canManage && <Button size="sm" variant="outline" onClick={async () => {
+                const { v15API } = await import('../services/api');
+                try {
+                  const r = await v15API.autoRoster(weekForm.weekStart || new Date().toISOString().split('T')[0]);
+                  const shifts = r.data?.suggestions || [];
+                  if (window.confirm(`AI suggests ${shifts.length} shifts:\n\n${r.data?.reasoning}\n\nCommit them to the roster?`)) {
+                    await v15API.commitAutoRoster(shifts);
+                    toast.success(`Created ${shifts.length} shifts`);
+                    fetchAll();
+                  }
+                } catch { toast.error('AI roster failed'); }
+              }} data-testid="auto-roster-btn"><Brain size={14} className="mr-1" /> AI Auto-Roster</Button>}
               {canManage && <Button size="sm" style={{ backgroundColor: theme.primary }} onClick={() => setShowWeekRoster(true)} data-testid="add-week-roster-btn"><Plus size={14} className="mr-1" /> Add Week Roster</Button>}
             </div>
           </div>

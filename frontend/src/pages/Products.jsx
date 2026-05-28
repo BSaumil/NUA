@@ -84,9 +84,39 @@ const Products = () => {
           <p className="text-gray-500 mt-1">Manage your catalog, pricing, and special offers</p>
         </div>
         {view === 'products' ? (
-          <Button style={{ backgroundColor: theme.primary }} onClick={openAddProduct} data-testid="add-product-btn">
-            <Plus className="mr-2" size={18} /> Add Product
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => document.getElementById('csv-import-input').click()} data-testid="csv-import-btn">
+              CSV Import
+            </Button>
+            <input id="csv-import-input" type="file" accept=".csv" className="hidden" onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              const text = await file.text();
+              const lines = text.split(/\r?\n/).filter(l => l.trim());
+              if (lines.length < 2) return;
+              const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+              const rows = lines.slice(1).map(l => {
+                const cells = l.split(',');
+                const obj = {};
+                headers.forEach((h, i) => obj[h] = cells[i]?.trim());
+                return obj;
+              });
+              try {
+                const r = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/items/bulk-import`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('nuva_token')}` },
+                  body: JSON.stringify({ rows }),
+                });
+                const d = await r.json();
+                alert(`Imported ${d.imported} products`);
+                fetchData();
+              } catch { alert('Import failed'); }
+              e.target.value = '';
+            }} />
+            <Button style={{ backgroundColor: theme.primary }} onClick={openAddProduct} data-testid="add-product-btn">
+              <Plus className="mr-2" size={18} /> Add Product
+            </Button>
+          </div>
         ) : (
           <Button style={{ backgroundColor: theme.primary }} onClick={openAddPromo} data-testid="add-promo-btn">
             <Plus className="mr-2" size={18} /> Create Promotion

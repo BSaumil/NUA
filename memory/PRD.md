@@ -1,47 +1,62 @@
-# NUA POS — PRD v15.0
+# NUA POS — PRD v16.0
 
 ## Brand
-NUA. Custom RBAC, PIN-only staff login optional, JWT login.
+NUA. POS-first UX. Bottom-dock primary nav. Sidebar deprecated.
 
-## Navigation (v15, Feb 2026)
-- **Sidebar removed** entirely from layout.
-- **BottomDock** is now the primary navigation, fixed at the bottom of every authenticated page.
-  - Role-based quick actions (4 per role): Owner: POS · Dashboard · Bookings · Items. Manager: POS · Bookings · Kitchen · Roster. Cashier: POS · Bookings · Customers · Loyalty. Kitchen: Kitchen · Pre-Shift · Inventory · AI Pantry. Barista: POS · Drinks · Customers · Loyalty.
-  - **More** button opens a fullscreen splash modal grouping every feature the user can access (Operations, Reservations, Items, Menu Engineering, Team, Customers, Accounting, System).
-  - Logout button on dock (right side).
-- **Default landing**: `/pos` for ALL roles (owner included). Dashboard moved to `/dashboard` and is reachable via owner's dock or splash.
+## v16 (Feb 2026) — Phase A + C + D Mega-Drop
+**Backend**: New consolidated routes file `routes/v15_features.py` adds:
+- `GET /api/dock/badges` — live counters (reservations/kitchen/pos/waitlist)
+- `GET/POST/DELETE /api/pos/tabs` — Hold/Recall orders
+- `GET/POST /api/pos/favorites` — per-user quick keys
+- `PUT /api/products/{id}/variants` — variant matrix
+- `POST /api/items/bulk-import` — CSV import
+- `POST /api/pos/voice-order` — Whisper transcription + product matching
+- `POST /api/ai/ask-nua` — natural-language analytics (GPT-5.2)
+- `POST /api/items/generate-image` — Nano Banana marketing photos
+- `GET /api/analytics/inventory-anomalies` — sales velocity spike detection
+- `POST /api/staff/auto-roster` + `POST /api/staff/roster/commit-auto` — AI roster
+- `GET/POST /api/staff/shift-swaps` + approve/reject
+- `GET /api/analytics/booking-heatmap` — DOW × hour guest density
+- `GET /api/analytics/cohort-retention` — month-over-month return rate
+- `GET /api/audit/logs` — aggregated sensitive events
+- `POST /api/auth/2fa/{setup,verify,disable}` — TOTP scaffold
+- `GET /api/customers/{id}/gdpr-export` + DELETE for anonymize
+- `POST /api/bas-gst/efile/{report_id}` — ATO submission record
+- `GET /api/i18n/labels/{lang}` — 5-lang cart labels (en/es/fr/hi/zh)
+- **Rate limit middleware**: 120 req/min per (X-Tenant-Id, IP)
 
-## POS Terminal (v15)
-- Smaller product cards (h-16 image, 3-6 column compact grid).
-- Category-wise sections when "All" is selected (sticky headers per category, populated dynamically from `/api/categories`).
-- Bigger 440px cart panel (white card, rounded shadow).
-- **Swipe gestures on cart items**:
-  - **Left swipe (>80px)** → DELETE the item (red bg revealed).
-  - **Right swipe (>80px)** → REPEAT the item, qty +1 (green bg revealed).
-- Quantity ± buttons preserved with `data-no-swipe` zone so they don't conflict with swipe.
-- Hint text: "← swipe delete · repeat swipe →" on each cart item.
-- Image fallback: `https://placehold.co/...` when product image is empty.
+**Frontend**: New components + pages:
+- `components/AskNua.jsx` — chat panel + global FAB
+- `components/VoiceOrderButton.jsx` — Whisper mic in POS header
+- `pages/AuditLog.jsx` — sensitive events viewer
+- `pages/InventoryAnomalies.jsx` — AI spike detector
+- `pages/BookingHeatmap.jsx` — busy times visualization
+- `pages/CohortRetention.jsx` — retention heatmap
+- `pages/ShiftSwaps.jsx` — staff swap requests
+- `pages/SecurityCompliance.jsx` — 2FA, dark mode, locale, GDPR
+- POSTerminal additions: Voice button, Hold/Recall Tabs, Loyalty preview chip, BNPL + Crypto pay buttons, multi-lang labels
+- StaffRoster: AI Auto-Roster button
+- Products: CSV import button
+- BottomDock: live badges polled every 30s; new splash tiles
+- ThemeContext: dark mode + language state
+- PWA: `manifest.json` + `service-worker.js` for offline-shell
 
-## Items Module (v14)
-6 sub-pages: Item Library, Categories, Modifiers, Discounts & Offers, Comp/Void, Payment Links.
-- **Payment Links**: now includes a **QR Code** modal (data-testid `qr-modal`) per link with download SVG + copy URL — perfect for instagram bios, table tents, shop windows.
-
-## Roster (v14)
-- @dnd-kit drag-and-drop on weekly grid; daily cost recalculates live.
-- PUT `/api/staff/roster/{id}` persists day moves.
-
-## Credentials (Seed-healed)
-Owner: `owner@nuva.com / NuvaOwner2026!`  
-Manager: `manager@nuva.com / Staff2026!` (Sarah Manager — role auto-healed to `manager` on startup)  
-Cashier: `cashier@nuva.com / Staff2026!` (Tom Cashier)  
-Kitchen: `kitchen@nuva.com / Staff2026!` (Chef Kim)  
-PINs: 25 owner · 00 manager · 11 cashier · 22 kitchen
+## Credentials
+Owner: owner@nuva.com / NuvaOwner2026!  
+Manager: manager@nuva.com / Staff2026!  
+Cashier: cashier@nuva.com / Staff2026!  
+Kitchen: kitchen@nuva.com / Staff2026!  
+2FA demo code: `123456`
 
 ## Testing
-21 iterations completed. Iteration 21: 100% on UX refactor — swipe gestures, role-based dock, splash modal, default-to-POS routing, Payment Link QR all verified working in Playwright automation.
+v16 backend curl-verified: badges, tabs, audit, Ask NUA (real GPT-5.2 reply), heatmap, i18n.  
+Frontend smoke-tested: POS, voice btn, Hold/Recall, Ask NUA FAB, BottomDock, all 6 new splash tiles render.
+
+## Pending (Phase B — requires user API keys)
+WhatsApp Business · Twilio SMS · Stripe Tap-to-Pay iOS · Stripe Crypto · Xero/QB · Uber Eats/DoorDash · Google Reserve · TikTok Shop.
 
 ## Backlog
-- P1: SendGrid integration for autonomous nightly EOD emails
-- P2: Nightly EOD cron job
-- P3: Real Uber Eats / DoorDash delivery API hookups
-- P4: Optional — split POSTerminal.jsx (746 lines) into sub-files (Cart, Payment dialogs, etc.)
+- POSTerminal.jsx 800+ lines — split into sub-files (mechanical refactor)
+- WebSocket real-time orders (currently 30s polling)
+- Multi-region Atlas deployment notes
+- Full TOTP via pyotp (currently demo-accepts `123456`)
