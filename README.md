@@ -1,225 +1,425 @@
-# 🚀 Ananta POS - Complete Point of Sale System
+# NUA — Enterprise Restaurant POS & Hospitality Suite
 
-**Version 2.0** | Production Ready | Windows .exe Available | Made with ❤️
-
-**Ananta** (अनन्त) - Sanskrit for "infinite" or "endless"
-
----
-
-## 🎯 Quick Start - Get Your Windows .exe
-
-**Want the Windows installer?** 👉 **[START HERE](START_HERE.md)**
-
-This guide will help you:
-1. Download the code to your Windows PC
-2. Build the standalone .exe installer
-3. Distribute to users
-
-**Total time:** ~1 hour (mostly automated)
+> Originally a Square-clone called **Ananta**, then **NUVA**, now **NUA**.
+> A multi-tenant, full-stack restaurant + retail POS platform built on FastAPI + React + MongoDB with PIN/JWT auth, custom RBAC, drag-and-drop staff rostering, AI menu/pantry intelligence, advanced reservations, gamified leaderboards, table-side QR ordering, and a swipe-driven mobile-first POS terminal.
 
 ---
 
-## 🌟 What is Ananta POS?
-
-Ananta POS is a comprehensive, enterprise-level Point of Sale system that works **completely offline** while providing cloud sync capabilities. Built for retail stores, restaurants, cafes, and service businesses.
-
-### Why Ananta?
-
-✅ **True Offline-First** - No internet? No problem!
-✅ **Windows Installer** - One-click install, everything bundled
-✅ **Production Ready** - Deploy today, start selling tomorrow
-✅ **Feature Complete** - 95% feature parity with Square, Lightspeed & Epos Now
-✅ **Modern Tech** - React + FastAPI + MongoDB
-✅ **Affordable** - No per-transaction fees
-✅ **Standalone** - No dependencies, works out of the box
+## Table of Contents
+1. [Quick Start](#quick-start)
+2. [Credentials](#test-credentials)
+3. [Tech Stack](#tech-stack)
+4. [Feature Timeline (Day 1 → Today)](#feature-timeline-day-1--today)
+5. [Current Feature Set](#current-feature-set-bullets)
+6. [Architecture](#architecture)
+7. [API Reference](#api-reference-condensed)
+8. [Potential Improvements](#potential-improvements)
 
 ---
 
-## ✨ Core Features
+## Quick Start
 
-### 💰 Sales & Checkout
-- Fast touchscreen interface
-- Split payments & tipping
-- Product modifiers (size, extras, etc.)
-- Discounts & bundles
-- Refunds & exchanges
-- Gift cards & store credit
-- Digital receipts (email/SMS)
-
-### 📦 Inventory
-- Real-time stock tracking
-- Multi-location support
-- Product variants
-- Low-stock alerts
-- Supplier management
-- Purchase orders
-- Barcode/QR support
-
-### 👥 Customer Loyalty
-- Membership tiers
-- Points system
-- Purchase history
-- Gift cards
-- Targeted marketing (ready)
-
-### 📊 Accounting & Tax
-- **BAS/GST quarterly reports**
-- Automated tax calculations
-- Expense tracking
-- P&L statements
-- Minute-level transaction tracing
-- Export to CSV/PDF
-
-### 👨‍💼 Staff Management
-- Role-based access
-- Clock in/out
-- Commission tracking
-- Performance analytics
-
-### 🍽️ Restaurant Features
-- Table management
-- Order tracking
-- Kitchen tickets
-- Multiple order types
-
----
-
-## 🚀 Quick Start
+Services are auto-managed by **supervisord** inside the container.
 
 ```bash
-# Backend
-cd backend
-pip install -r requirements.txt
-python seed_data.py
-supervisorctl start backend
-
-# Frontend
-cd frontend
-yarn install
-yarn start
+# Backend (port 8001)
+sudo supervisorctl restart backend
+# Frontend (port 3000)
+sudo supervisorctl restart frontend
 ```
 
-**Access:** http://localhost:3000
+Access the app at `REACT_APP_BACKEND_URL` (defined in `/app/frontend/.env`).
 
 ---
 
-## 📊 System Status
+## Test Credentials
 
-**Feature Coverage:** 95% ✅
-**API Endpoints:** 50+
-**Database Collections:** 18
-**Offline Support:** Full ✅
-**Production Status:** READY ✅
+| Role    | Email                  | Password         | PIN |
+|---------|------------------------|------------------|-----|
+| Owner   | owner@nuva.com         | NuvaOwner2026!   | 25  |
+| Manager | manager@nuva.com       | Staff2026!       | 00  |
+| Cashier | cashier@nuva.com       | Staff2026!       | 11  |
+| Kitchen | kitchen@nuva.com       | Staff2026!       | 22  |
+| Barista | (Maria — PIN only)     | —                | 99  |
 
----
-
-## 💪 What Makes Ananta Different?
-
-1. **Works Offline** - Full POS functionality without internet
-2. **Australian Built** - BAS/GST compliance out of the box
-3. **Restaurant Ready** - Table management & modifiers
-4. **Split Payments** - Multiple payment methods per sale
-5. **Gift Cards** - Complete loyalty system
-6. **Open Architecture** - Easy to customize
+Demo accounts auto-heal on backend startup (`seed_admin` in `routes/auth.py`).
 
 ---
 
-## 🎯 Perfect For
+## Tech Stack
 
-- ☕ Cafes & Coffee Shops
-- 🍕 Restaurants & Takeaway
-- 👔 Retail Stores
-- 💇 Salons & Spas
-- 🏪 Multi-location Chains
-
----
-
-## 📖 Documentation
-
-- **Full Feature List:** See `/app/FEATURE_COMPARISON.md`
-- **API Contracts:** See `/app/contracts.md`
-- **API Docs:** http://localhost:8001/docs
+- **Frontend**: React 19, Tailwind CSS, Shadcn UI, Lucide icons, `@dnd-kit` for drag-and-drop, `qrcode.react` for QR generation.
+- **Backend**: FastAPI (Python 3.11), Motor (async MongoDB driver), Pydantic models.
+- **Database**: MongoDB (single tenant, indexed by `businessId`).
+- **Auth**: JWT + bcrypt + PIN-only login fallback.
+- **Native builds**: Capacitor (Android), Electron (Windows).
+- **Integrations**: Emergent Universal LLM Key (OpenAI / Gemini / Claude), Stripe Checkout, 18+ hospitality 3rd-party hubs.
 
 ---
 
-## 🔐 Default Setup
+## Feature Timeline (Day 1 → Today)
 
-**Database:** MongoDB (local)
-**Admin User:** John Doe (Admin role)
-**Sample Data:** Products, customers, transactions included
-**Test Mode:** Ready to use immediately
+Each row corresponds to one development iteration verified by the testing agent (`/app/test_reports/iteration_N.json`).
+
+### Phase 1 — Foundation (Iter 1-4)
+- Initial **Ananta POS** scaffold: Products, Customers, Transactions, Refunds.
+- **Reservations** module: bookings, floor plan grid, waitlist with seating.
+- **Guest CRM**: customer profiles, membership tiers, feedback inbox.
+- **Kitchen Display System (KDS)** with course-firing and priority queueing.
+- **Pre-Shift Dashboard** with day-of-trade context.
+- **AI Command Center**, **Menu Engineering Matrix**, **Automation Engine** (rules + alerts).
+- **Loyalty & Events**, **Demand Forecasting**, **What-If Simulator**.
+
+### Phase 2 — Public-facing & Payments (Iter 5-6)
+- **Customer Booking Portal** (public, no auth) with available-slot scanning.
+- **QR / UPI / Split** payment flows.
+- **Table-Side QR Ordering** — diners scan, order, pay from their phone.
+- **Integrations Hub** — 18 connectors (Stripe, Toast, DoorDash, Uber Eats, etc.).
+- **Stripe Checkout** + **Payment Success** page.
+
+### Phase 3 — Multi-tenant & Identity (Iter 7)
+- **JWT + RBAC** with Owner / Manager / Cashier / Kitchen roles.
+- **Staff Management** with financial reports.
+- **AI Smart Pantry** — predictive stock, expiry alerts.
+- **Member Portal** (EatClub-style) — vouchers, referrals, social sharing.
+- **Multi-Business** management (single tenant DB, multi-location).
+
+### Phase 4 — End-game Ops (Iter 8)
+- **Email Marketing** campaigns (CRUD + bulk send).
+- **End-of-Day Reports** (Square-style, AI insights).
+- **Tip Management** (Toast-style with pooling).
+- **Training Mode** toggle (Clover-style sandbox).
+
+### Phase 5 — Bug-fix & Hardening (Iter 9-11)
+- Products CRUD, Inventory stock adjustment, Settings (Locations/Staff/Business), Accounting Transactions/Refunds, EOD reports — all wired off-mock.
+- **Menu Engineering AI Import**, **Price-adjust bulk** tools.
+- **What-If Simulator**: projected qty inputs.
+- **Ghost Discount** — owner-only triple-click secret on POS title for off-the-books discounts.
+- **Cash Payment** flow with change calculation + custom amount.
+
+### Phase 6 — Enterprise (Iter 12-13)
+- **Granular Permissions System** (26 permission keys), owner-assignable to any user, with sidebar/route filtering.
+- **Auto Surcharging** (card / weekend / holiday).
+- **Live Sales** stream.
+- **Hardware Integrations** (printers, scanners).
+- **Automated Reports** (scheduled email).
+- **Gamification**: Staff Leaderboard, Smart Tip distribution by performance, Quarterly Menu Review with AI alternatives.
+- **Category-wise Print Routing** (Bar / Kitchen / Pizza Station printers).
+
+### Phase 7 — NUVA Restructure (Iter 14-17)
+- **Renamed** from Ananta → NUVA. Dashboard rewrite (5 stat cards, recent transactions, action buttons).
+- **Grouped Sidebar** dropdowns (Reservations, Menu Engineering, Team, Customers, Accounting).
+- Removed revenue figures from Pre-Shift (visibility restriction).
+- **Settings**: Print Routing tab, Business Hours editor.
+- **Reservation System Expansion**:
+  - Table Layout designer
+  - Booking Settings (Rules + Schedule)
+  - **Experiences** (themed bookings: degustation, masterclass, etc.)
+  - **Clubmember** (social-login offers via FB / Google / Instagram accounts)
+  - **Booking Analytics**
+- **Editable Loyalty Tiers/Rewards** (no more hardcoded).
+- **Email Settings** (provider config, test send).
+- **Enhanced Roster**: Week view, daily budget summary, print roster (no wages), position column, 8 default positions.
+- **Staff PIN-only Login**: name-only staff creation (email auto-generated), Hourly / Daily / Annually salary types, custom roles (add unlimited).
+
+### Phase 8 — NUA Rebrand + Items Module (Iter 18-19)
+- Global **NUVA → NUA** rebrand.
+- **Items module** restructure: 6 sub-pages under one sidebar group:
+  - **Item Library** (`/products`)
+  - **Categories** (CRUD with sort order, active toggle)
+  - **Modifiers** (universal, list/dropdown, mandatory, multi-select, options w/ price, print-with-item)
+  - **Discounts & Offers** (%, $, bundle, BOGO, half-price, date-bound)
+  - **Comp / Void** (track reasons, transaction id, kitchen-print flag, type filter + search)
+  - **Payment Links** (shareable URLs per product, custom price)
+- **Drag-and-Drop Staff Roster** powered by `@dnd-kit/core`:
+  - PointerSensor (4px activation) + KeyboardSensor.
+  - Drop a shift on a different day → PUT `/api/staff/roster/{id}` persists; daily cost chip recalculates live.
+  - Print Roster strips wages/tips/cost (privacy-safe).
+
+### Phase 9 — POS-First UX (Iter 20-21, current)
+- **Default landing = `/pos`** for ALL roles (including owner). Dashboard moved to `/dashboard`.
+- **Sidebar removed**. New **BottomDock** is the primary nav:
+  - 4 role-based quick actions per role.
+  - **More** button opens fullscreen splash with role-filtered feature tiles, grouped by domain.
+  - Logout button on dock.
+- **POS layout overhaul**:
+  - Smaller product cards (h-16 thumbnail, 3-6 column compact grid).
+  - **Category-wise sections** when "All" is selected (sticky headers, live `/api/categories`).
+  - Bigger 440px cart panel.
+  - **Cart swipe gestures**:
+    - **Left swipe** (>80px) → DELETE (red bg revealed).
+    - **Right swipe** (>80px) → REPEAT, qty +1 (green bg revealed).
+  - Quantity ± buttons preserved via `data-no-swipe` zones.
+  - Image fallback to `https://placehold.co/...` when product image is empty.
+- **Payment Links → QR codes**: per-link QR modal with SVG download + copy URL, ideal for Instagram bios, table tents, shop windows.
+- **Seed auto-heal**: demo accounts re-assert their canonical role on every backend startup.
 
 ---
 
-## 💻 Windows Desktop Application
+## Current Feature Set (bullets)
 
-### Build Your Own .exe Installer
+### Core POS
+- Mobile-first POS terminal with category-grouped product picker.
+- Cart with swipe-to-delete / swipe-to-repeat.
+- Multi-method payment (card, cash, QR, UPI, split, Stripe).
+- Cash flow with change calc + custom tender amounts.
+- Owner-only triple-click Ghost Discount.
+- Training mode toggle (sandbox transactions).
 
-Ananta POS can be packaged as a **standalone Windows executable** that includes:
-- ✅ Complete React frontend
-- ✅ FastAPI backend server
-- ✅ MongoDB database
-- ✅ All runtimes (Node.js, Python)
-- ✅ 100% offline capability
+### Items
+- Item Library (full CRUD + stock adjustment).
+- Categories with sort order & active flag.
+- Universal modifiers (list/dropdown, mandatory, multi-select, options w/ price).
+- Discounts & Offers (percentage / $ / bundle / BOGO / half-price, date-bound).
+- Comp/Void tracking with reason + transaction id + kitchen-print flag.
+- Payment Links (shareable URLs with QR code).
 
-**📦 What You Get:**
-- Professional Windows installer (~250-300 MB)
-- One-click installation for users
-- No dependencies needed
-- Desktop and Start Menu shortcuts
-- Works on Windows 7/8/10/11
+### Reservations
+- Bookings + Floor Plan + Waitlist + Table Layout designer.
+- Booking Rules + Schedule editor.
+- Experiences (themed sessions).
+- Clubmember social offers.
+- Booking Analytics dashboard.
 
-**🚀 Quick Start:**
-1. **Read:** [START_HERE.md](START_HERE.md)
-2. **Download code** to Windows PC (via GitHub or direct download)
-3. **Run:** `build_windows_exe.bat`
-4. **Get:** `Ananta POS-Setup-2.0.1.exe`
+### Kitchen
+- KDS with course firing, priority, prep list.
+- Category-wise print routing (Bar/Kitchen/Pizza printers).
+- Pre-Shift dashboard (no revenue for staff).
 
-**📚 Complete Documentation:**
-- **[START_HERE.md](START_HERE.md)** - Choose download method
-- **[GITHUB_DOWNLOAD_GUIDE.md](GITHUB_DOWNLOAD_GUIDE.md)** - Download via GitHub
-- **[DIRECT_DOWNLOAD_GUIDE.md](DIRECT_DOWNLOAD_GUIDE.md)** - Direct download
-- **[WINDOWS_SETUP_GUIDE.md](WINDOWS_SETUP_GUIDE.md)** - Prepare Windows PC
-- **[WINDOWS_BUILD_GUIDE.md](WINDOWS_BUILD_GUIDE.md)** - Build the .exe
-- **[BUILD_GUIDE.html](BUILD_GUIDE.html)** - Visual guide (open in browser)
-- **[BUILD_CHECKLIST.md](BUILD_CHECKLIST.md)** - Quick reference
+### Staff & Team
+- JWT + bcrypt + PIN-only login.
+- 8 default roles + unlimited custom roles.
+- Salary types: Hourly / Daily / Annually.
+- Timecards (clock in/out with break minutes).
+- Weekly drag-and-drop roster with live cost projection.
+- Payrun (week / fortnight / month / quarter / year) with gross / super (11.5%) / tax / net.
+- Staff Reports (filtered by period).
+- **Gamification**: Leaderboard, smart tip distribution, quarterly review.
 
-**⏱️ Build Time:** 20-35 minutes (mostly automated)
+### Customers
+- Customer list + profile pages.
+- Loyalty (editable tiers, rewards, voucher engine).
+- Loyalty Events.
+- Email Marketing campaigns.
+- Member Portal (EatClub-style vouchers + referrals).
 
-**💡 Tools Included:**
-- `build_windows_exe.bat` - One-click build script
-- `check_prerequisites.py` - System readiness checker
+### Analytics & AI
+- AI Command Center.
+- Menu Engineering Matrix.
+- What-If Simulator (projected qty).
+- Demand Forecasting.
+- Quarterly Menu Review with AI alternatives.
+- AI Smart Pantry (predictive stock).
+
+### Accounting & Compliance
+- Transactions + Refunds.
+- BAS/GST reports (with submission flow).
+- End-of-Day reports (Square-style + AI insights).
+- Auto Surcharging (card / weekend / holiday).
+
+### Integrations & Hardware
+- 18-integration Hub (Stripe, Toast, DoorDash, Uber Eats, etc.).
+- Printer & Scanner registry.
+- Stripe Checkout + Payment Success.
+
+### Public-facing
+- Booking Portal (no auth).
+- Table-Side QR Ordering.
+- Member sign-up portal.
+
+### Navigation & UX
+- BottomDock primary nav (role-based 4 quick actions + More splash).
+- Sidebar deprecated.
+- Default landing = POS for everyone.
+- Splash modal groups every accessible feature.
+- Logout on dock.
+
+### Multi-tenant & Auth
+- Multi-Business management.
+- Granular permissions (26 keys, owner-assignable).
+- Seed auto-heal on startup.
+
+### Native builds
+- Android via Capacitor (`build-android.sh`).
+- Windows via Electron (`build-windows.bat`).
 
 ---
 
-## 🌐 Deployment Options
+## Architecture
 
-1. **Windows Desktop App** - Standalone .exe installer (see above)
-2. **Local Server** - On-premise deployment
-3. **Cloud** - AWS, Azure, Google Cloud
-4. **Hybrid** - Local POS + cloud backup
-5. **Multi-tenant SaaS** - Host for multiple businesses
+```
+/app
+├── backend/
+│   ├── server.py                # FastAPI entrypoint, /api prefix
+│   ├── database.py              # Mongo client + db handle
+│   ├── models/                  # Pydantic schemas
+│   └── routes/
+│       ├── auth.py              # JWT + PIN + seed
+│       ├── products.py
+│       ├── transactions.py
+│       ├── customers.py
+│       ├── reservations.py
+│       ├── kitchen.py
+│       ├── analytics.py
+│       ├── automation.py
+│       ├── settings.py
+│       ├── loyalty.py
+│       ├── public.py
+│       ├── table_ordering.py
+│       ├── integrations.py
+│       ├── ai_pantry.py
+│       ├── members.py
+│       ├── multi_tenant.py
+│       ├── advanced_features.py     # EOD, Email Marketing, Tips, Training
+│       ├── staff_management.py      # PIN, timecards, roster, payrun
+│       ├── menu_features.py         # AI import, ghost discount, what-if
+│       ├── enterprise_features.py   # Surcharges, permissions, hardware
+│       ├── gamification.py          # Leaderboard, smart tips, print routing
+│       ├── reservation_features.py  # Rules, experiences, clubmember, analytics
+│       └── items_system.py          # Categories, modifiers, discounts, comp/void, payment links
+│
+└── frontend/
+    ├── public/
+    ├── electron/                # Windows build wrapper
+    ├── android/                 # Capacitor Android wrapper
+    └── src/
+        ├── App.js               # Routes + StaffLayout (BottomDock + content)
+        ├── components/
+        │   ├── BottomDock.jsx   # Primary nav (role-based + More splash)
+        │   ├── Sidebar.jsx      # Legacy (not rendered)
+        │   └── ui/              # Shadcn components
+        ├── contexts/            # Theme, POS, Auth providers
+        ├── pages/               # 40+ page components
+        └── services/api.js      # Axios instance + per-domain APIs
+```
 
 ---
 
-## 📞 Support
+## API Reference (condensed)
 
-**Documentation:** Full docs in `/docs`
-**Issues:** GitHub Issues
-**Email:** support@anantapos.com
+| Domain                  | Endpoint prefix                  |
+|-------------------------|----------------------------------|
+| Auth                    | `/api/auth/*`                    |
+| Products                | `/api/products`                  |
+| Categories              | `/api/categories`                |
+| Modifiers               | `/api/modifiers`                 |
+| Discounts               | `/api/discounts`                 |
+| Comp/Void               | `/api/comp-void`                 |
+| Payment Links           | `/api/payment-links`             |
+| Transactions            | `/api/transactions`              |
+| Refunds                 | `/api/refunds`                   |
+| Customers               | `/api/customers`                 |
+| Feedback                | `/api/feedback`                  |
+| Reservations            | `/api/reservations`              |
+| Floor Plans             | `/api/floor-plans`               |
+| Waitlist                | `/api/waitlist`                  |
+| Booking Rules/Schedule  | `/api/booking/*`                 |
+| Experiences             | `/api/booking/experiences`       |
+| Clubmember              | `/api/clubmember/*`              |
+| Kitchen                 | `/api/kitchen/*`                 |
+| Pre-Shift               | `/api/pre-shift/today`           |
+| Analytics / AI          | `/api/analytics/*`               |
+| Forecasting             | `/api/analytics/demand-forecast` |
+| Automation              | `/api/automation/*`              |
+| Loyalty                 | `/api/loyalty/*`                 |
+| Events                  | `/api/events`                    |
+| Email Marketing         | `/api/marketing/campaigns`       |
+| Tips                    | `/api/tips/*`                    |
+| EOD Reports             | `/api/reports/end-of-day`        |
+| Quarterly Review        | `/api/reports/quarterly-review`  |
+| Print Routing           | `/api/print-routing/*`           |
+| Staff (PIN/Roster)      | `/api/staff/*`                   |
+| Payrun                  | `/api/payrun/*`                  |
+| Permissions             | `/api/permissions/*`             |
+| Surcharging             | `/api/surcharge/*`               |
+| Live Sales              | `/api/live-sales`                |
+| Hardware                | `/api/hardware/*`                |
+| Stripe                  | `/api/stripe/*`                  |
+| Integrations            | `/api/integrations/*`            |
+| Table-Side Order        | `/api/table/*`                   |
+| Public Booking          | `/api/public/*`                  |
+| Member Portal           | `/api/members/*`                 |
+| Multi-Business          | `/api/business/*`                |
+| AI Pantry               | `/api/ai-pantry/*`               |
+| Receipt Settings        | `/api/receipt/settings`          |
+| Email Settings          | `/api/email/settings`            |
 
 ---
 
-## 📄 License
+## Potential Improvements
 
-Proprietary Software. All rights reserved.
+### High-impact UX
+- **Dock live-counter badges**: red dots on dock icons (Bookings = new reservation, Kitchen = order firing >10 min, POS = open tab waiting payment). Turns the dock into a mini ops dashboard.
+- **Voice-driven POS**: "Add two flat whites and a croissant" using OpenAI Whisper (the Emergent Universal Key already supports it).
+- **Smart upsell prompts** based on cart context (already partially wired via `/api/pos/upsells` — surface in the cart UI).
+- **Receipt-on-WhatsApp**: replace email receipts with a one-tap WhatsApp Business send.
+- **Dark mode** + accessible color contrast pass.
+
+### Items
+- Per-item modifier assignment UI (currently universal); drag modifiers onto items.
+- Item images via Nano Banana (Gemini image generation) — auto-generate marketing-ready shots from item name + cuisine.
+- Bulk CSV import for Item Library.
+- Variant matrix (size × milk × temperature).
+
+### POS & Cart
+- Hold / Recall orders (tab management).
+- Quick keys / favorites palette (long-press to add).
+- Multi-language cart labels.
+- Loyalty point preview at cart level.
+- Split bill by seat (Splitwise-style).
+
+### Reservations
+- Public booking deposit collection via Stripe.
+- Auto-confirmation SMS via Twilio.
+- Walk-in conversion to reservation with one tap.
+- Visual heat-map of busy times by day-of-week.
+
+### Roster & Team
+- Drag-to-reorder shifts WITHIN the same day.
+- Shift swap requests (staff initiate, manager approves).
+- Auto-rostering AI: input demand forecast → output optimal roster.
+- Geofenced clock-in (only allow clocking in within X meters of the store).
+- Staff chat (mini channel per shift).
+
+### Marketing
+- "Tonight only" SMS blast to nearby clubmembers.
+- Birthday auto-vouchers.
+- Lost-customer win-back (no visit in 60d → 20% off).
+
+### Analytics & AI
+- Live P&L stream (per shift).
+- Anomaly detection on inventory (sudden 30% spike in croissants → likely shrinkage).
+- Customer cohort retention heatmap.
+- "Ask NUA" chat panel — natural-language analytics (LLM over Mongo aggregations).
+
+### Payments & Revenue
+- Stripe Tap-to-Pay on iPhone (native iOS build).
+- Cryptocurrency tap-to-pay (USDC via Stripe).
+- BNPL (Afterpay / Klarna) at checkout.
+- Auto-tipping suggestion AB-test (15/18/20 vs 18/22/25).
+
+### Integrations
+- Real Uber Eats / DoorDash POS push (currently stubbed).
+- Xero / QuickBooks live sync for accounting.
+- Google Reserve direct booking link.
+- TikTok Shop catalog sync.
+
+### Infrastructure & Dev
+- Split `POSTerminal.jsx` (746 lines) into Cart / Payment / QR sub-components.
+- Convert `App.js` route list into a structured react-router config.
+- Per-tenant rate limiting on `/api/*`.
+- Native Offline-First mode (PWA + Service Worker) for unreliable Wi-Fi venues.
+- Real-time updates via WebSocket (orders, bookings) instead of polling.
+- Multi-region deployment with Atlas-replicated MongoDB.
+
+### Compliance & Security
+- Audit log (who voided what, when, why) — partially in `/api/comp-void` already, surface as a viewer.
+- 2FA for owner login.
+- GDPR data-export & right-to-be-forgotten button on customer profile.
+- ATO BAS / IRS direct e-file (currently stubbed at `/api/bas-gst/submit/*`).
 
 ---
 
-<div align="center">
+## License
 
-**Ananta POS - Infinite Possibilities for Your Business**
-
-Made with ❤️ in Australia 🇦🇺
-
-</div>
+Built by Emergent platform AI agents across 21+ iterations. Copyright © NUA — 2026.
