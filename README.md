@@ -130,7 +130,39 @@ Seed roles auto-heal on every backend startup.
 **C. Infra:** Per-tenant rate limiter (120/min/IP), PWA + Service Worker
 **D. Compliance:** Audit Log viewer · 2FA scaffold · GDPR export+anonymize · ATO BAS e-file
 
-### Phase 11 — Loyalty + Autonomous Agent + Voice-Everywhere (Iter 23, this build)
+### Phase 11 — Loyalty + Autonomous Agent + Voice-Everywhere (Iter 23)
+- **Category-multiplied Loyalty Engine**
+  - $1 spend = 1 base point · 1 point = $0.01 redeem value · min 50 pts to redeem
+  - Owner-configurable category multipliers (Beverages 2x, Bakery 1.5x, …)
+  - Points-and-Pay in POS cart with "All" shortcut
+  - Immutable ledger (`loyalty_ledger`) + idempotent per-transaction credit
+- **Ash — Autonomous AI Agent** (`/agent`)
+  - Auto-segments customers (VIP / Regular / At-Risk / First-Timer)
+  - Auto-flags 60-day-dormant customers
+  - Auto-generates birthday vouchers (7-day window)
+  - Auto low-stock reorder alerts
+  - Auto inventory anomaly detection
+  - Suggests SMS blasts to VIPs on low-booking nights
+  - All decisions logged with audit trail + status badge
+- **Voice Commands Everywhere**
+  - Hold mic in POS → "Pay using points" / "Add 2 flat whites" / "Open dashboard"
+  - GPT-5.2 classifies intent into: navigate / add_item / book_reservation / run_report / redeem_points / message_blast / agent_tick
+  - Voice Catalog endpoint (`/agent/voice-catalog`) lists supported phrases per section
+
+### Phase 12 — Deeper Autonomy + Nomni-gap (Iter 24, this build)
+**Phase E — Deeper Ash autonomy**
+- **Auto-VIP tagging** — `agent_tick_extended` promotes customers crossing owner-configured spend + visit thresholds (default $500 + 10 visits) ✅ tested
+- **Auto-confirm reservation SMS** — every new reservation with a phone queued into `sms_queue` table (Twilio integration drop-in ready)
+- **Auto-publish AI roster** — if proposed weekly cost is within owner-configured budget cap, Ash commits shifts automatically
+- **Voice intent extensions** — "void last item" / "raise espresso by 50 cents" / "drop latte by 1 dollar" / "86 the croissant" → routed through `/api/agent/voice-extended` with regex+LLM hybrid intent parser ✅ verified math correct ($5.70 → $6.20 on "+50 cents")
+- **Ash Autonomy page** (`/agent-autonomy`) — owner toggles each autonomous capability and configures thresholds
+
+**Phase F — Nomni-gap features**
+- **AI Phone Agent** (`/phone-agent`) — inbound voice (Twilio Voice drop-in ready), GPT-5.2 classifies caller intent (reservation/order/inquiry), auto-creates reservation + queues confirmation SMS. Verified: phone call "book for 4 Saturday 7pm" → reservation created automatically.
+- **Auto-PO generation** (`/purchase-orders`) — low-stock products grouped by supplier into draft POs, with approve → send → receive workflow. Receiving increments stock automatically.
+- **Live menu A/B testing** (`/ab-tests`) — create variant pairs, public/table-side records exposures + conversions, winner auto-picked by conversion-rate, owner concludes.
+- **Guest "Your Usual"** — POS auto-loads top-3 frequent items for the selected customer based on last-20 transactions (with frequency count + price). One tap to add.
+- **Tick-Extended** (`/api/agent/tick-extended`) — autonomous loop now runs all E+F rules; verified end-to-end: VIP promoted, low-stock PO auto-generated.
 - **Category-multiplied Loyalty Engine**
   - $1 spend = 1 base point · 1 point = $0.01 redeem value · min 50 pts to redeem
   - Owner-configurable category multipliers (Beverages 2x, Bakery 1.5x, …)
@@ -423,7 +455,25 @@ Mic icon in POS header. Behind the scenes:
 - TikTok Shop catalog sync
 - Afterpay/Klarna BNPL provider connection
 
-### Phase E — Deeper autonomy for Ash (every section gains autonomous decisions + voice)
+### Phase E — Deeper autonomy ✅ SHIPPED (Iter 24)
+- ✅ Auto-publish AI roster (within owner-configured cost cap)
+- ✅ Auto-confirm reservation SMS queue (Twilio drop-in)
+- ✅ Auto-VIP tagging (spend + visits thresholds)
+- ✅ Voice: "void last item" / "raise espresso 50 cents" / "drop latte 1 dollar" / "86 the croissant"
+- ✅ Per-section voice command catalog
+
+### Phase F — Nomni-gap features ✅ SHIPPED (Iter 24)
+- ✅ AI Phone Agent — GPT-5.2 inbound voice classifier, auto-books reservations
+- ✅ Auto-PO generation — low-stock grouped by supplier, draft → approve → send → receive (auto-increments stock)
+- ✅ Live menu A/B testing — variant pairs with exposure + conversion tracking and winner auto-pick
+- ✅ Guest predictive "Your Usual" — top-3 frequent items shown in POS cart panel for known customer
+- ⏳ Predictive labor forecasting tied to weather + bookings (next)
+- ⏳ Dynamic surge pricing for peak hours
+- ⏳ AI cost-control coach with daily margin nudges
+- ⏳ Voice-to-recipe for menu R&D
+- ⏳ Live kitchen-load balancing (auto-86 when station overloaded)
+
+### Phase E — Deeper autonomy (next wave — pending)
 - **POS**: auto-suggest upsells in cart based on customer history; auto-apply best applicable discount; voice "void last item" / "split bill"
 - **Items**: auto-generate Nano Banana images for items missing photos; auto-tune prices based on sales velocity; voice "raise espresso by 50 cents"
 - **Reservations**: auto-confirm SMS; auto-walk-in conversion; auto-overbooking guardrails based on heatmap; voice "block bookings tonight after 9pm"
@@ -433,7 +483,7 @@ Mic icon in POS header. Behind the scenes:
 - **Kitchen**: auto-prioritize tickets by table turn time; auto-reroute when station overloaded
 - **Marketing**: auto-trigger lost-customer win-back at 60-day mark; auto-A/B test subject lines
 
-### Phase F — Nomni-style features we don't have yet
+### Phase F — Nomni-style features we don't have yet (next wave — pending)
 - **AI Phone Agent** for inbound orders/bookings (voice agent picks up, takes order, adds to POS, books table)
 - **Predictive labor forecasting** tied directly to weather + bookings + historical demand
 - **Auto-reorder PO generation** with per-supplier minimums and lead times

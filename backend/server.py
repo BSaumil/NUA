@@ -34,6 +34,7 @@ from routes.reservation_features import router as reservation_features_router
 from routes.items_system import router as items_system_router
 from routes.v15_features import router as v15_router
 from routes.loyalty_engine import router as loyalty_engine_router
+from routes.phase_ef import router as phase_ef_router
 
 app = FastAPI()
 
@@ -64,6 +65,7 @@ api_router.include_router(reservation_features_router)
 api_router.include_router(items_system_router)
 api_router.include_router(v15_router)
 api_router.include_router(loyalty_engine_router)
+api_router.include_router(phase_ef_router)
 api_router.include_router(multi_tenant_router)
 
 @api_router.get("/")

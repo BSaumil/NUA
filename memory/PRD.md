@@ -1,58 +1,48 @@
-# NUA POS — PRD v17.0 (Loyalty + Ash Agent + Voice-Everywhere)
+# NUA POS — PRD v18.0 (Phase E + F)
 
-## v17 (Feb 2026) — Iteration 23
+## v18 (Feb 2026) — Iteration 24
 
-### Backend (`routes/loyalty_engine.py`)
-- `GET/PUT /api/loyalty/config` — earnRate, redeemRate, minRedeem, categoryMultipliers
-- `POST /api/loyalty/earn` — credits points with category multipliers (idempotent by txnId)
-- `POST /api/loyalty/redeem` — burns points at checkout, returns face value
-- `GET /api/loyalty/balance/{customerId}` — current balance + canRedeem flag
-- `GET /api/loyalty/ledger/{customerId}` — full audit ledger
-- `GET /api/agent/decisions` — Ash's autonomous action log
-- `GET /api/agent/segments` — VIP / regular / at-risk / first-timer
-- `POST /api/agent/tick` — run all autonomous rules once
-- `POST /api/agent/voice-command` — text or audio → GPT-5.2 intent → instruction
-- `GET /api/agent/voice-catalog` — supported voice phrases per section
+### Backend (`routes/phase_ef.py`)
+- `GET/PUT /api/agent/autonomy` — owner toggles for auto-publish-roster, auto-confirm-SMS, A/B testing, VIP thresholds, reorder threshold
+- `GET /api/comms/sms-queue` · `POST /api/comms/auto-confirm/{resId}` — auto SMS confirmation queue
+- `POST /api/agent/voice-extended` — extended voice intents: void_last_item · price_change · eighty_six
+- `POST /api/agent/auto-publish-roster` — generates + commits AI weekly shifts within budget cap
+- `GET /api/phone-agent/calls` · `POST /api/phone-agent/simulate` — AI Phone Agent (GPT-5.2 classifier, auto-creates reservation, queues confirmation SMS)
+- `GET /api/purchase-orders` · `POST /api/purchase-orders/generate` · `POST /api/purchase-orders/{id}/{approve,send,receive,cancel}` — auto-PO generation, receive auto-increments stock
+- `GET/POST /api/ab-tests` · `POST /api/ab-tests/{id}/{exposure,conversion,conclude}` — live menu A/B testing with winner auto-pick
+- `GET /api/customers/{id}/your-usual` — top-3 frequent items from last-20 transactions
+- `POST /api/agent/tick-extended` — runs auto-VIP + auto-SMS + auto-PO rules in one shot
 
 ### Frontend
-- `pages/LoyaltyConfig.jsx` (`/loyalty-config`) — owner sets category multipliers
-- `pages/AgentDashboard.jsx` (`/agent`) — Ash decisions + segment counters + "Run Cycle"
-- `components/VoiceCommandCatalog.jsx` — modal listing voice commands per section
-- POSTerminal updates:
-  - Customer selection auto-loads loyalty balance + tier badge
-  - **Points & Pay block** appears when balance >= minRedeem (default 50)
-  - Live redemption-discount line in cart totals
-  - Transaction commit now records ledger (redeem first, then earn on net spend)
-- BottomDock splash: new "Analytics & AI" group includes Ash Agent + Audit + Anomalies + Heatmap + Cohort + Swaps + Security
-- "Customers" splash group adds "Loyalty Config"
+- `pages/PhoneAgent.jsx` (`/phone-agent`) — call log + simulate inbound call
+- `pages/PurchaseOrders.jsx` (`/purchase-orders`) — supplier-grouped POs with workflow buttons
+- `pages/MenuABTesting.jsx` (`/ab-tests`) — variant pair creator, exposure/conversion table, winner trophy
+- `pages/AgentAutonomy.jsx` (`/agent-autonomy`) — owner toggle panel + threshold inputs + "Run Extended Tick"
+- POSTerminal: **Your Usual** strip when known customer selected
+- VoiceOrderButton now hands off transcript to `voice-extended` for void/price/86 commands
+- BottomDock splash: 4 new tiles added under Analytics & AI group
 
-### Math example (verified via curl)
-- Cart: 2× Latte ($5 in Beverages) + 1× Croissant ($4 in Bakery)
-- Multipliers: Beverages 2x, Bakery 1.5x
-- Earned: (10 × 1 × 2) + (4 × 1 × 1.5) = **26 points** ✅
-- Balance 26 pts = $0.26 value, canRedeem = false (< 50 min)
+## Curl-verified
+- Voice "raise espresso by 50 cents" → $5.70 → $6.20 ✅
+- Voice "drop latte by 1 dollar" → Product not found (handled gracefully) ✅
+- Phone agent "book for 4 Saturday 7pm" → reservation auto-created + SMS queued ✅
+- Auto-PO: seeded 3 low-stock products with supplier "Acme Wholesale" → 1 PO created ✅
+- Auto-VIP: Sarah Johnson with spend=1500, visits=25 → tier auto-promoted from Gold to VIP ✅
+- Your Usual: customer with 2 past orders → 2 most-frequent items returned ✅
 
-### Ash auto-decision rules
-1. At-Risk flag (no visit > 60 days)
-2. Birthday vouchers (next 7 days)
-3. Low-stock reorder alert (stock ≤ 5)
-4. Inventory anomaly detection (sales-velocity spike > 30%)
-5. Tonight blast suggestion (bookings today < 5 → suggest VIP outreach)
+## Frontend Playwright-verified
+- `/phone-agent`, `/purchase-orders`, `/ab-tests`, `/agent-autonomy` all render ✅
+- `/pos` with Sarah Johnson selected → Your Usual block visible ✅
 
 ## Credentials
 Owner: owner@nuva.com / NuvaOwner2026!  
 Manager: manager@nuva.com / Staff2026!  
 Cashier: cashier@nuva.com / Staff2026!  
 Kitchen: kitchen@nuva.com / Staff2026!  
-2FA demo: `123456`
-
-## Testing (Iteration 23)
-- curl-verified: loyalty config CRUD, earn (26 pts with multipliers), balance, agent tick (1 decision + 4 first-timers), voice command ("open dashboard" → navigate intent)
-- Playwright-verified: /loyalty-config + /agent + /pos with Voice btn all render
+2FA demo: 123456
 
 ## Backlog
-- Phase B (user keys): WhatsApp · Twilio · Stripe Tap-to-Pay · Crypto USDC · Xero/QB · Uber Eats · DoorDash · Google Reserve · TikTok Shop
-- Phase E: deeper autonomy + voice per section (auto-publish AI roster, auto-confirm SMS, auto-tag VIPs, voice "void last item")
-- Phase F (Nomni gap): AI Phone Agent · auto-PO generation · live menu A/B · guest predictive ordering · dynamic surge pricing · AI cost coach
-- Phase G: split POSTerminal.jsx · structured routes · real TOTP · WebSocket real-time
-- Phase H: SOC2 audit log retention · IP allowlists · consent ledger · WCAG 2.2 AA
+- Phase B (user keys): WhatsApp · Twilio Voice/SMS · Stripe Tap-to-Pay · Crypto USDC · Xero/QB · Uber Eats · DoorDash · Google Reserve · TikTok Shop
+- Phase E next wave: auto-upsell in cart · auto-price-tune · auto-overbooking guardrails · auto-swap-finder · auto-EOD-email
+- Phase F next wave: AI cost coach · predictive labor forecasting · dynamic surge pricing · voice-to-recipe · live kitchen-load balancing
+- Refactor: Split POSTerminal.jsx (900+ lines), structured react-router config, real TOTP via pyotp, WebSocket real-time

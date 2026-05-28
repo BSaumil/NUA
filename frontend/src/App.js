@@ -57,6 +57,10 @@ import ShiftSwaps from './pages/ShiftSwaps';
 import SecurityCompliance from './pages/SecurityCompliance';
 import LoyaltyConfig from './pages/LoyaltyConfig';
 import AgentDashboard from './pages/AgentDashboard';
+import AgentAutonomy from './pages/AgentAutonomy';
+import PhoneAgent from './pages/PhoneAgent';
+import PurchaseOrders from './pages/PurchaseOrders';
+import MenuABTesting from './pages/MenuABTesting';
 import AskNuaPanel, { AskNuaButton } from './components/AskNua';
 import { useState as useGlobalState } from 'react';
 
@@ -126,6 +130,12 @@ function ProtectedRoutes() {
         <Route path="/booking-heatmap" element={<BookingHeatmap />} />
         <Route path="/cohort-retention" element={<CohortRetention />} />
         <Route path="/shift-swaps" element={<ShiftSwaps />} />
+        <Route path="/loyalty-config" element={<LoyaltyConfig />} />
+        <Route path="/agent" element={<AgentDashboard />} />
+        <Route path="/agent-autonomy" element={<AgentAutonomy />} />
+        <Route path="/phone-agent" element={<PhoneAgent />} />
+        <Route path="/purchase-orders" element={<PurchaseOrders />} />
+        <Route path="/ab-tests" element={<MenuABTesting />} />
       </Routes>
     </StaffLayout>
   );

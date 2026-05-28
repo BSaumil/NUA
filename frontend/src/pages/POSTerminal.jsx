@@ -389,12 +389,19 @@ const POSTerminal = () => {
               <Input placeholder="Search products..." className="pl-9 h-9" value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)} data-testid="pos-search" />
             </div>
-            <VoiceOrderButton onAddSuggestions={(suggestions) => {
-              suggestions.forEach(s => {
-                const p = products.find(pp => pp.id === s.productId);
-                if (p) { for (let i = 0; i < s.quantity; i++) addToCart(p); }
-              });
-            }} />
+            <VoiceOrderButton
+              onAddSuggestions={(suggestions) => {
+                suggestions.forEach(s => {
+                  const p = products.find(pp => pp.id === s.productId);
+                  if (p) { for (let i = 0; i < s.quantity; i++) addToCart(p); }
+                });
+              }}
+              onExtendedAction={(act) => {
+                if (act.action === 'void_last_item' && cart.length > 0) {
+                  removeFromCart(cart[cart.length - 1].id);
+                }
+              }}
+            />
             <Button variant="outline" className="h-9 px-3" onClick={async () => {
               if (cart.length === 0) { toast({ title: 'Cart empty', variant: 'destructive' }); return; }
               try {
@@ -520,7 +527,9 @@ const POSTerminal = () => {
                 setSelectedCustomer(c);
                 if (c) {
                   try { const r = await loyaltyEngineAPI.getBalance(c.id); setPointsBalance(r.data?.points || 0); } catch {}
-                }
+                  // Your Usual
+                  try { const r = await phaseEFAPI.yourUsual(c.id); setYourUsual(r.data?.items || []); } catch {}
+                } else { setYourUsual([]); }
               }}
               data-testid="pos-customer-select">
               <option value="">Walk-in Customer</option>
@@ -529,7 +538,23 @@ const POSTerminal = () => {
           )}
         </CardContent></Card>
 
-        {/* Cart Items — swipe-left=delete · swipe-right=repeat */}
+        {/* Your Usual — predictive suggestions for known customer */}
+        {selectedCustomer && yourUsual.length > 0 && (
+          <Card className="mb-3 border-amber-200 bg-amber-50" data-testid="your-usual">
+            <CardContent className="p-3">
+              <p className="text-xs font-bold uppercase tracking-wider text-amber-700 mb-2">⭐ Your Usual</p>
+              <div className="flex gap-2 overflow-x-auto">
+                {yourUsual.map(p => (
+                  <button key={p.id} onClick={() => { const prod = products.find(pp => pp.id === p.id); if (prod) addToCart(prod); }} className="flex-shrink-0 bg-white border rounded-lg p-2 hover:shadow-md transition-all min-w-[110px]" data-testid={`usual-${p.id}`}>
+                    {p.image && <img src={p.image} alt={p.name} className="w-full h-12 object-cover rounded mb-1" />}
+                    <p className="text-xs font-medium truncate">{p.name}</p>
+                    <p className="text-xs text-gray-500">${p.price} · {p.frequency}×</p>
+                  </button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
         <div className="flex-1 overflow-y-auto mb-4">
           {cart.length === 0 ? (
             <div className="text-center py-12 text-gray-400">

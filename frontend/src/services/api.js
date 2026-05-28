@@ -409,6 +409,25 @@ export const agentAPI = {
   voiceCommand: (text, audioBase64, mime) => api.post('/agent/voice-command', { text, audioBase64, mime }),
   getCatalog: () => api.get('/agent/voice-catalog'),
 };
+// Phase E+F — Autonomy config, Phone Agent, POs, A/B tests, Your Usual
+export const phaseEFAPI = {
+  getAutonomy: () => api.get('/agent/autonomy'),
+  updateAutonomy: (data) => api.put('/agent/autonomy', data),
+  getSmsQueue: () => api.get('/comms/sms-queue'),
+  autoConfirm: (resId) => api.post(`/comms/auto-confirm/${resId}`),
+  voiceExtended: (text) => api.post('/agent/voice-extended', { text }),
+  autoPublishRoster: (weekStart) => api.post('/agent/auto-publish-roster', { weekStart }),
+  tickExtended: () => api.post('/agent/tick-extended'),
+  getCalls: () => api.get('/phone-agent/calls'),
+  simulateCall: (caller, transcript) => api.post('/phone-agent/simulate', { caller, transcript }),
+  getPOs: () => api.get('/purchase-orders'),
+  generatePOs: () => api.post('/purchase-orders/generate'),
+  updatePO: (id, action) => api.post(`/purchase-orders/${id}/${action}`),
+  getABTests: () => api.get('/ab-tests'),
+  createABTest: (data) => api.post('/ab-tests', data),
+  concludeAB: (id) => api.post(`/ab-tests/${id}/conclude`),
+  yourUsual: (customerId) => api.get(`/customers/${customerId}/your-usual`),
+};
 export const v15API = {
   getBadges: () => api.get('/dock/badges'),
   // Tabs (hold/recall)
