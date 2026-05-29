@@ -157,28 +157,28 @@ const POSTerminal = () => {
 
   const fetchData = async () => {
     try {
-      const [productsRes, promotionsRes, customersRes] = await Promise.all([
-        productsAPI.getAll(), promotionsAPI.getActive(), customersAPI.getAll()
+      // Run all initial fetches in parallel for max speed
+      const [productsRes, promotionsRes, customersRes, catsRes, loyaltyRes, labelsRes, trainingRes] = await Promise.allSettled([
+        productsAPI.getAll(),
+        promotionsAPI.getActive(),
+        customersAPI.getAll(),
+        fetch(`${process.env.REACT_APP_BACKEND_URL}/api/categories`).then(r => r.json()).catch(() => []),
+        loyaltyEngineAPI.getConfig(),
+        v15API.getLabels(localStorage.getItem('nua_lang') || 'en'),
+        advancedAPI.getTrainingMode(),
       ]);
-      setProducts(productsRes.data);
-      setPromotions(promotionsRes.data);
-      setCustomers(customersRes.data);
-      // Fetch dynamic category list
-      try {
-        const r = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/categories`);
-        const cats = await r.json();
-        if (Array.isArray(cats)) setCategories(['All', ...cats.filter(c => c.active !== false).sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99)).map(c => c.name)]);
-      } catch {}
-      // Fetch loyalty config
-      try { const r = await loyaltyEngineAPI.getConfig(); setLoyaltyCfg(r.data || { minRedeem: 50, redeemRate: 0.01 }); } catch {}
-      // Fetch multi-lang labels
-      try {
-        const lang = localStorage.getItem('nua_lang') || 'en';
-        const r = await v15API.getLabels(lang);
-        setLabels(r.data || {});
-      } catch {}
-      // Check training mode
-      advancedAPI.getTrainingMode().then(r => setTrainingMode(r.data?.enabled || false)).catch(() => {});
+      if (productsRes.status === 'fulfilled') setProducts(productsRes.value.data || []);
+      if (promotionsRes.status === 'fulfilled') setPromotions(promotionsRes.value.data || []);
+      if (customersRes.status === 'fulfilled') setCustomers(customersRes.value.data || []);
+      if (catsRes.status === 'fulfilled' && Array.isArray(catsRes.value)) {
+        setCategories(['All', ...catsRes.value
+          .filter(c => c.active !== false)
+          .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99))
+          .map(c => c.name)]);
+      }
+      if (loyaltyRes.status === 'fulfilled') setLoyaltyCfg(loyaltyRes.value.data || { minRedeem: 50, redeemRate: 0.01 });
+      if (labelsRes.status === 'fulfilled') setLabels(labelsRes.value.data || {});
+      if (trainingRes.status === 'fulfilled') setTrainingMode(trainingRes.value.data?.enabled || false);
     } catch (error) {
       console.error('Error fetching data:', error);
       toast({ title: "Error", description: "Failed to load data.", variant: "destructive" });
@@ -428,6 +428,20 @@ const POSTerminal = () => {
         </div>
         <div className="flex-1 overflow-y-auto pr-1">
           {selectedCategory === 'All' ? (
+            products.length === 0 ? (
+              // Skeleton loader while products fetch
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2" data-testid="pos-skeleton">
+                {[...Array(12)].map((_, i) => (
+                  <div key={i} className="bg-white rounded-lg border overflow-hidden animate-pulse">
+                    <div className="w-full h-16 bg-gray-200" />
+                    <div className="p-2 space-y-1">
+                      <div className="h-3 bg-gray-200 rounded" />
+                      <div className="h-3 bg-gray-100 rounded w-2/3" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
             // Category-wise grouped view
             <div className="space-y-5">
               {Object.entries(groupedByCategory).map(([cat, prods]) => (
@@ -457,6 +471,7 @@ const POSTerminal = () => {
                 </div>
               ))}
             </div>
+            )
           ) : (
             // Single category compact grid
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2">

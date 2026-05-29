@@ -129,9 +129,14 @@ export default function BottomDock() {
 
   useEffect(() => {
     if (!user) return;
-    const tick = async () => { try { const r = await v15API.getBadges(); setBadges(r.data || {}); } catch {} };
+    // Only owners/managers need live badges (kitchen + cashier don't have access)
+    if (!['owner', 'manager'].includes(user.role)) return;
+    const tick = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try { const r = await v15API.getBadges(); setBadges(r.data || {}); } catch {}
+    };
     tick();
-    const id = setInterval(tick, 30000); // poll every 30s
+    const id = setInterval(tick, 60000); // poll every 60s
     return () => clearInterval(id);
   }, [user]);
 
