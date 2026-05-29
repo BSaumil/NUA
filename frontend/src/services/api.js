@@ -428,6 +428,22 @@ export const phaseEFAPI = {
   concludeAB: (id) => api.post(`/ab-tests/${id}/conclude`),
   yourUsual: (customerId) => api.get(`/customers/${customerId}/your-usual`),
 };
+
+// Phase E+F Wave 2 — Auto-upsell, Price-tune, Overbooking, Cost coach, Labor forecast, Surge, Voice-to-recipe, Kitchen load
+export const aiWave2API = {
+  upsell: (cart) => api.post('/ai/upsell', { cart }),
+  priceTune: () => api.get('/ai/price-tune'),
+  applyPriceTune: (productId, newPrice) => api.post('/ai/price-tune/apply', { productId, newPrice }),
+  overbookingCheck: (date, time, partySize) => api.post('/ai/overbooking-check', { date, time, partySize }),
+  costCoach: () => api.get('/ai/cost-coach'),
+  laborForecast: () => api.get('/ai/labor-forecast'),
+  surgeRecs: () => api.get('/ai/surge-recommendations'),
+  applySurge: (rules) => api.post('/ai/surge/apply', { rules }),
+  activeSurge: () => api.get('/ai/surge/active'),
+  voiceRecipe: (text, audioBase64, mime) => api.post('/ai/voice-recipe', { text, audioBase64, mime }),
+  listRecipes: () => api.get('/ai/recipes'),
+  kitchenLoad: () => api.get('/ai/kitchen-load'),
+};
 export const v15API = {
   getBadges: () => api.get('/dock/badges'),
   // Tabs (hold/recall)

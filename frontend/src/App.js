@@ -61,6 +61,12 @@ import AgentAutonomy from './pages/AgentAutonomy';
 import PhoneAgent from './pages/PhoneAgent';
 import PurchaseOrders from './pages/PurchaseOrders';
 import MenuABTesting from './pages/MenuABTesting';
+import AICostCoach from './pages/AICostCoach';
+import LaborForecast from './pages/LaborForecast';
+import SurgePricing from './pages/SurgePricing';
+import VoiceRecipe from './pages/VoiceRecipe';
+import KitchenLoad from './pages/KitchenLoad';
+import PriceTune from './pages/PriceTune';
 import AskNuaPanel, { AskNuaButton } from './components/AskNua';
 import { useState as useGlobalState } from 'react';
 
@@ -136,6 +142,12 @@ function ProtectedRoutes() {
         <Route path="/phone-agent" element={<PhoneAgent />} />
         <Route path="/purchase-orders" element={<PurchaseOrders />} />
         <Route path="/ab-tests" element={<MenuABTesting />} />
+        <Route path="/ai-cost-coach" element={<AICostCoach />} />
+        <Route path="/labor-forecast" element={<LaborForecast />} />
+        <Route path="/surge-pricing" element={<SurgePricing />} />
+        <Route path="/voice-recipe" element={<VoiceRecipe />} />
+        <Route path="/kitchen-load" element={<KitchenLoad />} />
+        <Route path="/price-tune" element={<PriceTune />} />
       </Routes>
     </StaffLayout>
   );

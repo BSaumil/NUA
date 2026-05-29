@@ -15,7 +15,7 @@ import {
 } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { useTheme } from '../contexts/ThemeContext';
-import { reservationsAPI, floorPlansAPI } from '../services/api';
+import { reservationsAPI, floorPlansAPI, aiWave2API } from '../services/api';
 import { toast } from 'sonner';
 
 const TIME_SLOTS = [];
@@ -90,6 +90,16 @@ export default function Reservations() {
       toast.error('Guest name, date, and time are required'); return;
     }
     try {
+      // Wave 2 — Overbooking guardrail (only on create)
+      if (!editId) {
+        try {
+          const chk = await aiWave2API.overbookingCheck(form.date, form.time, form.partySize || 2);
+          if (chk.data && chk.data.allow === false) {
+            const proceed = window.confirm(`⚠️ ${chk.data.reason}\n\nProceed anyway?`);
+            if (!proceed) return;
+          }
+        } catch { /* fail-open: don't block legitimate bookings */ }
+      }
       if (editId) {
         await reservationsAPI.update(editId, form);
         toast.success('Reservation updated');

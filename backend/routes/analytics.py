@@ -120,11 +120,9 @@ async def create_supplier(supplier: SupplierCreate):
     return supplier_obj
 
 # ============ PURCHASE ORDERS API ============
-@router.get("/purchase-orders", response_model=List[PurchaseOrder])
-async def get_purchase_orders():
-    orders = await db.purchase_orders.find().to_list(1000)
-    return [PurchaseOrder(**o) for o in orders]
-
+# Note: phase_ef.py also exposes /purchase-orders with a flexible schema. The
+# canonical GET endpoint lives in phase_ef.py; this strict-model variant is kept
+# here only for legacy POST (creating supplier-linked POs with GST math).
 @router.post("/purchase-orders", response_model=PurchaseOrder)
 async def create_purchase_order(po: PurchaseOrderCreate):
     supplier = await db.suppliers.find_one({"id": po.supplierId})

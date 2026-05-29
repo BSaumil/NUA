@@ -35,6 +35,7 @@ from routes.items_system import router as items_system_router
 from routes.v15_features import router as v15_router
 from routes.loyalty_engine import router as loyalty_engine_router
 from routes.phase_ef import router as phase_ef_router
+from routes.phase_ef_wave2 import router as phase_ef_wave2_router
 
 app = FastAPI()
 
@@ -66,6 +67,7 @@ api_router.include_router(items_system_router)
 api_router.include_router(v15_router)
 api_router.include_router(loyalty_engine_router)
 api_router.include_router(phase_ef_router)
+api_router.include_router(phase_ef_wave2_router)
 api_router.include_router(multi_tenant_router)
 
 @api_router.get("/")

@@ -13,7 +13,7 @@ import {
 } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { usePOS } from '../contexts/POSContext';
-import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI } from '../services/api';
+import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API } from '../services/api';
 import { useToast } from '../hooks/use-toast';
 import { useAuth } from '../contexts/AuthContext';
 import VoiceOrderButton from '../components/VoiceOrderButton';
@@ -152,9 +152,27 @@ const POSTerminal = () => {
   const [pointsToRedeem, setPointsToRedeem] = useState(0);
   const [loyaltyCfg, setLoyaltyCfg] = useState({ minRedeem: 50, redeemRate: 0.01 });
 
+  // Wave 2: AI Upsell suggestions
+  const [upsells, setUpsells] = useState([]);
+  const [upsellLoading, setUpsellLoading] = useState(false);
+
   const [categories, setCategories] = useState(['All']);
 
   useEffect(() => { fetchData(); }, []);
+
+  // Wave 2 — Fetch AI upsell suggestions whenever the cart changes (debounced)
+  useEffect(() => {
+    if (!cart || cart.length === 0) { setUpsells([]); return; }
+    const t = setTimeout(async () => {
+      try {
+        setUpsellLoading(true);
+        const r = await aiWave2API.upsell(cart.map(i => ({ productId: i.id, name: i.name, quantity: i.quantity, price: i.price })));
+        setUpsells(r.data?.suggestions || []);
+      } catch { setUpsells([]); }
+      finally { setUpsellLoading(false); }
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [cart]);
 
   const fetchData = async () => {
     try {
@@ -591,6 +609,34 @@ const POSTerminal = () => {
             </div>
           )}
         </div>
+
+        {/* Wave 2 — AI Upsell strip */}
+        {cart.length > 0 && (upsells.length > 0 || upsellLoading) && (
+          <div className="mb-3" data-testid="upsell-strip">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-amber-700 mb-1.5 flex items-center gap-1.5">
+              <span>✨ AI suggests</span>
+              {upsellLoading && <span className="text-gray-400 normal-case font-normal">thinking…</span>}
+            </div>
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {upsells.map(s => {
+                const prod = products.find(p => p.id === s.productId);
+                if (!prod) return null;
+                return (
+                  <button
+                    key={s.productId}
+                    onClick={() => { addToCart(prod); toast({ title: 'Added', description: s.reason || s.name }); }}
+                    className="flex-shrink-0 bg-amber-50 border border-amber-200 rounded-lg p-2 hover:shadow-md hover:-translate-y-0.5 transition-all text-left min-w-[140px] max-w-[180px]"
+                    data-testid={`upsell-${s.productId}`}
+                  >
+                    <div className="text-xs font-semibold text-amber-900 truncate">{s.name}</div>
+                    <div className="text-[10px] text-amber-700 line-clamp-2">{s.reason || ''}</div>
+                    <div className="text-xs font-bold text-amber-900 mt-1">+${Number(s.price).toFixed(2)}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Totals + Loyalty preview */}
         {cart.length > 0 && (

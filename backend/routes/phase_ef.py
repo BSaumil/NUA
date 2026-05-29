@@ -100,12 +100,13 @@ async def auto_confirm_reservation(reservation_id: str, request: Request):
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
     if not res:
         raise HTTPException(status_code=404, detail="Reservation not found")
-    phone = res.get("phone") or res.get("customerPhone") or ""
+    phone = res.get("guestPhone") or res.get("phone") or res.get("customerPhone") or ""
     if not phone:
         raise HTTPException(status_code=400, detail="No phone on reservation")
-    body = (f"Hi {res.get('customerName','guest')}, your booking for {res.get('partySize','?')} on "
+    name = res.get("guestName") or res.get("customerName") or "guest"
+    body = (f"Hi {name}, your booking for {res.get('partySize','?')} on "
             f"{res.get('date','?')} at {res.get('time','?')} is confirmed at NUA. Reply C to cancel.")
-    msg = await queue_sms(phone, res.get("customerName", ""), body, "reservation_confirm")
+    msg = await queue_sms(phone, name, body, "reservation_confirm")
     await db.reservations.update_one({"id": reservation_id}, {"$set": {"confirmationSent": True, "confirmationAt": msg["createdAt"]}})
     return msg
 
@@ -282,8 +283,8 @@ async def simulate_call(data: dict, request: Request):
         if parsed.get("intent") == "reservation" and details.get("date"):
             r = {
                 "id": f"RES-{str(uuid.uuid4())[:8].upper()}",
-                "customerName": details.get("name") or caller,
-                "phone": caller,
+                "guestName": details.get("name") or caller,
+                "guestPhone": caller,
                 "partySize": int(details.get("partySize", 2) or 2),
                 "date": details.get("date"),
                 "time": details.get("time", "19:00"),
@@ -294,7 +295,7 @@ async def simulate_call(data: dict, request: Request):
             await db.reservations.insert_one(r)
             intent_result["actions"].append({"action": "reservation_created", "id": r["id"]})
             # Auto-confirm SMS
-            await queue_sms(caller, r["customerName"], f"Booking confirmed: {r['date']} at {r['time']} for {r['partySize']} at NUA.", "phone_agent")
+            await queue_sms(caller, r["guestName"], f"Booking confirmed: {r['date']} at {r['time']} for {r['partySize']} at NUA.", "phone_agent")
         elif parsed.get("intent") == "order":
             items = details.get("items", [])
             intent_result["actions"].append({"action": "order_drafted", "items": items})

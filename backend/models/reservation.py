@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from typing import Optional, List
 from datetime import datetime
 import uuid
@@ -74,6 +74,19 @@ class Reservation(BaseModel):
     completedAt: Optional[str] = None
     createdAt: str = ""
     updatedAt: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_aliases(cls, data):
+        if isinstance(data, dict):
+            # Legacy docs may use customerName/customerPhone/phone
+            if not data.get("guestName"):
+                data["guestName"] = data.get("customerName") or data.get("name") or "Guest"
+            if not data.get("guestPhone"):
+                data["guestPhone"] = data.get("customerPhone") or data.get("phone")
+            if not data.get("guestEmail"):
+                data["guestEmail"] = data.get("customerEmail") or data.get("email")
+        return data
 
     def __init__(self, **data):
         super().__init__(**data)
