@@ -18,6 +18,9 @@ import uuid
 import os
 import json
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -43,6 +46,7 @@ async def _llm_json(session_id: str, system: str, user_text: str, model: str = "
             m = re.search(r"\{.*\}|\[.*\]", text, re.DOTALL)
             return json.loads(m.group(0)) if m else {}
     except Exception as e:
+        logger.warning("LLM call failed [%s]: %s", session_id, str(e)[:200])
         return {"_error": str(e)[:200]}
 
 
@@ -167,6 +171,13 @@ async def apply_price_tune(data: dict, request: Request):
                 "at": datetime.now(timezone.utc).isoformat(),
                 "reason": "AI price-tune",
             },
+        }, "$push": {
+            "priceHistory": {
+                "newPrice": new_price,
+                "by": user["id"],
+                "at": datetime.now(timezone.utc).isoformat(),
+                "reason": "AI price-tune",
+            }
         }},
     )
     if res.matched_count == 0:
@@ -199,8 +210,9 @@ async def overbooking_check(data: dict, request: Request):
     # Capacity = sum of seats across active tables, or 60 if none configured
     tables = await db.floor_tables.find({}, {"_id": 0, "capacity": 1, "seats": 1}).to_list(500)
     capacity = sum(int(t.get("capacity") or t.get("seats") or 4) for t in tables) or 60
-    # Buffer ratio (configurable later)
-    buffer_ratio = 1.1  # allow 10% overbook for no-shows
+    # Buffer ratio — owner-configurable via settings doc, default 1.10
+    settings = await db.settings.find_one({"id": "overbooking"}, {"_id": 0}) or {}
+    buffer_ratio = float(settings.get("bufferRatio", 1.10))
     cap_with_buffer = int(capacity * buffer_ratio)
 
     # Existing covers for that slot ±30min
@@ -492,6 +504,9 @@ async def voice_to_recipe(data: dict, request: Request):
     out = await _llm_json(f"recipe-{uuid.uuid4().hex[:8]}", sys_msg, transcript)
     if "_error" in out:
         raise HTTPException(status_code=500, detail=f"LLM error: {out['_error']}")
+    # Validate before persisting — name + at least one ingredient required
+    if not isinstance(out, dict) or not out.get("name") or not out.get("ingredients"):
+        raise HTTPException(status_code=422, detail="LLM returned incomplete recipe — please rephrase with more detail.")
 
     recipe = {
         "id": f"RCP-{uuid.uuid4().hex[:8].upper()}",
