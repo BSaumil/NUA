@@ -17,9 +17,32 @@
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
     <script>
+      // Service worker with auto-recovery: if a new SW takes control (i.e. an
+      // old cached bundle was being served), reload immediately so the user
+      // gets the fresh app code. Also force an update check on every load.
       if ('serviceWorker' in navigator) {
+        var didReload = false;
+        navigator.serviceWorker.addEventListener('controllerchange', function() {
+          if (didReload) return;
+          didReload = true;
+          window.location.reload();
+        });
         window.addEventListener('load', function() {
-          navigator.serviceWorker.register('/service-worker.js').catch(()=>{});
+          navigator.serviceWorker.register('/service-worker.js').then(function(reg) {
+            // Wipe any stale caches left by previous SW versions
+            if (reg.active) reg.active.postMessage('PURGE');
+            reg.update().catch(function(){});
+            // If a new worker is waiting, activate it immediately
+            if (reg.waiting) reg.waiting.postMessage('SKIP_WAITING');
+            reg.addEventListener('updatefound', function() {
+              var nw = reg.installing;
+              if (nw) nw.addEventListener('statechange', function() {
+                if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+                  nw.postMessage('SKIP_WAITING');
+                }
+              });
+            });
+          }).catch(function(){});
         });
       }
     </script>
