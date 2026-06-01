@@ -219,8 +219,12 @@ async def hardware_status(request: Request):
 
 
 @router.post("/hardware/heartbeat")
-async def hardware_heartbeat(data: dict):
-    """Devices ping in. We mark status from the payload."""
+async def hardware_heartbeat(data: dict, request: Request):
+    """Devices ping in with a shared secret header `X-Device-Secret`."""
+    secret = request.headers.get("X-Device-Secret")
+    expected = os.environ.get("DEVICE_HEARTBEAT_SECRET", "nua-device-2026")
+    if secret != expected:
+        raise HTTPException(status_code=401, detail="Invalid device secret")
     dev_id = data.get("id")
     if not dev_id: raise HTTPException(status_code=400, detail="id required")
     update = {"status": data.get("status", "online"), "lastSeen": _now(),
@@ -501,11 +505,16 @@ async def ash_plan(request: Request):
     plan = {
         "id": _uid("ASHP"),
         "createdAt": _now(),
+        "planDate": datetime.now(timezone.utc).date().isoformat(),
         "signals": {"todaysTransactions": today_tx, "bookingsToday": bookings_today, "bookingDeltaPct": round(booking_delta, 1), "lowStockItems": low_stock},
         "actions": actions,
         "status": "pending_approval",
     }
-    await db.ash_plans.insert_one({**plan})
+    # Replace today's existing plan (idempotent — don't grow the collection)
+    await db.ash_plans.update_one(
+        {"planDate": plan["planDate"], "status": "pending_approval"},
+        {"$set": plan}, upsert=True,
+    )
     return plan
 
 
@@ -781,13 +790,20 @@ async def issue_gift_card(data: dict, request: Request):
 
 @router.post("/gift-cards/{code}/redeem")
 async def redeem_gift_card(code: str, data: dict):
-    card = await db.gift_cards.find_one({"code": code}, {"_id": 0})
-    if not card: raise HTTPException(status_code=404, detail="Card not found")
-    if card.get("status") != "active": raise HTTPException(status_code=400, detail="Card not active")
     amount = float(data.get("amount", 0))
-    if amount > (card.get("amount", 0) + card.get("bonus", 0)):
+    if amount <= 0: raise HTTPException(status_code=400, detail="amount > 0 required")
+    # Atomic redeem — only deduct if balance is sufficient
+    res = await db.gift_cards.find_one_and_update(
+        {"code": code, "status": "active", "amount": {"$gte": amount}},
+        {"$inc": {"amount": -amount}},
+        return_document=False,
+    )
+    if not res:
+        # Either not found, inactive, or insufficient balance
+        exists = await db.gift_cards.find_one({"code": code}, {"_id": 0})
+        if not exists: raise HTTPException(status_code=404, detail="Card not found")
+        if exists.get("status") != "active": raise HTTPException(status_code=400, detail="Card not active")
         raise HTTPException(status_code=400, detail="Insufficient balance")
-    await db.gift_cards.update_one({"code": code}, {"$inc": {"amount": -amount}})
     return {"redeemed": amount, "code": code}
 
 

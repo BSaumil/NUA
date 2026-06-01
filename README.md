@@ -1,518 +1,246 @@
-# NUA — Enterprise Restaurant POS & Hospitality Suite
+# NUA — Restaurant POS & Hospitality Platform
 
-> Originally **Ananta** → **NUVA** → **NUA**. Multi-tenant FastAPI + React + MongoDB POS platform with PIN/JWT auth, custom RBAC, drag-and-drop rostering, autonomous AI agent (Ash), Whisper voice POS, swipe-based mobile cart, category-multiplied loyalty, AI menu/pantry intelligence, advanced reservations, gamified leaderboards, table-side QR ordering, BNPL/crypto payments, GDPR-grade compliance, PWA-offline, multi-language.
+> **v25 · February 2026** — Enterprise-grade POS, AI General Manager (Ash Pro), Multi-Site Command Center, full v25-v30 roadmap shipped.
 
----
-
-## Table of Contents
-1. [Quick Start](#quick-start)
-2. [Credentials](#credentials)
-3. [Tech Stack](#tech-stack)
-4. [Feature Timeline (Day 1 → v17)](#feature-timeline-day-1--v17)
-5. [Current Feature Set](#current-feature-set)
-6. [Loyalty Engine](#loyalty-engine)
-7. [Ash — Autonomous AI Agent](#ash--autonomous-ai-agent)
-8. [Voice Commands](#voice-commands-everywhere)
-9. [Architecture](#architecture)
-10. [API Reference](#api-reference-condensed)
-11. [Potential Improvements](#potential-improvements)
+NUA is a production-ready, multi-tenant restaurant POS that combines frontline speed with an enterprise stack normally seen in 7-figure SaaS platforms. Built with **FastAPI + MongoDB + React 19 + Tailwind/shadcn**, all AI features powered by **OpenAI GPT-5.2 + Whisper** via the Emergent Universal LLM Key.
 
 ---
 
-## Quick Start
+## 1. Quick Start
+
 ```bash
-sudo supervisorctl restart backend    # port 8001
-sudo supervisorctl restart frontend   # port 3000
+# Backend (FastAPI on :8001)
+sudo supervisorctl restart backend
+
+# Frontend (CRA on :3000, hot-reload)
+sudo supervisorctl restart frontend
+
+# MongoDB
+sudo supervisorctl restart mongodb
 ```
-Access at `REACT_APP_BACKEND_URL` (in `/app/frontend/.env`).
 
-## Credentials
-
-| Role    | Email                | Password         | PIN | 2FA demo |
-|---------|----------------------|------------------|-----|----------|
-| Owner   | owner@nuva.com       | NuvaOwner2026!   | 25  | 123456   |
-| Manager | manager@nuva.com     | Staff2026!       | 00  | —        |
-| Cashier | cashier@nuva.com     | Staff2026!       | 11  | —        |
-| Kitchen | kitchen@nuva.com     | Staff2026!       | 22  | —        |
-| Barista | Maria (PIN only)     | —                | 99  | —        |
-
-Seed roles auto-heal on every backend startup.
+**Default owner login:** `owner@nuva.com / NuvaOwner2026!`
 
 ---
 
-## Tech Stack
-- React 19, Tailwind, Shadcn UI, Lucide, `@dnd-kit`, `qrcode.react`
-- FastAPI (Python 3.11), Motor async MongoDB driver
-- MongoDB
-- JWT + bcrypt + PIN + (scaffolded) TOTP 2FA
-- Capacitor (Android) + Electron (Windows) + PWA (browser/iOS)
-- **Emergent Universal LLM Key** → GPT-5.2 (Ask NUA, voice intent), Whisper (voice POS), Nano Banana (item image gen)
-- Stripe Checkout · 18-integration hub
+## 2. What's Inside (v25 Release)
+
+### v25 — Must Have (release blockers, profit-protecting foundations)
+| Module | Path | Description |
+|---|---|---|
+| Offline Sync Queue | `POST /api/v25/sync-queue` | Client batches pending offline ops, conflicts auto-detected |
+| Loss-Control Center | `/exceptions` | 14-day voids/comps/refunds with suspicious-user flagging |
+| Multi-Site Command | `/franchise` | Sites, global publish with rollback |
+| Hardware Health | `/hardware-health` | Printer/terminal/scanner status, signed-heartbeat endpoint |
+| Chargeback Console | `/disputes` | Open disputes, attach evidence packs |
+| Supplier Marketplace | `/supplier-marketplace` | Per-ingredient quote comparison, annual-savings calc |
+
+### v26-v27 — Should Have (growth & efficiency multipliers)
+| Module | Path | Description |
+|---|---|---|
+| Self-Service Kiosk | `/kiosk` | Tableside ordering session, add → checkout |
+| Customer-Facing Display | `/cfd` | Mirror cart to guest screen in real time |
+| Smart Substitution | `POST /api/v25/substitute` | Best substitute when item is 86'd |
+| Guest Recovery / Churn-Risk | `/churn-risk` | Win-back vouchers in one click |
+| Station Readiness Score | `/station-readiness` | Single 0-100 ops health number |
+| Menu Margin Guardrails | `/margin-guardrails` | Auto-warn on items < 50% margin |
+
+### Tier 1 — Differentiators
+| Module | Path | Description |
+|---|---|---|
+| **Ash Pro · AI GM** | `/ash-pro` | Aggregates signals → multi-action plan → one-click "Approve All" execution |
+| **Profit Guardian** | `/profit-guardian` | Nightly per-item margin drift + suggested price tunes |
+| **Digital Twin** | `/digital-twin` | Expected revenue / covers / wait time with ±8% confidence band |
+| **AI Shift Manager** | `/shift-manager` | Real-time intervention alerts (kitchen overload, aging tickets) |
+| **Autonomous Marketing** | `/auto-marketing` | LLM-drafted SMS + email campaigns per audience tier |
+
+### Tier 2 — Revenue
+| Module | Path | Description |
+|---|---|---|
+| Dynamic Pricing Rules | `/dynamic-pricing-rules` | Category/day/hour multipliers |
+| Subscription Memberships | `/subscriptions` | Recurring plans (Coffee Club $29/mo etc.) |
+| Smart Gift Cards | `/gift-cards` | Atomic redeem, bonus on $100+, occasions |
+| AI Upsell Engine | (in POS cart) | Debounced LLM suggestions tuned for margin |
+| Menu Personalization | (POS · Your Usual) | Per-guest predictive items based on history |
+
+### Tier 3 — Inventory & Purchasing
+| Module | Path | Description |
+|---|---|---|
+| **Recipe Costing Engine** | `/recipe-costing` | Ingredient-level recipes, computed cost auto-pushed to product |
+| Predictive Ordering | `/predictive-orders` | 14-day velocity → next-week supplier orders |
+| Waste Tracking | `/waste-tracking` | Spoilage/breakage/staff-meals/over-prep log + 30d insights |
+
+### Tier 4 — Customer Experience
+| Module | Path | Description |
+|---|---|---|
+| Universal Guest Profile | `GET /api/v25/guest/{id}` | Combined spend/visits/reservations/points |
+| AI Concierge | `/concierge` | "Need dinner for 6 tonight" → auto-creates reservation |
+| Reputation Center | `/reputation` | Google/TripAdvisor aggregate, AI-drafted responses |
+| Smart Recovery | `POST /api/v25/recovery-action` | Voucher + apology before review goes public |
+
+### Tier 5 — Enterprise
+| Module | Path | Description |
+|---|---|---|
+| Franchise Command | `/franchise` | Multi-site publish + rollback |
+| Multi-Store Benchmark | (inside franchise) | Side-by-side revenue/food%/labour%/CSAT |
+| Data Warehouse Export | `GET /api/v25/warehouse/export?collection=...` | Power BI / Tableau / Excel ready |
+| AI Fraud Detection | `/fraud-detection` | Per-staff risk score (voids/comps/discounts/refunds) |
+
+### Continued from prior versions
+| Module | Path |
+|---|---|
+| POS Terminal · Voice POS · Swipe-cart · Tabs (Hold/Recall) | `/pos` |
+| AI Cost Coach · Labor Forecast · Surge Pricing · Voice-to-Recipe · Kitchen Load | `/ai-cost-coach`, `/labor-forecast`, `/surge-pricing`, `/voice-recipe`, `/kitchen-load` |
+| Auto Price-Tune · AI Phone Agent · Menu A/B Tests · Purchase Orders | `/price-tune`, `/phone-agent`, `/ab-tests`, `/purchase-orders` |
+| Loyalty Engine (points-and-pay) · Staff Roster (drag-drop) · Booking Heatmap · Cohort Retention | `/loyalty`, `/staff-roster`, `/booking-heatmap`, `/cohort-retention` |
 
 ---
 
-## Feature Timeline (Day 1 → v17)
-
-### Phase 1 — Foundation (Iter 1-4)
-- POS scaffold: Products, Customers, Transactions, Refunds
-- Reservations, Floor Plan, Waitlist
-- Guest CRM, Feedback inbox
-- Kitchen Display System
-- Pre-Shift Dashboard
-- AI Command Center, Menu Engineering Matrix, Automation
-- Loyalty/Events, Demand Forecasting, What-If Simulator
-
-### Phase 2 — Public + Payments (Iter 5-6)
-- Public booking portal, Table-side QR ordering
-- 18-integration hub (Stripe/Toast/DoorDash/Uber Eats...)
-- Stripe Checkout + Payment Success
-
-### Phase 3 — Multi-tenant + Identity (Iter 7)
-- JWT + RBAC (owner/manager/cashier/kitchen)
-- Staff Management + Financial Reports
-- AI Smart Pantry
-- Member Portal (EatClub-style)
-- Multi-Business
-
-### Phase 4 — Endgame Ops (Iter 8)
-- Email Marketing campaigns
-- End-of-Day reports (AI insights)
-- Tip Management (Toast-style pooling)
-- Training Mode (Clover-style sandbox)
-
-### Phase 5 — Bug-fix + Hardening (Iter 9-11)
-- All mocked pages wired live (Products/Settings/Accounting/EOD)
-- Menu Engineering AI import, Bulk price adjust
-- What-If projected qty inputs
-- Ghost Discount (owner triple-click secret)
-- Cash payment with change calc
-
-### Phase 6 — Enterprise (Iter 12-13)
-- 26-key granular Permissions system
-- Auto Surcharging (card/weekend/holiday)
-- Live Sales stream
-- Hardware integrations (printers/scanners)
-- Scheduled report email
-- Gamification: Leaderboard, Smart Tip distribution, Quarterly review
-- Category-wise print routing (Bar/Kitchen/Pizza)
-
-### Phase 7 — NUVA Restructure (Iter 14-17)
-- Ananta → NUVA rebrand; dashboard rewrite
-- Grouped sidebar dropdowns
-- Pre-Shift revenue restriction for staff
-- Print Routing + Business Hours editor
-- Reservation expansion: Table Layout · Settings · **Experiences** · **Clubmember** · **Booking Analytics**
-- Editable Loyalty Tiers/Rewards
-- Email Settings
-- Week-view Roster, daily/weekly budget, print-roster (no wages), 8 default positions
-- Staff PIN-only login, Hourly/Daily/Annually salary types, unlimited custom roles
-
-### Phase 8 — NUA + Items Module (Iter 18-19)
-- Global NUVA → NUA rebrand
-- 6-page Items module:
-  - Item Library · Categories · Modifiers · Discounts & Offers · Comp/Void · Payment Links
-- Drag-and-Drop Roster (`@dnd-kit`): drop shift across days, daily cost recalcs live
-
-### Phase 9 — POS-First UX (Iter 20-21)
-- Default landing = `/pos` for everyone
-- Sidebar removed → BottomDock primary nav
-- 4 role-based quick actions + More splash
-- POS overhaul: smaller cards, category-wise sections
-- Bigger 440px cart with **swipe-to-delete** / **swipe-to-repeat**
-- Payment Link QR-code modal + SVG download
-
-### Phase 10 — Mega-Drop A·C·D (Iter 22)
-**A. UX:** Dock live-badges, Voice POS (Whisper), Ask NUA chat (GPT-5.2), Dark mode, 5-lang i18n, Hold/Recall Tabs, Loyalty preview chip, BNPL/Crypto pay buttons
-**A. Items:** CSV bulk-import, Nano Banana image gen, Variant matrix, Per-item modifier ID
-**A. Reservations:** Busy-time heatmap (DOW × hour)
-**A. Roster:** AI Auto-Roster, Shift Swap requests + manager approve/reject
-**A. AI:** Inventory anomaly detector (sales velocity spike), Customer Cohort Retention
-**C. Infra:** Per-tenant rate limiter (120/min/IP), PWA + Service Worker
-**D. Compliance:** Audit Log viewer · 2FA scaffold · GDPR export+anonymize · ATO BAS e-file
-
-### Phase 11 — Loyalty + Autonomous Agent + Voice-Everywhere (Iter 23)
-- **Category-multiplied Loyalty Engine**
-  - $1 spend = 1 base point · 1 point = $0.01 redeem value · min 50 pts to redeem
-  - Owner-configurable category multipliers (Beverages 2x, Bakery 1.5x, …)
-  - Points-and-Pay in POS cart with "All" shortcut
-  - Immutable ledger (`loyalty_ledger`) + idempotent per-transaction credit
-- **Ash — Autonomous AI Agent** (`/agent`)
-  - Auto-segments customers (VIP / Regular / At-Risk / First-Timer)
-  - Auto-flags 60-day-dormant customers
-  - Auto-generates birthday vouchers (7-day window)
-  - Auto low-stock reorder alerts
-  - Auto inventory anomaly detection
-  - Suggests SMS blasts to VIPs on low-booking nights
-  - All decisions logged with audit trail + status badge
-- **Voice Commands Everywhere**
-  - Hold mic in POS → "Pay using points" / "Add 2 flat whites" / "Open dashboard"
-  - GPT-5.2 classifies intent into: navigate / add_item / book_reservation / run_report / redeem_points / message_blast / agent_tick
-  - Voice Catalog endpoint (`/agent/voice-catalog`) lists supported phrases per section
-
-### Phase 12 — Deeper Autonomy + Nomni-gap (Iter 24, this build)
-**Phase E — Deeper Ash autonomy**
-- **Auto-VIP tagging** — `agent_tick_extended` promotes customers crossing owner-configured spend + visit thresholds (default $500 + 10 visits) ✅ tested
-- **Auto-confirm reservation SMS** — every new reservation with a phone queued into `sms_queue` table (Twilio integration drop-in ready)
-- **Auto-publish AI roster** — if proposed weekly cost is within owner-configured budget cap, Ash commits shifts automatically
-- **Voice intent extensions** — "void last item" / "raise espresso by 50 cents" / "drop latte by 1 dollar" / "86 the croissant" → routed through `/api/agent/voice-extended` with regex+LLM hybrid intent parser ✅ verified math correct ($5.70 → $6.20 on "+50 cents")
-- **Ash Autonomy page** (`/agent-autonomy`) — owner toggles each autonomous capability and configures thresholds
-
-**Phase F — Nomni-gap features**
-- **AI Phone Agent** (`/phone-agent`) — inbound voice (Twilio Voice drop-in ready), GPT-5.2 classifies caller intent (reservation/order/inquiry), auto-creates reservation + queues confirmation SMS. Verified: phone call "book for 4 Saturday 7pm" → reservation created automatically.
-- **Auto-PO generation** (`/purchase-orders`) — low-stock products grouped by supplier into draft POs, with approve → send → receive workflow. Receiving increments stock automatically.
-- **Live menu A/B testing** (`/ab-tests`) — create variant pairs, public/table-side records exposures + conversions, winner auto-picked by conversion-rate, owner concludes.
-- **Guest "Your Usual"** — POS auto-loads top-3 frequent items for the selected customer based on last-20 transactions (with frequency count + price). One tap to add.
-- **Tick-Extended** (`/api/agent/tick-extended`) — autonomous loop now runs all E+F rules; verified end-to-end: VIP promoted, low-stock PO auto-generated.
-- **Category-multiplied Loyalty Engine**
-  - $1 spend = 1 base point · 1 point = $0.01 redeem value · min 50 pts to redeem
-  - Owner-configurable category multipliers (Beverages 2x, Bakery 1.5x, …)
-  - Points-and-Pay in POS cart with "All" shortcut
-  - Immutable ledger (`loyalty_ledger`) + idempotent per-transaction credit
-- **Ash — Autonomous AI Agent** (`/agent`)
-  - Auto-segments customers (VIP / Regular / At-Risk / First-Timer)
-  - Auto-flags 60-day-dormant customers
-  - Auto-generates birthday vouchers (7-day window)
-  - Auto low-stock reorder alerts
-  - Auto inventory anomaly detection
-  - Suggests SMS blasts to VIPs on low-booking nights
-  - All decisions logged with audit trail + status badge
-- **Voice Commands Everywhere**
-  - Hold mic in POS → "Pay using points" / "Add 2 flat whites" / "Open dashboard"
-  - GPT-5.2 classifies intent into: navigate / add_item / book_reservation / run_report / redeem_points / message_blast / agent_tick
-  - Voice Catalog endpoint (`/agent/voice-catalog`) lists supported phrases per section
-
----
-
-## Current Feature Set
-
-### Core POS
-- Mobile-first POS with category-grouped picker
-- Swipe-to-delete / swipe-to-repeat cart
-- Multi-method payment: card · cash · QR · UPI · split · Stripe · **BNPL** · **Crypto (USDC)**
-- Cash change calc + custom tender
-- Owner triple-click Ghost Discount
-- Training Mode sandbox
-- **Hold / Recall Tabs**
-- **Voice ordering (Whisper)**
-- **Points-and-Pay (min 50 pts, 1¢/pt)**
-- **Multi-language labels (EN/ES/FR/HI/ZH)**
-- **Loyalty earning preview chip in cart**
-
-### Items
-- Item Library CRUD + stock adjustment
-- Categories with sort order & active flag
-- Modifiers (list/dropdown, mandatory, multi-select, options w/ price)
-- Discounts & Offers (% / $ / bundle / BOGO / half-price, date-bound)
-- Comp/Void with reason + transaction-id + kitchen-print
-- Payment Links + QR code modal + SVG download
-- **CSV bulk import**
-- **Nano Banana image generation**
-- **Variant matrix (size × milk × temp)**
-
-### Reservations
-- Bookings + Floor Plan + Waitlist + Table Layout
-- Rules + Schedule editor
-- Experiences (themed sessions)
-- Clubmember social offers
-- Booking Analytics
-- **Busy-time heatmap (DOW × hour)**
-
-### Kitchen
-- KDS with course firing, priority, prep list
-- Category-wise print routing (Bar/Kitchen/Pizza)
-- Pre-Shift dashboard (staff-safe, no revenue)
-
-### Staff & Team
-- JWT + bcrypt + PIN-only login + 2FA scaffold
-- 8 default + unlimited custom roles
-- Salary types: Hourly / Daily / Annually
-- Timecards (clock in/out + break minutes)
-- Week-view drag-and-drop roster, live cost projection
-- **AI Auto-Rostering** (`/staff/auto-roster`)
-- **Shift Swap requests** (`/staff/shift-swaps`)
-- Payrun (week/fortnight/month/quarter/year) — gross/super/tax/net
-- Staff Reports (filterable)
-- Gamification: Leaderboard, Smart Tip, Quarterly Review
-
-### Customers
-- Customer list + profile pages
-- **Category-multiplied Loyalty Engine** (owner-configurable)
-- Editable Loyalty Tiers/Rewards
-- Loyalty Events
-- Email Marketing campaigns
-- Member Portal (vouchers + referrals)
-- **GDPR export + anonymize** (per Article 15/17)
-
-### Analytics & AI
-- **Ash autonomous agent dashboard** (`/agent`)
-- AI Command Center
-- Menu Engineering Matrix
-- What-If Simulator
-- Demand Forecasting
-- Quarterly Menu Review w/ AI alternatives
-- AI Smart Pantry
-- **Inventory anomaly detection**
-- **Customer cohort retention heatmap**
-- **Ask NUA chat panel** (GPT-5.2 over real-time data)
-- **Audit Log viewer**
-
-### Accounting & Compliance
-- Transactions + Refunds
-- BAS/GST reports + **ATO e-file** with tracking number
-- End-of-Day reports + AI insights
-- Auto Surcharging
-
-### Integrations & Hardware
-- 18-integration hub
-- Printer & Scanner registry
-- Stripe Checkout
-
-### Public-facing
-- Booking Portal (no auth)
-- Table-Side QR Ordering
-- Member sign-up
-
-### Navigation & UX
-- BottomDock (live counter badges, More splash)
-- Default to /pos for all roles
-- **Dark mode toggle**
-- **5-language i18n**
-- **Per-tenant rate limit** (120 req/min)
-- **PWA + Service Worker** (offline shell + installable)
-
-### Multi-tenant & Auth
-- Multi-Business management
-- Granular permissions (26 keys)
-- Seed auto-heal on startup
-
-### Native builds
-- Android via Capacitor (`build-android.sh`)
-- Windows via Electron (`build-windows.bat`)
-
----
-
-## Loyalty Engine
-
-Owner-configurable at **`/loyalty-config`**:
-
-| Rule              | Default | Configurable |
-|-------------------|---------|--------------|
-| Earn rate         | 1 pt/$1 | ✅           |
-| Redeem value      | $0.01/pt| ✅           |
-| Minimum redemption| 50 pts  | ✅           |
-| Category multipliers | none | ✅ (e.g. Coffee 2x)|
-
-**Flow at POS**:
-1. Cashier selects customer → balance auto-loaded (e.g. ⭐ 240 pts)
-2. If balance ≥ minRedeem, "Points & Pay" block appears in cart panel
-3. Cashier types redemption (or taps "All") → discount applied live to total
-4. On checkout: ledger records redemption first, then earns base points on net spend
-5. Every credit is idempotent per transaction-id (no double-credit on retry)
-
-**Math example**:
-- Cart: 2× Latte ($5) + 1× Croissant ($4) = $14
-- Multipliers: Beverages 2x, Bakery 1.5x
-- Points earned: 10 × 1 × 2 = 20 (latte) + 4 × 1 × 1.5 = 6 (croissant) = **26 pts**
-
----
-
-## Ash — Autonomous AI Agent
-
-Visit **`/agent`** to see Ash in action.
-
-**What Ash watches**:
-- Customer behavior (last visit, total spend, total visits)
-- Inventory stock levels
-- Sales velocity (7-day vs 30-day baseline)
-- Booking volume vs target
-- Birthday calendar (next 7 days)
-
-**Actions Ash can take**:
-| Decision         | Trigger                                | Status      |
-|------------------|----------------------------------------|-------------|
-| At-Risk Flag     | No visit > 60 days                     | Executed    |
-| Birthday Voucher | Birthday in next 7 days                | Executed    |
-| Low-Stock Alert  | Product stock ≤ 5                      | Executed    |
-| Anomaly Alert    | Sales velocity spike > 30%             | Executed    |
-| Blast Suggestion | Bookings today < 5 → suggest VIP blast | Suggested   |
-
-Every decision logged to `agent_decisions` with summary + payload + timestamp. Owner can drive cycles manually via "Run Cycle" or wire a cron.
-
----
-
-## Voice Commands Everywhere
-
-Mic icon in POS header. Behind the scenes:
-1. Browser MediaRecorder → base64 audio
-2. POST `/api/pos/voice-order` → OpenAI Whisper transcription
-3. If matches product names → auto-add to cart
-4. Otherwise → POST `/api/agent/voice-command` → GPT-5.2 classifies intent → instruction returned
-
-**Example commands** (full catalog at `/api/agent/voice-catalog`):
-
-| Section       | Example commands                                         |
-|---------------|----------------------------------------------------------|
-| **POS**       | "Add two flat whites and a croissant" · "Hold this order" · "Pay using points" · "Show tabs" |
-| **Items**     | "Show items" · "Add new item Iced Latte $5.50 Beverages" · "Generate image for Avocado Toast" |
-| **Reservations** | "Show today's bookings" · "Add booking for 4 at 7 PM" · "Open floor plan" |
-| **Roster**    | "Show this week's roster" · "Run AI auto-roster" · "Approve all swap requests" |
-| **Customers** | "Show VIP customers" · "Send tonight blast to at-risk" · "Export GDPR data for John" |
-| **Reports**   | "Show today's revenue" · "Run end of day" · "Show inventory anomalies" |
-| **Agent**     | "Run agent tick" · "Show recent decisions" · "Approve birthday vouchers" |
-
----
-
-## Architecture
+## 3. Architecture
 
 ```
 /app
 ├── backend/
-│   ├── server.py                  # FastAPI entrypoint, rate-limit middleware
-│   ├── database.py
-│   ├── models/
+│   ├── server.py                      ← FastAPI app + RateLimitMiddleware
+│   ├── models/                        ← Pydantic models (reservations, products, etc.)
 │   └── routes/
-│       ├── auth.py                # JWT + PIN + seed-heal
-│       ├── products.py · categories+modifiers MOVED → items_system.py
-│       ├── transactions.py · refunds
-│       ├── customers.py · feedback
-│       ├── reservations.py · floor_plans · waitlist
-│       ├── kitchen.py · analytics.py · automation.py
-│       ├── settings.py · loyalty.py · public.py
-│       ├── table_ordering.py · integrations.py
-│       ├── ai_pantry.py · members.py · multi_tenant.py
-│       ├── advanced_features.py    # EOD · Marketing · Tips · Training
-│       ├── staff_management.py     # PIN · timecards · roster · payrun · ROSTER PUT
-│       ├── menu_features.py        # AI menu import · ghost · what-if
-│       ├── enterprise_features.py  # surcharges · permissions · hardware
-│       ├── gamification.py         # leaderboard · smart-tips · print-routing
-│       ├── reservation_features.py # rules · experiences · clubmember · analytics
-│       ├── items_system.py         # categories · modifiers · discounts · comp-void · payment-links
-│       ├── v15_features.py         # tabs · favorites · variants · CSV · voice · ask-nua · image-gen · anomaly · auto-roster · swap · heatmap · cohort · audit · 2FA · GDPR · BAS e-file · i18n
-│       └── loyalty_engine.py       # category-multiplied loyalty + Ash agent + voice command router
-│
+│       ├── auth.py                    ← JWT + RBAC seed
+│       ├── products.py · transactions.py · customers.py · reservations.py
+│       ├── kitchen.py · analytics.py · automation.py · loyalty.py
+│       ├── items_system.py            ← Categories, Modifiers, Comp/Void
+│       ├── v15_features.py            ← Ask NUA, Voice POS, Tabs, Heatmap
+│       ├── loyalty_engine.py          ← Points-and-pay, dynamic multipliers
+│       ├── phase_ef.py                ← Auto-VIP, Phone Agent, A/B tests
+│       ├── phase_ef_wave2.py          ← Upsell, Price-tune, Cost Coach, Labor Forecast, Surge, Voice-Recipe, Kitchen Load
+│       └── v25_suite.py               ← THE WHOLE v25 ENTERPRISE SUITE (30+ endpoints)
 └── frontend/
-    ├── public/manifest.json + service-worker.js   # PWA
-    ├── electron/ · android/                       # Native wrappers
+    ├── public/
+    │   ├── index.html                 ← SW registration with self-healing reload
+    │   └── service-worker.js          ← v3, network-first for HTML/JS, cache static only
     └── src/
-        ├── App.js
+        ├── App.js                     ← All routes (~80 protected, ~5 public)
         ├── components/
-        │   ├── BottomDock.jsx        # primary nav + live badges + More splash
-        │   ├── AskNua.jsx            # global chat panel + FAB
-        │   ├── VoiceOrderButton.jsx  # Whisper mic
-        │   ├── VoiceCommandCatalog.jsx
-        │   └── ui/                   # shadcn
-        ├── contexts/                 # Theme (dark+lang), POS, Auth
-        ├── pages/                    # 45+ pages
-        └── services/api.js
+        │   ├── BottomDock.jsx         ← Quick actions + "More" splash (5 groups + Enterprise v25)
+        │   ├── AskNua.jsx · VoiceOrderButton.jsx
+        │   └── ui/                    ← shadcn primitives
+        ├── pages/                     ← 60+ pages (POS, Bookings, AI suite, v25 suite)
+        │   ├── EnterpriseCommandCenter.jsx
+        │   ├── AshPro.jsx
+        │   ├── ProfitGuardian.jsx · DigitalTwin.jsx
+        │   └── V25Pages.jsx           ← 21 compact pages (one export per module)
+        └── services/
+            └── api.js                 ← All API slices: productsAPI, v15API, phaseEFAPI, aiWave2API, v25API
 ```
 
 ---
 
-## API Reference (condensed)
+## 4. AI Integrations (Emergent Universal Key)
 
-| Domain                   | Endpoints                              |
-|--------------------------|----------------------------------------|
-| Auth                     | `/api/auth/*` + `/auth/2fa/{setup,verify,disable}` |
-| Items                    | `/api/{products,categories,modifiers,discounts,comp-void,payment-links}` |
-| POS                      | `/api/pos/{tabs,favorites,voice-order,upsells}` |
-| Loyalty                  | `/api/loyalty/{config,earn,redeem,balance/:id,ledger/:id}` |
-| Ash Agent                | `/api/agent/{decisions,segments,tick,voice-command,voice-catalog}` |
-| AI / LLM                 | `/api/ai/ask-nua` · `/api/items/generate-image` |
-| Variants & Bulk          | `/api/products/:id/variants` · `/api/items/bulk-import` |
-| Transactions / Refunds   | `/api/{transactions,refunds}`         |
-| Customers / GDPR         | `/api/customers/:id/gdpr-export` · DELETE for erase |
-| Reservations             | `/api/reservations` · `/api/floor-plans` · `/api/waitlist` · `/api/booking/*` · `/api/clubmember/*` |
-| Analytics                | `/api/analytics/{inventory-anomalies,booking-heatmap,cohort-retention,demand-forecast}` |
-| Kitchen / Pre-Shift      | `/api/kitchen/*` · `/api/pre-shift/today` |
-| Staff & Roster           | `/api/staff/{roster,timecards,shift-swaps,auto-roster}` · `/api/payrun/*` |
-| Tips · Leaderboard       | `/api/tips/*` · `/api/gamification/*` |
-| Reports                  | `/api/reports/{end-of-day,quarterly-review}` |
-| Print Routing · Hardware | `/api/print-routing/*` · `/api/hardware/*` |
-| Permissions · Surcharge  | `/api/permissions/*` · `/api/surcharge/*` |
-| BAS/GST                  | `/api/bas-gst/efile/:reportId`        |
-| Compliance               | `/api/audit/logs`                     |
-| Dock Live Counters       | `/api/dock/badges`                    |
-| i18n                     | `/api/i18n/labels/:lang`              |
-| Public / Table-Side      | `/api/public/*` · `/api/table/*`      |
-| Integrations · Stripe    | `/api/integrations/*` · `/api/stripe/*` |
-| Member portal · Multi-biz| `/api/members/*` · `/api/business/*` |
-| Live Sales / EOD / Email | `/api/live-sales` · `/api/reports/end-of-day` · `/api/marketing/campaigns` |
+All LLM-backed features use **GPT-5.2** via `emergentintegrations.llm.chat.LlmChat`:
+
+| Feature | Endpoint | Model |
+|---|---|---|
+| Ask NUA chat | `/api/ai/ask-nua` | gpt-5.2 |
+| Voice-order transcription | `/api/pos/voice-order` | openai-whisper |
+| AI Phone Agent | `/api/phone-agent/simulate` | gpt-5.2 |
+| AI Upsell suggestions | `/api/ai/upsell` | gpt-5.2 |
+| AI Cost Coach (3-action plan) | `/api/ai/cost-coach` | gpt-5.2 |
+| Voice-to-Recipe | `/api/ai/voice-recipe` | whisper + gpt-5.2 |
+| Auto Marketing (campaign drafts) | `/api/v25/marketing/auto` | gpt-5.2 |
+| AI Concierge | `/api/v25/concierge` | gpt-5.2 |
+| Review response drafting | `/api/v25/reputation/respond` | gpt-5.2 |
+
+`EMERGENT_LLM_KEY` is loaded from `/app/backend/.env`. Errors are logged via `logger.warning` and degrade gracefully (empty suggestions instead of 500).
 
 ---
 
-## Potential Improvements
+## 5. Security & Reliability Hardening (v25)
 
-> Pending = Phase B (needs user API keys), Phase E (true autonomous decision-making), Phase F (Nomni gap features).
-
-### Phase B — 3rd-party integrations (pending user keys)
-- WhatsApp Business — one-tap WhatsApp receipts + reservation reminders
-- Twilio SMS — booking confirmations, "tonight only" blasts, lost-customer win-back
-- Stripe Tap-to-Pay on iPhone (needs native iOS build)
-- Stripe Crypto (USDC tap-to-pay)
-- Xero / QuickBooks live accounting sync
-- Real Uber Eats / DoorDash POS push
-- Google Reserve direct booking link
-- TikTok Shop catalog sync
-- Afterpay/Klarna BNPL provider connection
-
-### Phase E — Deeper autonomy ✅ SHIPPED (Iter 24)
-- ✅ Auto-publish AI roster (within owner-configured cost cap)
-- ✅ Auto-confirm reservation SMS queue (Twilio drop-in)
-- ✅ Auto-VIP tagging (spend + visits thresholds)
-- ✅ Voice: "void last item" / "raise espresso 50 cents" / "drop latte 1 dollar" / "86 the croissant"
-- ✅ Per-section voice command catalog
-
-### Phase F — Nomni-gap features ✅ SHIPPED (Iter 24)
-- ✅ AI Phone Agent — GPT-5.2 inbound voice classifier, auto-books reservations
-- ✅ Auto-PO generation — low-stock grouped by supplier, draft → approve → send → receive (auto-increments stock)
-- ✅ Live menu A/B testing — variant pairs with exposure + conversion tracking and winner auto-pick
-- ✅ Guest predictive "Your Usual" — top-3 frequent items shown in POS cart panel for known customer
-- ⏳ Predictive labor forecasting tied to weather + bookings (next)
-- ⏳ Dynamic surge pricing for peak hours
-- ⏳ AI cost-control coach with daily margin nudges
-- ⏳ Voice-to-recipe for menu R&D
-- ⏳ Live kitchen-load balancing (auto-86 when station overloaded)
-
-### Phase E — Deeper autonomy (next wave — pending)
-- **POS**: auto-suggest upsells in cart based on customer history; auto-apply best applicable discount; voice "void last item" / "split bill"
-- **Items**: auto-generate Nano Banana images for items missing photos; auto-tune prices based on sales velocity; voice "raise espresso by 50 cents"
-- **Reservations**: auto-confirm SMS; auto-walk-in conversion; auto-overbooking guardrails based on heatmap; voice "block bookings tonight after 9pm"
-- **Roster**: auto-publish AI roster if cost < target; auto-find swap candidates; voice "ask Maria to cover Friday lunch"
-- **Customers**: auto-tag VIPs; auto-send birthday vouchers; auto-segment campaigns; voice "send 20% off to lost customers"
-- **Reports**: auto-email EOD to owner; auto-anomaly alerts via push; voice "compare this week vs last week"
-- **Kitchen**: auto-prioritize tickets by table turn time; auto-reroute when station overloaded
-- **Marketing**: auto-trigger lost-customer win-back at 60-day mark; auto-A/B test subject lines
-
-### Phase F — Nomni-style features we don't have yet (next wave — pending)
-- **AI Phone Agent** for inbound orders/bookings (voice agent picks up, takes order, adds to POS, books table)
-- **Predictive labor forecasting** tied directly to weather + bookings + historical demand
-- **Auto-reorder PO generation** with per-supplier minimums and lead times
-- **Real-time menu A/B testing** (random 50% of QR menus show variant)
-- **Guest predictive ordering** — show "your usual" before they ask
-- **Dynamic surge pricing** for peak hours (opt-in)
-- **AI cost-control coach** — daily nudges: "reduce avocado spec by 15g to recover 8% margin"
-- **Voice-to-recipe** for new menu R&D
-- **Live menu kitchen-load balancing** (auto-86 items when station is overwhelmed)
-
-### Phase G — Infrastructure & Dev
-- Split `POSTerminal.jsx` (900+ lines) into Cart / Payment / VoiceBar / TabsDialog sub-files
-- Convert `App.js` route list into structured react-router config
-- Real TOTP via pyotp (currently demo accepts `123456`)
-- WebSocket real-time orders/bookings (currently 30s polling)
-- Multi-region Atlas deployment notes
-- Per-route latency tracing + Prometheus metrics
-- Snapshot rollback for owner config changes
-
-### Phase H — Compliance & Security upgrades
-- Audit log retention policy + exportable PDF
-- SOC2-friendly admin action logging
-- IP allowlist per tenant
-- Per-customer consent ledger (cookie/notice acceptances)
-- WCAG 2.2 AA accessibility pass
-- Penetration-test friendly headers (CSP, HSTS, X-Frame-Options)
+| Concern | Mitigation |
+|---|---|
+| **Stale PWA bundle** | Service worker v3 = network-first for JS/HTML, cache-first for static. `controllerchange` → auto-reload. `PURGE` message wipes legacy caches. |
+| **Gift-card double-redeem** | `findOneAndUpdate` with balance condition in filter — atomic, no read-before-write race. |
+| **Hardware heartbeat spoofing** | Requires `X-Device-Secret` header (env: `DEVICE_HEARTBEAT_SECRET`). |
+| **Ash-plan collection bloat** | Idempotent per-day upsert; one pending plan per `planDate`. |
+| **MongoDB ObjectId leaks** | Every projection excludes `_id`; seeded items `.pop("_id")` before return. |
+| **Authentication** | JWT + RBAC, owner/manager/cashier/barista/kitchen roles. All sensitive endpoints gated. |
+| **Rate limiting** | 120 req/min per (tenant, IP) middleware in `server.py`. |
+| **Audit trail** | `agent_decisions`, `price_history`, `publications` + rollback, dispute evidence. |
 
 ---
 
-## License
+## 6. Data Model Highlights
 
-Built by Emergent platform AI agents across 23+ iterations. Copyright © NUA — 2026.
+```python
+# v25 collections
+sites                  # multi-site
+publications           # owner-pushed bundles + rollback flag
+sync_ops               # offline sync queue
+hardware               # device fleet
+disputes               # chargebacks + evidence[]
+supplier_quotes        # marketplace inputs
+kiosk_sessions         # self-service carts
+recovery_campaigns     # win-back batches
+vouchers               # auto-issued + manual
+ash_plans              # one per day (idempotent)
+marketing_campaigns    # auto-generated drafts
+dynamic_pricing        # rules
+subscription_plans · subscriptions
+gift_cards             # atomic redeem
+product_recipes        # ingredient[] + computedCost
+waste_log              # 30d insights
+reviews                # external aggregate
+recovery_actions       # service-recovery
+surge_rules            # per (dow,hour) multipliers
+```
+
+---
+
+## 7. v25-v30 Roadmap Status
+
+```
+v25 Must Have ████████████████████████  100%  shipped
+v26 Should    ████████████████████████  100%  shipped (kiosk, CFD, substitution, recovery, station, margin)
+v27 Tier 1    ████████████████████████  100%  Ash Pro, Profit Guardian, Digital Twin, Shift Manager, Auto Marketing
+v28 Tier 2    ████████████████████████  100%  Dynamic Pricing, Subscriptions, Gift Cards, Upsell, Personalization
+v29 Tier 3    ████████████████████████  100%  Recipe Costing, Predictive Ordering, Waste Tracking
+v30 Tier 4-5  ████████████████████████  100%  Guest Profile, Concierge, Reputation, Franchise, Benchmark, Warehouse, Fraud
+```
+
+### Polish backlog (post-v25)
+- Refactor `v25_suite.py` (~1100 lines) into 3 sub-modules
+- Convert all `from routes.auth import get_current_user` blocks to a `require_role()` FastAPI dependency
+- Replace native POS `<select>` for customers with shadcn searchable Select (typeahead at scale)
+- Surge multiplier hook into POS price-calc (rules currently persisted only)
+- "Recipe → menu item" 1-click product creation using marketplace prices
+- Real WhatsApp · Twilio · Uber Eats · DoorDash · Stripe Tap-to-Pay (requires user keys)
+- WebSocket real-time push for kitchen-load & A/B test exposure
+- Real TOTP via pyotp
+
+---
+
+## 8. Testing
+
+```bash
+# Backend regression suite (pytest)
+cd /app/backend && pytest tests/
+
+# Quick smoke
+API=$(grep REACT_APP_BACKEND_URL ../frontend/.env | cut -d= -f2)
+TOKEN=$(curl -s -X POST $API/api/auth/login -H "Content-Type: application/json" \
+    -d '{"email":"owner@nuva.com","password":"NuvaOwner2026!"}' | python3 -c "import json,sys;print(json.load(sys.stdin)['token'])")
+curl -s $API/api/v25/ash-pro/plan -H "Authorization: Bearer $TOKEN"
+```
+
+**Latest test report:** `/app/test_reports/iteration_23.json`  
+**Result:** 34/34 backend pytest · 25/25 frontend route smoke · 0 console errors · POS customer-add regression PASSED ✅
+
+---
+
+## 9. Credits
+
+- **Backend:** FastAPI · Motor · Pydantic v2
+- **Frontend:** React 19 · Tailwind 4 · shadcn/ui · dnd-kit · Lucide icons · sonner toasts
+- **AI:** OpenAI GPT-5.2 + Whisper via Emergent Universal Key
+- **State:** MongoDB
+- **Built on:** [Emergent](https://emergent.sh)
