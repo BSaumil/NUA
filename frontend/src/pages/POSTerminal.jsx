@@ -17,6 +17,56 @@ import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, 
 import { useToast } from '../hooks/use-toast';
 import { useAuth } from '../contexts/AuthContext';
 import VoiceOrderButton from '../components/VoiceOrderButton';
+import { Popover, PopoverTrigger, PopoverContent } from '../components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '../components/ui/command';
+import { ChevronsUpDown } from 'lucide-react';
+
+// Searchable customer combobox — replaces native <select> for fast lookup at scale.
+function CustomerCombobox({ customers, value, onChange, theme }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          role="combobox"
+          aria-expanded={open}
+          className="w-full flex items-center justify-between p-2 border rounded-md text-sm bg-white hover:border-gray-400 transition"
+          data-testid="pos-customer-select"
+        >
+          <span className="text-gray-500">Walk-in Customer · search to assign</span>
+          <ChevronsUpDown size={14} className="opacity-50" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[380px] p-0" align="start">
+        <Command shouldFilter={true}>
+          <CommandInput placeholder="Search by name, email, phone…" data-testid="customer-search-input" />
+          <CommandList className="max-h-[280px]">
+            <CommandEmpty>No matching customer.</CommandEmpty>
+            <CommandGroup>
+              {customers.map(c => (
+                <CommandItem
+                  key={c.id}
+                  value={`${c.name} ${c.email || ''} ${c.phone || ''} ${c.membershipTier || ''}`}
+                  onSelect={() => { onChange(c); setOpen(false); }}
+                  data-testid={`customer-option-${c.id}`}
+                  className="cursor-pointer"
+                >
+                  <div className="flex flex-col w-full">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">{c.name}</span>
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${theme.primary}15`, color: theme.primary }}>{c.membershipTier || 'Member'}</span>
+                    </div>
+                    {(c.email || c.phone) && <span className="text-xs text-gray-500">{c.email}{c.email && c.phone ? ' · ' : ''}{c.phone}</span>}
+                  </div>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 // ===== Swipeable Cart Item: left-swipe deletes, right-swipe repeats =====
 function SwipeableCartItem({ item, onUpdateQty, onRemove, onRepeat, theme }) {
@@ -558,20 +608,18 @@ const POSTerminal = () => {
               )}
             </div>
           ) : (
-            <select className="w-full p-2 border rounded-md text-sm"
-              onChange={async (e) => {
-                const c = customers.find(c => c.id === e.target.value);
+            <CustomerCombobox
+              customers={customers}
+              value={null}
+              theme={theme}
+              onChange={async (c) => {
                 setSelectedCustomer(c);
                 if (c) {
                   try { const r = await loyaltyEngineAPI.getBalance(c.id); setPointsBalance(r.data?.points || 0); } catch {}
-                  // Your Usual
                   try { const r = await phaseEFAPI.yourUsual(c.id); setYourUsual(r.data?.items || []); } catch {}
                 } else { setYourUsual([]); }
               }}
-              data-testid="pos-customer-select">
-              <option value="">Walk-in Customer</option>
-              {customers.map(c => <option key={c.id} value={c.id}>{c.name} ({c.membershipTier})</option>)}
-            </select>
+            />
           )}
         </CardContent></Card>
 
