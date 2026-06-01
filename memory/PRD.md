@@ -199,7 +199,56 @@ Kitchen: kitchen@nuva.com / Staff2026!
 ## Backlog
 - Phase B (user keys): WhatsApp · Twilio Voice/SMS · Stripe Tap-to-Pay · Crypto USDC · Xero/QB · Uber Eats · DoorDash · Google Reserve · TikTok Shop
 - Real-time: WebSocket for kitchen-load auto-refresh and live A/B test exposure
-- Refactor: Split POSTerminal.jsx (~950 lines) into Cart/Payment/QR sub-components, structured react-router config, real TOTP via pyotp
+- Refactor: Split POSTerminal.jsx (~1220 lines) into Cart/Payment/QR sub-components, split V25Pages.jsx and V26Pages.jsx mega-files
 - Surge pricing apply to live POS prices (currently only persisted) — hook into product price calc
 - Recipe → menu item: 1-click convert /voice-recipe generated spec into a product with cost-rolled-up from ingredient prices
 - Auto-swap-finder + auto-EOD-email (Phase E next wave residual)
+
+---
+
+## v26.1 — Iteration 25-26 (Feb 2026): Unified Gift Cards + AI Marketing + AI Roster Blackouts + Live CFD
+
+### Backend additions (`routes/v26_commerce.py`)
+- **Unified Voucher↔Gift Card lifecycle**:
+  - `POST /v26/vouchers` with `kind=gift` now also mints a paired `gift_card` row in `pending_activation` (shared code + barcode, `currentBalance=0`, `voucherId` linked).
+  - `POST /v26/gift-cards/{code}/activate` — idempotent state transition pending → active. Sets `currentBalance = initial + bonus`, writes an `activate` ledger row in `db.gift_card_transactions`. Called automatically by POS *after* the cart paying for the card settles.
+  - `POST /v26/gift-cards/{code}/redeem` — atomic partial redemption via `find_one_and_update` guarded by `currentBalance >= amount`. Writes a `redeem` ledger row, flips status to `depleted` at 0.
+  - `GET /v26/gift-cards/{code}/transactions` — ledger by ascending createdAt.
+  - `GET /v26/gift-cards?status=...` — list (optional status filter).
+  - `GET /v26/gift-cards/lookup/{code}` — back-fills legacy cards with `currentBalance`.
+  - `POST /v26/gift-cards/sell` — counter sale activates immediately + writes ledger; online channel lands as pending.
+- **AI Marketing Email engine**:
+  - `POST /v26/marketing/email/generate` — LLM (`emergentintegrations` GPT-5.2) drafts a complete email featuring upcoming events, active vouchers, and tier perks. Audience-aware, tone-aware, horizon-aware. Persisted as `draft` in `db.marketing_emails`.
+  - `GET /v26/marketing/emails` · `PATCH /v26/marketing/emails/{id}` · `DELETE /v26/marketing/emails/{id}`.
+- **Customer Display live push**:
+  - `POST /v26/cfd/push` — POS pushes live cart + customer to `db.cfd_live` (keyed by terminalId).
+  - `GET /v26/cfd/enriched?terminalId=...` — returns the pushed feed enriched with customerName, tableNumber, pointsEarned/missed; falls back to `pos_tabs` when no live feed.
+
+### Backend update (`routes/v15_features.py`)
+- `POST /staff/auto-roster` now consumes `db.staff_availability`:
+  - Filters out staff whose weekly availability excludes the day or whose blackoutDates cover that calendar date.
+  - Response gains an `excluded[]` array `{staffId, staffName, date, reason}` and reasoning string reports exclusion count.
+
+### Backend update (`routes/v25_suite.py`)
+- `POST /v25/subscriptions/plans` now mints a scannable manualCode + barcode (`SUB-XXXX-XXXX`), accepts `inclusions[]`, `termsAndConditions`, `trialDays`, `priceAnnual`.
+
+### Frontend additions
+- **POSContext.js** — added `appliedGiftCards` tender array and `pendingGiftActivations` queue. `calculateTotal()` returns both `total` (gross) and `balanceDue` (after gift-card tenders) so cash/QR/UPI/Stripe only charge the remainder.
+- **POSTerminal.jsx**:
+  - "🎁 Apply" gift-card input inside the discount picker. Looks up the card, auto-tenders min(balance, balanceDue).
+  - Totals panel shows applied gift cards as violet chips with × to remove + a "Balance due (after gift cards)" line.
+  - `settleGiftCards()` runs after every successful checkout (standard / QR / UPI / Split) and: activates any pending-sold cards, redeems applied tenders, all via the ledger endpoints.
+  - Live cart pushed to `/v26/cfd/push` 400ms-debounced on every cart/customer change.
+- **V26Pages.jsx**:
+  - `VoucherManager.save()` surfaces the auto-minted gift-card code in a toast when `kind=gift`.
+  - **New `MarketingEmails` page** (`/marketing-emails`) — generate · list drafts · edit subject/preheader/body/sms/cta · delete (owner only). Bottom Dock entry added under Enterprise.
+- **api.js** — `v26API` extended: `listGiftCards`, `activateGift`, `redeemGiftPartial`, `giftTransactions`, `generateMarketingEmail`, `listMarketingEmails`, `updateMarketingEmail`, `deleteMarketingEmail`, `cfdPush`.
+
+### Test status (Iteration 25 + 26)
+- **Backend**: 19/19 PASS (`/app/test_reports/iteration_25.json`) — full gift-card lifecycle, ledger correctness, AI marketing CRUD, blackout-aware roster, live CFD.
+- **Frontend**: 6/6 PASS (`/app/test_reports/iteration_26.json`) — gift card chip in POS totals, voucher creation toast, marketing email generator + editor, bottom-dock entry.
+
+### Known status
+- License enforcement remains feature-flagged OFF for dev (`LICENSE_ENFORCEMENT_ENABLED=false`).
+- P2 backlog items (offline-first sync, kiosk mode, smart 86/substitution) have working MVP backend + frontend stubs from earlier iterations — production-grade refinement still backlogged.
+
