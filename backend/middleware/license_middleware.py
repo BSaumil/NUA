@@ -49,6 +49,12 @@ BLOCKED_WHEN_SUSPENDED_PREFIXES = (
 
 class LicenseEnforcementMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
+        # Global kill-switch — keep the entire licensing system off during
+        # development. Production sets LICENSE_ENFORCEMENT_ENABLED=true.
+        import os
+        if os.environ.get("LICENSE_ENFORCEMENT_ENABLED", "false").lower() != "true":
+            return await call_next(request)
+
         path = request.url.path
         method = request.method.upper()
 

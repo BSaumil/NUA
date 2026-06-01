@@ -6,6 +6,10 @@ import { licenseAPI } from '../services/api';
 
 const LicenseContext = createContext(null);
 
+// Feature flag — keep entire licensing system off during product development.
+const LICENSE_ENFORCEMENT_ENABLED =
+  (process.env.REACT_APP_LICENSE_ENFORCEMENT || 'false').toLowerCase() === 'true';
+
 // Stable per-browser device ID — first install creates it, never changes.
 function getDeviceId() {
   let id = localStorage.getItem('nua-device-id');
@@ -58,6 +62,12 @@ export function LicenseProvider({ children }) {
   }, []);
 
   useEffect(() => {
+    if (!LICENSE_ENFORCEMENT_ENABLED) {
+      // Skip the periodic /validate poll while enforcement is off — the
+      // /license page can still call licenseAPI.me() on demand.
+      setState(s => ({ ...s, loading: false, ok: true, licenseState: 'disabled', warnings: [] }));
+      return;
+    }
     revalidate();
     // Spec: periodic online revalidation. Token TTL is 30 min; revalidate every 10 min.
     const id = setInterval(revalidate, 10 * 60 * 1000);

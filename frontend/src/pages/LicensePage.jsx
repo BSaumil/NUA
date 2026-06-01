@@ -28,11 +28,24 @@ const STATE_BADGES = {
 // =====================================================================
 // LicenseLockScreen — full-page overlay when licenseState is bad
 // =====================================================================
+// Feature flag — licensing UI is off during product development. Flip to
+// 'true' via REACT_APP_LICENSE_ENFORCEMENT to re-arm it.
+const LICENSE_ENFORCEMENT_ENABLED =
+  (process.env.REACT_APP_LICENSE_ENFORCEMENT || 'false').toLowerCase() === 'true';
+
 export function LicenseLockScreen() {
   const { ok, licenseState, errorCode, message, abnEntityName } = useLicense();
   const { theme } = useTheme();
   const [recoveryLoading, setRecoveryLoading] = useState(false);
   const { toast } = useToast();
+
+  // Global kill-switch
+  if (!LICENSE_ENFORCEMENT_ENABLED) return null;
+
+  // Always allow owner onto the License & Billing page so they can update
+  // billing / view details without being blocked by their own lock screen.
+  const path = typeof window !== 'undefined' ? window.location.pathname : '';
+  if (path.startsWith('/license')) return null;
 
   // Lock screen only shows for HARD lock states. Past due / grace stay as banners.
   const isHardLock = ok === false && ['suspended', 'cancelled', 'abn_review'].includes(licenseState);
@@ -55,6 +68,14 @@ export function LicenseLockScreen() {
   return (
     <div className="fixed inset-0 z-[9999] bg-gradient-to-br from-slate-900 to-slate-800 text-white flex items-center justify-center p-6" data-testid="license-lockscreen">
       <div className="max-w-xl w-full text-center space-y-6">
+        {/* NUA brand mark */}
+        <div className="flex flex-col items-center gap-2" data-testid="lockscreen-logo">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-xl">
+            <span className="text-2xl font-black text-slate-900 tracking-tight">N</span>
+          </div>
+          <p className="text-sm font-bold tracking-[0.4em] text-white/80">NUA</p>
+        </div>
+
         <div className="inline-flex w-20 h-20 rounded-full bg-red-500/20 items-center justify-center">
           <Lock className="text-red-400" size={40} />
         </div>
@@ -92,6 +113,7 @@ export function LicenseLockScreen() {
 // =====================================================================
 export function LicenseBanner() {
   const { warnings, licenseState, graceEndAt } = useLicense();
+  if (!LICENSE_ENFORCEMENT_ENABLED) return null;
   if (!['past_due', 'grace'].includes(licenseState) || warnings.length === 0) return null;
   return (
     <div className="bg-amber-50 border-l-4 border-amber-500 text-amber-900 px-4 py-2 text-sm flex items-center gap-2" data-testid="license-banner">
@@ -223,6 +245,14 @@ export default function LicensePage() {
   // ----- License exists → full dashboard ----------------------------------
   return (
     <div className="space-y-6 max-w-6xl mx-auto" data-testid="license-page">
+      {!LICENSE_ENFORCEMENT_ENABLED && (
+        <div className="rounded-lg border-l-4 border-blue-400 bg-blue-50 px-4 py-3 text-sm text-blue-900 flex items-start gap-2" data-testid="enforcement-disabled-banner">
+          <Shield size={16} className="flex-shrink-0 mt-0.5" />
+          <div>
+            <strong>Licensing enforcement is OFF</strong> for development. The lock screen and billing banner are hidden across the app. Set <code className="bg-blue-100 px-1.5 py-0.5 rounded">REACT_APP_LICENSE_ENFORCEMENT=true</code> (frontend) and <code className="bg-blue-100 px-1.5 py-0.5 rounded">LICENSE_ENFORCEMENT_ENABLED=true</code> (backend) to re-arm before deployment.
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
