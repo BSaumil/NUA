@@ -8,6 +8,9 @@ export const POSProvider = ({ children }) => {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [currentLocation, setCurrentLocation] = useState('Main Street');
   const [currentUser, setCurrentUser] = useState({ name: 'John Doe', role: 'Admin' });
+  // Discounts applied to the current cart — both auto promotions and manually
+  // selected vouchers live here so calculateTotal can subtract them all.
+  const [appliedDiscounts, setAppliedDiscounts] = useState([]);
 
   const addToCart = (product, quantity = 1) => {
     setCart(prev => {
@@ -42,15 +45,31 @@ export const POSProvider = ({ children }) => {
   const clearCart = () => {
     setCart([]);
     setSelectedCustomer(null);
+    setAppliedDiscounts([]);
   };
+
+  const addDiscount = (d) => setAppliedDiscounts(prev => {
+    // Replace same id; otherwise append. Auto-applied promos use promotionId,
+    // manual vouchers use voucher.id.
+    const key = d.promotionId || d.voucherId || d.id;
+    const filtered = prev.filter(x => (x.promotionId || x.voucherId || x.id) !== key);
+    return [...filtered, d];
+  });
+
+  const removeDiscount = (key) => setAppliedDiscounts(prev =>
+    prev.filter(x => (x.promotionId || x.voucherId || x.id) !== key)
+  );
 
   const calculateTotal = () => {
     const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-    const gst = subtotal * 0.1;
+    const discount = appliedDiscounts.reduce((s, d) => s + (Number(d.discount) || 0), 0);
+    const afterDiscount = Math.max(0, subtotal - discount);
+    const gst = afterDiscount * 0.1;
     return {
       subtotal: subtotal.toFixed(2),
+      discount: discount.toFixed(2),
       gst: gst.toFixed(2),
-      total: (subtotal + gst).toFixed(2)
+      total: (afterDiscount + gst).toFixed(2),
     };
   };
 
@@ -68,7 +87,10 @@ export const POSProvider = ({ children }) => {
         currentLocation,
         setCurrentLocation,
         currentUser,
-        setCurrentUser
+        setCurrentUser,
+        appliedDiscounts,
+        addDiscount,
+        removeDiscount,
       }}
     >
       {children}

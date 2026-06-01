@@ -131,6 +131,10 @@ const ALL_FEATURES = [
     { path: '/cfd', label: 'Customer Display', icon: Sparkles, access: ['owner', 'manager', 'cashier'] },
     { path: '/churn-risk', label: 'Guest Recovery', icon: Users, access: ['owner', 'manager'] },
     { path: '/license', label: 'License & Billing', icon: Key, access: ['owner'] },
+    { path: '/vouchers', label: 'Vouchers & Codes', icon: Tag, access: ['owner', 'manager'] },
+    { path: '/events', label: 'Events & Experiences', icon: Trophy, access: ['owner', 'manager'] },
+    { path: '/staff-availability', label: 'Staff Availability', icon: Users, access: ['owner', 'manager'] },
+    { path: '/gift-card-sale', label: 'Sell Gift Card', icon: Tag, access: ['owner', 'manager', 'cashier'] },
   ]},
   { group: 'Analytics & AI', items: [
     { path: '/agent', label: 'Ash AI Agent', icon: Brain, access: ['owner', 'manager'] },

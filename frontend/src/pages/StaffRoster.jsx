@@ -269,6 +269,23 @@ export default function StaffRoster() {
             <div className="flex gap-2">
               {roster.length > 0 && <Button size="sm" variant="outline" onClick={printRoster} data-testid="print-roster-btn"><Printer size={14} className="mr-1" /> Print Roster</Button>}
               {canManage && <Button size="sm" variant="outline" onClick={async () => {
+                if (!window.confirm('Clear ALL shifts on the roster? This cannot be undone.')) return;
+                try {
+                  const { v26API } = await import('../services/api');
+                  const r = await v26API.clearRoster();
+                  toast.success(`Cleared ${r.data?.cleared || 0} shifts`);
+                  fetchAll();
+                } catch { toast.error('Clear failed'); }
+              }} data-testid="clear-roster-btn"><Trash2 size={14} className="mr-1" /> Clear All</Button>}
+              {canManage && <Button size="sm" variant="outline" onClick={async () => {
+                try {
+                  const { v26API } = await import('../services/api');
+                  const r = await v26API.syncRoster();
+                  toast.success(`Removed ${r.data?.orphansRemoved || 0} orphans, ${r.data?.duplicatesRemoved || 0} duplicates`);
+                  fetchAll();
+                } catch { toast.error('Sync failed'); }
+              }} data-testid="sync-roster-btn">Sync Staff</Button>}
+              {canManage && <Button size="sm" variant="outline" onClick={async () => {
                 const { v15API } = await import('../services/api');
                 try {
                   const r = await v15API.autoRoster(weekForm.weekStart || new Date().toISOString().split('T')[0]);

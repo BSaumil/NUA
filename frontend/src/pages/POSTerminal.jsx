@@ -13,7 +13,7 @@ import {
 } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { usePOS } from '../contexts/POSContext';
-import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API } from '../services/api';
+import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API, v26API } from '../services/api';
 import { useToast } from '../hooks/use-toast';
 import { useAuth } from '../contexts/AuthContext';
 import VoiceOrderButton from '../components/VoiceOrderButton';
@@ -161,7 +161,7 @@ function SwipeableCartItem({ item, onUpdateQty, onRemove, onRepeat, theme }) {
 const POSTerminal = () => {
   const { theme } = useTheme();
   const { user } = useAuth();
-  const { cart, addToCart, removeFromCart, updateQuantity, clearCart, calculateTotal, selectedCustomer, setSelectedCustomer, currentUser, currentLocation } = usePOS();
+  const { cart, addToCart, removeFromCart, updateQuantity, clearCart, calculateTotal, selectedCustomer, setSelectedCustomer, currentUser, currentLocation, appliedDiscounts, addDiscount, removeDiscount } = usePOS();
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -209,6 +209,12 @@ const POSTerminal = () => {
   // Your Usual — predictive items per known customer
   const [yourUsual, setYourUsual] = useState([]);
 
+  // Voucher / coupon manual entry
+  const [voucherCode, setVoucherCode] = useState('');
+  const [voucherLoading, setVoucherLoading] = useState(false);
+  const [showDiscountPicker, setShowDiscountPicker] = useState(false);
+  const [availableVouchers, setAvailableVouchers] = useState([]);
+
   const [categories, setCategories] = useState(['All']);
 
   useEffect(() => { fetchData(); }, []);
@@ -226,6 +232,67 @@ const POSTerminal = () => {
     }, 1200);
     return () => clearTimeout(t);
   }, [cart]);
+
+  // v26 — auto-apply scheduled promotions whenever the cart changes.
+  // Manually selected vouchers stay sticky (keyed by voucherId).
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      // Drop stale auto-promotions before re-evaluating
+      (appliedDiscounts || [])
+        .filter(d => d.promotionId)
+        .forEach(d => removeDiscount(d.promotionId));
+      if (!cart || cart.length === 0) return;
+      try {
+        const items = cart.map(i => ({
+          productId: i.id, id: i.id, name: i.name, price: i.price, quantity: i.quantity, category: i.category,
+        }));
+        const r = await v26API.applyPromos(items);
+        if (cancelled) return;
+        (r.data?.applied || []).forEach(p => addDiscount({
+          promotionId: p.promotionId, label: p.label, discount: p.discount, auto: true,
+        }));
+      } catch {}
+    };
+    run();
+    return () => { cancelled = true; };
+    // Intentionally only depend on cart contents — avoids feedback loop with appliedDiscounts
+  }, [cart]);  // eslint-disable-line
+
+  // Load available vouchers once when discount picker opens
+  useEffect(() => {
+    if (!showDiscountPicker) return;
+    v26API.listVouchers().then(r => setAvailableVouchers(r.data || [])).catch(() => {});
+  }, [showDiscountPicker]);
+
+  const applyManualCode = async () => {
+    const code = (voucherCode || '').trim().toUpperCase();
+    if (!code) return;
+    setVoucherLoading(true);
+    try {
+      const items = cart.map(i => ({ productId: i.id, id: i.id, name: i.name, price: i.price, quantity: i.quantity, category: i.category }));
+      const r = await v26API.applyVoucher(code, items);
+      const v = r.data?.voucher || {};
+      addDiscount({ voucherId: v.id, label: `${v.name} · ${r.data.message}`, discount: r.data.discount, code });
+      toast({ title: 'Voucher applied', description: r.data.message });
+      setVoucherCode('');
+      setShowDiscountPicker(false);
+    } catch (e) {
+      toast({ title: 'Could not apply', description: e?.response?.data?.detail || 'Invalid code', variant: 'destructive' });
+    } finally { setVoucherLoading(false); }
+  };
+
+  const applyAvailableVoucher = async (v) => {
+    try {
+      const items = cart.map(i => ({ productId: i.id, id: i.id, name: i.name, price: i.price, quantity: i.quantity, category: i.category }));
+      const r = await v26API.applyVoucher(v.manualCode || v.barcode || v.id, items);
+      addDiscount({ voucherId: v.id, label: `${v.name} · ${r.data.message}`, discount: r.data.discount, code: v.manualCode });
+      toast({ title: 'Applied', description: r.data.message });
+      setShowDiscountPicker(false);
+    } catch (e) {
+      toast({ title: 'Could not apply', description: e?.response?.data?.detail || 'Conditions not met', variant: 'destructive' });
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -693,6 +760,24 @@ const POSTerminal = () => {
         {cart.length > 0 && (
           <Card className="mb-4"><CardContent className="p-4 space-y-2">
             <div className="flex justify-between text-sm"><span>{labels.subtotal || 'Subtotal'}</span><span>${totals.subtotal}</span></div>
+            {/* Applied discounts (auto promotions + manual vouchers) */}
+            {(appliedDiscounts || []).map((d, i) => {
+              const key = d.promotionId || d.voucherId || d.id;
+              return (
+                <div key={key || i} className="flex justify-between text-sm text-emerald-700" data-testid={`applied-discount-${key}`}>
+                  <span className="flex items-center gap-1.5 truncate">
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100">{d.auto ? 'AUTO' : 'VOUCHER'}</span>
+                    <span className="truncate">{d.label}</span>
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    -${Number(d.discount).toFixed(2)}
+                    {!d.auto && (
+                      <button onClick={() => removeDiscount(key)} className="text-emerald-600 hover:text-red-600" data-testid={`remove-discount-${key}`}>×</button>
+                    )}
+                  </span>
+                </div>
+              );
+            })}
             <div className="flex justify-between text-sm"><span>{labels.tax || 'GST (10%)'}</span><span>${totals.gst}</span></div>
             {totals.pointsDiscount && (
               <div className="flex justify-between text-sm text-green-700" data-testid="points-discount-row">
@@ -706,6 +791,40 @@ const POSTerminal = () => {
               </div>
             )}
             <div className="border-t pt-2 flex justify-between font-bold text-lg"><span>{labels.total || 'Total'}</span><span style={{ color: theme.primary }} data-testid="pos-total">${totals.total}</span></div>
+          </CardContent></Card>
+        )}
+
+        {/* Discount picker — opens above Proceed to Payment */}
+        {!showPayment && cart.length > 0 && (
+          <Card className="mb-3"><CardContent className="p-3">
+            {!showDiscountPicker ? (
+              <Button variant="outline" className="w-full" onClick={() => setShowDiscountPicker(true)} data-testid="open-discount-picker">
+                🎟️ Apply discount / voucher
+              </Button>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <Input value={voucherCode} onChange={e => setVoucherCode(e.target.value)}
+                    placeholder="Scan barcode or enter code" className="text-sm" data-testid="voucher-code-input" />
+                  <Button onClick={applyManualCode} disabled={voucherLoading || !voucherCode} data-testid="apply-voucher-btn" style={{ background: theme.primary }}>
+                    {voucherLoading ? '…' : 'Apply'}
+                  </Button>
+                </div>
+                {availableVouchers.length > 0 && (
+                  <div className="space-y-1 max-h-44 overflow-y-auto" data-testid="voucher-list">
+                    <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Available</p>
+                    {availableVouchers.filter(v => v.active).map(v => (
+                      <button key={v.id} onClick={() => applyAvailableVoucher(v)}
+                        className="w-full text-left p-2 border rounded text-xs hover:bg-amber-50 hover:border-amber-300 transition" data-testid={`voucher-${v.id}`}>
+                        <div className="flex justify-between font-semibold"><span>{v.name}</span><span className="text-amber-700">{v.discountType === 'percent' ? `${v.value}%` : `$${v.value}`} off</span></div>
+                        <div className="text-[10px] text-gray-500 font-mono">{v.manualCode}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <Button variant="ghost" size="sm" onClick={() => setShowDiscountPicker(false)} className="w-full">Close</Button>
+              </div>
+            )}
           </CardContent></Card>
         )}
 

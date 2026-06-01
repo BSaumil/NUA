@@ -513,8 +513,7 @@ export const v25API = {
 };
 
 // Licensing & Entitlements
-export const licenseAPI = {
-  me: () => api.get('/license/me'),
+export const licenseAPI = {  me: () => api.get('/license/me'),
   audit: () => api.get('/license/audit'),
   validate: (payload) => api.post('/license/validate', payload),
   onboard: (data) => api.post('/license/onboard', data),
@@ -523,6 +522,41 @@ export const licenseAPI = {
   requestAbnChange: (data) => api.post('/license/abn/change-request', data),
   billingRecovery: (returnUrl) => api.post('/license/billing/recovery-link', { returnUrl }),
   forceState: (state, reason) => api.post('/license/dev/force-state', { state, reason }),
+};
+
+// v26 Commerce — vouchers, gift cards, events, staff availability, CFD
+export const v26API = {
+  // Vouchers / coupons
+  listVouchers: () => api.get('/v26/vouchers'),
+  createVoucher: (data) => api.post('/v26/vouchers', data),
+  updateVoucher: (vid, data) => api.patch(`/v26/vouchers/${vid}`, data),
+  deleteVoucher: (vid) => api.delete(`/v26/vouchers/${vid}`),
+  applyVoucher: (code, cart) => api.post(`/v26/vouchers/${code}/apply`, { cart }),
+  recordRedemption: (vid, data) => api.post(`/v26/vouchers/${vid}/redeem`, data),
+  // Auto-apply promotions
+  applyPromos: (cart) => api.post('/v26/cart/apply-promos', { cart }),
+  // Subscriptions
+  updateSubPlan: (id, data) => api.patch(`/v26/subscriptions/plans/${id}`, data),
+  deleteSubPlan: (id) => api.delete(`/v26/subscriptions/plans/${id}`),
+  // Gift cards
+  sellGift: (data) => api.post('/v26/gift-cards/sell', data),
+  assignGift: (codeOrId, customerId) => api.post(`/v26/gift-cards/${codeOrId}/assign`, { customerId }),
+  lookupGift: (code) => api.get(`/v26/gift-cards/lookup/${code}`),
+  // Events
+  listEvents: (upcomingOnly = false) => api.get('/v26/events', { params: { upcomingOnly } }),
+  createEvent: (data) => api.post('/v26/events', data),
+  updateEvent: (eid, data) => api.patch(`/v26/events/${eid}`, data),
+  deleteEvent: (eid) => api.delete(`/v26/events/${eid}`),
+  bookEvent: (eid, data) => api.post(`/v26/events/${eid}/book`, data),
+  eventAiPreview: (date) => api.post('/v26/events/ai-preview', { date }),
+  // Staff availability
+  getAvailability: (staffId) => api.get(`/v26/staff/${staffId}/availability`),
+  setAvailability: (staffId, data) => api.put(`/v26/staff/${staffId}/availability`, data),
+  // Roster
+  clearRoster: (week) => api.post('/v26/roster/clear-all', { week }),
+  syncRoster: () => api.post('/v26/roster/sync-staff'),
+  // CFD enriched
+  cfdEnriched: () => api.get('/v26/cfd/enriched'),
 };
 export const v15API = {
   getBadges: () => api.get('/dock/badges'),
