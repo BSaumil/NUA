@@ -161,7 +161,7 @@ function SwipeableCartItem({ item, onUpdateQty, onRemove, onRepeat, theme }) {
 const POSTerminal = () => {
   const { theme } = useTheme();
   const { user } = useAuth();
-  const { cart, addToCart, removeFromCart, updateQuantity, clearCart, calculateTotal, selectedCustomer, setSelectedCustomer, currentUser, currentLocation, appliedDiscounts, addDiscount, removeDiscount } = usePOS();
+  const { cart, addToCart, removeFromCart, updateQuantity, clearCart, calculateTotal, selectedCustomer, setSelectedCustomer, currentUser, currentLocation, appliedDiscounts, addDiscount, removeDiscount, appliedGiftCards, addGiftCard, removeGiftCard, pendingGiftActivations } = usePOS();
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -215,6 +215,10 @@ const POSTerminal = () => {
   const [showDiscountPicker, setShowDiscountPicker] = useState(false);
   const [availableVouchers, setAvailableVouchers] = useState([]);
 
+  // Gift-card tender
+  const [giftCodeInput, setGiftCodeInput] = useState('');
+  const [giftLoading, setGiftLoading] = useState(false);
+
   const [categories, setCategories] = useState(['All']);
 
   useEffect(() => { fetchData(); }, []);
@@ -259,6 +263,17 @@ const POSTerminal = () => {
     // Intentionally only depend on cart contents — avoids feedback loop with appliedDiscounts
   }, [cart]);  // eslint-disable-line
 
+  // Push live cart to the customer-facing display (debounced ~400ms)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      v26API.cfdPush({
+        cart: cart.map(i => ({ id: i.id, name: i.name, price: i.price, quantity: i.quantity, image: i.image })),
+        selectedCustomer: selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name, membershipTier: selectedCustomer.membershipTier } : null,
+      }).catch(() => {});
+    }, 400);
+    return () => clearTimeout(t);
+  }, [cart, selectedCustomer]);
+
   // Load available vouchers once when discount picker opens
   useEffect(() => {
     if (!showDiscountPicker) return;
@@ -292,6 +307,40 @@ const POSTerminal = () => {
     } catch (e) {
       toast({ title: 'Could not apply', description: e?.response?.data?.detail || 'Conditions not met', variant: 'destructive' });
     }
+  };
+
+  // Look up a gift card, then auto-apply as a tender capped at the balance due.
+  const applyGiftCard = async () => {
+    const code = (giftCodeInput || '').trim().toUpperCase();
+    if (!code) return;
+    setGiftLoading(true);
+    try {
+      const r = await v26API.lookupGift(code);
+      const card = r.data || {};
+      if (card.status !== 'active') {
+        toast({ title: 'Card not active', description: `Status: ${card.status}. Use after activation.`, variant: 'destructive' });
+        return;
+      }
+      const balance = Number(card.currentBalance ?? card.amount ?? 0);
+      if (balance <= 0) {
+        toast({ title: 'Empty card', description: 'Balance is $0.00', variant: 'destructive' });
+        return;
+      }
+      // Tender = min(balance, current balance due)
+      const totalsNow = calculateTotal();
+      const balanceDue = Number(totalsNow.balanceDue || totalsNow.total) || 0;
+      const tender = Math.min(balance, balanceDue);
+      if (tender <= 0) {
+        toast({ title: 'No balance due', description: 'Cart already covered by other tenders', variant: 'destructive' });
+        return;
+      }
+      addGiftCard({ code: card.code, giftCardId: card.id, balance, amount: tender });
+      toast({ title: 'Gift card applied', description: `$${tender.toFixed(2)} (balance $${balance.toFixed(2)})` });
+      setGiftCodeInput('');
+      setShowDiscountPicker(false);
+    } catch (e) {
+      toast({ title: 'Gift card error', description: e?.response?.data?.detail || 'Not found', variant: 'destructive' });
+    } finally { setGiftLoading(false); }
   };
 
   const fetchData = async () => {
@@ -342,8 +391,27 @@ const POSTerminal = () => {
 
   const totalsRaw = calculateTotal();
   const redeemDiscount = pointsToRedeem >= (loyaltyCfg.minRedeem || 50) ? pointsToRedeem * (loyaltyCfg.redeemRate || 0.01) : 0;
-  const totals = redeemDiscount > 0 ? { ...totalsRaw, total: Math.max(0, parseFloat(totalsRaw.total) - redeemDiscount).toFixed(2), pointsDiscount: redeemDiscount.toFixed(2) } : totalsRaw;
-  const totalNum = parseFloat(totals.total) || 0;
+  const totals = redeemDiscount > 0
+    ? { ...totalsRaw, total: Math.max(0, parseFloat(totalsRaw.total) - redeemDiscount).toFixed(2),
+        balanceDue: Math.max(0, parseFloat(totalsRaw.balanceDue || totalsRaw.total) - redeemDiscount).toFixed(2),
+        pointsDiscount: redeemDiscount.toFixed(2) }
+    : totalsRaw;
+  // The amount we charge through the chosen payment method = balance due (after gift cards).
+  const totalNum = parseFloat(totals.balanceDue || totals.total) || 0;
+  const grossTotal = parseFloat(totals.total) || 0;
+
+  // Settle gift cards after a successful payment: activate sold-cards, redeem tenders.
+  const settleGiftCards = async (txId) => {
+    for (const card of (pendingGiftActivations || [])) {
+      try { await v26API.activateGift(card.code, { transactionId: txId }); }
+      catch (e) { console.warn('Gift activation failed', card.code, e); }
+    }
+    for (const gc of (appliedGiftCards || [])) {
+      try {
+        if (gc.amount > 0) await v26API.redeemGiftPartial(gc.code, gc.amount, txId);
+      } catch (e) { console.warn('Gift redeem failed', gc.code, e); }
+    }
+  };
 
   // ---- Standard checkout ----
   const handleCheckout = async (paymentMethod) => {
@@ -378,6 +446,8 @@ const POSTerminal = () => {
       toast({ title: "Transaction Complete!", description: `Payment of $${totals.total} via ${paymentMethod}` });
       // Auto-route items to category printers
       try { await gamificationAPI.sendToPrinters({ items: cart.map(i => ({ productName: i.name, category: i.category, quantity: i.quantity })), orderId: res.data?.id }); } catch {}
+      // Settle gift cards: activate any pending-sold cards + redeem applied tenders.
+      await settleGiftCards(res.data?.id);
       resetPayment();
       clearCart();
       setPointsToRedeem(0);
@@ -418,12 +488,13 @@ const POSTerminal = () => {
     setLoading(true);
     try {
       await paymentAPI.confirm(qrData.paymentId);
-      await transactionsAPI.create({
+      const res = await transactionsAPI.create({
         items: cart.map(item => ({ productId: item.id, productName: item.name, quantity: item.quantity, price: item.price })),
         paymentMethod: paymentView === 'upi' ? 'UPI' : 'QR Code',
         customerId: selectedCustomer?.id || null, location: currentLocation, cashier: currentUser.name,
       });
       toast({ title: "Payment Confirmed!", description: `$${totalNum.toFixed(2)} received via ${paymentView === 'upi' ? 'UPI' : 'QR Code'}` });
+      await settleGiftCards(res.data?.id);
       resetPayment(); clearCart();
       const r = await productsAPI.getAll(); setProducts(r.data);
     } catch {
@@ -481,13 +552,14 @@ const POSTerminal = () => {
       const updatedParts = splitParts.map((s, i) => i === idx ? { ...s, status: 'confirmed' } : s);
       const allPaid = updatedParts.every(s => s.status === 'confirmed');
       if (allPaid) {
-        await transactionsAPI.create({
+        const res = await transactionsAPI.create({
           items: cart.map(item => ({ productId: item.id, productName: item.name, quantity: item.quantity, price: item.price })),
           paymentMethod: 'Split Payment',
           customerId: selectedCustomer?.id || null, location: currentLocation, cashier: currentUser.name,
           splitDetails: updatedParts.map(s => ({ payerName: s.payerName, amount: s.amount, method: s.method })),
         });
         toast({ title: "All Splits Paid!", description: `Total $${totalNum.toFixed(2)} collected` });
+        await settleGiftCards(res.data?.id);
         setTimeout(() => { resetPayment(); clearCart(); }, 1200);
         productsAPI.getAll().then(r => setProducts(r.data));
       }
@@ -784,6 +856,18 @@ const POSTerminal = () => {
                 <span>⭐ Points redeemed ({pointsToRedeem} pts)</span><span>-${totals.pointsDiscount}</span>
               </div>
             )}
+            {(appliedGiftCards || []).map(gc => (
+              <div key={gc.code} className="flex justify-between text-sm text-violet-700" data-testid={`gift-tender-${gc.code}`}>
+                <span className="flex items-center gap-1.5 truncate">
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100">GIFT</span>
+                  <span className="font-mono truncate">{gc.code}</span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  -${Number(gc.amount).toFixed(2)}
+                  <button onClick={() => removeGiftCard(gc.code)} className="text-violet-600 hover:text-red-600" data-testid={`remove-gift-${gc.code}`}>×</button>
+                </span>
+              </div>
+            ))}
             {selectedCustomer && (
               <div className="flex justify-between text-xs bg-amber-50 -mx-2 px-2 py-1 rounded" data-testid="loyalty-preview">
                 <span className="text-amber-700">⭐ Loyalty preview</span>
@@ -791,6 +875,11 @@ const POSTerminal = () => {
               </div>
             )}
             <div className="border-t pt-2 flex justify-between font-bold text-lg"><span>{labels.total || 'Total'}</span><span style={{ color: theme.primary }} data-testid="pos-total">${totals.total}</span></div>
+            {appliedGiftCards.length > 0 && (
+              <div className="flex justify-between text-sm font-semibold text-violet-700" data-testid="pos-balance-due">
+                <span>Balance due (after gift cards)</span><span>${totals.balanceDue}</span>
+              </div>
+            )}
           </CardContent></Card>
         )}
 
@@ -799,15 +888,23 @@ const POSTerminal = () => {
           <Card className="mb-3"><CardContent className="p-3">
             {!showDiscountPicker ? (
               <Button variant="outline" className="w-full" onClick={() => setShowDiscountPicker(true)} data-testid="open-discount-picker">
-                🎟️ Apply discount / voucher
+                🎟️ Apply discount / voucher / gift card
               </Button>
             ) : (
               <div className="space-y-3">
                 <div className="flex gap-2">
                   <Input value={voucherCode} onChange={e => setVoucherCode(e.target.value)}
-                    placeholder="Scan barcode or enter code" className="text-sm" data-testid="voucher-code-input" />
+                    placeholder="Voucher code (NUA-XXXX)" className="text-sm" data-testid="voucher-code-input" />
                   <Button onClick={applyManualCode} disabled={voucherLoading || !voucherCode} data-testid="apply-voucher-btn" style={{ background: theme.primary }}>
                     {voucherLoading ? '…' : 'Apply'}
+                  </Button>
+                </div>
+                <div className="flex gap-2">
+                  <Input value={giftCodeInput} onChange={e => setGiftCodeInput(e.target.value)}
+                    placeholder="Gift card code (GC-XXXX)" className="text-sm" data-testid="gift-code-input" />
+                  <Button onClick={applyGiftCard} disabled={giftLoading || !giftCodeInput} data-testid="apply-gift-btn"
+                    className="bg-violet-600 hover:bg-violet-700 text-white">
+                    {giftLoading ? '…' : '🎁 Apply'}
                   </Button>
                 </div>
                 {availableVouchers.length > 0 && (

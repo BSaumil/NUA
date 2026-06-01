@@ -79,7 +79,7 @@ import {
   Reputation, Franchise, FraudDetection, MarginGuardrails, StationReadiness,
   KioskMode, CFD, ChurnRisk, RecipeCosting, DynamicPricing, Subscriptions
 } from './pages/V25Pages';
-import { VoucherManager, EventsManager, StaffAvailability, GiftCardSale } from './pages/V26Pages';
+import { VoucherManager, EventsManager, StaffAvailability, GiftCardSale, MarketingEmails } from './pages/V26Pages';
 import AskNuaPanel, { AskNuaButton } from './components/AskNua';
 import { useState as useGlobalState } from 'react';
 
@@ -195,6 +195,7 @@ function ProtectedRoutes() {
         <Route path="/events" element={<EventsManager />} />
         <Route path="/staff-availability" element={<StaffAvailability />} />
         <Route path="/gift-card-sale" element={<GiftCardSale />} />
+        <Route path="/marketing-emails" element={<MarketingEmails />} />
         <Route path="/license" element={<LicensePage />} />
       </Routes>
     </StaffLayout>

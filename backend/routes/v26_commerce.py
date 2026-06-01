@@ -83,11 +83,12 @@ async def create_voucher(data: dict, request: Request):
     user = await get_current_user(request)
     if user["role"] not in ("owner", "manager"):
         raise HTTPException(status_code=403, detail="Owner/Manager only")
-    codes = _new_code(data.get("codePrefix", "NUA"))
+    kind = data.get("kind", "discount")
+    codes = _new_code("GC" if kind == "gift" else data.get("codePrefix", "NUA"))
     v = {
         "id": _uid("VCH"),
         "name": data.get("name", "Voucher"),
-        "kind": data.get("kind", "discount"),  # discount | freebie | bundle | gift | marketing
+        "kind": kind,  # discount | freebie | bundle | gift | marketing
         "discountType": data.get("discountType", "percent"),  # percent | fixed | free_item
         "value": float(data.get("value", 0)),
         "appliesTo": data.get("appliesTo", "cart"),   # cart | category | product
@@ -105,6 +106,32 @@ async def create_voucher(data: dict, request: Request):
         "createdBy": user["id"],
     }
     await db.commerce_vouchers.insert_one(v); v.pop("_id", None)
+
+    # Stored-value Gift Card: when kind="gift" mint a paired gift_card that is
+    # PENDING_ACTIVATION until paid for at the POS. value = initial_balance.
+    if kind == "gift":
+        initial = float(data.get("value", 0))
+        card = {
+            "id": _uid("GC"),
+            "code": codes["manualCode"], "barcode": codes["barcode"],
+            "voucherId": v["id"],
+            "initialBalance": initial,
+            "currentBalance": 0.0,           # 0 until paid + activated
+            "originalAmount": initial,
+            "bonus": float(data.get("bonus", 0)),
+            "recipientName": data.get("recipientName", ""),
+            "recipientEmail": data.get("recipientEmail", ""),
+            "purchaserName": data.get("purchaserName", ""),
+            "purchaserEmail": data.get("purchaserEmail", ""),
+            "customerId": data.get("customerId"),
+            "channel": data.get("channel", "voucher"),
+            "occasion": data.get("occasion", "general"),
+            "message": data.get("message", ""),
+            "status": "pending_activation",
+            "createdAt": _iso(_now()), "createdBy": user["id"],
+        }
+        await db.gift_cards.insert_one(card); card.pop("_id", None)
+        v["giftCard"] = card
     return v
 
 
@@ -292,6 +319,16 @@ async def delete_sub_plan(plan_id: str, request: Request):
 # ============================================================================
 # GIFT CARDS — sell online + at counter + assign to customer
 # ============================================================================
+@router.get("/gift-cards")
+async def list_gift_cards(request: Request, status: Optional[str] = None):
+    from routes.auth import get_current_user
+    await get_current_user(request)
+    q = {}
+    if status: q["status"] = status
+    rows = await db.gift_cards.find(q, {"_id": 0}).sort("createdAt", -1).to_list(500)
+    return rows
+
+
 @router.post("/gift-cards/sell")
 async def sell_gift_card(data: dict, request: Request):
     """Channel-aware sale. Owner/manager/cashier can sell at counter; the same
@@ -305,23 +342,34 @@ async def sell_gift_card(data: dict, request: Request):
     if amount <= 0: raise HTTPException(status_code=400, detail="Amount must be > 0")
     bonus = float(data.get("bonus", 20 if amount >= 100 else 0))
     codes = _new_code("GC")
+    starting = round(amount + bonus, 2)
+    # Counter sales activate immediately (cash/card taken at till). Online sales
+    # land as 'pending_activation' and need to be paid for via Stripe etc.
+    channel = data.get("channel", "counter")
+    status = "active" if channel == "counter" else "pending_activation"
     card = {
         "id": _uid("GC"),
         "code": codes["manualCode"], "barcode": codes["barcode"],
-        "amount": amount, "originalAmount": amount, "bonus": bonus,
+        "initialBalance": amount,
+        "currentBalance": starting if status == "active" else 0.0,
+        "amount": starting,                                   # legacy mirror
+        "originalAmount": amount, "bonus": bonus,
         "recipientName": data.get("recipientName", ""),
         "recipientEmail": data.get("recipientEmail", ""),
         "purchaserName": data.get("purchaserName", ""),
         "purchaserEmail": data.get("purchaserEmail", ""),
-        "customerId": data.get("customerId"),                 # optional pre-assignment
-        "channel": data.get("channel", "counter"),            # counter | online
+        "customerId": data.get("customerId"),
+        "channel": channel,
         "paymentMethod": data.get("paymentMethod", "card"),
         "occasion": data.get("occasion", "general"),
         "message": data.get("message", ""),
-        "status": "active",
+        "status": status,
         "createdAt": _iso(_now()), "createdBy": user["id"],
     }
     await db.gift_cards.insert_one(card); card.pop("_id", None)
+    if status == "active":
+        await _record_gift_txn(card, "activate", starting, 0.0, starting,
+                               user["id"], data.get("transactionId"))
     return card
 
 
@@ -349,7 +397,112 @@ async def lookup_gift_card(code: str):
         {"_id": 0},
     )
     if not card: raise HTTPException(status_code=404, detail="Card not found")
+    # Back-fill balance for legacy cards that pre-date the stored-value rewrite.
+    if "currentBalance" not in card and "amount" in card:
+        card["currentBalance"] = float(card.get("amount", 0))
+        card["initialBalance"] = float(card.get("originalAmount", card.get("amount", 0)))
     return card
+
+
+@router.get("/gift-cards/{code}/transactions")
+async def gift_card_transactions(code: str, request: Request):
+    from routes.auth import get_current_user
+    await get_current_user(request)
+    card = await db.gift_cards.find_one(
+        {"$or": [{"code": code.upper()}, {"barcode": code.upper()}, {"id": code}]},
+        {"_id": 0, "id": 1},
+    )
+    if not card: raise HTTPException(status_code=404, detail="Card not found")
+    rows = await db.gift_card_transactions.find({"giftCardId": card["id"]}, {"_id": 0}).sort("createdAt", 1).to_list(500)
+    return rows
+
+
+async def _record_gift_txn(card: dict, txn_type: str, amount: float, balance_before: float,
+                           balance_after: float, user_id: str, ref: Optional[str] = None) -> dict:
+    txn = {
+        "id": _uid("GCT"),
+        "giftCardId": card["id"],
+        "giftCardCode": card.get("code"),
+        "type": txn_type,          # issue | activate | redeem | refund | adjust
+        "amount": round(float(amount), 2),
+        "balanceBefore": round(float(balance_before), 2),
+        "balanceAfter": round(float(balance_after), 2),
+        "ref": ref,                # tx/order id or note
+        "createdAt": _iso(_now()),
+        "createdBy": user_id,
+    }
+    await db.gift_card_transactions.insert_one(txn); txn.pop("_id", None)
+    return txn
+
+
+@router.post("/gift-cards/{code}/activate")
+async def activate_gift_card(code: str, data: dict, request: Request):
+    """Activate a pending gift card. Called by POS *after* the cart payment that
+    pays for the card has settled successfully. Idempotent: re-activating an
+    already-active card just no-ops with the current state."""
+    from routes.auth import get_current_user
+    user = await get_current_user(request)
+    if user["role"] not in ("owner", "manager", "cashier"):
+        raise HTTPException(status_code=403, detail="Staff only")
+    card = await db.gift_cards.find_one(
+        {"$or": [{"code": code.upper()}, {"barcode": code.upper()}, {"id": code}]},
+        {"_id": 0},
+    )
+    if not card: raise HTTPException(status_code=404, detail="Card not found")
+    if card.get("status") == "active":
+        return {"activated": False, "alreadyActive": True, "card": card}
+    if card.get("status") not in ("pending_activation", None):
+        raise HTTPException(status_code=400, detail=f"Card status '{card.get('status')}' cannot be activated")
+    initial = float(card.get("initialBalance") or card.get("originalAmount") or card.get("amount") or 0)
+    bonus = float(card.get("bonus", 0))
+    starting = round(initial + bonus, 2)
+    await db.gift_cards.update_one(
+        {"id": card["id"]},
+        {"$set": {"status": "active", "currentBalance": starting,
+                  "initialBalance": initial,
+                  "activatedAt": _iso(_now()), "activatedBy": user["id"],
+                  "activationTxId": data.get("transactionId")}},
+    )
+    txn = await _record_gift_txn(card, "activate", starting, 0.0, starting,
+                                 user["id"], data.get("transactionId"))
+    card = await db.gift_cards.find_one({"id": card["id"]}, {"_id": 0})
+    return {"activated": True, "card": card, "transaction": txn}
+
+
+@router.post("/gift-cards/{code}/redeem")
+async def redeem_gift_card_partial(code: str, data: dict, request: Request):
+    """Atomic partial redemption. Requires card.status == 'active' AND sufficient
+    balance. Records a ledger entry and returns the new balance."""
+    from routes.auth import get_current_user
+    user = await get_current_user(request)
+    if user["role"] not in ("owner", "manager", "cashier"):
+        raise HTTPException(status_code=403, detail="Staff only")
+    amount = float(data.get("amount", 0))
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="amount must be > 0")
+    upper = code.upper()
+    # Atomic deduction — guarantees no double-spend even under concurrency.
+    card = await db.gift_cards.find_one_and_update(
+        {"$or": [{"code": upper}, {"barcode": upper}, {"id": code}],
+         "status": "active", "currentBalance": {"$gte": amount}},
+        {"$inc": {"currentBalance": -amount}},
+        return_document=False,
+    )
+    if not card:
+        exists = await db.gift_cards.find_one(
+            {"$or": [{"code": upper}, {"barcode": upper}, {"id": code}]}, {"_id": 0})
+        if not exists: raise HTTPException(status_code=404, detail="Card not found")
+        if exists.get("status") != "active":
+            raise HTTPException(status_code=400, detail=f"Card is {exists.get('status')}")
+        raise HTTPException(status_code=400, detail=f"Insufficient balance (${exists.get('currentBalance', 0):.2f})")
+    balance_before = float(card.get("currentBalance", 0))
+    balance_after = round(balance_before - amount, 2)
+    if balance_after <= 0.001:
+        await db.gift_cards.update_one({"id": card["id"]}, {"$set": {"status": "depleted", "depletedAt": _iso(_now())}})
+    txn = await _record_gift_txn({"id": card["id"], "code": card.get("code")}, "redeem",
+                                 amount, balance_before, balance_after,
+                                 user["id"], data.get("transactionId"))
+    return {"redeemed": amount, "newBalance": balance_after, "transaction": txn}
 
 
 # ============================================================================
@@ -461,6 +614,103 @@ async def event_ai_preview(data: dict, request: Request):
 
 
 # ============================================================================
+# AI MARKETING EMAILS — autonomous generator
+# ============================================================================
+@router.post("/marketing/email/generate")
+async def generate_marketing_email(data: dict, request: Request):
+    """LLM drafts a full marketing email featuring upcoming events, active
+    vouchers, and tier-specific perks. Returns JSON the owner can edit + send.
+    Audience: 'all' | 'tier:Gold' | 'segment:lapsed' | etc."""
+    from routes.auth import get_current_user
+    user = await get_current_user(request)
+    if user["role"] not in ("owner", "manager"):
+        raise HTTPException(status_code=403, detail="Owner/Manager only")
+    audience = data.get("audience", "all")
+    tone = data.get("tone", "friendly")
+    horizon_days = int(data.get("horizonDays", 14))
+    today_iso = _now().date().isoformat()
+    until_iso = (_now() + timedelta(days=horizon_days)).date().isoformat()
+    # Pull data once, in parallel where possible.
+    events = await db.events.find(
+        {"active": True, "date": {"$gte": today_iso, "$lte": until_iso}},
+        {"_id": 0}).sort("date", 1).to_list(20)
+    vouchers = await db.commerce_vouchers.find(
+        {"active": True, "kind": {"$in": ["discount", "freebie", "bundle", "marketing"]}},
+        {"_id": 0}).to_list(20)
+    tiers = await db.loyalty_tiers.find({}, {"_id": 0}).to_list(10)
+    if not events and not vouchers and not tiers:
+        raise HTTPException(status_code=400, detail="Nothing to promote — add events, vouchers or tiers first")
+
+    sys_msg = (
+        "You are NUA's autonomous marketing engine. Draft a single marketing email "
+        "for a restaurant. Include: catchy subject, preheader, warm opening, a section "
+        "highlighting upcoming events with dates, a section featuring 1-3 active "
+        "vouchers/codes the reader can use, and a callout for the audience's tier "
+        "perks (or generic if 'all'). Keep it under 320 words. Tone: {tone}. "
+        "Return STRICT JSON: "
+        '{"subject":"...","preheader":"...","emailBody":"...","sms":"...","cta":"...",'
+        '"featuredEventIds":["..."],"featuredVoucherIds":["..."],"highlights":["..."]}'
+    ).replace("{tone}", tone)
+    user_text = json.dumps({
+        "audience": audience,
+        "windowFrom": today_iso, "windowTo": until_iso,
+        "events": events[:10],
+        "vouchers": [{"id": v["id"], "name": v["name"], "code": v.get("manualCode"),
+                      "kind": v["kind"], "discountType": v["discountType"], "value": v["value"]}
+                     for v in vouchers],
+        "tiers": [{"name": t.get("name"), "perks": t.get("perks", [])} for t in tiers[:5]],
+    })
+    draft = await _llm_json(f"mkt-email-{uuid.uuid4().hex[:6]}", sys_msg, user_text) or {}
+
+    # Persist as a draft so it appears in the marketing inbox / can be sent later.
+    row = {
+        "id": _uid("MKT"),
+        "audience": audience, "tone": tone, "horizonDays": horizon_days,
+        "subject": draft.get("subject", ""), "preheader": draft.get("preheader", ""),
+        "emailBody": draft.get("emailBody", ""), "sms": draft.get("sms", ""),
+        "cta": draft.get("cta", ""),
+        "featuredEventIds": draft.get("featuredEventIds", []),
+        "featuredVoucherIds": draft.get("featuredVoucherIds", []),
+        "highlights": draft.get("highlights", []),
+        "status": "draft",
+        "createdAt": _iso(_now()), "createdBy": user["id"],
+    }
+    await db.marketing_emails.insert_one(row); row.pop("_id", None)
+    return row
+
+
+@router.get("/marketing/emails")
+async def list_marketing_emails(request: Request):
+    from routes.auth import get_current_user
+    await get_current_user(request)
+    rows = await db.marketing_emails.find({}, {"_id": 0}).sort("createdAt", -1).to_list(100)
+    return rows
+
+
+@router.patch("/marketing/emails/{mid}")
+async def update_marketing_email(mid: str, data: dict, request: Request):
+    from routes.auth import get_current_user
+    user = await get_current_user(request)
+    if user["role"] not in ("owner", "manager"):
+        raise HTTPException(status_code=403, detail="Owner/Manager only")
+    update = {k: v for k, v in data.items() if k not in {"id", "createdAt"}}
+    update["updatedAt"] = _iso(_now())
+    r = await db.marketing_emails.update_one({"id": mid}, {"$set": update})
+    if r.matched_count == 0: raise HTTPException(status_code=404, detail="Email not found")
+    return {"updated": True}
+
+
+@router.delete("/marketing/emails/{mid}")
+async def delete_marketing_email(mid: str, request: Request):
+    from routes.auth import get_current_user
+    user = await get_current_user(request)
+    if user["role"] != "owner": raise HTTPException(status_code=403, detail="Owner only")
+    r = await db.marketing_emails.delete_one({"id": mid})
+    if r.deleted_count == 0: raise HTTPException(status_code=404, detail="Not found")
+    return {"deleted": True}
+
+
+# ============================================================================
 # STAFF AVAILABILITY (normal days + blackout periods)
 # ============================================================================
 @router.get("/staff/{staff_id}/availability")
@@ -535,27 +785,58 @@ async def sync_roster_staff(request: Request):
 # ============================================================================
 # CUSTOMER DISPLAY — enriched current cart
 # ============================================================================
+@router.post("/cfd/push")
+async def cfd_push(data: dict, request: Request):
+    """POS terminal pushes the live cart + customer here so the customer-facing
+    display can render it. One doc per terminal/session (keyed by terminalId)."""
+    from routes.auth import get_current_user
+    user = await get_current_user(request)
+    terminal_id = data.get("terminalId") or user["id"]
+    doc = {
+        "terminalId": terminal_id,
+        "cart": data.get("cart") or [],
+        "selectedCustomer": data.get("selectedCustomer"),
+        "tableNumber": data.get("tableNumber"),
+        "walkInName": data.get("walkInName"),
+        "updatedAt": _iso(_now()),
+        "cashier": user.get("name"),
+    }
+    await db.cfd_live.update_one({"terminalId": terminal_id}, {"$set": doc}, upsert=True)
+    return {"pushed": True}
+
+
 @router.get("/cfd/enriched")
-async def cfd_enriched(request: Request):
-    """Current cart + customer name OR walk-in booking name, table number, and
-    points earned/missed this visit."""
-    tab = await db.pos_tabs.find_one({"status": {"$in": ["open", "active", None]}}, {"_id": 0}, sort=[("createdAt", -1)])
-    customer = (tab or {}).get("selectedCustomer")
-    cart = (tab or {}).get("cart") or []
+async def cfd_enriched(request: Request, terminalId: Optional[str] = None):
+    """Live cart + customer name OR walk-in booking name, table number, and
+    points earned/missed this visit. Prefers a live pushed feed; falls back to
+    pos_tabs for legacy callers."""
+    live = None
+    if terminalId:
+        live = await db.cfd_live.find_one({"terminalId": terminalId}, {"_id": 0})
+    if not live:
+        live = await db.cfd_live.find_one({}, {"_id": 0}, sort=[("updatedAt", -1)])
+    if not live:
+        tab = await db.pos_tabs.find_one({"status": {"$in": ["open", "active", None]}}, {"_id": 0}, sort=[("createdAt", -1)])
+        live = {
+            "cart": (tab or {}).get("cart") or [],
+            "selectedCustomer": (tab or {}).get("selectedCustomer"),
+            "tableNumber": (tab or {}).get("tableNumber") or (tab or {}).get("tableId"),
+            "walkInName": (tab or {}).get("walkInName"),
+        }
+    customer = live.get("selectedCustomer")
+    cart = live.get("cart") or []
     subtotal = sum(float(i.get("price", 0)) * int(i.get("quantity", 1)) for i in cart)
-    # Points: 1 point per $1 (default), tier multiplier
     cfg = await db.loyalty_config.find_one({}, {"_id": 0}) or {}
     earn_rate = float(cfg.get("earnRate", 1))
     points_earned = int(subtotal * earn_rate) if customer else 0
     points_missed = 0 if customer else int(subtotal * earn_rate)
-    table_number = (tab or {}).get("tableNumber") or (tab or {}).get("tableId")
-    name_display = (customer or {}).get("name") if customer else (tab or {}).get("walkInName")
+    name_display = (customer or {}).get("name") if customer else live.get("walkInName")
     return {
         "cart": cart, "subtotal": round(subtotal, 2),
         "customerName": name_display,
         "isMember": bool(customer),
         "membershipTier": (customer or {}).get("membershipTier"),
-        "tableNumber": table_number,
+        "tableNumber": live.get("tableNumber"),
         "pointsEarned": points_earned,
         "pointsMissed": points_missed,
         "updatedAt": _iso(_now()),

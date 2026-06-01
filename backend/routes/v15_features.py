@@ -309,14 +309,54 @@ async def auto_roster(data: dict, request: Request):
     week_start = data.get("weekStart")
     # Get demand forecast — use existing data or simple heuristic
     staff = await db.auth_users.find({"role": {"$ne": "owner"}, "status": "active"}, {"_id": 0}).to_list(100)
+    # Load availability/blackouts so we don't schedule unavailable staff.
+    avail_rows = await db.staff_availability.find(
+        {"staffId": {"$in": [s["id"] for s in staff]}}, {"_id": 0}
+    ).to_list(200)
+    avail_map = {a["staffId"]: a for a in avail_rows}
+
+    def _date_for(day_name: str) -> str:
+        # Resolve which calendar date a weekday falls on inside the requested week.
+        # week_start is expected as ISO Monday (YYYY-MM-DD). If not provided, use today.
+        try:
+            from datetime import date as _date
+            base = _date.fromisoformat(week_start) if week_start else _date.today()
+            offset = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].index(day_name)
+            return (base + timedelta(days=offset)).isoformat()
+        except Exception:
+            return ""
+
+    def _is_blacked_out(staff_id: str, day_name: str) -> tuple[bool, str]:
+        a = avail_map.get(staff_id)
+        if not a: return False, ""
+        # Weekly availability: if defined and day not listed → off
+        short = day_name[:3]
+        weekly = a.get("weeklyAvailable") or []
+        if weekly and short not in weekly and day_name not in weekly:
+            return True, "weekly_unavailable"
+        # Blackout date ranges
+        date_iso = _date_for(day_name)
+        for b in (a.get("blackoutDates") or []):
+            f, t = b.get("from") or "", b.get("to") or b.get("from") or ""
+            if f and t and f <= date_iso <= t:
+                return True, b.get("reason", "blackout")
+        return False, ""
+
     DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
-    # Simple AI heuristic: weekday avg 3 staff, weekend 5 staff, peak shifts 11-15 + 17-21
     suggestions = []
+    excluded = []
     for day in DAYS:
         is_weekend = day in ('Friday','Saturday','Sunday')
         target = 5 if is_weekend else 3
-        # Rotate through available staff
-        pool = staff[:target] if target <= len(staff) else staff
+        # Filter out blacked-out staff for this day
+        pool = []
+        for s in staff:
+            blocked, reason = _is_blacked_out(s["id"], day)
+            if blocked:
+                excluded.append({"staffId": s["id"], "staffName": s["name"], "date": day, "reason": reason})
+                continue
+            pool.append(s)
+            if len(pool) >= target: break
         for s in pool:
             suggestions.append({
                 "staffId": s["id"], "staffName": s["name"],
@@ -327,7 +367,11 @@ async def auto_roster(data: dict, request: Request):
                 "notes": s.get("role", "Floor").capitalize(),
                 "aiGenerated": True,
             })
-    return {"suggestions": suggestions, "reasoning": f"Generated {len(suggestions)} shifts. Weekend coverage 5 staff/day, weekday 3 staff/day, peak service hours."}
+    return {
+        "suggestions": suggestions,
+        "excluded": excluded,
+        "reasoning": f"Generated {len(suggestions)} shifts across {len(DAYS)} days. {len(excluded)} blackout exclusions honoured. Weekend cover 5/day, weekday 3/day.",
+    }
 
 
 @router.post("/staff/roster/commit-auto")

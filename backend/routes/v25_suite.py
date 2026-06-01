@@ -735,7 +735,23 @@ async def add_sub_plan(data: dict, request: Request):
     from routes.auth import get_current_user
     user = await get_current_user(request)
     if user["role"] != "owner": raise HTTPException(status_code=403, detail="Owner only")
-    plan = {"id": _uid("SUB"), **data, "createdAt": _now()}
+    # Mint scannable barcode + manual code so the membership can be scanned at POS.
+    import secrets as _secrets
+    raw = _secrets.token_hex(4).upper()
+    manual = f"SUB-{raw[:4]}-{raw[4:]}"
+    plan = {
+        "id": _uid("SUB"),
+        "name": data.get("name", "Membership"),
+        "priceMonthly": float(data.get("priceMonthly", 0)),
+        "priceAnnual": float(data.get("priceAnnual", 0)),
+        "perks": data.get("perks", []),
+        "inclusions": data.get("inclusions", []),               # [{item, quantity, period}]
+        "termsAndConditions": data.get("termsAndConditions", ""),
+        "trialDays": int(data.get("trialDays", 0)),
+        "manualCode": manual, "barcode": manual,
+        "active": bool(data.get("active", True)),
+        "createdAt": _now(),
+    }
     await db.subscription_plans.insert_one(plan); plan.pop("_id", None)
     return plan
 

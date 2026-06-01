@@ -539,9 +539,18 @@ export const v26API = {
   updateSubPlan: (id, data) => api.patch(`/v26/subscriptions/plans/${id}`, data),
   deleteSubPlan: (id) => api.delete(`/v26/subscriptions/plans/${id}`),
   // Gift cards
+  listGiftCards: (status) => api.get('/v26/gift-cards', { params: status ? { status } : {} }),
   sellGift: (data) => api.post('/v26/gift-cards/sell', data),
   assignGift: (codeOrId, customerId) => api.post(`/v26/gift-cards/${codeOrId}/assign`, { customerId }),
   lookupGift: (code) => api.get(`/v26/gift-cards/lookup/${code}`),
+  activateGift: (code, data) => api.post(`/v26/gift-cards/${code}/activate`, data || {}),
+  redeemGiftPartial: (code, amount, transactionId) => api.post(`/v26/gift-cards/${code}/redeem`, { amount, transactionId }),
+  giftTransactions: (code) => api.get(`/v26/gift-cards/${code}/transactions`),
+  // Marketing emails
+  generateMarketingEmail: (data) => api.post('/v26/marketing/email/generate', data),
+  listMarketingEmails: () => api.get('/v26/marketing/emails'),
+  updateMarketingEmail: (id, data) => api.patch(`/v26/marketing/emails/${id}`, data),
+  deleteMarketingEmail: (id) => api.delete(`/v26/marketing/emails/${id}`),
   // Events
   listEvents: (upcomingOnly = false) => api.get('/v26/events', { params: { upcomingOnly } }),
   createEvent: (data) => api.post('/v26/events', data),
@@ -557,6 +566,7 @@ export const v26API = {
   syncRoster: () => api.post('/v26/roster/sync-staff'),
   // CFD enriched
   cfdEnriched: () => api.get('/v26/cfd/enriched'),
+  cfdPush: (data) => api.post('/v26/cfd/push', data),
 };
 export const v15API = {
   getBadges: () => api.get('/dock/badges'),
