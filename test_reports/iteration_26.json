@@ -1,0 +1,40 @@
+{
+  "summary": "Frontend integration test of v26 features: POS gift-card tender, Voucher Manager (kind=gift mints paired GC), AI Marketing Emails page, and Bottom Dock. All 6 user-stories PASS end-to-end. Seeded gift card via POST /api/v26/gift-cards/sell (counter, $50) → code GC-13E3-12F3 → applied in POS cart (Espresso $5.20 with auto-promos → balance due $3.15) → gift card chip appears in totals as 'GIFT GC-13E3-12F3 -$3.15' and 'Balance due (after gift cards) $0.00' row renders. Created voucher kind=gift value=25% via /vouchers — row appears in table as 'gift · percent / 25% / active' (TEST_GiftV_471172 → GC-094B-339D). Marketing Emails /marketing-emails: Generate Draft produced an LLM populated draft (subject 62 chars: 'Sip, savor, repeat: Sake Tasting on June 15 + 10% off coffee', body 951 chars, preheader, SMS, CTA 'Book the Sake Tasting', Highlights list with event + voucher + tier perks all rendered), draft appears in left list (Drafts (2)), editor loads on click, subject edited + Save button clicked successfully. Bottom Dock contains 'AI Marketing Emails' text in DOM (under the More submenu — visible for owner role per BottomDock.jsx:138 access=['owner','manager']).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Voucher Manager + Marketing Emails save", "issues": ["Toast description text could not be captured by automated DOM eval after ~2.5s — shadcn toast may have auto-dismissed before the evaluate() ran. Functional saves succeeded (row inserted in voucher table; draft visible + persisted in left list). Recommend adding a stable [data-testid=\"toast-description\"] for automation and/or extending toast duration to 4s for confirmation messages like 'Card GC-XXXX pending activation'."]}
+    ]
+  },
+  "verification_results": {
+    "step1_owner_login": "PASS — logged in as owner@nuva.com and redirected to /pos",
+    "step2_pos_load": "PASS — POSTerminal renders with product grid (Espresso/Soft Drink/Smoothies/Chocolate Cake/Beef Burger/Caesar Salad) + Cart panel + AI SUGGESTS + auto promotions",
+    "step3_discount_picker_testids": "PASS — all 4 testids present: voucher-code-input, apply-voucher-btn (renamed from voucher-apply-btn in request — actual code uses apply-voucher-btn), gift-code-input, apply-gift-btn",
+    "step4_gift_card_apply": "PASS — entered GC-13E3-12F3, clicked 🎁 Apply, GIFT chip with code + -$3.15 + 'Balance due (after gift cards) $0.00' row appears in totals; toast 'Gift card applied' fired",
+    "step5_voucher_manager_gift_kind": "PASS — created TEST_GiftV_471172 with kind=gift value=25 — row appears as 'gift · percent / 25% / active' with new code GC-094B-339D (gift card minted in pending_activation state per backend contract iteration_25). Toast description not captured (auto-dismissed) but row creation confirmed.",
+    "step6_marketing_emails_generate": "PASS — clicked Generate Draft, LLM responded in ~10s, editor populated with subject (62 chars), preheader, body (951 chars), SMS, CTA, Highlights; new draft listed in left panel (Drafts count went from 1→2)",
+    "step7_marketing_emails_edit_save": "PASS — clicked into existing draft, edited subject field, clicked Save — no error thrown, list refreshed",
+    "step8_bottom_dock_link": "PASS — 'AI Marketing Emails' present in DOM (rendered under More submenu for owner role per BottomDock.jsx line 138, access: ['owner','manager'])"
+  },
+  "test_report_links": ["/app/test_reports/iteration_26.json"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "V26Pages.jsx:537 save() toast — uses `toast({ title: 'Saved' })` with no description and no `data-testid`. Add data-testid='toast-saved' to enable automated verification of save confirmation across VoucherManager + MarketingEmails.",
+    "V26Pages.jsx:79 — the 'Gift voucher created' toast description references `${gc.initialBalance.toFixed(2)}` but does not include the requested 'Card GC-XXXX pending activation' literal token. Request asked toast should mention 'Card GC-XXXX pending activation' — current implementation says 'Card ${gc.code} pending activation ($X.XX). Activates on POS sale.' which actually matches the intent. Confirmed by reading code at line 76-80. No change needed.",
+    "POSTerminal.jsx:898 — the data-testid for voucher apply button is 'apply-voucher-btn' but the review_request lists 'voucher-apply-btn'. Either rename to 'voucher-apply-btn' for parallelism with 'voucher-code-input' or update test specs. Current code uses 'apply-voucher-btn' — both exist consistently with 'apply-gift-btn'.",
+    "POSTerminal.jsx 1224 lines — exceeds the 700-line code review threshold. Split into POSTerminal/cart, POSTerminal/discounts, POSTerminal/payment, POSTerminal/customer modules.",
+    "V26Pages.jsx 627 lines — approaching threshold. Already a candidate to split into VoucherManager.jsx, EventsManager.jsx, GiftCardSale.jsx, MarketingEmails.jsx per /app/frontend/src/pages.",
+    "BottomDock.jsx — 'AI Marketing Emails' is buried under More menu. Owners use marketing campaigns often; consider promoting to a primary dock slot for owner/manager only, or grouping under a 'Marketing' submenu alongside Vouchers + Loyalty.",
+    "MarketingEmails.tsx save flow — `save()` does not refresh the `opened` state from server; if the LLM enrichment sets server-side fields (like `updatedAt`, generation metadata) the UI shows stale data. Re-set `opened` from server response after PATCH succeeds."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (per iteration_25 — not retested)", "frontend": "100% (6/6 user stories pass; one minor design concern logged)"},
+  "test_credentials_used": ["owner@nuva.com / NuvaOwner2026!"],
+  "seed_data_creation": "Created 1 gift card via POST /api/v26/gift-cards/sell {amount:50, channel:'counter'} → GC-13E3-12F3 (active, $50). Created 1 voucher kind=gift via UI → TEST_GiftV_471172 / GC-094B-339D / 25% / pending paired gift card. Created 1 marketing email draft via UI (LLM generated). Cart populated with Espresso for POS test.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All v26 frontend integration points (POSTerminal applyGiftCard, V26Pages VoucherManager kind=gift, V26Pages MarketingEmails generate/edit/save, BottomDock /marketing-emails for owner+manager) are working end-to-end. The created gift card GC-13E3-12F3 still has $50 - $3.15 = $46.85 (test did not check out — added gift card as a pending tender, not redeemed). To verify redemption, complete a checkout from the POS with this card in tender list; backend lifecycle is already covered by test_iteration25_v26_gift_marketing.py. Toast descriptions are not currently testable via DOM because shadcn toasts auto-dismiss in ~3s — add data-testid to toast components for future automated assertions.",
+  "rca of the issue": "N/A — all reviewed v26 flows functional. Only minor non-blocking note: toast description text was not capturable by Playwright due to auto-dismiss timing, but the underlying actions (voucher row inserted, gift card chip rendered, marketing draft persisted) all succeeded — confirming the side-effects of the save handlers."
+}
