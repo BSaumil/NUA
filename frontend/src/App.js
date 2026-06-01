@@ -67,6 +67,16 @@ import SurgePricing from './pages/SurgePricing';
 import VoiceRecipe from './pages/VoiceRecipe';
 import KitchenLoad from './pages/KitchenLoad';
 import PriceTune from './pages/PriceTune';
+import EnterpriseCommandCenter from './pages/EnterpriseCommandCenter';
+import AshPro from './pages/AshPro';
+import ProfitGuardian from './pages/ProfitGuardian';
+import DigitalTwin from './pages/DigitalTwin';
+import {
+  ShiftManager, AutoMarketing, Exceptions, HardwareHealth, Disputes,
+  SupplierMarketplace, GiftCards, PredictiveOrders, WasteTracking, Concierge,
+  Reputation, Franchise, FraudDetection, MarginGuardrails, StationReadiness,
+  KioskMode, CFD, ChurnRisk, RecipeCosting, DynamicPricing, Subscriptions
+} from './pages/V25Pages';
 import AskNuaPanel, { AskNuaButton } from './components/AskNua';
 import { useState as useGlobalState } from 'react';
 
@@ -148,6 +158,32 @@ function ProtectedRoutes() {
         <Route path="/voice-recipe" element={<VoiceRecipe />} />
         <Route path="/kitchen-load" element={<KitchenLoad />} />
         <Route path="/price-tune" element={<PriceTune />} />
+        {/* v25 Enterprise Suite */}
+        <Route path="/enterprise" element={<EnterpriseCommandCenter />} />
+        <Route path="/ash-pro" element={<AshPro />} />
+        <Route path="/profit-guardian" element={<ProfitGuardian />} />
+        <Route path="/digital-twin" element={<DigitalTwin />} />
+        <Route path="/shift-manager" element={<ShiftManager />} />
+        <Route path="/auto-marketing" element={<AutoMarketing />} />
+        <Route path="/exceptions" element={<Exceptions />} />
+        <Route path="/hardware-health" element={<HardwareHealth />} />
+        <Route path="/disputes" element={<Disputes />} />
+        <Route path="/supplier-marketplace" element={<SupplierMarketplace />} />
+        <Route path="/gift-cards" element={<GiftCards />} />
+        <Route path="/predictive-orders" element={<PredictiveOrders />} />
+        <Route path="/waste-tracking" element={<WasteTracking />} />
+        <Route path="/concierge" element={<Concierge />} />
+        <Route path="/reputation" element={<Reputation />} />
+        <Route path="/franchise" element={<Franchise />} />
+        <Route path="/fraud-detection" element={<FraudDetection />} />
+        <Route path="/margin-guardrails" element={<MarginGuardrails />} />
+        <Route path="/station-readiness" element={<StationReadiness />} />
+        <Route path="/kiosk" element={<KioskMode />} />
+        <Route path="/cfd" element={<CFD />} />
+        <Route path="/churn-risk" element={<ChurnRisk />} />
+        <Route path="/recipe-costing" element={<RecipeCosting />} />
+        <Route path="/dynamic-pricing-rules" element={<DynamicPricing />} />
+        <Route path="/subscriptions" element={<Subscriptions />} />
       </Routes>
     </StaffLayout>
   );

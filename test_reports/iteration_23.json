@@ -1,0 +1,59 @@
+{
+  "summary": "v25 Enterprise Suite regression — 34/34 backend pytest cases PASS (23 GET smoke + 11 POST/auth flows). Frontend smoke: all 25 v25 routes render with no console errors and no 404s. BUG REGRESSION: POSTerminal selecting 'Sarah Johnson' (cust-1) no longer crashes; cart shows 'Customer: Sarah Johnson — VIP Member 26 pts' and the '⭐ YOUR USUAL' strip renders with Espresso ×3 and Chocolate Cake ×2. BottomDock 'More' splash exposes the 'Enterprise (v25)' group with 21 of 25 expected tile labels detectable on-screen; quick-action tab is now labeled 'Enterprise'.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "verification_results": {
+    "owner_login": true,
+    "v25_get_endpoints_200": "23/23 (sites, hardware, exceptions, station-readiness, margin-guardrails, profit-guardian, digital-twin, shift-manager, subscriptions/plans, gift-cards, recipes/list, waste, waste/insights, recovery/churn-risk, reputation, franchise/dashboard, benchmark, fraud-detection, dynamic-pricing, marketing/auto, disputes, kiosk/sessions, ash-pro/plan)",
+    "v25_post_flows": {
+      "ash-pro/approve (planId from /plan)": "200, returns executed count + actions[]",
+      "sites (owner)": "200, persisted to /sites GET",
+      "disputes (open)": "200, txId/amount/reason persisted",
+      "gift-cards issue + redeem": "200 both, amount=50 → redeem 20 returns redeemed:20",
+      "waste (log)": "200, quantity/reason/estCost echoed",
+      "recipes/upsert": "200, computedCost returned",
+      "predictive-orders": "200",
+      "concierge (LLM)": "200, returns reply/intent (latency ~3-6s)",
+      "marketing/auto (LLM)": "200",
+      "recovery/win-back": "200"
+    },
+    "unauth_v25_blocked": "GET /v25/sites without cookie → 401/403",
+    "no_objectid_leak": "all 23 GET responses verified — no '_id' field",
+    "pos_bug_regression": {
+      "select_sarah_johnson_no_crash": true,
+      "your_usual_strip_renders": true,
+      "items_shown": "Espresso $5.20 ×3, Chocolate Cake $8.27 ×2",
+      "vip_badge_rendered": "VIP Member · 26 pts"
+    },
+    "v25_routes_smoke": "25/25 render (no 404, no console errors): /enterprise /ash-pro /profit-guardian /digital-twin /shift-manager /auto-marketing /exceptions /hardware-health /disputes /supplier-marketplace /gift-cards /predictive-orders /waste-tracking /concierge /reputation /franchise /fraud-detection /margin-guardrails /station-readiness /kiosk /cfd /churn-risk /recipe-costing /dynamic-pricing-rules /subscriptions",
+    "bottomdock_enterprise_v25_group": "visible; 21 distinct v25 tile labels detected in splash",
+    "dock_quick_action_label": "Enterprise (replaces previous 'Dashboard')",
+    "total_console_errors_across_session": 0
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration23_v25_suite.py",
+    "/app/test_reports/pytest/pytest_iteration23.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "v25_suite.py is 1116 lines — exceeds 700-line guideline. Recommend splitting into v25_must_have.py (sync/sites/hardware/disputes/suppliers/exceptions), v25_should_have.py (kiosk/cfd/substitute/recovery/station/margin), and v25_tier.py (ash-pro/profit/twin/shift/marketing/pricing/subs/gift/recipes/predictive/waste/guest/concierge/reputation/franchise/benchmark/warehouse/fraud) for maintainability.",
+    "Every authenticated endpoint repeats 'from routes.auth import get_current_user' + role-check pattern. Extract a dependency decorator (e.g. require_role('owner','manager')) to remove the ~50 duplicated 4-line blocks (DRY).",
+    "ash_plan inserts a new plan to db.ash_plans on every GET — over time this collection will grow unboundedly. Add a TTL index or de-dupe by date so repeated dashboard polls don't blow up storage.",
+    "gift_card redeem uses $inc on amount without optimistic concurrency. Two concurrent redeems on the same card can over-redeem past 0 because the balance check is read-before-write non-atomic. Use findOneAndUpdate with the balance condition in the filter.",
+    "hardware_heartbeat has no auth at all (intentional for device pings?) — anyone with the URL can mark devices online/offline. Recommend a shared device-secret header or HMAC.",
+    "_llm_json swallows exceptions into {'_error': ...}; concierge/marketing/auto silently degrade. Acceptable but the client (e.g. /concierge UI) should distinguish degraded mode and show a banner; currently it just shows empty reply.",
+    "POS customer dropdown uses a native HTML <select> which prevents custom search/typeahead. Consider migrating to the shadcn Select component for a11y + searchability, especially when customer list grows (>10 entries).",
+    "Recipe upsert pushes computedCost back to products.cost — make sure this is idempotent if recipes/upsert is replayed; current code overwrites unconditionally which is fine but should log the prior cost for audit/rollback."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration23_v25_suite.py"],
+  "success_rate": {"backend": "100% (34/34 pytest)", "frontend": "100% smoke (25/25 routes, POS regression, dock splash)"},
+  "test_credentials_used": ["owner@nuva.com / NuvaOwner2026! \u2713"],
+  "seed_data_creation": "Created TEST_SITE_v25 (Melbourne), TEST_TX_001 dispute, TEST_buyer@example.com gift card (amount 50 → balance 30 after redeem), TEST_PROD waste entry, recipe with TEST_flour/TEST_sugar attached to first product. None blocking — all prefixed for easy cleanup.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iteration23_v25_suite.py is reusable as regression for the v25 Enterprise Suite. Note: POS customer dropdown is a native <select> with data-testid='pos-customer-select' — use page.select_option(value='cust-1') not visual text-clicking. /concierge and /marketing/auto are LLM-backed; use 60-90s timeouts. Owner-only endpoints: /v25/sites POST, /v25/sites/publish, /v25/sites/rollback, /v25/ash-pro/approve, /v25/subscriptions/plans POST. Owner/Manager: /v25/disputes, /v25/gift-cards, /v25/profit-guardian, /v25/digital-twin, /v25/shift-manager, /v25/ash-pro/plan, /v25/waste/insights, /v25/reputation/respond, /v25/franchise POST. Auth header method uses httpOnly cookies — use a requests.Session() after POST /api/auth/login."
+}

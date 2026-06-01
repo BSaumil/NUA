@@ -156,6 +156,9 @@ const POSTerminal = () => {
   const [upsells, setUpsells] = useState([]);
   const [upsellLoading, setUpsellLoading] = useState(false);
 
+  // Your Usual — predictive items per known customer
+  const [yourUsual, setYourUsual] = useState([]);
+
   const [categories, setCategories] = useState(['All']);
 
   useEffect(() => { fetchData(); }, []);

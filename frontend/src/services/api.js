@@ -444,6 +444,73 @@ export const aiWave2API = {
   listRecipes: () => api.get('/ai/recipes'),
   kitchenLoad: () => api.get('/ai/kitchen-load'),
 };
+
+// v25 Suite — Enterprise / AI GM / Profit / Recipes / Franchise / Fraud / etc.
+export const v25API = {
+  // Must-have
+  pushSync: (ops) => api.post('/v25/sync-queue', { ops }),
+  syncQueue: () => api.get('/v25/sync-queue'),
+  exceptions: () => api.get('/v25/exceptions'),
+  sites: () => api.get('/v25/sites'),
+  addSite: (data) => api.post('/v25/sites', data),
+  publish: (siteIds, bundle) => api.post('/v25/sites/publish', { siteIds, bundle }),
+  rollback: (pubId) => api.post(`/v25/sites/rollback/${pubId}`),
+  hardware: () => api.get('/v25/hardware'),
+  heartbeat: (data) => api.post('/v25/hardware/heartbeat', data),
+  disputes: () => api.get('/v25/disputes'),
+  openDispute: (data) => api.post('/v25/disputes', data),
+  attachEvidence: (id, notes) => api.post(`/v25/disputes/${id}/evidence`, { notes }),
+  compareSuppliers: (item) => api.get('/v25/suppliers/compare', { params: { item } }),
+  addQuote: (data) => api.post('/v25/suppliers/quote', data),
+  // Should-have
+  kioskStart: (data) => api.post('/v25/kiosk/session', data),
+  kioskAdd: (sid, item) => api.post(`/v25/kiosk/session/${sid}/add`, { item }),
+  kioskCheckout: (sid) => api.post(`/v25/kiosk/session/${sid}/checkout`),
+  kioskList: () => api.get('/v25/kiosk/sessions'),
+  cfdCurrent: () => api.get('/v25/cfd/current'),
+  substitute: (productId) => api.post('/v25/substitute', { productId }),
+  churnRisk: () => api.get('/v25/recovery/churn-risk'),
+  winBack: (customerIds, voucherValue) => api.post('/v25/recovery/win-back', { customerIds, voucherValue }),
+  stationReadiness: () => api.get('/v25/station-readiness'),
+  marginGuardrails: () => api.get('/v25/margin-guardrails'),
+  // Tier 1 — Ash Pro & co
+  ashPlan: () => api.get('/v25/ash-pro/plan'),
+  ashApprove: (planId, actionIds) => api.post('/v25/ash-pro/approve', { planId, actionIds }),
+  profitGuardian: () => api.get('/v25/profit-guardian'),
+  digitalTwin: () => api.get('/v25/digital-twin'),
+  shiftManager: () => api.get('/v25/shift-manager'),
+  autoMarketing: (audience) => api.post('/v25/marketing/auto', { audience }),
+  listMarketing: () => api.get('/v25/marketing/auto'),
+  // Tier 2
+  dynamicRules: () => api.get('/v25/dynamic-pricing'),
+  addDynamic: (data) => api.post('/v25/dynamic-pricing', data),
+  subPlans: () => api.get('/v25/subscriptions/plans'),
+  addSubPlan: (data) => api.post('/v25/subscriptions/plans', data),
+  enrollSub: (customerId, planId) => api.post('/v25/subscriptions/enroll', { customerId, planId }),
+  subMembers: () => api.get('/v25/subscriptions/members'),
+  giftCards: () => api.get('/v25/gift-cards'),
+  issueGift: (data) => api.post('/v25/gift-cards', data),
+  redeemGift: (code, amount) => api.post(`/v25/gift-cards/${code}/redeem`, { amount }),
+  // Tier 3
+  recipes: () => api.get('/v25/recipes/list'),
+  upsertRecipe: (data) => api.post('/v25/recipes/upsert', data),
+  getRecipe: (pid) => api.get(`/v25/recipes/${pid}`),
+  predictiveOrders: () => api.post('/v25/predictive-orders'),
+  waste: () => api.get('/v25/waste'),
+  logWaste: (data) => api.post('/v25/waste', data),
+  wasteInsights: () => api.get('/v25/waste/insights'),
+  // Tier 4
+  universalGuest: (id) => api.get(`/v25/guest/${id}`),
+  concierge: (message) => api.post('/v25/concierge', { message }),
+  reputation: () => api.get('/v25/reputation'),
+  respondReview: (reviewId, response) => api.post('/v25/reputation/respond', { reviewId, response }),
+  recoveryAction: (data) => api.post('/v25/recovery-action', data),
+  // Tier 5
+  franchiseDashboard: () => api.get('/v25/franchise/dashboard'),
+  benchmark: () => api.get('/v25/benchmark'),
+  warehouseExport: (collection, limit = 1000) => api.get('/v25/warehouse/export', { params: { collection, limit } }),
+  fraudDetection: () => api.get('/v25/fraud-detection'),
+};
 export const v15API = {
   getBadges: () => api.get('/dock/badges'),
   // Tabs (hold/recall)
