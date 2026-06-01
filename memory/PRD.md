@@ -1,4 +1,57 @@
-# NUA POS — PRD v25.0 (Enterprise Suite — Full v25-v30 Roadmap)
+# NUA POS — PRD v26.0 (Enterprise Licensing & Entitlements)
+
+## v26 (Feb 2026) — Iteration 27 — LICENSING RELEASE
+
+### New backend module — `routes/licensing.py` (12 endpoints, prefix `/license`)
+- `POST /api/license/onboard` — Issue tenant license bound to ABR-verified ABN (one ABN per license, immutable). `devSkipAbr=true` + `ALLOW_ABR_DEV_SKIP=true` env allows dev-mode issuance without ABR_GUID; production must omit the override.
+- `POST /api/license/validate` — Server-authoritative startup/periodic check. Returns short-lived signed JWT entitlement token (30 min TTL). Specific error codes: `NO_LICENSE`, `DEVICE_NOT_AUTHORIZED`, `ABN_REVERIFY_REQUIRED`, `SUBSCRIPTION_PAST_DUE`, `LICENSE_SUSPENDED`, `LICENSE_CANCELLED`.
+- `POST /api/license/device/activate` · `POST /api/license/device/revoke` — owner-gated device list with `maxDevices` enforcement.
+- `POST /api/license/abn/change-request` — owner + 4-char 2FA + ABR re-verification + 7-day grace; immediately moves tenant into `abn_review` state.
+- `POST /api/license/abn/approve/{req_id}` — gated by `X-Support-Override` header (per spec: "ABN cannot be changed once a license is issued").
+- `POST /api/license/stripe/webhook` — handles `invoice.paid`, `invoice.payment_failed`, `customer.subscription.updated`, `customer.subscription.deleted`. Progressive state machine: Day 0-1 `past_due` (warn) → Day 2-6 `grace` (restrict admin) → Day 7+ `suspended` (block sales) → `cancelled` (export-only).
+- `POST /api/license/billing/recovery-link` — generates a Stripe Billing Portal session URL for owner card update.
+- `GET /api/license/me` · `GET /api/license/audit` — owner dashboard data.
+- `POST /api/license/dev/force-state` — owner-only QA helper to simulate any of the 6 states.
+
+### New services
+- `services/abr_service.py` — `checksum_valid()` (MOD-89) + `lookup_abn()` (live ABR REST call via httpx, requires `ABR_GUID` from abr.business.gov.au/Tools/WebServices). Raises `RuntimeError("ABR_GUID not configured")` if env missing — refuses silent fallback unless explicit dev override.
+
+### New middleware — `middleware/license_middleware.py`
+- `LicenseEnforcementMiddleware` — server-authoritative. Allowlist: `/auth/`, `/license/`, `/payments/`, `/webhook/`, `/v25/warehouse/`. State enforcement:
+  - **active** → all OK
+  - **past_due / grace** → admin writes (settings, sites/publish, dynamic-pricing, device activation) → 423 `SUBSCRIPTION_PAST_DUE`
+  - **suspended** → new sales (transactions, tabs, kiosk, gift-cards) → 423 `LICENSE_SUSPENDED`
+  - **abn_review** → same as suspended but error code `ABN_REVERIFY_REQUIRED`
+  - **cancelled** → only `/license/` + `/v25/warehouse/export` work; everything else → 423 `LICENSE_CANCELLED`
+
+### New frontend
+- `contexts/LicenseContext.jsx` — `LicenseProvider`, `useLicense()`, periodic 10-min revalidation, stable deviceId via localStorage.
+- `pages/LicensePage.jsx` — three exports:
+  - **default `LicensePage`** — owner dashboard: onboarding form (when no license), state badge, plan/devices/ABN verified/grace cards, device table with revoke, ABN change request (with 2FA + reason), dev/QA force-state controls, audit log.
+  - **`LicenseLockScreen`** — full-page dark overlay (z-index 9999) shown when state is suspended/cancelled/abn_review; "POS Locked", "What you can still do", Update Billing + License Details CTAs, error code visible.
+  - **`LicenseBanner`** — non-blocking amber strip at top of app shown during past_due/grace.
+- `App.js` — `LicenseProvider` wraps `StaffLayout`; `LicenseBanner` + `LicenseLockScreen` mounted globally; `/license` route added.
+- `BottomDock` — "License & Billing" entry added under Enterprise group (owner-only).
+- `services/api.js` — `licenseAPI` export (me, audit, validate, onboard, activateDevice, revokeDevice, requestAbnChange, billingRecovery, forceState).
+
+### Security & policy
+- All license decisions server-side; the frontend cannot bypass state.
+- 30-min JWT entitlement tokens (`HS256`, env `JWT_SECRET`).
+- Stripe webhook signature verification when `STRIPE_WEBHOOK_SECRET` is set (warns and falls back in dev).
+- Progressive lockout — never instant shutdown.
+- Audit log of every state change (`license.created`, `device.activated/revoked`, `state.*`, `abn.change_requested`, `billing.paid/payment_failed`).
+- Owner+2FA required for ABN change; support override key required for approval.
+- Always-open routes: auth, license itself, billing recovery, data export, webhooks — even when suspended.
+
+### Hardenings
+- `ALLOW_ABR_DEV_SKIP` defaults to **off** (production-safe). Set explicitly on dev/staging.
+- `forceState` in LicensePage now awaits `revalidate()` before resolving so navigation reflects new state immediately.
+
+### Verified
+- `testing_agent_v3_fork` iteration_24: **19/19 backend pytest passed**, all enforcement flows verified (suspended → 423, grace → 423 on admin writes, allowlist intact, ABN re-verification flow gates 2FA + support override, device authorization, stripe webhook with unknown customer returns 200 ignored, audit log chronological, no ObjectId leaks).
+- Lock screen overlay verified visually with "SUSPENDED · POS Locked · LICENSE_SUSPENDED" + Update Billing CTA.
+
+## Backlog (post-licensing polish)
 
 ## v25 (Feb 2026) — Iteration 26 — ENTERPRISE RELEASE
 

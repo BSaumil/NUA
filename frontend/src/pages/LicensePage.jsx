@@ -179,8 +179,12 @@ export default function LicensePage() {
   };
 
   const forceState = async (state) => {
-    try { await licenseAPI.forceState(state, 'Dev test'); toast({ title: `State → ${state}` }); load(); lic.revalidate(); }
-    catch (e) { toast({ title: 'Failed', variant: 'destructive' }); }
+    try {
+      await licenseAPI.forceState(state, 'Dev test');
+      // Await both refreshes so navigating immediately reflects the new state
+      await Promise.all([load(), lic.revalidate()]);
+      toast({ title: `State → ${state}` });
+    } catch (e) { toast({ title: 'Failed', variant: 'destructive' }); }
   };
 
   if (loading) return <div className="text-center py-20 text-gray-400">Loading license…</div>;

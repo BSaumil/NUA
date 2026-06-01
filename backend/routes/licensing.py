@@ -119,9 +119,11 @@ async def onboard(data: dict, request: Request):
     if not checksum_valid(abn):
         raise HTTPException(status_code=422, detail="ABN failed local checksum")
 
-    # Live ABR call (requires ABR_GUID). If a dev override is supplied, we still
-    # demand a valid checksum but skip the upstream network call so demos work.
-    dev_skip = data.get("devSkipAbr") and os.environ.get("ALLOW_ABR_DEV_SKIP", "true").lower() == "true"
+    # Live ABR call (requires ABR_GUID). If a dev override is supplied AND the
+    # environment explicitly opts in, we still demand a valid checksum but skip
+    # the upstream network call. Production default is OFF — set ALLOW_ABR_DEV_SKIP=true
+    # only on dev/staging.
+    dev_skip = bool(data.get("devSkipAbr")) and os.environ.get("ALLOW_ABR_DEV_SKIP", "false").lower() == "true"
     if dev_skip:
         abr = {"abn": abn, "entityName": data.get("entityName", "DEMO ENTITY"),
                "gstRegistered": False, "raw": {"devSkipped": True}}

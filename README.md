@@ -21,6 +21,27 @@ sudo supervisorctl restart mongodb
 
 **Default owner login:** `owner@nuva.com / NuvaOwner2026!`
 
+## 0. Enterprise Licensing & Entitlements (v26)
+
+NUA ships as a server-authoritative licensed SaaS product:
+
+- **One verified ABN per tenant license** — bound at onboarding via Australian Business Register's ABN Lookup web service (requires `ABR_GUID` from abr.business.gov.au/Tools/WebServices). Once issued, the ABN is immutable; changes require owner + 2FA + ABR re-verification + support approval.
+- **Stripe Billing webhooks** drive a progressive state machine: `active` → `past_due` → `grace` → `suspended` → `cancelled`. **Never** instant shutdown — warnings first (Day 0), admin restrictions (Day 2), then sales block (Day 7).
+- **Device-level entitlements** — each POS device activates against the license server, receives a short-lived signed JWT (30 min), and silently revalidates every 10 min. Unauthorized devices return `DEVICE_NOT_AUTHORIZED`.
+- **`LicenseEnforcementMiddleware`** intercepts every API call and returns HTTP 423 with specific error codes (`LICENSE_SUSPENDED`, `SUBSCRIPTION_PAST_DUE`, `ABN_REVERIFY_REQUIRED`, etc.) — the frontend cannot bypass this.
+- **`/license` UI** — owner dashboard with state badge, device list, ABN change request (2FA-gated), Stripe billing portal link, dev/QA force-state controls, and full audit log.
+- **`LicenseLockScreen`** — full-page overlay (z-index 9999) on suspended/cancelled/abn_review; always allows owner login, billing update, data export.
+
+Config:
+```bash
+# backend/.env
+STRIPE_API_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...   # optional; signature verification skipped if blank
+ABR_GUID=...                       # from abr.business.gov.au/Tools/WebServices
+ALLOW_ABR_DEV_SKIP=true            # dev/staging only — must NOT be set in production
+SUPPORT_OVERRIDE_KEY=nua-support-2026  # required header X-Support-Override for ABN approval
+```
+
 ---
 
 ## 2. What's Inside (v25 Release)
