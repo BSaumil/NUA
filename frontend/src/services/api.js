@@ -511,6 +511,19 @@ export const v25API = {
   warehouseExport: (collection, limit = 1000) => api.get('/v25/warehouse/export', { params: { collection, limit } }),
   fraudDetection: () => api.get('/v25/fraud-detection'),
 };
+
+// Licensing & Entitlements
+export const licenseAPI = {
+  me: () => api.get('/license/me'),
+  audit: () => api.get('/license/audit'),
+  validate: (payload) => api.post('/license/validate', payload),
+  onboard: (data) => api.post('/license/onboard', data),
+  activateDevice: (data) => api.post('/license/device/activate', data),
+  revokeDevice: (deviceId) => api.post('/license/device/revoke', { deviceId }),
+  requestAbnChange: (data) => api.post('/license/abn/change-request', data),
+  billingRecovery: (returnUrl) => api.post('/license/billing/recovery-link', { returnUrl }),
+  forceState: (state, reason) => api.post('/license/dev/force-state', { state, reason }),
+};
 export const v15API = {
   getBadges: () => api.get('/dock/badges'),
   // Tabs (hold/recall)

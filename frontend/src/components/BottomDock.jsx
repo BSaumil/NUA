@@ -9,7 +9,7 @@ import {
   FlaskConical, Sunrise, Brain, Plug, Users2, LogOut, Mail, ClipboardList,
   Trophy, Printer, PieChart, MoreHorizontal, X, FileText, DollarSign, Tag,
   Link2, Ban, Receipt, Calendar, MapPin, Clock, Sparkles, BookOpen, Shield,
-  ShieldAlert, AlertTriangle, Flame, ArrowLeftRight
+  ShieldAlert, AlertTriangle, Flame, ArrowLeftRight, Key
 } from 'lucide-react';
 
 // Role-default quick actions (left → right) on the bottom dock.
@@ -130,6 +130,7 @@ const ALL_FEATURES = [
     { path: '/kiosk', label: 'Kiosk Mode', icon: ShoppingCart, access: ['owner', 'manager'] },
     { path: '/cfd', label: 'Customer Display', icon: Sparkles, access: ['owner', 'manager', 'cashier'] },
     { path: '/churn-risk', label: 'Guest Recovery', icon: Users, access: ['owner', 'manager'] },
+    { path: '/license', label: 'License & Billing', icon: Key, access: ['owner'] },
   ]},
   { group: 'Analytics & AI', items: [
     { path: '/agent', label: 'Ash AI Agent', icon: Brain, access: ['owner', 'manager'] },

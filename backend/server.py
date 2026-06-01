@@ -37,6 +37,8 @@ from routes.loyalty_engine import router as loyalty_engine_router
 from routes.phase_ef import router as phase_ef_router
 from routes.phase_ef_wave2 import router as phase_ef_wave2_router
 from routes.v25_suite import router as v25_suite_router
+from routes.licensing import router as licensing_router
+from middleware.license_middleware import LicenseEnforcementMiddleware
 
 app = FastAPI()
 
@@ -70,6 +72,7 @@ api_router.include_router(loyalty_engine_router)
 api_router.include_router(phase_ef_router)
 api_router.include_router(phase_ef_wave2_router)
 api_router.include_router(v25_suite_router)
+api_router.include_router(licensing_router)
 api_router.include_router(multi_tenant_router)
 
 @api_router.get("/")
@@ -117,6 +120,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 app.add_middleware(RateLimitMiddleware)
+app.add_middleware(LicenseEnforcementMiddleware)
 
 frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 app.add_middleware(

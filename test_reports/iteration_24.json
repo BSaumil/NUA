@@ -1,0 +1,57 @@
+{
+  "summary": "Enterprise Licensing & Entitlements regression — 19/19 backend pytest cases PASS in /app/backend/tests/test_iteration24_licensing.py. Verified: /license/me, onboard (checksum reject, devSkipAbr issue, ABR_GUID guard, duplicate 409), device activate (idempotent), validate (token issuance + DEVICE_NOT_AUTHORIZED), middleware enforcement (suspended → 423 on /transactions, grace → 423 on /v25/sites/publish, abn_review → 423 ABN_REVERIFY_REQUIRED), always-open allowlist (/license/me + /v25/warehouse/export 200 in suspended state), ABN change-request 2FA gate + 503 without ABR_GUID, abn/approve gate (403 without X-Support-Override), audit log returns chronologically ordered rows including state.forced/device.activated. Stripe webhook handler is reachable and gracefully ignores unknown customers. Frontend smoke: /license dashboard renders all 4 cards (state ACTIVE badge, plan/devices/ABN/grace, devices table with 3 entries, ABN change form, dev/QA force-state buttons for all 6 states, audit log) — zero console errors on render. Lock screen overlay verified end-to-end: force-suspended → /pos shows full-page lock with SUSPENDED label, POS Locked headline, Update Billing + License Details CTAs, Error code: LICENSE_SUSPENDED. Final tenant state restored to active.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "force-past_due → navigate to /dashboard", "issue": "After clicking the past_due force button on /license and navigating to /dashboard, the lock-screen overlay from the previous suspended force-state was still showing in the screenshot after ~8s wait. license-banner [data-testid=\"license-banner\"] was not detected. Most likely cause: LicenseContext state propagation lag after revalidate (the context is updated but the navigation happens before the new state batches through). Worth verifying that lic.revalidate() in forceState awaits before allowing navigation, or that the banner mounts based on the freshest /license/me payload rather than cached entitlement state.", "affected_selectors": ["[data-testid=\"license-banner\"]"]}
+    ],
+    "design_issues": []
+  },
+  "verification_results": {
+    "owner_login": true,
+    "backend_pytest": "19/19 passed",
+    "license_page_render": "license-page + state-badge=ACTIVE + devices-card (3 devices) + abn-change-card + audit-card + all 6 force-state buttons present",
+    "lockscreen_on_pos_when_suspended": "VERIFIED — SUSPENDED badge, POS Locked headline, Update Billing + License Details buttons, LICENSE_SUSPENDED error code visible",
+    "middleware_enforcement": {
+      "suspended_blocks_transactions": "423 LICENSE_SUSPENDED",
+      "grace_blocks_v25_sites_publish": "423 SUBSCRIPTION_PAST_DUE",
+      "abn_review_blocks_transactions": "423 ABN_REVERIFY_REQUIRED",
+      "always_open_license_me_when_suspended": "200",
+      "always_open_warehouse_export_when_suspended": "200"
+    },
+    "abn_change_flow": "2FA enforced (400 without code); approve gate enforced (403 without X-Support-Override header); change-request fails 503 with clear 'ABR_GUID not configured' message when GUID env missing (expected per spec)",
+    "audit_log": "rows returned chronologically (createdAt desc), no _id leak, includes state.forced + device.activated actions",
+    "stripe_webhook": "POST /api/license/stripe/webhook with unknown customer → 200 {received:true, ignored:'no license linked'}",
+    "abr_guid_guard": "POST /onboard without devSkipAbr returns 500/503 with 'ABR_GUID not configured' message when env missing",
+    "dev_skip_onboard": "Issued license for isolated TEST_ tenant with state=active, abnVerified=true, abn=51824753556",
+    "device_activation_idempotent": "second activate of same deviceId → {alreadyActive: true}",
+    "device_authorization": "validate with unknown deviceId on tenant with devices → 200 {ok:false, errorCode:'DEVICE_NOT_AUTHORIZED'}",
+    "no_objectid_leak": "/license/me, /license/audit, onboard response — verified no '_id' field",
+    "final_state_restored": "default tenant set back to active at end of suite"
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration24_licensing.py",
+    "/app/test_reports/pytest/pytest_iteration24.xml"
+  ],
+  "action_items": [
+    "Minor: After clicking a force-state button on /license and navigating away, ensure LicenseContext state propagates before render of subsequent route (consider awaiting lic.revalidate() and forcing a hard re-render on context value change). Verify LicenseBanner mounts at past_due — the banner element was not seen in playwright. This may simply be a test-timing artifact (the screenshot was captured during the revalidation poll), but worth a manual verification."
+  ],
+  "critical_code_review_comments": [
+    "licensing.py:380-444 — stripe_webhook is 60+ lines with deeply nested branching on event types. Recommend extracting per-event handlers (handle_invoice_paid, handle_invoice_payment_failed, handle_subscription_updated) for readability and unit-testability.",
+    "licensing.py:124 — `dev_skip = data.get('devSkipAbr') and os.environ.get('ALLOW_ABR_DEV_SKIP', 'true').lower() == 'true'`. ALLOW_ABR_DEV_SKIP defaults to 'true' which means production environments must explicitly set this to 'false' to disable. Safer default would be 'false' with explicit opt-in for dev.",
+    "license_middleware.py:65-68 — fail-open behavior on DB lookup error logs a warning and continues. In a server-authoritative enforcement system this is risky (an attacker could induce DB error to bypass). Recommend fail-closed with a graceful 503 + a circuit-breaker for transient errors.",
+    "licensing.py:265 — `$push` on devices array allows unbounded growth if maxDevices check is bypassed by concurrent activations. The check at line 261 is read-before-write non-atomic. Use findOneAndUpdate with `devices.${maxDevices-1}: {$exists: false}` filter for atomicity.",
+    "licensing.py:341-363 — approve_abn_change has SUPPORT_OVERRIDE_KEY default 'nua-support-2026' hardcoded in code. This is effectively a backdoor if env var not set. Recommend raising 503 'Support override not configured' if env var missing instead of using a default.",
+    "abr_service.py — lookup_abn does not retry on transient ABR 5xx. Recommend httpx.AsyncClient(transport=httpx.AsyncHTTPTransport(retries=2)) for resilience.",
+    "license_middleware.py — READ_ONLY_PREFIXES is defined but never referenced in dispatch(). Either wire it in or remove dead code."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration24_licensing.py"],
+  "success_rate": {"backend": "100% (19/19)", "frontend": "95% (license page + lockscreen verified; banner propagation needs manual confirm)"},
+  "test_credentials_used": ["owner@nuva.com / NuvaOwner2026!"],
+  "seed_data_creation": "Created isolated test tenant TEST_<uuid> with license (ABN 51824753556, plan standard). 2 TEST_DEV_* devices activated on default tenant. Final state restored to active on default tenant.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iteration24_licensing.py is reusable as regression for licensing. The default tenant already has a license issued (ABN 51824753556, NUA DEMO PTY LTD) plus 3 devices from previous runs (Main POS + 2 TEST_DEV). Always restore tenant to active via POST /api/license/dev/force-state {state:'active'} at end of test or in fixture teardown. ABR_GUID is NOT configured in env — change-request flow returns 503 with 'ABR_GUID not configured' message; onboard works only with devSkipAbr=true. Lock screen overlay (z-index 9999) intercepts ALL clicks on routes other than /license when state is suspended/cancelled, including overriding the BottomDock — so playwright tests that need to access dock while in suspended state will fail; force back to active first.",
+  "rca of the issue": "Frontend banner not appearing after past_due force may be a LicenseContext propagation lag — after lic.revalidate() the context state updates asynchronously and the subsequent navigation captures a stale render. Recommended mitigation: in LicensePage.forceState handler, await revalidate fully before returning; in LicenseContext, expose a Promise from revalidate so callers can chain. Alternatively, add a manual key/version bump on context value to force re-render."
+}

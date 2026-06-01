@@ -4,8 +4,10 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { POSProvider } from './contexts/POSContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { LicenseProvider } from './contexts/LicenseContext';
 import { Toaster } from './components/ui/sonner';
 import BottomDock from './components/BottomDock';
+import LicensePage, { LicenseLockScreen, LicenseBanner } from './pages/LicensePage';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import POSTerminal from './pages/POSTerminal';
@@ -84,6 +86,8 @@ function StaffLayout({ children }) {
   const [askOpen, setAskOpen] = useGlobalState(false);
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
+      <LicenseBanner />
+      <LicenseLockScreen />
       <div className="px-6 py-6 max-w-screen-2xl mx-auto">{children}</div>
       <AskNuaButton onClick={() => setAskOpen(true)} />
       <AskNuaPanel open={askOpen} onClose={() => setAskOpen(false)} />
@@ -99,6 +103,7 @@ function ProtectedRoutes() {
 
   // ALL staff (including owner) land on POS by default. Use "More" dock to access dashboard / other pages.
   return (
+    <LicenseProvider>
     <StaffLayout>
       <Routes>
         <Route path="/" element={<Navigate to="/pos" replace />} />
@@ -184,8 +189,10 @@ function ProtectedRoutes() {
         <Route path="/recipe-costing" element={<RecipeCosting />} />
         <Route path="/dynamic-pricing-rules" element={<DynamicPricing />} />
         <Route path="/subscriptions" element={<Subscriptions />} />
+        <Route path="/license" element={<LicensePage />} />
       </Routes>
     </StaffLayout>
+    </LicenseProvider>
   );
 }
 
