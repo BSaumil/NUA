@@ -542,10 +542,15 @@ const POSTerminal = () => {
                   <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(130px,1fr))]">
                     {prods.map(product => (
                       <button key={product.id}
-                        onClick={() => addToCart(product)}
-                        className="bg-white rounded-lg border hover:shadow-md hover:-translate-y-0.5 transition-all overflow-hidden text-left active:scale-95"
-                        data-testid={`product-${product.id}`}>
+                        onClick={() => !product.eightySixed && addToCart(product)}
+                        disabled={product.eightySixed}
+                        className={`bg-white rounded-lg border transition-all overflow-hidden text-left active:scale-95 relative ${product.eightySixed ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-md hover:-translate-y-0.5'}`}
+                        data-testid={`product-${product.id}`}
+                        data-product-card={product.id}>
                         <img src={product.image || 'https://placehold.co/200x100/e5e7eb/9ca3af?text=NUA'} alt={product.name} className="w-full h-20 object-cover" />
+                        {product.eightySixed && (
+                          <span className="absolute top-1 right-1 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">86</span>
+                        )}
                         <div className="p-2">
                           <h3 className="font-medium text-xs leading-tight line-clamp-1" style={{ color: theme.text }}>{product.name}</h3>
                           <div className="flex items-center justify-between mt-1">
@@ -565,10 +570,15 @@ const POSTerminal = () => {
             <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(130px,1fr))]">
               {filteredProducts.map(product => (
                 <button key={product.id}
-                  onClick={() => addToCart(product)}
-                  className="bg-white rounded-lg border hover:shadow-md hover:-translate-y-0.5 transition-all overflow-hidden text-left active:scale-95"
-                  data-testid={`product-${product.id}`}>
+                  onClick={() => !product.eightySixed && addToCart(product)}
+                  disabled={product.eightySixed}
+                  className={`bg-white rounded-lg border transition-all overflow-hidden text-left active:scale-95 relative ${product.eightySixed ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-md hover:-translate-y-0.5'}`}
+                  data-testid={`product-${product.id}`}
+                  data-product-card={product.id}>
                   <img src={product.image || 'https://placehold.co/200x100/e5e7eb/9ca3af?text=NUA'} alt={product.name} className="w-full h-20 object-cover" />
+                  {product.eightySixed && (
+                    <span className="absolute top-1 right-1 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">86</span>
+                  )}
                   <div className="p-2">
                     <h3 className="font-medium text-xs leading-tight line-clamp-1" style={{ color: theme.text }}>{product.name}</h3>
                     <div className="flex items-center justify-between mt-1">

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { staffMgmtAPI } from '../services/api';
 import { Button } from '../components/ui/button';
@@ -8,6 +9,7 @@ import { Lock, Mail, AlertCircle, Hash } from 'lucide-react';
 
 export default function Login() {
   const { login } = useAuth();
+  const navigate = useNavigate();
   const [mode, setMode] = useState('email'); // email | pin
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -18,7 +20,10 @@ export default function Login() {
   const handleEmailLogin = async (e) => {
     e.preventDefault();
     setError(''); setLoading(true);
-    try { await login(email, password); } catch (err) {
+    try {
+      await login(email, password);
+      navigate('/pos', { replace: true });
+    } catch (err) {
       setError(err.response?.data?.detail || 'Invalid credentials');
     }
     setLoading(false);
@@ -30,7 +35,7 @@ export default function Login() {
     try {
       const res = await staffMgmtAPI.pinLogin(pin);
       localStorage.setItem('nuva_token', res.data.token);
-      window.location.reload();
+      window.location.assign('/pos');
     } catch (err) {
       setError(err.response?.data?.detail || 'Invalid PIN');
     }

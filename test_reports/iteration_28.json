@@ -1,0 +1,35 @@
+{
+  "summary": "Iteration 28 retest — all 4 action items from iteration_27 are FIXED. Backend 6/6 pytest PASS: GET /api/products now exposes eightySixed/active/eightySixedAt/eightySixedBy fields; toggling /v25/products/{id}/86 to true is reflected in the products list (eightySixed=true, eightySixedAt populated) and clears on 86 off. v25 sync-queue/process replay, substitute with reasons, kiosk upsell with reason+productId, and v26 gift card creation all still pass (regression). Frontend 3/3 PASS via Playwright: (1) Login form submit auto-navigates from /login to /pos using useNavigate (no manual click); (2) POSTerminal product tiles correctly render a red '86' badge in top-right and are disabled (button.disabled=true, opacity 0.5, click times out as expected) on 86'd products; (3) Categories /categories New Category dialog now includes DialogDescription ('Choose a name, icon, and tile colour…') and zero shadcn a11y warnings logged in console.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Categories /categories", "issues": ["Duplicate categories still visible (Coffee + Coffee & Teas, Mains + Lunch). Per main-agent guidance this is the stale-data nuisance the admin will clean up manually — NOT a code bug."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration28_retest.py",
+    "/app/test_reports/pytest/pytest_iteration28.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "POSTerminal.jsx is still ~991 lines — consider further splitting (Discount panel, Promotions banner, Voice ordering) into their own files as flagged last iteration.",
+    "The 86-tile rendering logic is duplicated across both grid branches (category-grouped grid lines 542-563 and single-category grid lines 570-590). Extract into a shared <ProductTile /> component to remove the duplication.",
+    "v25_suite.py is still >1200 lines — should be split per concern (sync-queue, 86/substitute, kiosk, etc.) into routes/v25/ subdir.",
+    "ProductUpdate pydantic model (backend/models/product.py:57) does not expose eightySixed/active/eightySixedAt/eightySixedBy as updatable fields. The v25 86 endpoint writes directly to Mongo so it works, but the standard PUT /api/products/{id} cannot be used to clear/set 86 state — this is by design but worth documenting."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration28_retest.py (NEW — 6 pytest cases, all passing)"
+  ],
+  "success_rate": {"backend": "100% (6/6)", "frontend": "100% (3/3 — login redirect, 86 badge+disabled, no DialogDescription warning)"},
+  "test_credentials_used": ["owner@nuva.com / NuvaOwner2026!"],
+  "seed_data_creation": "Toggled 86 on/off on 1 Coffee product (Espresso) — restored. Pushed + replayed 2 sync ops (transaction.create + stock.adjust). Created 1 TEST_GIFTVCH_xxx voucher.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 27 action items are all closed. Product model now exposes eightySixed/active/eightySixedAt/eightySixedBy, Login.jsx uses navigate('/pos', { replace: true }) after login(), POSTerminal renders red '86' badge + disabled state via data-product-card attribute (data-testid=product-{id} also preserved), and Categories dialog has DialogDescription. Only outstanding item is the stale duplicate categories (Coffee vs Coffee & Teas) which the main agent has explicitly deferred as admin manual cleanup. Code review comments: POSTerminal still long and product-tile JSX duplicated across two grid branches; consider extracting ProductTile.",
+  "rca of the issue": "N/A — all reported issues resolved."
+}

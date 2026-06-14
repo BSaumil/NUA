@@ -10,7 +10,7 @@ import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { itemsSystemAPI } from '../services/api';
 import { toast } from 'sonner';
@@ -107,7 +107,10 @@ export default function Categories() {
 
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
         <DialogContent className="max-w-md" data-testid="category-dialog">
-          <DialogHeader><DialogTitle>{editing ? 'Edit Category' : 'New Category'}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{editing ? 'Edit Category' : 'New Category'}</DialogTitle>
+            <DialogDescription>Choose a name, icon, and tile colour to use on the POS dashboard.</DialogDescription>
+          </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="flex items-center gap-3 p-3 rounded-lg border bg-gray-50">
               <div className="w-12 h-12 rounded-xl flex items-center justify-center text-white shadow"

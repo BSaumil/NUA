@@ -31,6 +31,11 @@ class Product(BaseModel):
     onlineChannels: List[str] = []  # uber_eats, doordash, website, etc.
     seoDescription: str = ""
     description: str = ""
+    # 86 (out-of-stock) flag set by /api/v25/products/{id}/86
+    active: bool = True
+    eightySixed: bool = False
+    eightySixedAt: Optional[datetime] = None
+    eightySixedBy: Optional[str] = None
     createdAt: datetime = Field(default_factory=datetime.utcnow)
     updatedAt: datetime = Field(default_factory=datetime.utcnow)
 
