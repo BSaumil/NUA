@@ -206,6 +206,38 @@ Kitchen: kitchen@nuva.com / Staff2026!
 
 ---
 
+## v26.2 — Iteration 27-28 (Feb 2026): Fluid POS, Category Icons, Seed Catalog, P2 Refinement, Refactor
+
+### Backend additions
+- **`/api/seed/catalog`** (owner-only, idempotent): inserts 5 canonical categories (Coffee, Burgers, Mains, Cakes & Slices, Pasta), 60 products and 10 modifiers (Milk Choice, Extra Shot, Coffee Strength, Syrup, Burger Cheese, Burger Add-ons, Cooking Pref, Side Choice, Pasta Style, Sauce Add-on) — assigned by category.
+- **Categories now accept `icon` + `color`** (`POST/PUT /api/categories`). `icon` is a lucide-react name (`Coffee`, `Beef`, `UtensilsCrossed`, `Cake`, `Soup`, …), `color` is a hex string.
+- **`/api/v25/sync-queue/process`** (owner/manager): replays pending offline ops into real collections — `transaction.create`, `kitchen.order`, `stock.adjust`, `tab.append`. Idempotent via `clientOpId`. Returns `{applied, errors, pendingBefore}`.
+- **`/api/v25/products/{id}/86`**: toggles 86 (out-of-stock) flag. Persists `eightySixed`, `eightySixedAt`, `eightySixedBy`. Sets stock to 0 when 86'd. Returns a `suggestedSubstitute` so the cashier can offer it on the spot.
+- **`/api/v25/substitute`**: now ranks substitutes by price-proximity + stock and attaches a `substitutionReason` string per result.
+- **`/api/v25/kiosk/session/{sid}/upsell`**: smart category-based upsell — examines what's missing in the kiosk cart and suggests up to 3 complementary items with reasons (e.g. "Add a drink to round out the meal", "Save room for something sweet").
+- **`Product` pydantic model** gained `active`, `eightySixed`, `eightySixedAt`, `eightySixedBy` so the 86 flag round-trips through `GET /api/products`.
+
+### Frontend
+- **POSTerminal refactor**: extracted three components into `/app/frontend/src/components/pos/`:
+  - `SwipeableCartItem.jsx` — left-swipe delete, right-swipe repeat
+  - `CustomerCombobox.jsx` — cmdk-based searchable customer picker
+  - `PaymentDialogs.jsx` — QR / UPI / Split payment dialogs as named exports
+- **Fluid POS dashboard**: product grid switched to `[grid-template-columns:repeat(auto-fill,minmax(130px,1fr))]` (was fixed `grid-cols-3 sm:4 md:5 lg:6`). Side cart panel is `w-full lg:w-[440px]` so it stacks on narrow viewports.
+- **Category icons on the POS**: each category button shows its custom icon + color (icon in coloured tile, active state floods the button with the category colour, not the global theme colour).
+- **Categories admin (`/categories`)** rewritten with: large icon preview card, name+sortOrder+active inputs, **icon picker grid (21 lucide icons)**, **15-swatch colour row + custom colour picker**, live preview. Added `DialogDescription` for shadcn a11y.
+- **`Barcode128`** extracted to shared `/components/Barcode128.jsx` (used by gift card sale page & subscription plans).
+- **Login → POS redirect**: `Login.jsx` now uses `useNavigate('/pos', { replace: true })` after `login()` resolves.
+- **86 indicator**: POSTerminal product tiles render a red "86" badge on out-of-stock items and disable the click handler (`opacity-50 cursor-not-allowed`).
+
+### Frontend API surface (`services/api.js`)
+- `itemsSystemAPI.createCategory/updateCategory` already accepted icon+color (passthrough).
+- `v25API.processSync()`, `v25API.kioskUpsell(sid)`, `v25API.toggle86(id, eightySixed)`.
+
+### Test status
+- **Iteration 27**: Backend 10/10 PASS (seed idempotency, category icon CRUD, sync-queue replay, 86 toggle + substitute, kiosk upsell, gift card regression). Frontend POSTerminal + Categories admin rendered correctly.
+- **Iteration 28**: Backend 6/6 PASS + Frontend 3/3 PASS — all action items from iteration 27 (Product model fields, login redirect, 86 badge, dialog a11y) verified fixed. `retest_needed=false`.
+
+
 ## v26.1 — Iteration 25-26 (Feb 2026): Unified Gift Cards + AI Marketing + AI Roster Blackouts + Live CFD
 
 ### Backend additions (`routes/v26_commerce.py`)
