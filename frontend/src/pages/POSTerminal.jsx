@@ -3,7 +3,6 @@ import {
   Search, Plus, Minus, Trash2, User, CreditCard, Banknote, Smartphone,
   ShoppingCart, QrCode, SplitSquareHorizontal, X, Check, ChevronLeft, Copy
 } from 'lucide-react';
-import { QRCodeSVG } from 'qrcode.react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent } from '../components/ui/card';
@@ -17,146 +16,12 @@ import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, 
 import { useToast } from '../hooks/use-toast';
 import { useAuth } from '../contexts/AuthContext';
 import VoiceOrderButton from '../components/VoiceOrderButton';
-import { Popover, PopoverTrigger, PopoverContent } from '../components/ui/popover';
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '../components/ui/command';
-import { ChevronsUpDown } from 'lucide-react';
+import SwipeableCartItem from '../components/pos/SwipeableCartItem';
+import CustomerCombobox from '../components/pos/CustomerCombobox';
+import { QrPaymentDialog, UpiPaymentDialog, SplitPaymentDialog } from '../components/pos/PaymentDialogs';
+import { CategoryIcon } from './Categories';
 
-// Searchable customer combobox — replaces native <select> for fast lookup at scale.
-function CustomerCombobox({ customers, value, onChange, theme }) {
-  const [open, setOpen] = React.useState(false);
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button
-          role="combobox"
-          aria-expanded={open}
-          className="w-full flex items-center justify-between p-2 border rounded-md text-sm bg-white hover:border-gray-400 transition"
-          data-testid="pos-customer-select"
-        >
-          <span className="text-gray-500">Walk-in Customer · search to assign</span>
-          <ChevronsUpDown size={14} className="opacity-50" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent className="w-[380px] p-0" align="start">
-        <Command shouldFilter={true}>
-          <CommandInput placeholder="Search by name, email, phone…" data-testid="customer-search-input" />
-          <CommandList className="max-h-[280px]">
-            <CommandEmpty>No matching customer.</CommandEmpty>
-            <CommandGroup>
-              {customers.map(c => (
-                <CommandItem
-                  key={c.id}
-                  value={`${c.name} ${c.email || ''} ${c.phone || ''} ${c.membershipTier || ''}`}
-                  onSelect={() => { onChange(c); setOpen(false); }}
-                  data-testid={`customer-option-${c.id}`}
-                  className="cursor-pointer"
-                >
-                  <div className="flex flex-col w-full">
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium">{c.name}</span>
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${theme.primary}15`, color: theme.primary }}>{c.membershipTier || 'Member'}</span>
-                    </div>
-                    {(c.email || c.phone) && <span className="text-xs text-gray-500">{c.email}{c.email && c.phone ? ' · ' : ''}{c.phone}</span>}
-                  </div>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-// ===== Swipeable Cart Item: left-swipe deletes, right-swipe repeats =====
-function SwipeableCartItem({ item, onUpdateQty, onRemove, onRepeat, theme }) {
-  const [dragX, setDragX] = useState(0);
-  const startXRef = React.useRef(null);
-  const isDraggingRef = React.useRef(false);
-  const THRESHOLD = 80; // pixels to commit action
-
-  const onPointerDown = (e) => {
-    // ignore drags initiated on quantity buttons
-    if (e.target.closest('[data-no-swipe]')) return;
-    startXRef.current = e.clientX;
-    isDraggingRef.current = true;
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
-  const onPointerMove = (e) => {
-    if (!isDraggingRef.current || startXRef.current === null) return;
-    const dx = e.clientX - startXRef.current;
-    setDragX(dx);
-  };
-  const onPointerUp = (e) => {
-    if (!isDraggingRef.current) return;
-    isDraggingRef.current = false;
-    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch {}
-    const dx = dragX;
-    if (dx <= -THRESHOLD) {
-      // Animate out then delete
-      setDragX(-400);
-      setTimeout(() => onRemove(item.id), 180);
-    } else if (dx >= THRESHOLD) {
-      // Trigger repeat then bounce back
-      onRepeat(item);
-      setDragX(0);
-    } else {
-      setDragX(0);
-    }
-    startXRef.current = null;
-  };
-
-  const bgIntensity = Math.min(Math.abs(dragX) / THRESHOLD, 1);
-
-  return (
-    <div className="relative overflow-hidden rounded-lg" data-testid={`cart-item-wrapper-${item.id}`}>
-      {/* Background hint — left side (right-swipe = repeat) */}
-      <div
-        className="absolute inset-y-0 left-0 flex items-center pl-4 text-white font-bold text-xs"
-        style={{ backgroundColor: '#10b981', opacity: dragX > 0 ? bgIntensity : 0, width: '100%' }}
-        data-testid={`swipe-repeat-bg-${item.id}`}
-      >
-        <span>+1 REPEAT →</span>
-      </div>
-      {/* Background hint — right side (left-swipe = delete) */}
-      <div
-        className="absolute inset-y-0 right-0 flex items-center justify-end pr-4 text-white font-bold text-xs"
-        style={{ backgroundColor: '#ef4444', opacity: dragX < 0 ? bgIntensity : 0, width: '100%' }}
-        data-testid={`swipe-delete-bg-${item.id}`}
-      >
-        <span>← DELETE</span>
-      </div>
-      <Card
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-        style={{ transform: `translateX(${dragX}px)`, transition: isDraggingRef.current ? 'none' : 'transform 0.2s ease-out', touchAction: 'pan-y' }}
-        className="relative bg-white cursor-grab active:cursor-grabbing select-none"
-        data-testid={`cart-item-${item.id}`}
-      >
-        <CardContent className="p-3">
-          <div className="flex items-center gap-3">
-            <img src={item.image || 'https://placehold.co/56x56/e5e7eb/9ca3af?text=NUA'} alt={item.name} className="w-14 h-14 object-cover rounded-md flex-shrink-0" draggable={false} />
-            <div className="flex-1 min-w-0">
-              <p className="font-semibold text-sm truncate">{item.name}</p>
-              <p className="text-xs text-gray-500">${item.price.toFixed(2)} each</p>
-            </div>
-            <div className="flex items-center gap-1.5" data-no-swipe>
-              <Button size="sm" variant="outline" onClick={() => onUpdateQty(item.id, item.quantity - 1)} className="w-7 h-7 p-0" data-testid={`cart-minus-${item.id}`}><Minus size={12} /></Button>
-              <span className="font-semibold w-6 text-center text-sm">{item.quantity}</span>
-              <Button size="sm" variant="outline" onClick={() => onUpdateQty(item.id, item.quantity + 1)} className="w-7 h-7 p-0" data-testid={`cart-plus-${item.id}`}><Plus size={12} /></Button>
-            </div>
-          </div>
-          <div className="flex items-center justify-between mt-1.5">
-            <span className="text-[10px] text-gray-300 italic">← swipe delete · repeat swipe →</span>
-            <span className="font-bold" style={{ color: theme.primary }}>${(item.price * item.quantity).toFixed(2)}</span>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
+// SwipeableCartItem and CustomerCombobox now live in components/pos/.
 
 const POSTerminal = () => {
   const { theme } = useTheme();
@@ -219,7 +84,8 @@ const POSTerminal = () => {
   const [giftCodeInput, setGiftCodeInput] = useState('');
   const [giftLoading, setGiftLoading] = useState(false);
 
-  const [categories, setCategories] = useState(['All']);
+  // Categories with icons + colors (kept as full objects, not just names)
+  const [categories, setCategories] = useState([{ id: 'all', name: 'All', icon: 'Sparkles', color: '#6366f1' }]);
 
   useEffect(() => { fetchData(); }, []);
 
@@ -359,10 +225,11 @@ const POSTerminal = () => {
       if (promotionsRes.status === 'fulfilled') setPromotions(promotionsRes.value.data || []);
       if (customersRes.status === 'fulfilled') setCustomers(customersRes.value.data || []);
       if (catsRes.status === 'fulfilled' && Array.isArray(catsRes.value)) {
-        setCategories(['All', ...catsRes.value
+        const active = catsRes.value
           .filter(c => c.active !== false)
           .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99))
-          .map(c => c.name)]);
+          .map(c => ({ id: c.id, name: c.name, icon: c.icon || 'Tag', color: c.color || '#6366f1' }));
+        setCategories([{ id: 'all', name: 'All', icon: 'Sparkles', color: '#6366f1' }, ...active]);
       }
       if (loyaltyRes.status === 'fulfilled') setLoyaltyCfg(loyaltyRes.value.data || { minRedeem: 50, redeemRate: 0.01 });
       if (labelsRes.status === 'fulfilled') setLabels(labelsRes.value.data || {});
@@ -580,7 +447,7 @@ const POSTerminal = () => {
   };
 
   return (
-    <div className="flex gap-4 h-[calc(100vh-7rem)]" data-testid="pos-terminal">
+    <div className="flex flex-col lg:flex-row gap-4 h-[calc(100vh-7rem)]" data-testid="pos-terminal">
       {/* Training Mode Banner */}
       {trainingMode && (
         <div className="fixed top-0 left-0 right-0 z-40 bg-amber-500 text-white text-center py-2 text-sm font-semibold"
@@ -625,26 +492,33 @@ const POSTerminal = () => {
               try { const r = await v15API.getTabs(); setOpenTabs(r.data || []); setShowTabsDialog(true); } catch {}
             }} data-testid="recall-tab-btn">Tabs</Button>
           </div>
-          <div className="flex gap-1.5 overflow-x-auto pb-1">
-            {categories.map(cat => (
-              <button key={cat}
-                onClick={() => setSelectedCategory(cat)}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-all ${selectedCategory === cat ? 'text-white shadow-sm' : 'bg-white text-gray-600 border hover:border-gray-400'}`}
-                style={selectedCategory === cat ? { backgroundColor: theme.primary } : {}}
-                data-testid={`pos-cat-${cat}`}>
-                {cat}
-              </button>
-            ))}
+          <div className="flex gap-2 overflow-x-auto pb-1.5">
+            {categories.map(cat => {
+              const active = selectedCategory === cat.name;
+              return (
+                <button key={cat.id || cat.name}
+                  onClick={() => setSelectedCategory(cat.name)}
+                  className={`flex flex-col items-center gap-1 px-3 py-2 rounded-xl whitespace-nowrap transition-all flex-shrink-0 min-w-[72px] ${active ? 'text-white shadow-md scale-[1.02]' : 'bg-white text-gray-700 border hover:border-gray-400'}`}
+                  style={active ? { backgroundColor: cat.color || theme.primary } : { borderColor: `${cat.color || theme.primary}40` }}
+                  data-testid={`pos-cat-${cat.name}`}>
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center"
+                    style={active ? { background: 'rgba(255,255,255,0.18)' } : { background: `${cat.color || theme.primary}15`, color: cat.color || theme.primary }}>
+                    <CategoryIcon name={cat.icon} size={18} />
+                  </div>
+                  <span className="text-[11px] font-semibold leading-none">{cat.name}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
         <div className="flex-1 overflow-y-auto pr-1">
           {selectedCategory === 'All' ? (
             products.length === 0 ? (
-              // Skeleton loader while products fetch
-              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2" data-testid="pos-skeleton">
+              // Skeleton loader while products fetch — fluid grid
+              <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(130px,1fr))]" data-testid="pos-skeleton">
                 {[...Array(12)].map((_, i) => (
                   <div key={i} className="bg-white rounded-lg border overflow-hidden animate-pulse">
-                    <div className="w-full h-16 bg-gray-200" />
+                    <div className="w-full h-20 bg-gray-200" />
                     <div className="p-2 space-y-1">
                       <div className="h-3 bg-gray-200 rounded" />
                       <div className="h-3 bg-gray-100 rounded w-2/3" />
@@ -653,22 +527,25 @@ const POSTerminal = () => {
                 ))}
               </div>
             ) : (
-            // Category-wise grouped view
+            // Category-wise grouped view — fluid grid that adapts to viewport.
             <div className="space-y-5">
-              {Object.entries(groupedByCategory).map(([cat, prods]) => (
+              {Object.entries(groupedByCategory).map(([cat, prods]) => {
+                const meta = categories.find(c => c.name === cat);
+                return (
                 <div key={cat} data-testid={`pos-category-section-${cat}`}>
                   <div className="flex items-center gap-2 mb-2 sticky top-0 bg-gray-50 py-1.5 z-[1]">
+                    {meta && <div className="w-6 h-6 rounded-md flex items-center justify-center text-white" style={{ background: meta.color }}><CategoryIcon name={meta.icon} size={13} /></div>}
                     <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">{cat}</h3>
                     <span className="text-[10px] text-gray-400">{prods.length} items</span>
                     <div className="flex-1 border-b border-dashed"></div>
                   </div>
-                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2">
+                  <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(130px,1fr))]">
                     {prods.map(product => (
                       <button key={product.id}
                         onClick={() => addToCart(product)}
                         className="bg-white rounded-lg border hover:shadow-md hover:-translate-y-0.5 transition-all overflow-hidden text-left active:scale-95"
                         data-testid={`product-${product.id}`}>
-                        <img src={product.image || 'https://placehold.co/200x100/e5e7eb/9ca3af?text=NUA'} alt={product.name} className="w-full h-16 object-cover" />
+                        <img src={product.image || 'https://placehold.co/200x100/e5e7eb/9ca3af?text=NUA'} alt={product.name} className="w-full h-20 object-cover" />
                         <div className="p-2">
                           <h3 className="font-medium text-xs leading-tight line-clamp-1" style={{ color: theme.text }}>{product.name}</h3>
                           <div className="flex items-center justify-between mt-1">
@@ -680,18 +557,18 @@ const POSTerminal = () => {
                     ))}
                   </div>
                 </div>
-              ))}
+              );})}
             </div>
             )
           ) : (
-            // Single category compact grid
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2">
+            // Single category compact grid — fluid
+            <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(130px,1fr))]">
               {filteredProducts.map(product => (
                 <button key={product.id}
                   onClick={() => addToCart(product)}
                   className="bg-white rounded-lg border hover:shadow-md hover:-translate-y-0.5 transition-all overflow-hidden text-left active:scale-95"
                   data-testid={`product-${product.id}`}>
-                  <img src={product.image || 'https://placehold.co/200x100/e5e7eb/9ca3af?text=NUA'} alt={product.name} className="w-full h-16 object-cover" />
+                  <img src={product.image || 'https://placehold.co/200x100/e5e7eb/9ca3af?text=NUA'} alt={product.name} className="w-full h-20 object-cover" />
                   <div className="p-2">
                     <h3 className="font-medium text-xs leading-tight line-clamp-1" style={{ color: theme.text }}>{product.name}</h3>
                     <div className="flex items-center justify-between mt-1">
@@ -721,7 +598,7 @@ const POSTerminal = () => {
       </div>
 
       {/* Cart Panel — bigger for easier billing */}
-      <div className="w-[440px] flex-shrink-0 flex flex-col border bg-white rounded-xl shadow-sm p-4" data-testid="pos-cart-panel">
+      <div className="w-full lg:w-[440px] flex-shrink-0 flex flex-col border bg-white rounded-xl shadow-sm p-4" data-testid="pos-cart-panel">
         <h2 className="text-xl font-bold mb-3" style={{ color: theme.text }}>{labels.cart || 'Current Order'}</h2>
         {/* Customer Selection */}
         <Card className="mb-4"><CardContent className="p-4">
@@ -1018,147 +895,27 @@ const POSTerminal = () => {
         )}
       </div>
 
-      {/* ========== QR Code Payment Dialog ========== */}
-      <Dialog open={paymentView === 'qr'} onOpenChange={(open) => { if (!open) setPaymentView('methods'); }}>
-        <DialogContent className="max-w-sm" data-testid="qr-payment-dialog">
-          <DialogHeader><DialogTitle>Scan QR to Pay</DialogTitle></DialogHeader>
-          <div className="flex flex-col items-center py-4 space-y-4">
-            <div className="bg-white p-4 rounded-xl shadow-inner border">
-              {qrData?.qrData && <QRCodeSVG value={qrData.qrData} size={200} level="M" includeMargin />}
-            </div>
-            <div className="text-center">
-              <p className="text-3xl font-bold">${totalNum.toFixed(2)}</p>
-              <p className="text-sm text-gray-500 mt-1">Transaction: {qrData?.transactionId}</p>
-            </div>
-            <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50">Waiting for payment...</Badge>
-            <Button className="w-full bg-green-600 hover:bg-green-700 text-white" onClick={handleConfirmQRPayment}
-              disabled={loading} data-testid="qr-confirm-btn">
-              <Check size={18} className="mr-2" /> Confirm Payment Received
-            </Button>
-            <Button variant="ghost" className="w-full" onClick={() => setPaymentView('methods')}>
-              <ChevronLeft size={16} className="mr-1" /> Back
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* ========== UPI Payment Dialog ========== */}
-      <Dialog open={paymentView === 'upi'} onOpenChange={(open) => { if (!open) setPaymentView('methods'); }}>
-        <DialogContent className="max-w-sm" data-testid="upi-payment-dialog">
-          <DialogHeader><DialogTitle>UPI Payment</DialogTitle></DialogHeader>
-          <div className="flex flex-col items-center py-4 space-y-4">
-            <div className="bg-white p-4 rounded-xl shadow-inner border">
-              {qrData?.qrData && <QRCodeSVG value={qrData.qrData} size={180} level="M" includeMargin />}
-            </div>
-            <div className="text-center">
-              <p className="text-3xl font-bold">${totalNum.toFixed(2)}</p>
-              {qrData?.merchantUpi && (
-                <div className="flex items-center gap-2 justify-center mt-2 text-sm text-gray-600 bg-gray-50 px-3 py-1.5 rounded-full">
-                  <span className="font-mono">{qrData.merchantUpi}</span>
-                  <button onClick={() => copyToClipboard(qrData.merchantUpi)} className="text-gray-400 hover:text-gray-700"><Copy size={14} /></button>
-                </div>
-              )}
-              <p className="text-xs text-gray-400 mt-2">Scan QR or pay to UPI ID above</p>
-            </div>
-            <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50">Awaiting UPI confirmation...</Badge>
-            <Button className="w-full bg-green-600 hover:bg-green-700 text-white" onClick={handleConfirmQRPayment}
-              disabled={loading} data-testid="upi-confirm-btn">
-              <Check size={18} className="mr-2" /> Confirm Payment Received
-            </Button>
-            <Button variant="ghost" className="w-full" onClick={() => setPaymentView('methods')}>
-              <ChevronLeft size={16} className="mr-1" /> Back
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* ========== Split Payment Dialog ========== */}
-      <Dialog open={paymentView === 'split'} onOpenChange={(open) => { if (!open) setPaymentView('methods'); }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto" data-testid="split-payment-dialog">
-          <DialogHeader>
-            <DialogTitle className="flex items-center justify-between">
-              <span>Split Payment — ${totalNum.toFixed(2)}</span>
-              {splitRemaining > 0 && <Badge variant="outline" className="text-orange-600 border-orange-300">${splitRemaining.toFixed(2)} remaining</Badge>}
-              {splitRemaining === 0 && splitParts.length > 0 && <Badge className="bg-green-600 text-white">All paid</Badge>}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            {/* Controls */}
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-gray-600">Split into</span>
-                <div className="flex items-center border rounded-lg overflow-hidden">
-                  <button className="px-3 py-1.5 hover:bg-gray-100 text-sm" onClick={() => splitCount > 2 && recalcEqualSplit(splitCount - 1)}>-</button>
-                  <span className="px-3 py-1.5 font-bold text-sm border-x" data-testid="split-count">{splitCount}</span>
-                  <button className="px-3 py-1.5 hover:bg-gray-100 text-sm" onClick={() => splitCount < 10 && recalcEqualSplit(splitCount + 1)}>+</button>
-                </div>
-              </div>
-              <div className="flex gap-1 ml-auto">
-                {['equal', 'custom'].map(m => (
-                  <button key={m} onClick={() => { setSplitMode(m); if (m === 'equal') initSplitParts(splitCount, 'equal'); }}
-                    className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${splitMode === m ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                    data-testid={`split-mode-${m}`}>
-                    {m === 'equal' ? 'Equal' : 'Custom'}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Split Parts */}
-            <div className="space-y-3">
-              {splitParts.map((part, idx) => (
-                <Card key={idx} className={`border ${part.status === 'confirmed' ? 'border-green-300 bg-green-50/50' : ''}`}
-                  data-testid={`split-part-${idx}`}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${part.status === 'confirmed' ? 'bg-green-600 text-white' : 'bg-gray-200 text-gray-700'}`}>
-                        {part.status === 'confirmed' ? <Check size={16} /> : idx + 1}
-                      </div>
-                      <div className="flex-1 space-y-2">
-                        <div className="flex gap-2">
-                          <Input placeholder="Guest name" value={part.payerName} className="h-8 text-sm"
-                            onChange={e => updateSplitPart(idx, 'payerName', e.target.value)}
-                            disabled={part.status === 'confirmed'} data-testid={`split-name-${idx}`} />
-                          {splitMode === 'custom' && (
-                            <Input type="number" step="0.01" min="0" value={part.amount} className="h-8 text-sm w-28"
-                              onChange={e => updateSplitPart(idx, 'amount', parseFloat(e.target.value) || 0)}
-                              disabled={part.status === 'confirmed'} data-testid={`split-amount-${idx}`} />
-                          )}
-                          {splitMode === 'equal' && (
-                            <span className="font-bold text-sm whitespace-nowrap self-center">${part.amount.toFixed(2)}</span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          {['Card', 'Cash', 'UPI', 'QR Code'].map(method => (
-                            <button key={method} onClick={() => part.status !== 'confirmed' && updateSplitPart(idx, 'method', method)}
-                              className={`px-2 py-1 text-[11px] rounded-md font-medium transition-colors ${part.method === method ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
-                              disabled={part.status === 'confirmed'} data-testid={`split-method-${idx}-${method.toLowerCase().replace(' ', '-')}`}>
-                              {method}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      {part.status !== 'confirmed' ? (
-                        <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white h-8 px-3"
-                          onClick={() => handlePaySplit(idx)} disabled={loading && activeSplitIndex === idx}
-                          data-testid={`split-pay-${idx}`}>
-                          {loading && activeSplitIndex === idx ? '...' : 'Pay'}
-                        </Button>
-                      ) : (
-                        <Badge className="bg-green-100 text-green-700 border-green-300">Paid</Badge>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-
-            <Button variant="ghost" className="w-full" onClick={() => setPaymentView('methods')}>
-              <ChevronLeft size={16} className="mr-1" /> Back to Methods
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* ========== Payment Dialogs (QR / UPI / Split) ========== */}
+      <QrPaymentDialog
+        open={paymentView === 'qr'} onClose={() => setPaymentView('methods')}
+        qrData={qrData} total={totalNum} onConfirm={handleConfirmQRPayment} loading={loading}
+      />
+      <UpiPaymentDialog
+        open={paymentView === 'upi'} onClose={() => setPaymentView('methods')}
+        qrData={qrData} total={totalNum} onConfirm={handleConfirmQRPayment} loading={loading}
+        onCopyUpi={copyToClipboard}
+      />
+      <SplitPaymentDialog
+        open={paymentView === 'split'} onClose={() => setPaymentView('methods')}
+        total={totalNum}
+        splitParts={splitParts} splitMode={splitMode} splitCount={splitCount}
+        onSetMode={(m) => { setSplitMode(m); if (m === 'equal') initSplitParts(splitCount, 'equal'); }}
+        onChangeCount={recalcEqualSplit}
+        onUpdatePart={updateSplitPart}
+        onPayPart={handlePaySplit}
+        splitRemaining={splitRemaining}
+        loading={loading} activeSplitIndex={activeSplitIndex}
+      />
 
       {/* Ghost Discount (Owner Secret - triple-click POS title to show) */}
       {user?.role === 'owner' && (

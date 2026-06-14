@@ -11,39 +11,12 @@ import { Badge } from '../components/ui/badge';
 import { useToast } from '../hooks/use-toast';
 import { useTheme } from '../contexts/ThemeContext';
 import { v26API, customersAPI } from '../services/api';
+import Barcode128 from '../components/Barcode128';
 import {
   Ticket, Gift, Calendar, CalendarDays, Users2, Plus, Edit2, Trash2,
-  Barcode, Save, Sparkles, Lock, Unlock, CheckCircle, ChefHat, Eye
+  Barcode, Save, Sparkles, CheckCircle,
 } from 'lucide-react';
 
-// ---- Code-128 style barcode (CSS bars). No external lib — pure SVG. ---------
-function Barcode128({ value, height = 60, width = 240 }) {
-  if (!value) return null;
-  // Deterministic bar pattern per character. Same input → same bars.
-  const chars = String(value).toUpperCase().split('');
-  const widths = chars.flatMap(ch => {
-    const code = ch.charCodeAt(0);
-    return [(code % 3) + 1, (code % 2) + 1, ((code >> 2) % 3) + 1, 1];
-  });
-  const totalUnits = widths.reduce((a, b) => a + b, 0);
-  const unit = width / totalUnits;
-  let x = 0;
-  return (
-    <div className="flex flex-col items-center" data-testid="barcode-render">
-      <svg width={width} height={height} className="bg-white">
-        {widths.map((w, i) => {
-          const bar = (
-            <rect key={i} x={x} y={2} width={w * unit} height={height - 20}
-              fill={i % 2 === 0 ? '#000' : 'transparent'} />
-          );
-          x += w * unit;
-          return bar;
-        })}
-      </svg>
-      <p className="font-mono text-xs tracking-widest mt-1">{value}</p>
-    </div>
-  );
-}
 export { Barcode128 };
 
 // =============================================================================

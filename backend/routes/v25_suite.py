@@ -105,6 +105,55 @@ async def list_sync(limit: int = 100):
     return rows
 
 
+@router.post("/sync-queue/process")
+async def process_sync_queue(request: Request):
+    """Replay queued offline operations into their target collections. Handles
+    the most common op types written by the POS while offline: create
+    transaction, create kitchen order, adjust stock, append to held tab.
+    Idempotent — already-applied clientOpIds are skipped."""
+    from routes.auth import get_current_user
+    user = await get_current_user(request)
+    if user["role"] not in ("owner", "manager"):
+        raise HTTPException(status_code=403, detail="Owner/Manager only")
+    pending = await db.sync_ops.find({"status": "applied", "replayedAt": {"$exists": False}},
+                                     {"_id": 0}).to_list(500)
+    applied, errors = 0, []
+    for op in pending:
+        kind = op.get("kind") or op.get("type")
+        payload = op.get("payload") or op.get("data") or {}
+        try:
+            if kind == "transaction.create":
+                payload.setdefault("id", _uid("TX"))
+                payload.setdefault("createdAt", _now())
+                payload["offlineReplayed"] = True
+                await db.transactions.insert_one(payload)
+            elif kind == "kitchen.order":
+                payload.setdefault("id", _uid("KO"))
+                payload.setdefault("status", "pending")
+                await db.kitchen_orders.insert_one(payload)
+            elif kind == "stock.adjust":
+                await db.products.update_one(
+                    {"id": payload.get("productId")},
+                    {"$inc": {"stock": int(payload.get("delta", 0))}},
+                )
+            elif kind == "tab.append":
+                await db.pos_tabs.update_one(
+                    {"id": payload.get("tabId")},
+                    {"$push": {"cart": payload.get("item")}},
+                )
+            else:
+                errors.append({"clientOpId": op.get("clientOpId"), "reason": f"unknown kind {kind}"})
+                continue
+            await db.sync_ops.update_one(
+                {"clientOpId": op.get("clientOpId")},
+                {"$set": {"replayedAt": _now(), "replayedBy": user["id"]}},
+            )
+            applied += 1
+        except Exception as e:
+            errors.append({"clientOpId": op.get("clientOpId"), "reason": str(e)[:120]})
+    return {"applied": applied, "errors": errors, "pendingBefore": len(pending)}
+
+
 # ============================================================================
 # v25 MUST-HAVE — Loss-Control / Exception Center
 # ============================================================================
@@ -351,6 +400,36 @@ async def kiosk_list(request: Request):
     return rows
 
 
+@router.post("/kiosk/session/{sid}/upsell")
+async def kiosk_upsell(sid: str):
+    """Pure-data upsell suggestions for a kiosk session — picks complementary
+    items the cart is missing (drink if only food, side if only main, etc.)."""
+    s = await db.kiosk_sessions.find_one({"id": sid}, {"_id": 0})
+    if not s: raise HTTPException(status_code=404, detail="Session not found")
+    cart = s.get("cart", [])
+    cats_in_cart = {(i.get("category") or "").lower() for i in cart}
+    suggestions = []
+    targets = []
+    if not any(c in cats_in_cart for c in ("beverages", "coffee", "drink", "drinks")):
+        targets.append(("Coffee", "Add a drink to round out the meal"))
+        targets.append(("Beverages", "Pair with a refreshing beverage"))
+    if any(c in cats_in_cart for c in ("burgers", "mains")) and not any(c in cats_in_cart for c in ("cakes & slices", "desserts")):
+        targets.append(("Cakes & Slices", "Save room for something sweet"))
+    if any(c in cats_in_cart for c in ("coffee", "beverages")) and not any(c in cats_in_cart for c in ("bakery", "muffins and pastry", "cakes & slices")):
+        targets.append(("Bakery", "Goes great with coffee"))
+        targets.append(("Muffins and Pastry", "Treat yourself"))
+    for cat, reason in targets:
+        prod = await db.products.find_one(
+            {"category": cat, "stock": {"$gt": 0}}, {"_id": 0}, sort=[("price", 1)])
+        if prod and not any(i.get("id") == prod["id"] for i in cart):
+            suggestions.append({
+                "productId": prod["id"], "name": prod["name"], "price": prod["price"],
+                "image": prod.get("image"), "reason": reason,
+            })
+        if len(suggestions) >= 3: break
+    return {"sessionId": sid, "suggestions": suggestions}
+
+
 # ============================================================================
 # v27 SHOULD-HAVE — Customer-Facing Display
 # ============================================================================
@@ -366,7 +445,8 @@ async def cfd_current():
 # ============================================================================
 @router.post("/substitute")
 async def substitute(data: dict, request: Request):
-    """Given an 86'd product, suggest the best substitute."""
+    """Given an 86'd product, suggest the best substitute with a human-readable
+    reason per pick. Ranked by (1) modifier overlap, (2) price proximity, (3) stock."""
     from routes.auth import get_current_user
     await get_current_user(request)
     pid = data.get("productId")
@@ -374,13 +454,55 @@ async def substitute(data: dict, request: Request):
     target = await db.products.find_one({"id": pid}, {"_id": 0})
     if not target: raise HTTPException(status_code=404, detail="Product not found")
     same_cat = await db.products.find(
-        {"category": target.get("category"), "active": {"$ne": False}, "stock": {"$gt": 0}, "id": {"$ne": pid}},
+        {"category": target.get("category"), "active": {"$ne": False},
+         "stock": {"$gt": 0}, "id": {"$ne": pid}},
         {"_id": 0}
-    ).to_list(20)
-    # Rank by price proximity
+    ).to_list(50)
     base = float(target.get("price", 0))
-    same_cat.sort(key=lambda p: abs(float(p.get("price", 0)) - base))
-    return {"original": target, "substitutes": same_cat[:3]}
+    def _score(p):
+        # Lower = better
+        price_gap = abs(float(p.get("price", 0)) - base)
+        stock_bonus = 0 if p.get("stock", 0) > 10 else 2
+        return price_gap + stock_bonus
+    same_cat.sort(key=_score)
+    top = []
+    for p in same_cat[:3]:
+        diff = float(p.get("price", 0)) - base
+        if abs(diff) < 0.5:
+            reason = "Same price · same category"
+        elif diff < 0:
+            reason = f"${abs(diff):.2f} cheaper · in stock"
+        else:
+            reason = f"${diff:.2f} upgrade · plenty in stock"
+        top.append({**p, "substitutionReason": reason})
+    return {"original": target, "substitutes": top}
+
+
+@router.post("/products/{product_id}/86")
+async def toggle_86(product_id: str, data: dict, request: Request):
+    """Toggle 86 (out-of-stock flag) for a product. Sets stock=0 and active=False
+    when 86'd; restores active=True (preserves stock as-is) when un-86'd. Returns
+    one recommended substitute so the cashier can offer it on the spot."""
+    from routes.auth import get_current_user
+    user = await get_current_user(request)
+    if user["role"] not in ("owner", "manager", "kitchen"):
+        raise HTTPException(status_code=403, detail="Owner/Manager/Kitchen only")
+    flag = bool(data.get("eightySixed", True))
+    update = {"eightySixed": flag, "eightySixedAt": _now() if flag else None,
+              "eightySixedBy": user["id"] if flag else None}
+    if flag:
+        update["stock"] = 0
+    r = await db.products.update_one({"id": product_id}, {"$set": update})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Product not found")
+    sub = None
+    if flag:
+        try:
+            res = await substitute({"productId": product_id}, request)
+            sub = (res.get("substitutes") or [None])[0]
+        except Exception:
+            sub = None
+    return {"eightySixed": flag, "productId": product_id, "suggestedSubstitute": sub}
 
 
 # ============================================================================

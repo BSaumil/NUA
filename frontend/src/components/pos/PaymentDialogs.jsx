@@ -1,0 +1,154 @@
+import React from 'react';
+import { Check, ChevronLeft, Copy } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
+import { Card, CardContent } from '../ui/card';
+import { Badge } from '../ui/badge';
+
+/** QR Code payment dialog (e.g. Aussie payID, store-branded). */
+export function QrPaymentDialog({ open, onClose, qrData, total, onConfirm, loading }) {
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-sm" data-testid="qr-payment-dialog">
+        <DialogHeader><DialogTitle>Scan QR to Pay</DialogTitle></DialogHeader>
+        <div className="flex flex-col items-center py-4 space-y-4">
+          <div className="bg-white p-4 rounded-xl shadow-inner border">
+            {qrData?.qrData && <QRCodeSVG value={qrData.qrData} size={200} level="M" includeMargin />}
+          </div>
+          <div className="text-center">
+            <p className="text-3xl font-bold">${total.toFixed(2)}</p>
+            <p className="text-sm text-gray-500 mt-1">Transaction: {qrData?.transactionId}</p>
+          </div>
+          <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50">Waiting for payment...</Badge>
+          <Button className="w-full bg-green-600 hover:bg-green-700 text-white" onClick={onConfirm} disabled={loading} data-testid="qr-confirm-btn">
+            <Check size={18} className="mr-2" /> Confirm Payment Received
+          </Button>
+          <Button variant="ghost" className="w-full" onClick={onClose}><ChevronLeft size={16} className="mr-1" /> Back</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** UPI payment dialog (India). */
+export function UpiPaymentDialog({ open, onClose, qrData, total, onConfirm, loading, onCopyUpi }) {
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-sm" data-testid="upi-payment-dialog">
+        <DialogHeader><DialogTitle>UPI Payment</DialogTitle></DialogHeader>
+        <div className="flex flex-col items-center py-4 space-y-4">
+          <div className="bg-white p-4 rounded-xl shadow-inner border">
+            {qrData?.qrData && <QRCodeSVG value={qrData.qrData} size={180} level="M" includeMargin />}
+          </div>
+          <div className="text-center">
+            <p className="text-3xl font-bold">${total.toFixed(2)}</p>
+            {qrData?.merchantUpi && (
+              <div className="flex items-center gap-2 justify-center mt-2 text-sm text-gray-600 bg-gray-50 px-3 py-1.5 rounded-full">
+                <span className="font-mono">{qrData.merchantUpi}</span>
+                <button onClick={() => onCopyUpi(qrData.merchantUpi)} className="text-gray-400 hover:text-gray-700"><Copy size={14} /></button>
+              </div>
+            )}
+            <p className="text-xs text-gray-400 mt-2">Scan QR or pay to UPI ID above</p>
+          </div>
+          <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50">Awaiting UPI confirmation...</Badge>
+          <Button className="w-full bg-green-600 hover:bg-green-700 text-white" onClick={onConfirm} disabled={loading} data-testid="upi-confirm-btn">
+            <Check size={18} className="mr-2" /> Confirm Payment Received
+          </Button>
+          <Button variant="ghost" className="w-full" onClick={onClose}><ChevronLeft size={16} className="mr-1" /> Back</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Split payment dialog — supports equal/custom split & per-part method. */
+export function SplitPaymentDialog({
+  open, onClose, total, splitParts, splitMode, splitCount,
+  onSetMode, onChangeCount, onUpdatePart, onPayPart, splitRemaining, loading, activeSplitIndex,
+}) {
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto" data-testid="split-payment-dialog">
+        <DialogHeader>
+          <DialogTitle className="flex items-center justify-between">
+            <span>Split Payment — ${total.toFixed(2)}</span>
+            {splitRemaining > 0 && <Badge variant="outline" className="text-orange-600 border-orange-300">${splitRemaining.toFixed(2)} remaining</Badge>}
+            {splitRemaining === 0 && splitParts.length > 0 && <Badge className="bg-green-600 text-white">All paid</Badge>}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-gray-600">Split into</span>
+              <div className="flex items-center border rounded-lg overflow-hidden">
+                <button className="px-3 py-1.5 hover:bg-gray-100 text-sm" onClick={() => splitCount > 2 && onChangeCount(splitCount - 1)}>-</button>
+                <span className="px-3 py-1.5 font-bold text-sm border-x" data-testid="split-count">{splitCount}</span>
+                <button className="px-3 py-1.5 hover:bg-gray-100 text-sm" onClick={() => splitCount < 10 && onChangeCount(splitCount + 1)}>+</button>
+              </div>
+            </div>
+            <div className="flex gap-1 ml-auto">
+              {['equal', 'custom'].map(m => (
+                <button key={m} onClick={() => onSetMode(m)}
+                  className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${splitMode === m ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                  data-testid={`split-mode-${m}`}>
+                  {m === 'equal' ? 'Equal' : 'Custom'}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-3">
+            {splitParts.map((part, idx) => (
+              <Card key={idx} className={`border ${part.status === 'confirmed' ? 'border-green-300 bg-green-50/50' : ''}`}
+                data-testid={`split-part-${idx}`}>
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${part.status === 'confirmed' ? 'bg-green-600 text-white' : 'bg-gray-200 text-gray-700'}`}>
+                      {part.status === 'confirmed' ? <Check size={16} /> : idx + 1}
+                    </div>
+                    <div className="flex-1 space-y-2">
+                      <div className="flex gap-2">
+                        <Input placeholder="Guest name" value={part.payerName} className="h-8 text-sm"
+                          onChange={e => onUpdatePart(idx, 'payerName', e.target.value)}
+                          disabled={part.status === 'confirmed'} data-testid={`split-name-${idx}`} />
+                        {splitMode === 'custom' ? (
+                          <Input type="number" step="0.01" min="0" value={part.amount} className="h-8 text-sm w-28"
+                            onChange={e => onUpdatePart(idx, 'amount', parseFloat(e.target.value) || 0)}
+                            disabled={part.status === 'confirmed'} data-testid={`split-amount-${idx}`} />
+                        ) : (
+                          <span className="font-bold text-sm whitespace-nowrap self-center">${part.amount.toFixed(2)}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {['Card', 'Cash', 'UPI', 'QR Code'].map(method => (
+                          <button key={method} onClick={() => part.status !== 'confirmed' && onUpdatePart(idx, 'method', method)}
+                            className={`px-2 py-1 text-[11px] rounded-md font-medium transition-colors ${part.method === method ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                            disabled={part.status === 'confirmed'} data-testid={`split-method-${idx}-${method.toLowerCase().replace(' ', '-')}`}>
+                            {method}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {part.status !== 'confirmed' ? (
+                      <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white h-8 px-3"
+                        onClick={() => onPayPart(idx)} disabled={loading && activeSplitIndex === idx}
+                        data-testid={`split-pay-${idx}`}>
+                        {loading && activeSplitIndex === idx ? '...' : 'Pay'}
+                      </Button>
+                    ) : (
+                      <Badge className="bg-green-100 text-green-700 border-green-300">Paid</Badge>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+          <Button variant="ghost" className="w-full" onClick={onClose}>
+            <ChevronLeft size={16} className="mr-1" /> Back to Methods
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

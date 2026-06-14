@@ -1,0 +1,49 @@
+{
+  "summary": "Backend 10/10 PASS for iteration 27 (seed catalog idempotent, category icon/color CRUD, v25 sync-queue replay, 86 toggle + substitute, kiosk upsell, v26 gift card regression). Frontend POSTerminal refactor (extracted SwipeableCartItem/CustomerCombobox/PaymentDialogs) compiles and renders correctly — category strip shows icons+colors, fluid grid renders 60+ seeded products with sections by category (COFFEE 20 items, BAKERY, FOOD, ALCOHOL, etc.). Categories admin /categories — New Category dialog shows Preview, Name, Sort Order, Active toggle, ICON picker grid (21 lucide icons in 3×7 layout), COLOUR row (15 swatches in 2 rows), and Create button. All P2 backend features (sync-queue/process, 86 toggle with suggestedSubstitute, /substitute with substitutionReason strings, /kiosk/session/{sid}/upsell with reason+productId) work end-to-end.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/products", "issue": "Product pydantic model (backend/models/product.py:18) does not declare 'eightySixed', 'eightySixedAt', 'eightySixedBy' or 'active' fields — so the 86 flag set by POST /api/v25/products/{id}/86 is persisted in Mongo but stripped on response. UI cannot read the 86 status via the standard products list endpoint. The /api/v25/substitute and 86-toggle endpoints query Mongo directly and behave correctly, but any frontend badge/filter that relies on GET /api/products will not show 86'd items."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Login redirect", "issue": "After successful POST /api/auth/login, URL stays at /login (auth context updates but no automatic navigation to /pos). User must manually click 'POS' in BottomDock to land on the terminal. Earlier iterations redirected via useEffect — regression candidate or intentional change after refactor.", "selector": "n/a", "priority": "MEDIUM"},
+      {"component": "POSTerminal product cards", "issue": "Product cards lack `data-testid=\"product-card-{id}\"` attribute, so automated tests cannot reliably select individual products. Recommend adding data-testid to each product tile.", "selector": "card div", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Categories /categories", "issues": ["Default categories from /api/categories first-call (Beverages/Food/Bakery/Alcohol/Desserts) coexist with seeded ones (Coffee/Burgers/Mains/Cakes & Slices/Pasta) — UI shows 10 categories with overlap (e.g. Coffee + Coffee & Teas, Mains + Lunch). Recommend either replacing defaults during seed or namespacing seeded categories."]},
+      {"screen": "Categories New Category dialog", "issues": ["Dialog missing `aria-describedby` / `Description` for shadcn DialogContent — accessibility warning logged in console twice."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration27_seed_v25_p2.py",
+    "/app/test_reports/pytest/pytest_iteration27.xml"
+  ],
+  "action_items": [
+    "Add eightySixed/eightySixedAt/active fields to Product pydantic model (backend/models/product.py) so 86 status is visible via GET /api/products. Otherwise the POS UI cannot show 86'd badges or auto-hide 86'd items.",
+    "Fix login redirect — after POST /api/auth/login success, navigate to /pos (or last-visited route) via React Router. Currently URL stays on /login though session is established.",
+    "Add `data-testid=\"product-card-{id}\"` to POSTerminal product tiles for testability.",
+    "Add `aria-describedby` / `<DialogDescription>` to Categories New Category dialog to silence shadcn a11y warning.",
+    "Optional: dedupe overlapping default vs seeded categories (Coffee vs Coffee & Teas, Mains vs Lunch) — consider removing the default-seed of /api/categories now that /seed/catalog provides canonical ones."
+  ],
+  "critical_code_review_comments": [
+    "POSTerminal.jsx still > 700 lines even after extracting 3 sub-components — consider further splitting (Discount panel, Promotions banner, Voice ordering) into their own files.",
+    "v25_suite.py:1270 lines — exceeds 700-line threshold. Split per concern (sync-queue, 86/substitute, kiosk, ash-pro, fraud, etc.) into routes/v25/ subdir.",
+    "items_system.py:422 lines — the seed_catalog endpoint (lines 67-256) hard-codes 60 products with inline image URLs. Several Unsplash URLs in SEED_PRODUCTS may 404 over time (8 image 404s observed in browser console during POS load). Consider hosting images locally or using a CDN with explicit asset IDs.",
+    "v25_suite.py compare_suppliers signature `item: str = '', request: Request = None` then `if request is None: raise HTTPException(400)` — FastAPI cannot serialise Request as a default; this only works because FastAPI dependency-injects Request when it sees the annotation. Move `request: Request` to be a non-default first parameter for clarity.",
+    "items_system.py seed_catalog uses `find_one({\"name\": p[\"name\"], \"category\": p[\"category\"]})` for idempotency but does not return list of skipped IDs — fine for now but logging would help debugging duplicates.",
+    "/app/backend/models/product.py Product model is the source-of-truth response shape — all new fields (eightySixed, active, recipeLinked, supplier) added elsewhere are silently dropped. Either expand the model or switch the GET endpoint to dict-based projection."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration27_seed_v25_p2.py (NEW — 10 pytest cases, all passing)"
+  ],
+  "success_rate": {"backend": "100% (10/10)", "frontend": "85% — POS renders correctly with extracted components + seed catalog + fluid grid + category icons; Categories dialog complete with 21 icons + 15 colours; login auto-redirect broken (manual nav works)"},
+  "test_credentials_used": ["owner@nuva.com / NuvaOwner2026!"],
+  "seed_data_creation": "Ran POST /api/seed/catalog twice (idempotent verified — second run added 0). 5 seed categories + 60 products + 10 modifiers persisted. Created/deleted 1 TEST_Cat_xxx category for icon/color CRUD test. Pushed + replayed 2 sync ops (1 transaction.create + 1 stock.adjust on a Coffee product). Created 1 TEST_GIFTVCH_xxx voucher (kind=gift, fixed=25).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All P2 backend endpoints (sync-queue/process, /products/{id}/86 toggle, /substitute, /kiosk/session/{sid}/upsell) work and return required fields (suggestedSubstitute, substitutionReason, reason+productId). Seed is idempotent and seeded 60 products. Two real issues need fixing: (1) Product model strips eightySixed field — GET /api/products will not show 86 status though POST /v25/products/{id}/86 correctly persists it; (2) Post-login routing doesn't navigate to /pos automatically — user lands on /login with session active and must click POS in BottomDock. Both are reproducible. POSTerminal refactor itself is solid — extracted components import correctly (`../ui/card`, `../ui/button`) after the initial compile errors were fixed.",
+  "rca of the issue": "(1) 86-flag invisibility: Product pydantic model in /app/backend/models/product.py lines 18-35 does not include eightySixed/active fields. `@router.get('/products', response_model=Product)` in routes/products.py:12 enforces this schema, so FastAPI strips unknown fields from the Mongo doc on response. Fix: add `eightySixed: bool = False`, `eightySixedAt: Optional[str] = None`, `active: bool = True` to Product model. (2) Login redirect: After login form submission the auth state updates but no `navigate('/pos')` (or useEffect-redirect on currentUser change) fires in the Login page or App router. Likely missing from /app/frontend/src/pages/Login.jsx after recent refactor. Add `useEffect(() => { if (user) navigate('/pos') }, [user])`."
+}
