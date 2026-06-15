@@ -315,7 +315,7 @@ export default function AIPantry() {
                       <div key={i} className="flex items-start gap-3 p-3 bg-amber-50 rounded-lg">
                         <TrendingDown size={16} className="text-amber-600 mt-0.5 flex-shrink-0" />
                         <div>
-                          <p className="font-medium text-sm">{w.item} <Badge className={URGENCY_COLORS[w.risk]}>{w.risk} risk</Badge></p>
+                          <div className="flex items-center gap-2 text-sm font-medium">{w.item} <Badge className={URGENCY_COLORS[w.risk]}>{w.risk} risk</Badge></div>
                           <p className="text-xs text-gray-600 mt-1">{w.recommendation}</p>
                         </div>
                       </div>

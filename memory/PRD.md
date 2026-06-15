@@ -206,6 +206,36 @@ Kitchen: kitchen@nuva.com / Staff2026!
 
 ---
 
+## v26.3 — Iteration 29 (Feb 2026): Online Ordering + AI ETA + Invoice OCR + Item Insights
+
+### Backend additions
+- **`/api/online/*`** new module (`routes/online_orders.py`) — public storefront + owner inbox + AI ETA engine:
+  - `GET /online/categories` (public) — channel-filtered active categories with prepTime + icon + color.
+  - `GET /online/products` (public) — in-stock, not-86'd, online-channel-enabled catalog.
+  - `POST /online/orders` (public) — places an order; computes deterministic ETA = max(category prepTime per line, +30% per extra unit of same cat) × surge(load-based, ≤1.6×) + queuePenaltyMins + deliveryOffsetMins. Wraps the ETA in a friendly LLM-generated natural-language message (GPT-5.2; deterministic fallback if no key).
+  - `GET /online/orders/track/{code}` (public) — exposes only customer-safe fields (no phone/email/address leak).
+  - `GET /online/orders` · `GET /online/orders/{id}` · `PATCH /online/orders/{id}/status` · `POST /online/orders/{id}/eta` (auth) — owner pipeline with channel-aware notification messages.
+  - `GET /online/kitchen/load` (auth) — live snapshot of {pending, accepted, preparing, queuePenaltyMins}.
+- **Categories** gain `prepTime` + `channels` (`dine-in` / `pickup` / `delivery`).
+- **`POST /api/categories/cleanup-legacy`** (owner) — removes any non-canonical category that has zero products attached; safe / idempotent.
+- **`POST /api/ai-pantry/parse-invoice`** (owner/manager) — accepts `text` or `imageBase64`. GPT-5.2 extracts supplier, invoice#, date, line items. Fuzzy-matches each line to existing products (exact lower-case → token overlap fallback). Computes suggestedPrice that preserves the current margin %.
+- **`POST /api/ai-pantry/apply-invoice/{id}`** (owner/manager) — applies selected price/cost updates; returns audit trail.
+- **`GET /api/products/insights`** — per-product `weeklyUnitsSold`, `weeklyRevenue`, `marginAmount`, `marginPct` (last-7-day window).
+- **Product pydantic model** unchanged but `eightySixed`/`active` now visible in GET responses.
+
+### Frontend additions
+- **`/online-orders`** (owner) — pipeline board (5 stages: pending/accepted/preparing/ready/out_for_delivery/completed) with kitchen-load chip, click-through order details modal showing AI ETA breakdown (base / surge / queue penalty), step-by-step timeline, and stage-advance buttons (channel-aware: `Dispatch driver` for delivery, `Mark Ready` etc.). Polls every 8s.
+- **`/order-online`** (public storefront, no auth) — channel picker (Pickup / Delivery / Dine-in), category strip with prepTime hint, fluid product grid, sticky cart with customer details form, navigates to tracking page on submit.
+- **`/track/:code`** (public) — large AI ETA tile, ordered step-by-step timeline (channel-aware), customer notification feed. Polls every 12s.
+- **AI Pantry — Invoice Upload tab** — file dropper (accepts image / PDF, FileReader → base64) + paste-text textarea, parsed invoice table with apply-cost / apply-price checkboxes per row, suggestedPrice shown in theme accent, one-click apply.
+- **Items dashboard (`/items`)** — product cards now show: (a) margin chip in tier colours (green ≥60% / amber ≥40% / red <40%), (b) weekly-sales tile in `theme.primary` accent showing units sold + revenue past 7 days, (c) 86 corner badge preserved.
+- **Categories admin** — prepTime input + 3 channel toggle pills, "Remove demo categories" cleanup button.
+
+### Test status — Iteration 29
+- **Backend 11/11 PASS** — full lifecycle, PII privacy on tracking endpoint, AI ETA accuracy, invoice OCR (LLM parsed "INVOICE 12345 / 2x Espresso / 5x Long Black" → matched + applied + audit), insights endpoint.
+- **Frontend E2E PASS** (Playwright) — public storefront → order placement → auto-navigate to /track → AI ETA + timeline rendering; owner pipeline + kitchen load; categories with prep+channels; AI Pantry invoice tab; product cards with margin/weekly badges.
+- `retest_needed=false`.
+
 ## v26.2 — Iteration 27-28 (Feb 2026): Fluid POS, Category Icons, Seed Catalog, P2 Refinement, Refactor
 
 ### Backend additions
