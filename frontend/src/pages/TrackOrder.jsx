@@ -1,0 +1,144 @@
+import React, { useEffect, useState, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Clock, ChefHat, Bike, CheckCircle, Sparkles, RefreshCw, Bell, Package } from 'lucide-react';
+import { Card, CardContent } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { onlineAPI } from '../services/api';
+
+const STEPS = [
+  { key: 'pending', label: 'Order received', icon: Bell, color: '#f59e0b' },
+  { key: 'accepted', label: 'Accepted', icon: CheckCircle, color: '#3b82f6' },
+  { key: 'preparing', label: 'Preparing', icon: ChefHat, color: '#8b5cf6' },
+  { key: 'ready', label: 'Ready', icon: Package, color: '#10b981' },
+  { key: 'out_for_delivery', label: 'Out for delivery', icon: Bike, color: '#ec4899' },
+  { key: 'completed', label: 'Delivered / Picked up', icon: CheckCircle, color: '#10b981' },
+];
+
+const stepIdx = (status) => STEPS.findIndex(s => s.key === status);
+
+export default function TrackOrder() {
+  const { code: codeFromUrl } = useParams();
+  const navigate = useNavigate();
+  const [code, setCode] = useState(codeFromUrl || '');
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+
+  const fetchData = useCallback(async (c) => {
+    if (!c) return;
+    setLoading(true); setErr('');
+    try {
+      const r = await onlineAPI.track(c.toUpperCase());
+      setData(r.data);
+    } catch (e) { setErr(e?.response?.data?.detail || 'Not found'); setData(null); }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { if (codeFromUrl) fetchData(codeFromUrl); }, [codeFromUrl, fetchData]);
+  useEffect(() => {
+    if (!data || ['completed', 'cancelled'].includes(data.status)) return;
+    const t = setInterval(() => fetchData(data.id), 12000);
+    return () => clearInterval(t);
+  }, [data, fetchData]);
+
+  // For delivery the flow includes out_for_delivery; for pickup/dine-in it skips that.
+  const stepsForChannel = (() => {
+    if (!data) return STEPS;
+    if (data.channel === 'delivery') return STEPS;
+    return STEPS.filter(s => s.key !== 'out_for_delivery');
+  })();
+
+  const current = data ? stepIdx(data.status) : -1;
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100" data-testid="track-order-page">
+      <div className="max-w-2xl mx-auto p-4 sm:p-6 space-y-5">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">Track your order</h1>
+          <Button variant="ghost" size="sm" onClick={() => navigate('/order-online')}>← Back to menu</Button>
+        </div>
+
+        {!codeFromUrl && (
+          <Card><CardContent className="p-4 flex gap-2">
+            <Input placeholder="Enter order code (ORD-XXXXXXXX)" value={code} onChange={e => setCode(e.target.value)} data-testid="track-code-input" />
+            <Button onClick={() => fetchData(code)} disabled={!code} data-testid="track-lookup-btn">Lookup</Button>
+          </CardContent></Card>
+        )}
+
+        {err && <p className="text-sm text-center text-red-600">{err}</p>}
+
+        {data && (
+          <>
+            <Card>
+              <CardContent className="p-5 space-y-3" data-testid="track-order-card">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-mono font-bold text-xs text-gray-400">{data.id}</p>
+                    <p className="text-xl font-bold mt-0.5">Hi {data.customerName}!</p>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => fetchData(data.id)} disabled={loading}><RefreshCw size={12} className={loading ? 'animate-spin' : ''} /></Button>
+                </div>
+
+                <div className="bg-gradient-to-br from-purple-50 to-indigo-50 border border-purple-200 rounded-xl p-4">
+                  <div className="flex items-center gap-2 text-xs uppercase font-bold tracking-wider text-purple-700">
+                    <Sparkles size={12} /> AI ETA
+                  </div>
+                  <p className="text-5xl font-bold text-purple-900 mt-1" data-testid="track-eta">{data.eta?.etaMinutes ?? '—'} <span className="text-xl text-purple-500">min</span></p>
+                  {data.etaMessage && <p className="text-sm text-gray-700 mt-1">{data.etaMessage}</p>}
+                </div>
+
+                <ol className="space-y-3" data-testid="status-timeline">
+                  {stepsForChannel.map((s, idx) => {
+                    const Icon = s.icon;
+                    const isCompleted = current >= idx;
+                    const isActive = current === idx;
+                    return (
+                      <li key={s.key} className="flex items-start gap-3" data-testid={`track-step-${s.key}`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition ${isCompleted ? 'text-white' : 'bg-gray-100 text-gray-400'}`}
+                          style={isCompleted ? { background: s.color } : {}}>
+                          <Icon size={14} />
+                        </div>
+                        <div className="flex-1">
+                          <p className={`text-sm font-medium ${isActive ? 'text-gray-900' : (isCompleted ? 'text-gray-700' : 'text-gray-400')}`}>{s.label}</p>
+                          {isActive && <p className="text-xs text-gray-500 mt-0.5">In progress…</p>}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-4">
+                <p className="text-xs uppercase font-bold tracking-wider text-gray-500 mb-2">Your items</p>
+                {data.items.map((it, i) => (
+                  <div key={i} className="flex justify-between text-sm py-1.5 border-b last:border-0">
+                    <span>{it.quantity}× {it.name}</span>
+                    <span className="font-mono">${(it.price * it.quantity).toFixed(2)}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between text-sm pt-2 mt-1 font-bold border-t"><span>Total</span><span>${data.total.toFixed(2)}</span></div>
+              </CardContent>
+            </Card>
+
+            {data.notifications?.length > 0 && (
+              <Card>
+                <CardContent className="p-4 space-y-2">
+                  <p className="text-xs uppercase font-bold tracking-wider text-gray-500">Messages from the restaurant</p>
+                  {data.notifications.slice().reverse().map((n, i) => (
+                    <div key={i} className="text-sm bg-amber-50 border-l-4 border-amber-400 p-2 rounded">
+                      <p>{n.message}</p>
+                      <p className="text-[10px] text-gray-400 mt-0.5">{new Date(n.at).toLocaleString()}</p>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

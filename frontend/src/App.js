@@ -80,6 +80,9 @@ import {
   KioskMode, CFD, ChurnRisk, RecipeCosting, DynamicPricing, Subscriptions
 } from './pages/V25Pages';
 import { VoucherManager, EventsManager, StaffAvailability, GiftCardSale, MarketingEmails } from './pages/V26Pages';
+import OnlineOrders from './pages/OnlineOrders';
+import OrderOnline from './pages/OrderOnline';
+import TrackOrder from './pages/TrackOrder';
 import AskNuaPanel, { AskNuaButton } from './components/AskNua';
 import { useState as useGlobalState } from 'react';
 
@@ -196,6 +199,7 @@ function ProtectedRoutes() {
         <Route path="/staff-availability" element={<StaffAvailability />} />
         <Route path="/gift-card-sale" element={<GiftCardSale />} />
         <Route path="/marketing-emails" element={<MarketingEmails />} />
+        <Route path="/online-orders" element={<OnlineOrders />} />
         <Route path="/license" element={<LicensePage />} />
       </Routes>
     </StaffLayout>
@@ -216,6 +220,9 @@ function App() {
                 <Route path="/table/:tableId" element={<TableOrder />} />
                 <Route path="/join" element={<MemberPortal />} />
                 <Route path="/payment-success" element={<PaymentSuccess />} />
+                <Route path="/order-online" element={<OrderOnline />} />
+                <Route path="/track" element={<TrackOrder />} />
+                <Route path="/track/:code" element={<TrackOrder />} />
                 {/* Staff routes — auth required */}
                 <Route path="/*" element={<ProtectedRoutes />} />
               </Routes>

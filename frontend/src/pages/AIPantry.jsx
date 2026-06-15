@@ -1,12 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  Brain, ShoppingCart, AlertTriangle, TrendingDown, Leaf, RefreshCw, Clock, Package
+  Brain, ShoppingCart, AlertTriangle, TrendingDown, Leaf, RefreshCw, Clock, Package,
+  Upload, Receipt, CheckCircle2, FileText
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
+import { Textarea } from '../components/ui/textarea';
 import { useTheme } from '../contexts/ThemeContext';
 import { toast } from 'sonner';
+import { aiPantryAPI } from '../services/api';
 import axios from 'axios';
 
 const API = process.env.REACT_APP_BACKEND_URL;
@@ -21,6 +24,13 @@ export default function AIPantry() {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState('generate');
+  // Invoice OCR state
+  const [invoiceText, setInvoiceText] = useState('');
+  const [parsing, setParsing] = useState(false);
+  const [parsedInvoice, setParsedInvoice] = useState(null);
+  const [selections, setSelections] = useState({});  // {productId: {applyPrice, applyCost, priceOverride}}
+  const [applying, setApplying] = useState(false);
+  const fileRef = useRef(null);
 
   useEffect(() => { fetchHistory(); }, []);
 
@@ -45,6 +55,53 @@ export default function AIPantry() {
     setLoading(false);
   };
 
+  const handleFileUpload = async (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = reader.result.toString().split(',')[1];
+      await parseInvoice({ imageBase64: base64 });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const parseInvoice = async (payload) => {
+    setParsing(true); setParsedInvoice(null); setSelections({});
+    try {
+      const r = await aiPantryAPI.parseInvoice(payload);
+      setParsedInvoice(r.data);
+      // Pre-select every matched line for both price + cost updates
+      const defaultSel = {};
+      (r.data.matches || []).forEach(m => {
+        if (m.matchedProductId) {
+          defaultSel[m.matchedProductId] = { applyCost: true, applyPrice: !!m.suggestedPrice, priceOverride: m.suggestedPrice };
+        }
+      });
+      setSelections(defaultSel);
+      toast.success(`Parsed ${r.data.matches?.length || 0} lines from invoice`);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not parse invoice');
+    } finally { setParsing(false); }
+  };
+
+  const toggleSel = (pid, key, value) => setSelections(s => ({
+    ...s, [pid]: { ...(s[pid] || { applyCost: false, applyPrice: false }), [key]: value }
+  }));
+
+  const applyInvoice = async () => {
+    if (!parsedInvoice) return;
+    setApplying(true);
+    try {
+      const sel = Object.entries(selections)
+        .filter(([_, s]) => s.applyPrice || s.applyCost)
+        .map(([pid, s]) => ({ matchedProductId: pid, ...s }));
+      const r = await aiPantryAPI.applyInvoice(parsedInvoice.id, sel);
+      toast.success(`Updated ${r.data.updated} products`);
+      setParsedInvoice(null); setInvoiceText('');
+    } catch { toast.error('Apply failed'); }
+    finally { setApplying(false); }
+  };
+
   const data = pantryData?.data || {};
   const orderingList = data.orderingList || [];
   const wastageInsights = data.wastageInsights || [];
@@ -65,13 +122,120 @@ export default function AIPantry() {
 
       {/* Tabs */}
       <div className="flex gap-2 mb-6">
-        {['generate', 'history'].map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-2 rounded-full text-sm font-medium ${tab === t ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}>
-            {t === 'generate' ? 'Current List' : `History (${history.length})`}
+        {[
+          { k: 'generate', label: 'Current List' },
+          { k: 'history', label: `History (${history.length})` },
+          { k: 'invoice', label: 'Invoice Upload' },
+        ].map(t => (
+          <button key={t.k} onClick={() => setTab(t.k)}
+            className={`px-4 py-2 rounded-full text-sm font-medium ${tab === t.k ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}
+            data-testid={`pantry-tab-${t.k}`}>
+            {t.label}
           </button>
         ))}
       </div>
+
+      {tab === 'invoice' && (
+        <div className="space-y-4" data-testid="invoice-tab">
+          <Card><CardContent className="p-5 space-y-3">
+            <h2 className="font-bold text-lg flex items-center gap-2"><Receipt size={18} /> Upload supplier invoice</h2>
+            <p className="text-sm text-gray-600">Upload an invoice photo / PDF or paste the text. AI extracts each line item, matches it to your products, and proposes price + cost updates so you don't have to manually re-enter anything.</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center gap-2 hover:border-purple-400 transition cursor-pointer" onClick={() => fileRef.current?.click()} data-testid="invoice-drop-zone">
+                <Upload size={28} className="text-purple-500" />
+                <p className="text-sm font-medium">Click to upload invoice image / PDF</p>
+                <p className="text-xs text-gray-400">JPG, PNG, PDF · max 5MB</p>
+                <input ref={fileRef} type="file" accept="image/*,application/pdf" className="hidden"
+                  onChange={e => handleFileUpload(e.target.files?.[0])} data-testid="invoice-file-input" />
+              </div>
+              <div>
+                <label className="text-xs uppercase font-bold text-gray-500">Or paste invoice text</label>
+                <Textarea rows={6} value={invoiceText} onChange={e => setInvoiceText(e.target.value)}
+                  placeholder="Paste OCR'd or copied invoice text here…" data-testid="invoice-text" />
+                <Button onClick={() => parseInvoice({ text: invoiceText })} disabled={!invoiceText || parsing}
+                  className="mt-2 w-full" style={{ background: theme.primary }} data-testid="parse-invoice-text-btn">
+                  {parsing ? <><RefreshCw size={14} className="mr-1.5 animate-spin" /> Parsing…</> : <><Brain size={14} className="mr-1.5" /> Parse with AI</>}
+                </Button>
+              </div>
+            </div>
+          </CardContent></Card>
+
+          {parsing && (
+            <Card><CardContent className="p-8 text-center">
+              <RefreshCw size={32} className="mx-auto animate-spin text-purple-500" />
+              <p className="mt-3 text-sm text-gray-600">AI is reading the invoice…</p>
+            </CardContent></Card>
+          )}
+
+          {parsedInvoice && (
+            <Card><CardContent className="p-5 space-y-3" data-testid="parsed-invoice-card">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs uppercase font-bold text-gray-500 tracking-wider">Parsed invoice</p>
+                  <h3 className="font-bold">{parsedInvoice.parsed?.supplier || 'Unknown supplier'} · #{parsedInvoice.parsed?.invoiceNumber || '—'}</h3>
+                  <p className="text-xs text-gray-500">{parsedInvoice.parsed?.invoiceDate || ''} · Total ${parsedInvoice.parsed?.total ?? '?'}</p>
+                </div>
+                <Button onClick={applyInvoice} disabled={applying} style={{ background: theme.primary }} data-testid="apply-invoice-btn">
+                  {applying ? 'Applying…' : <><CheckCircle2 size={14} className="mr-1.5" /> Apply selected updates</>}
+                </Button>
+              </div>
+
+              <div className="overflow-x-auto" data-testid="parsed-invoice-table">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+                    <tr>
+                      <th className="text-left p-2">Invoice line</th>
+                      <th className="text-left p-2">Matched product</th>
+                      <th className="text-right p-2">Current cost</th>
+                      <th className="text-right p-2">New cost</th>
+                      <th className="text-right p-2">Current price</th>
+                      <th className="text-right p-2">Suggested price</th>
+                      <th className="text-center p-2">Apply</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {parsedInvoice.matches?.map((m, i) => {
+                      const sel = selections[m.matchedProductId] || {};
+                      return (
+                        <tr key={i} className="border-t" data-testid={`invoice-row-${i}`}>
+                          <td className="p-2">
+                            <p className="font-medium">{m.lineItem?.name}</p>
+                            <p className="text-[10px] text-gray-400">{m.lineItem?.quantity} {m.lineItem?.unit}</p>
+                          </td>
+                          <td className="p-2">{m.matchedProductName || <span className="text-red-500 text-xs">No match</span>}</td>
+                          <td className="p-2 text-right">${(m.currentCost || 0).toFixed(2)}</td>
+                          <td className={`p-2 text-right font-bold ${m.costDelta > 0 ? 'text-red-600' : m.costDelta < 0 ? 'text-green-600' : ''}`}>
+                            ${(m.newCost || 0).toFixed(2)}
+                            {m.costDelta !== null && m.costDelta !== 0 && (
+                              <span className="block text-[9px] font-normal">{m.costDelta > 0 ? '+' : ''}{m.costDelta.toFixed(2)}</span>
+                            )}
+                          </td>
+                          <td className="p-2 text-right">{m.currentPrice ? `$${m.currentPrice.toFixed(2)}` : '—'}</td>
+                          <td className="p-2 text-right text-purple-700 font-bold">{m.suggestedPrice ? `$${m.suggestedPrice.toFixed(2)}` : '—'}</td>
+                          <td className="p-2">
+                            {m.matchedProductId && (
+                              <div className="flex flex-col items-center gap-1 text-[10px]">
+                                <label className="flex items-center gap-1">
+                                  <input type="checkbox" checked={!!sel.applyCost} onChange={e => toggleSel(m.matchedProductId, 'applyCost', e.target.checked)} data-testid={`apply-cost-${i}`} />
+                                  Cost
+                                </label>
+                                <label className="flex items-center gap-1">
+                                  <input type="checkbox" checked={!!sel.applyPrice} onChange={e => toggleSel(m.matchedProductId, 'applyPrice', e.target.checked)} data-testid={`apply-price-${i}`} />
+                                  Price
+                                </label>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent></Card>
+          )}
+        </div>
+      )}
 
       {tab === 'generate' && (
         <>

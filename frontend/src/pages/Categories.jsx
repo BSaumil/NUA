@@ -33,7 +33,12 @@ const COLOR_SWATCHES = [
   '#6366f1', '#14b8a6', '#a855f7', '#84cc16', '#475569',
 ];
 
-const BLANK = { name: '', sortOrder: 0, active: true, icon: 'Tag', color: '#6366f1' };
+const BLANK = { name: '', sortOrder: 0, active: true, icon: 'Tag', color: '#6366f1', prepTime: 8, channels: ['dine-in', 'pickup', 'delivery'] };
+const CHANNELS = [
+  { key: 'dine-in', label: 'Dine-in' },
+  { key: 'pickup', label: 'Pickup' },
+  { key: 'delivery', label: 'Delivery' },
+];
 
 export default function Categories() {
   const { theme } = useTheme();
@@ -41,6 +46,7 @@ export default function Categories() {
   const [showDialog, setShowDialog] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(BLANK);
+  const [cleaning, setCleaning] = useState(false);
 
   useEffect(() => { fetchData(); }, []);
   const fetchData = async () => { try { const r = await itemsSystemAPI.getCategories(); setCategories(r.data); } catch {} };
@@ -48,7 +54,12 @@ export default function Categories() {
   const openAdd = () => { setEditing(null); setForm({ ...BLANK, sortOrder: categories.length }); setShowDialog(true); };
   const openEdit = (c) => {
     setEditing(c);
-    setForm({ name: c.name, sortOrder: c.sortOrder, active: c.active, icon: c.icon || 'Tag', color: c.color || '#6366f1' });
+    setForm({
+      name: c.name, sortOrder: c.sortOrder, active: c.active,
+      icon: c.icon || 'Tag', color: c.color || '#6366f1',
+      prepTime: c.prepTime ?? 8,
+      channels: c.channels || ['dine-in', 'pickup', 'delivery'],
+    });
     setShowDialog(true);
   };
 
@@ -66,6 +77,25 @@ export default function Categories() {
     try { await itemsSystemAPI.deleteCategory(id); toast.success('Deleted'); fetchData(); } catch {}
   };
 
+  const handleCleanup = async () => {
+    if (!window.confirm('Remove demo categories (Beverages/Food/Bakery/Alcohol/Desserts) that have no products?')) return;
+    setCleaning(true);
+    try {
+      const r = await itemsSystemAPI.cleanupLegacyCategories();
+      toast.success(`Removed ${r.data.removed.length} demo categor${r.data.removed.length === 1 ? 'y' : 'ies'}`);
+      if (r.data.keptWithProducts?.length) {
+        toast.message(`Kept ${r.data.keptWithProducts.length} (still has products)`);
+      }
+      fetchData();
+    } catch (e) { toast.error(e?.response?.data?.detail || 'Failed'); }
+    finally { setCleaning(false); }
+  };
+
+  const toggleChannel = (key) => setForm(f => ({
+    ...f,
+    channels: f.channels.includes(key) ? f.channels.filter(c => c !== key) : [...f.channels, key],
+  }));
+
   return (
     <div className="space-y-6" data-testid="categories-page">
       <div className="flex items-center justify-between">
@@ -75,6 +105,12 @@ export default function Categories() {
         </div>
         <Button style={{ backgroundColor: theme.primary }} onClick={openAdd} data-testid="add-category-btn">
           <Plus size={16} className="mr-1" /> New Category
+        </Button>
+      </div>
+
+      <div className="flex justify-end -mt-2">
+        <Button variant="outline" size="sm" onClick={handleCleanup} disabled={cleaning} data-testid="cleanup-legacy-btn">
+          {cleaning ? 'Cleaning…' : 'Remove demo categories'}
         </Button>
       </div>
 
@@ -90,7 +126,14 @@ export default function Categories() {
                 </div>
                 <div>
                   <h3 className="font-medium">{cat.name}</h3>
-                  <p className="text-xs text-gray-400">Sort {cat.sortOrder} · {cat.icon || 'Tag'}</p>
+                  <p className="text-xs text-gray-400">Sort {cat.sortOrder} · {cat.icon || 'Tag'} · ⏱ {cat.prepTime ?? '—'} min</p>
+                  {(cat.channels && cat.channels.length > 0) && (
+                    <div className="flex gap-1 mt-1">
+                      {cat.channels.map(ch => (
+                        <span key={ch} className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{ch}</span>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <Badge className={cat.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}>
                   {cat.active ? 'Active' : 'Inactive'}
@@ -166,6 +209,31 @@ export default function Categories() {
                 <input type="color" value={form.color}
                   onChange={e => setForm({ ...form, color: e.target.value })}
                   className="w-8 h-8 rounded-full border-0 cursor-pointer" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs uppercase text-gray-500 font-bold">Prep time (min)</label>
+                <Input type="number" min="0" max="120" value={form.prepTime}
+                  onChange={e => setForm({ ...form, prepTime: parseInt(e.target.value) || 0 })}
+                  data-testid="cat-prep-time" />
+                <p className="text-[10px] text-gray-400 mt-1">Used for ETA calc on online orders</p>
+              </div>
+              <div>
+                <label className="text-xs uppercase text-gray-500 font-bold">Channels</label>
+                <div className="flex flex-wrap gap-1 mt-1" data-testid="cat-channels-row">
+                  {CHANNELS.map(ch => {
+                    const on = form.channels.includes(ch.key);
+                    return (
+                      <button key={ch.key} type="button" onClick={() => toggleChannel(ch.key)}
+                        className={`px-2 py-1 text-xs rounded-full transition ${on ? 'text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                        style={on ? { background: form.color } : {}}
+                        data-testid={`cat-channel-${ch.key}`}>
+                        {ch.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
             <Button className="w-full" style={{ backgroundColor: theme.primary }} onClick={handleSave} data-testid="save-cat-btn">

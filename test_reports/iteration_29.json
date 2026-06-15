@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 29 — Online ordering + AI ETA + Invoice OCR + Insights. Backend 11/11 pytest PASS (100%) covering /api/online/categories (channel-filtered + prepTime), POST /api/online/orders (ETA computed, AI message returned, validation on delivery address), public /api/online/orders/track/{code} (no PII leak — customer phone/email/address NOT exposed), PATCH /status full lifecycle (pending→accepted→preparing→ready→completed) with channel-aware notifications, POST /eta recompute, GET /kitchen/load, POST /categories/cleanup-legacy (preserves all 5 canonical: Coffee/Burgers/Mains/Cakes & Slices/Pasta + removes orphan TEST_LegacyOrphan), POST /categories with default prepTime=8 + channels=[dine-in,pickup,delivery] and explicit values, POST /ai-pantry/parse-invoice + /apply-invoice (LLM gpt-5.2 parsed 'INVOICE 12345 / 2x Espresso / 5x Long Black' → matched Espresso → applied cost successfully → audit returned), GET /products/insights (66 rows with productId, weeklyUnitsSold, weeklyRevenue, marginAmount, marginPct). Frontend manual E2E via Playwright passes: /order-online (58 products), add-to-cart, place pickup order as TEST_UIBuyer, auto-nav to /track/ORD-XXXXXXXX, ETA '5 min' + AI message ('Your pickup Long Black will be ready in about 5 minutes due to fresh prep time.') + timeline (Order received → Accepted → Preparing → Ready → Delivered/Picked up) + 'MESSAGES FROM THE RESTAURANT' notification block rendered. /online-orders owner inbox shows 5-stage pipeline (data-testid=stage-pending..completed) with kitchen-load badge. /categories shows 5 canonical cards with prep time (4/12/18/2/14 min) + DINE-IN/PICKUP/DELIVERY pills + 'Remove demo categories' cleanup button + 'New Category' button (NOTE: cleanup button is labeled 'Remove demo categories' not 'cleanup-legacy' — verified it maps to POST /api/categories/cleanup-legacy via api.js). /ai-pantry has Invoice Upload tab + paste textarea. /products shows 66 margin chips (e.g., '100% MARGIN', '76% MARGIN', '65% MARGIN' on the 86'd Double Espresso) + 'Past 7 days · 0 sold · $0' tiles + 86 corner badge still working (regression OK).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/ai-pantry", "issues": ["React hydration warning: '<div> cannot be a descendant of <p>' — a Badge (renders as div) is nested inside a <p> element (likely in wastage insights / ordering list panel). Cosmetic/a11y only — no functional impact. Replace the wrapping <p> with <div> or render Badge outside the paragraph."]},
+      {"screen": "Global", "issues": ["8 repeated 404 console errors loading static resources on every page load — likely a missing favicon/image src='' (the console explicitly logged: 'An empty string (\"\") was passed to the src attribute.'). Cosmetic but fills the console log."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration29_online_orders.py",
+    "/app/test_reports/pytest/pytest_iteration29.xml"
+  ],
+  "action_items": [
+    "(Optional / cosmetic) Fix the <Badge> inside <p> hydration warning on /ai-pantry — replace the wrapping <p> with a <div> (or use Badge as a sibling, not nested in paragraph).",
+    "(Optional / cosmetic) Fix the empty-string src='' image on at least one page that is producing the 8 repeated 404s — likely an <img src={product.imageUrl || ''} /> with no fallback. Use src={url || undefined} or conditionally render."
+  ],
+  "critical_code_review_comments": [
+    "online_orders.py: PATCH /status writes back almost the entire order doc via 'update_fields = {k: v for k, v in order.items() if k != \"id\"}' — this is functional but inefficient and risks clobbering concurrent fields. Prefer targeted $set + $push on events/notifications arrays.",
+    "online_orders.py: _ai_eta_explanation() awaits an LLM call inside the synchronous request path of POST /orders. On a slow LLM response this directly impacts customer-facing storefront latency. Consider sending eta with a deterministic fallback first and enriching the LLM message asynchronously (e.g., background task) — or short LLM timeout (~3s) with hard fallback.",
+    "ai_pantry.py: parse_invoice does fuzzy matching by token overlap with score>=1, which can mis-match generic words (e.g., 'long' matches anything with 'long'). Add a minimum length filter on tokens already in place (>2) plus a max-match-distance guard, or display a confidence score in the UI.",
+    "ai_pantry.py:300 uses 'datetime.now()' (naive local time) for week_ago whereas the rest of the codebase stores ISO with timezone. Mixing naive + aware could under-count transactions whose createdAt is timezone-prefixed. Use datetime.now(timezone.utc) + isoformat() consistently.",
+    "online_orders.py: track_order endpoint correctly strips PII (verified — phone/email/address not exposed) but the 'driver' field is exposed — confirm this is intentional (driver name is shown to customer in test, which is desired for delivery UX).",
+    "online_orders.py: _STATUS_ORDER list is defined but lifecycle transitions are NOT validated server-side (e.g., a kitchen user could jump from 'pending' directly to 'completed'). Add a transition guard if business rules require strict ordering."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration29_online_orders.py (NEW — 11 pytest cases, all passing)"
+  ],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "100% (5/5 flows — storefront, place order, track page, owner inbox, categories with prep+channels, AI Pantry invoice tab, Items dashboard with margin+weekly)"},
+  "test_credentials_used": ["owner@nuva.com / NuvaOwner2026!"],
+  "seed_data_creation": "Created/deleted 1 TEST_DefaultCat, 1 TEST_PrepCat, 1 TEST_LegacyOrphan (cleaned up by /cleanup-legacy). Placed 2 public test orders (one valid pickup ORD-XXXX as TEST_Buyer + ORD-XXXX as TEST_UIBuyer) — order docs persist in online_orders collection. Created 1 invoice doc (parse-invoice) and applied a cost update to Espresso (then applied-flag set in invoices collection).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All iteration-29 features (online ordering, AI ETA, Invoice OCR with LLM parse + apply, /products/insights, Categories prepTime+channels, /categories/cleanup-legacy) are working end-to-end. Backend 11/11, all critical frontend flows verified. Only minor cosmetic issues: (1) Badge-in-<p> hydration warning on /ai-pantry, (2) empty-string src='' producing console 404s. The 'cleanup-legacy' button on /categories is labeled 'Remove demo categories' in the UI — this is intentional copy. The 86'd Double Espresso still renders correctly with red '86' corner badge + margin chip (regression from iter28 OK). NOTE: Mains category is correctly configured without DELIVERY channel in seed (only DINE-IN + PICKUP) which is filtered out of /online/categories for delivery — verified expected behaviour.",
+  "rca of the issue": "N/A — no blocking issues found. The 2 minor frontend warnings have RCA + fix included under action_items."
+}

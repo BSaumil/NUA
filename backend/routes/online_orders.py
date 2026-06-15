@@ -1,0 +1,325 @@
+"""Online ordering + AI ETA engine.
+
+Endpoints:
+- POST   /api/online/orders                  — customer places an order (public)
+- GET    /api/online/orders                  — owner inbox (auth)
+- GET    /api/online/orders/{id}             — single order (auth)
+- PATCH  /api/online/orders/{id}/status      — owner moves to next stage (auth)
+- POST   /api/online/orders/{id}/eta         — AI-recomputed ETA (auth)
+- GET    /api/online/orders/track/{code}     — public order tracking
+- GET    /api/online/kitchen/load            — current pending + preparing counts
+"""
+from fastapi import APIRouter, HTTPException, Request
+from database import db
+from datetime import datetime, timezone, timedelta
+from typing import Optional
+import os
+import json
+import uuid
+
+router = APIRouter()
+
+
+def _now(): return datetime.now(timezone.utc)
+def _iso(dt): return dt.isoformat() if isinstance(dt, datetime) else dt
+def _uid(prefix: str) -> str: return f"{prefix}-{uuid.uuid4().hex[:8].upper()}"
+
+
+# Allowed lifecycle transitions per channel.
+_STATUS_ORDER = ["pending", "accepted", "preparing", "ready", "out_for_delivery", "completed", "cancelled"]
+
+
+async def _kitchen_load() -> dict:
+    """Snapshot of currently-active orders feeding the ETA buffer."""
+    pending = await db.online_orders.count_documents({"status": "pending"})
+    preparing = await db.online_orders.count_documents({"status": "preparing"})
+    accepted = await db.online_orders.count_documents({"status": "accepted"})
+    # Per active order add a small queue penalty (1 min). 2x penalty for orders
+    # >5min stale to keep ETA honest in busy periods.
+    now = _now()
+    queue_penalty = 0.0
+    rows = await db.online_orders.find(
+        {"status": {"$in": ["accepted", "preparing"]}}, {"_id": 0, "createdAt": 1}).to_list(50)
+    for r in rows:
+        try:
+            created = datetime.fromisoformat(r.get("createdAt").replace("Z", "+00:00")) if isinstance(r.get("createdAt"), str) else r.get("createdAt")
+            age_min = (now - created).total_seconds() / 60.0 if created else 0
+            queue_penalty += 2.0 if age_min > 5 else 1.0
+        except Exception:
+            queue_penalty += 1.0
+    return {"pending": pending, "accepted": accepted, "preparing": preparing,
+            "queuePenaltyMins": round(queue_penalty, 1)}
+
+
+async def _compute_eta(items: list, channel: str, kitchen_load: dict) -> dict:
+    """Deterministic ETA = max category prep time × surge factor + delivery offset
+    + kitchen load buffer. AI then drafts a natural-language explanation."""
+    cats = await db.categories.find({}, {"_id": 0}).to_list(200)
+    cat_prep = {c["name"].lower(): int(c.get("prepTime", 8)) for c in cats}
+    item_prep_mins = []
+    cat_breakdown = {}
+    for it in items or []:
+        c = (it.get("category") or "").lower()
+        qty = int(it.get("quantity", 1))
+        base = cat_prep.get(c, 8)
+        # First unit is the base; each additional unit of the same category adds ~30%.
+        total = base + max(0, qty - 1) * (base * 0.3)
+        item_prep_mins.append(total)
+        cat_breakdown[c] = max(cat_breakdown.get(c, 0), total)
+    base_prep = max(item_prep_mins) if item_prep_mins else 8
+    # Surge based on kitchen load: 0 → 1.0x, 5+ pending → 1.4x
+    pending = kitchen_load.get("pending", 0) + kitchen_load.get("accepted", 0)
+    surge = min(1.0 + (pending * 0.05), 1.6)
+    queue_penalty = float(kitchen_load.get("queuePenaltyMins", 0))
+    delivery_offset = {"delivery": 12, "pickup": 0, "dine-in": 0}.get(channel, 0)
+    eta_mins = round(base_prep * surge + queue_penalty + delivery_offset)
+    return {
+        "etaMinutes": int(eta_mins),
+        "baseMinutes": round(base_prep, 1),
+        "surge": round(surge, 2),
+        "queuePenaltyMins": queue_penalty,
+        "deliveryOffsetMins": delivery_offset,
+        "categoryBreakdown": cat_breakdown,
+        "kitchenLoad": kitchen_load,
+    }
+
+
+async def _ai_eta_explanation(order: dict, eta: dict) -> str:
+    """Optional natural-language ETA reason for the customer. Falls back to a
+    deterministic string if the LLM is unavailable (key missing / network)."""
+    fallback = (
+        f"Your {order.get('channel','order')} is being prepared. "
+        f"Estimated ready in ~{eta['etaMinutes']} minutes."
+    )
+    if not os.environ.get("EMERGENT_LLM_KEY"): return fallback
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        chat = LlmChat(
+            api_key=os.environ["EMERGENT_LLM_KEY"],
+            session_id=f"eta-{uuid.uuid4().hex[:6]}",
+            system_message=(
+                "You are a friendly restaurant assistant writing a single-sentence "
+                "ETA message for a customer. Mention the ETA in minutes and a brief "
+                "reason (busy kitchen, large order, or simply 'fresh prep time'). "
+                "Plain text — no emoji, no JSON."
+            ),
+        ).with_model("openai", "gpt-5.2")
+        info = json.dumps({
+            "channel": order.get("channel"),
+            "items": [{"name": i.get("name"), "qty": i.get("quantity")} for i in order.get("items", [])],
+            "etaMinutes": eta["etaMinutes"],
+            "surge": eta["surge"],
+            "pendingInKitchen": eta["kitchenLoad"].get("pending", 0) + eta["kitchenLoad"].get("accepted", 0),
+        })
+        reply = await chat.send_message(UserMessage(text=info))
+        return (reply or fallback).strip()[:240]
+    except Exception:
+        return fallback
+
+
+def _append_event(order: dict, kind: str, message: str, actor: Optional[str] = None) -> dict:
+    event = {"kind": kind, "message": message, "actor": actor, "at": _iso(_now())}
+    order.setdefault("events", []).append(event)
+    return event
+
+
+def _notification(order: dict, message: str) -> dict:
+    """Persisted notification — would be hooked to SendGrid/Twilio in prod. For
+    now we just append to the order so the customer sees it on the tracking page."""
+    n = {"id": _uid("NOT"), "message": message, "at": _iso(_now())}
+    order.setdefault("notifications", []).append(n)
+    return n
+
+
+# =============================================================================
+# CATEGORY PREP TIMES (helper used by the storefront)
+# =============================================================================
+@router.get("/online/categories")
+async def public_categories():
+    """Public — only returns active categories that are enabled for online
+    channels (pickup OR delivery)."""
+    cats = await db.categories.find({"active": True}, {"_id": 0}).to_list(200)
+    rows = []
+    for c in cats:
+        channels = c.get("channels") or ["dine-in", "pickup", "delivery"]
+        if any(ch in channels for ch in ("pickup", "delivery", "online")):
+            rows.append({k: c.get(k) for k in ("id", "name", "icon", "color", "prepTime", "sortOrder")})
+    rows.sort(key=lambda x: x.get("sortOrder", 99))
+    return rows
+
+
+@router.get("/online/products")
+async def public_products():
+    """Public storefront catalog: in-stock, not 86'd, with online-enabled category."""
+    cats = await public_categories()
+    allowed = {c["name"] for c in cats}
+    products = await db.products.find(
+        {"category": {"$in": list(allowed)}, "stock": {"$gt": 0}, "eightySixed": {"$ne": True}},
+        {"_id": 0},
+    ).to_list(500)
+    return products
+
+
+# =============================================================================
+# PLACE ORDER (public)
+# =============================================================================
+@router.post("/online/orders")
+async def place_order(data: dict):
+    """Customer places a new order. No auth required (storefront)."""
+    items = data.get("items") or []
+    if not items:
+        raise HTTPException(status_code=400, detail="Order must contain at least one item")
+    channel = data.get("channel", "pickup")  # pickup | delivery | dine-in
+    if channel not in ("pickup", "delivery", "dine-in"):
+        raise HTTPException(status_code=400, detail="Invalid channel")
+    customer = {
+        "name": (data.get("customerName") or "").strip(),
+        "phone": (data.get("customerPhone") or "").strip(),
+        "email": (data.get("customerEmail") or "").strip(),
+        "address": (data.get("address") or "").strip(),
+        "notes": (data.get("notes") or "").strip(),
+    }
+    if not customer["name"]:
+        raise HTTPException(status_code=400, detail="Customer name required")
+    if channel == "delivery" and not customer["address"]:
+        raise HTTPException(status_code=400, detail="Delivery requires an address")
+    subtotal = sum(float(i.get("price", 0)) * int(i.get("quantity", 1)) for i in items)
+    gst = round(subtotal * 0.1, 2)
+    total = round(subtotal + gst, 2)
+    code = _uid("ORD")
+    load = await _kitchen_load()
+    eta = await _compute_eta(items, channel, load)
+    order = {
+        "id": code, "trackingCode": code,
+        "channel": channel,
+        "customer": customer,
+        "items": items,
+        "subtotal": round(subtotal, 2),
+        "gst": gst,
+        "total": total,
+        "status": "pending",
+        "eta": eta,
+        "etaMessage": await _ai_eta_explanation({"channel": channel, "items": items}, eta),
+        "events": [], "notifications": [],
+        "createdAt": _iso(_now()),
+    }
+    _append_event(order, "created", f"Order placed via {channel}")
+    _notification(order, f"Hi {customer['name']}, we received your order {code}. Estimated ready in ~{eta['etaMinutes']} min.")
+    await db.online_orders.insert_one(order); order.pop("_id", None)
+    return order
+
+
+# =============================================================================
+# OWNER INBOX + MANAGEMENT
+# =============================================================================
+@router.get("/online/orders")
+async def list_orders(request: Request, status: Optional[str] = None, limit: int = 100):
+    from routes.auth import get_current_user
+    user = await get_current_user(request)
+    if user["role"] not in ("owner", "manager", "cashier", "kitchen"):
+        raise HTTPException(status_code=403, detail="Staff only")
+    q = {}
+    if status: q["status"] = status
+    rows = await db.online_orders.find(q, {"_id": 0}).sort("createdAt", -1).to_list(limit)
+    return rows
+
+
+@router.get("/online/orders/{order_id}")
+async def get_order(order_id: str, request: Request):
+    from routes.auth import get_current_user
+    await get_current_user(request)
+    row = await db.online_orders.find_one({"id": order_id}, {"_id": 0})
+    if not row: raise HTTPException(status_code=404, detail="Order not found")
+    return row
+
+
+@router.patch("/online/orders/{order_id}/status")
+async def update_status(order_id: str, data: dict, request: Request):
+    from routes.auth import get_current_user
+    user = await get_current_user(request)
+    if user["role"] not in ("owner", "manager", "cashier", "kitchen"):
+        raise HTTPException(status_code=403, detail="Staff only")
+    new_status = data.get("status")
+    if new_status not in _STATUS_ORDER:
+        raise HTTPException(status_code=400, detail=f"Invalid status. Allowed: {_STATUS_ORDER}")
+    order = await db.online_orders.find_one({"id": order_id}, {"_id": 0})
+    if not order: raise HTTPException(status_code=404, detail="Order not found")
+    # Append event + notification with a status-specific message
+    cust_name = (order.get("customer") or {}).get("name", "")
+    ch = order.get("channel")
+    msgs = {
+        "accepted": f"Hi {cust_name}, your order {order['id']} has been accepted and is queued for the kitchen.",
+        "preparing": f"{cust_name}, the kitchen has started preparing your order.",
+        "ready": (f"{cust_name}, your order is ready for pickup!"
+                  if ch == "pickup"
+                  else (f"{cust_name}, your order is ready and the table is set." if ch == "dine-in"
+                        else f"{cust_name}, your order is packed and waiting for the driver.")),
+        "out_for_delivery": f"{cust_name}, your order is out for delivery. Driver: {data.get('driver','assigned')}.",
+        "completed": f"{cust_name}, your order is complete. Thanks for choosing us!",
+        "cancelled": f"{cust_name}, your order has been cancelled. {data.get('reason','')}",
+    }
+    _append_event(order, f"status:{new_status}", msgs.get(new_status, f"Status → {new_status}"), user.get("name"))
+    _notification(order, msgs.get(new_status, f"Status updated to {new_status}"))
+    order["status"] = new_status
+    if new_status == "accepted":
+        order["acceptedAt"] = _iso(_now())
+        # Recompute ETA with fresh kitchen-load snapshot
+        load = await _kitchen_load()
+        order["eta"] = await _compute_eta(order.get("items", []), ch, load)
+        order["etaMessage"] = await _ai_eta_explanation(order, order["eta"])
+    if new_status == "out_for_delivery":
+        order["driver"] = data.get("driver", "")
+        order["dispatchedAt"] = _iso(_now())
+    if new_status == "ready":
+        order["readyAt"] = _iso(_now())
+    if new_status == "completed":
+        order["completedAt"] = _iso(_now())
+    update_fields = {k: v for k, v in order.items() if k != "id"}
+    await db.online_orders.update_one({"id": order_id}, {"$set": update_fields})
+    return order
+
+
+@router.post("/online/orders/{order_id}/eta")
+async def recompute_eta(order_id: str, request: Request):
+    from routes.auth import get_current_user
+    await get_current_user(request)
+    order = await db.online_orders.find_one({"id": order_id}, {"_id": 0})
+    if not order: raise HTTPException(status_code=404, detail="Order not found")
+    load = await _kitchen_load()
+    eta = await _compute_eta(order.get("items", []), order.get("channel", "pickup"), load)
+    msg = await _ai_eta_explanation(order, eta)
+    _append_event(order, "eta:recomputed", f"New ETA: {eta['etaMinutes']} min")
+    await db.online_orders.update_one(
+        {"id": order_id}, {"$set": {"eta": eta, "etaMessage": msg, "events": order["events"]}})
+    return {"eta": eta, "etaMessage": msg}
+
+
+@router.get("/online/kitchen/load")
+async def kitchen_load_endpoint(request: Request):
+    from routes.auth import get_current_user
+    await get_current_user(request)
+    return await _kitchen_load()
+
+
+# =============================================================================
+# PUBLIC TRACKING (no auth — by order code)
+# =============================================================================
+@router.get("/online/orders/track/{code}")
+async def track_order(code: str):
+    order = await db.online_orders.find_one({"id": code.upper()}, {"_id": 0})
+    if not order: raise HTTPException(status_code=404, detail="Order not found")
+    # Strip internal fields the customer doesn't need.
+    customer = order.get("customer") or {}
+    return {
+        "id": order["id"], "status": order["status"], "channel": order.get("channel"),
+        "createdAt": order.get("createdAt"),
+        "customerName": customer.get("name"),
+        "items": order.get("items", []),
+        "subtotal": order.get("subtotal"), "gst": order.get("gst"), "total": order.get("total"),
+        "eta": order.get("eta"), "etaMessage": order.get("etaMessage"),
+        "notifications": order.get("notifications", []),
+        "events": [{"kind": e["kind"], "at": e["at"], "message": e.get("message", "")} for e in order.get("events", [])],
+        "driver": order.get("driver"),
+        "readyAt": order.get("readyAt"),
+        "completedAt": order.get("completedAt"),
+    }

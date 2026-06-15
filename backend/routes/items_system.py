@@ -34,6 +34,10 @@ async def create_category(data: dict, request: Request):
         "active": data.get("active", True),
         "icon": data.get("icon", "Tag"),          # lucide-react icon name
         "color": data.get("color", "#6366f1"),    # tile accent
+        # Online-ordering: how long this category takes to prep (mins) and which
+        # channels it's available on.
+        "prepTime": int(data.get("prepTime", 8)),
+        "channels": data.get("channels", ["dine-in", "pickup", "delivery"]),
     }
     await db.categories.insert_one(cat)
     cat.pop("_id", None)
@@ -45,13 +49,38 @@ async def update_category(cat_id: str, data: dict, request: Request):
     user = await get_current_user(request)
     if user["role"] not in ("owner", "manager"):
         raise HTTPException(status_code=403, detail="Owner/Manager access only")
-    allowed = {"name", "sortOrder", "active", "icon", "color"}
+    allowed = {"name", "sortOrder", "active", "icon", "color", "prepTime", "channels"}
     update = {k: v for k, v in data.items() if k in allowed}
+    if "prepTime" in update: update["prepTime"] = int(update["prepTime"] or 0)
     result = await db.categories.find_one_and_update({"id": cat_id}, {"$set": update}, return_document=True)
     if not result:
         raise HTTPException(status_code=404, detail="Not found")
     result.pop("_id", None)
     return result
+
+
+@router.post("/categories/cleanup-legacy")
+async def cleanup_legacy_categories(request: Request):
+    """Owner one-click: removes ANY category that has zero products attached
+    AND is not in the canonical seed-catalog set (Coffee/Burgers/Mains/
+    Cakes & Slices/Pasta). Safe — products are unaffected."""
+    from routes.auth import get_current_user
+    user = await get_current_user(request)
+    if user["role"] != "owner":
+        raise HTTPException(status_code=403, detail="Owner only")
+    canonical = {c["name"] for c in SEED_CATEGORIES}
+    all_cats = await db.categories.find({}, {"_id": 0}).to_list(200)
+    removed, kept = [], []
+    for cat in all_cats:
+        if cat["name"] in canonical:
+            continue
+        product_count = await db.products.count_documents({"category": cat["name"]})
+        if product_count == 0:
+            await db.categories.delete_one({"id": cat["id"]})
+            removed.append(cat["name"])
+        else:
+            kept.append({"name": cat["name"], "productCount": product_count})
+    return {"removed": removed, "keptWithProducts": kept}
 
 @router.delete("/categories/{cat_id}")
 async def delete_category(cat_id: str, request: Request):
@@ -65,11 +94,11 @@ async def delete_category(cat_id: str, request: Request):
 
 # ============ SEED CATALOG (60 products + 10 modifiers) ============
 SEED_CATEGORIES = [
-    {"id": "cat-coffee", "name": "Coffee", "sortOrder": 0, "active": True, "icon": "Coffee", "color": "#92400e"},
-    {"id": "cat-burgers", "name": "Burgers", "sortOrder": 1, "active": True, "icon": "Beef", "color": "#dc2626"},
-    {"id": "cat-mains", "name": "Mains", "sortOrder": 2, "active": True, "icon": "UtensilsCrossed", "color": "#16a34a"},
-    {"id": "cat-cakes", "name": "Cakes & Slices", "sortOrder": 3, "active": True, "icon": "Cake", "color": "#db2777"},
-    {"id": "cat-pasta", "name": "Pasta", "sortOrder": 4, "active": True, "icon": "Soup", "color": "#ea580c"},
+    {"id": "cat-coffee", "name": "Coffee", "sortOrder": 0, "active": True, "icon": "Coffee", "color": "#92400e", "prepTime": 4, "channels": ["dine-in", "pickup", "delivery"]},
+    {"id": "cat-burgers", "name": "Burgers", "sortOrder": 1, "active": True, "icon": "Beef", "color": "#dc2626", "prepTime": 12, "channels": ["dine-in", "pickup", "delivery"]},
+    {"id": "cat-mains", "name": "Mains", "sortOrder": 2, "active": True, "icon": "UtensilsCrossed", "color": "#16a34a", "prepTime": 18, "channels": ["dine-in", "pickup"]},
+    {"id": "cat-cakes", "name": "Cakes & Slices", "sortOrder": 3, "active": True, "icon": "Cake", "color": "#db2777", "prepTime": 2, "channels": ["dine-in", "pickup", "delivery"]},
+    {"id": "cat-pasta", "name": "Pasta", "sortOrder": 4, "active": True, "icon": "Soup", "color": "#ea580c", "prepTime": 14, "channels": ["dine-in", "pickup", "delivery"]},
 ]
 
 SEED_PRODUCTS = [
@@ -212,7 +241,11 @@ async def seed_catalog(request: Request):
     for c in SEED_CATEGORIES:
         existing = await db.categories.find_one({"name": c["name"]})
         if existing:
-            await db.categories.update_one({"name": c["name"]}, {"$set": {"icon": c["icon"], "color": c["color"]}})
+            await db.categories.update_one(
+                {"name": c["name"]},
+                {"$set": {"icon": c["icon"], "color": c["color"],
+                          "prepTime": c["prepTime"], "channels": c["channels"]}},
+            )
         else:
             await db.categories.insert_one({**c})
             cat_added += 1

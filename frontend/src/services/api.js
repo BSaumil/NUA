@@ -378,6 +378,7 @@ export const itemsSystemAPI = {
   createCategory: (data) => api.post('/categories', data),
   updateCategory: (id, data) => api.put(`/categories/${id}`, data),
   deleteCategory: (id) => api.delete(`/categories/${id}`),
+  cleanupLegacyCategories: () => api.post('/categories/cleanup-legacy'),
   getModifiers: () => api.get('/modifiers'),
   createModifier: (data) => api.post('/modifiers', data),
   updateModifier: (id, data) => api.put(`/modifiers/${id}`, data),
@@ -391,6 +392,30 @@ export const itemsSystemAPI = {
   createPaymentLink: (data) => api.post('/payment-links', data),
   getPaymentLinks: () => api.get('/payment-links'),
   deletePaymentLink: (id) => api.delete(`/payment-links/${id}`),
+  seedCatalog: () => api.post('/seed/catalog'),
+};
+
+// AI Pantry — invoice OCR + insights
+export const aiPantryAPI = {
+  generate: () => api.get('/ai-pantry/generate'),
+  history: () => api.get('/ai-pantry/history'),
+  parseInvoice: (data) => api.post('/ai-pantry/parse-invoice', data),
+  applyInvoice: (id, selections) => api.post(`/ai-pantry/apply-invoice/${id}`, { selections }),
+  listInvoices: () => api.get('/ai-pantry/invoices'),
+  productInsights: () => api.get('/products/insights'),
+};
+
+// Online Ordering — public storefront + owner inbox + AI ETA
+export const onlineAPI = {
+  publicCategories: () => api.get('/online/categories'),
+  publicProducts: () => api.get('/online/products'),
+  placeOrder: (data) => api.post('/online/orders', data),
+  listOrders: (status) => api.get('/online/orders', { params: status ? { status } : {} }),
+  getOrder: (id) => api.get(`/online/orders/${id}`),
+  updateStatus: (id, data) => api.patch(`/online/orders/${id}/status`, data),
+  recomputeEta: (id) => api.post(`/online/orders/${id}/eta`),
+  track: (code) => api.get(`/online/orders/track/${code}`),
+  kitchenLoad: () => api.get('/online/kitchen/load'),
 };
 
 // v17 — Loyalty engine + AI Agent (Ash)

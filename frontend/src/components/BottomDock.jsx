@@ -8,7 +8,7 @@ import {
   Settings, Utensils, ChefHat, BarChart3, Zap, Award, TrendingUp,
   FlaskConical, Sunrise, Brain, Plug, Users2, LogOut, Mail, ClipboardList,
   Trophy, Printer, PieChart, MoreHorizontal, X, FileText, DollarSign, Tag,
-  Link2, Ban, Receipt, Calendar, MapPin, Clock, Sparkles, BookOpen, Shield,
+  Link2, Ban, Receipt, Calendar, MapPin, Clock, Sparkles, BookOpen, Shield, ShoppingBag,
   ShieldAlert, AlertTriangle, Flame, ArrowLeftRight, Key
 } from 'lucide-react';
 
@@ -136,6 +136,7 @@ const ALL_FEATURES = [
     { path: '/staff-availability', label: 'Staff Availability', icon: Users, access: ['owner', 'manager'] },
     { path: '/gift-card-sale', label: 'Sell Gift Card', icon: Tag, access: ['owner', 'manager', 'cashier'] },
     { path: '/marketing-emails', label: 'AI Marketing Emails', icon: Sparkles, access: ['owner', 'manager'] },
+    { path: '/online-orders', label: 'Online Orders', icon: ShoppingBag, access: ['owner', 'manager', 'cashier', 'kitchen'] },
   ]},
   { group: 'Analytics & AI', items: [
     { path: '/agent', label: 'Ash AI Agent', icon: Brain, access: ['owner', 'manager'] },

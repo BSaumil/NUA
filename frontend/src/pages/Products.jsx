@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Plus, Edit, Trash2, Tag, Package, X } from 'lucide-react';
+import { Search, Plus, Edit, Trash2, Tag, Package, X, TrendingUp, TrendingDown } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent } from '../components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
-import { productsAPI, promotionsAPI, categoriesAPI } from '../services/api';
+import { productsAPI, promotionsAPI, categoriesAPI, aiPantryAPI } from '../services/api';
 import { toast } from 'sonner';
 
 const EMPTY_PRODUCT = { name: '', category: 'Beverages', price: '', cost: '', stock: '', sku: '', image: '', gstRate: 10, locations: ['Main'], onlineChannels: [], seoDescription: '', description: '' };
@@ -17,6 +17,7 @@ const Products = () => {
   const [view, setView] = useState('products');
   const [products, setProducts] = useState([]);
   const [promotions, setPromotions] = useState([]);
+  const [insights, setInsights] = useState({});  // {productId: {weeklyUnitsSold, marginPct, ...}}
   const [showProductDialog, setShowProductDialog] = useState(false);
   const [showPromoDialog, setShowPromoDialog] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
@@ -24,7 +25,16 @@ const Products = () => {
   const [productForm, setProductForm] = useState(EMPTY_PRODUCT);
   const [promoForm, setPromoForm] = useState(EMPTY_PROMO);
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); fetchInsights(); }, []);
+
+  const fetchInsights = async () => {
+    try {
+      const r = await aiPantryAPI.productInsights();
+      const map = {};
+      (r.data || []).forEach(i => { map[i.productId] = i; });
+      setInsights(map);
+    } catch {}
+  };
 
   const fetchData = async () => {
     try {
@@ -142,10 +152,28 @@ const Products = () => {
             <Input placeholder="Search products..." className="pl-10" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} data-testid="product-search" />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {filteredProducts.map(product => (
-              <Card key={product.id} className="hover:shadow-lg transition-shadow" data-testid={`product-card-${product.id}`}>
+            {filteredProducts.map(product => {
+              const ins = insights[product.id] || {};
+              const sold = ins.weeklyUnitsSold || 0;
+              const margin = ins.marginPct || 0;
+              // System-color tinting: badges use theme.primary at varying opacity
+              const marginTone = margin >= 60 ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                : margin >= 40 ? 'bg-amber-100 text-amber-800 border-amber-200'
+                : 'bg-red-100 text-red-800 border-red-200';
+              return (
+              <Card key={product.id} className={`hover:shadow-lg transition-shadow ${product.eightySixed ? 'opacity-60' : ''}`} data-testid={`product-card-${product.id}`}>
                 <CardContent className="p-4">
-                  <img src={product.image} alt={product.name} className="w-full h-40 object-cover rounded-lg mb-4" />
+                  <div className="relative">
+                    <img src={product.image} alt={product.name} className="w-full h-40 object-cover rounded-lg mb-4" />
+                    {product.eightySixed && (
+                      <span className="absolute top-1 left-1 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">86</span>
+                    )}
+                    {/* Margin chip — system colour at low opacity */}
+                    <span className={`absolute top-1 right-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${marginTone}`}
+                      data-testid={`margin-badge-${product.id}`}>
+                      {margin.toFixed(0)}% margin
+                    </span>
+                  </div>
                   <h3 className="font-bold text-lg" style={{ color: theme.text }}>{product.name}</h3>
                   <div className="flex items-center justify-between mt-1">
                     <span className="text-sm text-gray-500">{product.category}</span>
@@ -161,6 +189,17 @@ const Products = () => {
                       <p className="text-xs text-gray-500">GST: {product.gstRate}%</p>
                     </div>
                   </div>
+                  {/* Weekly sales tile — same accent colour as Theme primary */}
+                  <div className="mt-3 flex items-center justify-between px-2.5 py-1.5 rounded-md"
+                    style={{ background: `${theme.primary}10`, color: theme.primary }}
+                    data-testid={`weekly-sales-${product.id}`}>
+                    <span className="text-xs font-medium flex items-center gap-1">
+                      {sold > 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />} Past 7 days
+                    </span>
+                    <span className="font-bold text-sm">
+                      {sold} sold · ${Number(ins.weeklyRevenue || 0).toFixed(0)}
+                    </span>
+                  </div>
                   <div className="flex gap-2 pt-3">
                     <Button variant="outline" size="sm" className="flex-1" onClick={() => openEditProduct(product)} data-testid={`edit-product-${product.id}`}>
                       <Edit size={14} className="mr-1" /> Edit
@@ -171,7 +210,8 @@ const Products = () => {
                   </div>
                 </CardContent>
               </Card>
-            ))}
+              );
+            })}
             {filteredProducts.length === 0 && <p className="col-span-full text-center text-gray-400 py-12">No products found. Add your first product above.</p>}
           </div>
         </>
