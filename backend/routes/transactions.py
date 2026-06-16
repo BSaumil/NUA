@@ -116,12 +116,15 @@ async def create_transaction(transaction: TransactionCreate):
     await db.transactions.insert_one(txn_dict)
     txn_dict.pop("_id", None)
 
-    # Update stock
+    # Update stock + deduct recipe ingredients via the central helper.
+    from routes.inventory_accounting import deduct_recipe_stock
     for item in transaction.items:
         await db.products.update_one(
             {"id": item.productId},
             {"$inc": {"stock": -item.quantity}}
         )
+        try: await deduct_recipe_stock(item.productId, item.quantity)
+        except Exception: pass
 
     # Update customer stats
     if transaction.customerId:

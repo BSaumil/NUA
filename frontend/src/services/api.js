@@ -405,6 +405,23 @@ export const aiPantryAPI = {
   productInsights: () => api.get('/products/insights'),
 };
 
+// Inventory + Recipes + BAS / Accounting
+export const inventoryAPI = {
+  listIngredients: () => api.get('/ingredients'),
+  createIngredient: (data) => api.post('/ingredients', data),
+  updateIngredient: (id, data) => api.put(`/ingredients/${id}`, data),
+  deleteIngredient: (id) => api.delete(`/ingredients/${id}`),
+  lowStock: () => api.get('/ingredients/low-stock'),
+  getRecipe: (productId) => api.get(`/recipes/product/${productId}`),
+  saveRecipe: (productId, data) => api.put(`/recipes/product/${productId}`, data),
+  listRecipes: () => api.get('/recipes'),
+  createStockTake: (data) => api.post('/stock-takes', data),
+  listStockTakes: () => api.get('/stock-takes'),
+  assignInvoiceToStock: (invoiceId, assignments) => api.post(`/invoices/${invoiceId}/assign-stock`, { assignments }),
+  bas: (params) => api.get('/accounting/bas', { params }),
+  basCsv: (params) => api.get('/accounting/bas.csv', { params, responseType: 'blob' }),
+};
+
 // Online Ordering — public storefront + owner inbox + AI ETA
 export const onlineAPI = {
   publicCategories: () => api.get('/online/categories'),

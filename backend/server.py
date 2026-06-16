@@ -40,6 +40,7 @@ from routes.v25_suite import router as v25_suite_router
 from routes.licensing import router as licensing_router
 from routes.v26_commerce import router as v26_commerce_router
 from routes.online_orders import router as online_orders_router
+from routes.inventory_accounting import router as inventory_accounting_router
 from middleware.license_middleware import LicenseEnforcementMiddleware
 
 app = FastAPI()
@@ -77,6 +78,7 @@ api_router.include_router(v25_suite_router)
 api_router.include_router(licensing_router)
 api_router.include_router(v26_commerce_router)
 api_router.include_router(online_orders_router)
+api_router.include_router(inventory_accounting_router)
 api_router.include_router(multi_tenant_router)
 
 @api_router.get("/")

@@ -14,6 +14,7 @@ import POSTerminal from './pages/POSTerminal';
 import Products from './pages/Products';
 import Customers from './pages/Customers';
 import Inventory from './pages/Inventory';
+import InventoryAccounting from './pages/InventoryAccounting';
 import Accounting from './pages/Accounting';
 import BASGST from './pages/BASGST';
 import Settings from './pages/Settings';
@@ -135,6 +136,7 @@ function ProtectedRoutes() {
         <Route path="/customers" element={<Customers />} />
         <Route path="/loyalty" element={<LoyaltyEvents />} />
         <Route path="/inventory" element={<Inventory />} />
+        <Route path="/inventory-accounting" element={<InventoryAccounting />} />
         <Route path="/forecasting" element={<Forecasting />} />
         <Route path="/automation" element={<AutomationEngine />} />
         <Route path="/accounting" element={<Accounting />} />

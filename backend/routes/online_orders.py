@@ -17,6 +17,8 @@ import os
 import json
 import uuid
 
+from utils.notifications import notify_order
+
 router = APIRouter()
 
 
@@ -205,6 +207,9 @@ async def place_order(data: dict):
     }
     _append_event(order, "created", f"Order placed via {channel}")
     _notification(order, f"Hi {customer['name']}, we received your order {code}. Estimated ready in ~{eta['etaMinutes']} min.")
+    receipts = await notify_order(order, f"Hi {customer['name']}, we received your order {code}. Estimated ready in ~{eta['etaMinutes']} min.",
+                                  subject=f"NUA order {code} received")
+    order["deliveryReceipts"] = receipts
     await db.online_orders.insert_one(order); order.pop("_id", None)
     return order
 
@@ -260,6 +265,10 @@ async def update_status(order_id: str, data: dict, request: Request):
     }
     _append_event(order, f"status:{new_status}", msgs.get(new_status, f"Status → {new_status}"), user.get("name"))
     _notification(order, msgs.get(new_status, f"Status updated to {new_status}"))
+    # Best-effort email + SMS to the customer (no-op if SendGrid/Twilio not set).
+    receipts = await notify_order(order, msgs.get(new_status, f"Status updated to {new_status}"),
+                                  subject=f"Order {order['id']} — {new_status.replace('_',' ').title()}")
+    order.setdefault("deliveryReceipts", []).extend(receipts)
     order["status"] = new_status
     if new_status == "accepted":
         order["acceptedAt"] = _iso(_now())

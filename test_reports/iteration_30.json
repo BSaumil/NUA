@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 30 — Inventory & Accounting stack (ingredients with baseUnit g/mL/ea, recipes with kg<->g + L<->mL conversion + auto product cost roll-up, POS auto-deduct on sale, invoice->stock weighted moving average + recipe cascade re-cost, stock-take with shrinkage, Australian BAS/GST report + CSV export) + notification abstraction fallback. Backend: 16/16 pytest PASS (100%) — covers create/update/delete ingredients (validates baseUnit g/mL/ea; rejects 'litre'), DELETE blocks when used in recipe, /ingredients/low-stock filters (stock<=reorderLevel AND reorderLevel>0), PUT /recipes/product/{id} with kg->g (0.018kg=>18g qtyBase) + L->mL (0.25L=>250mL) conversion, computedCost=1.58 = 18*0.06+250*0.002, rejects incompatible g->mL (HTTP 400), product.cost pushed back, POS transaction (2 lattes) auto-deducts -36g coffee + -500mL milk via deduct_recipe_stock, /invoices/{id}/assign-stock with WMA cost update + stock_movements row + cascade re-roll (recipesRolledUp>=1), /stock-takes records variance + totalShrinkageValue<0 on shrinkage, /accounting/bas window mode (monthStart=2026-05-01&monthEnd=2026-06-30) returns g1/oneA/g11/oneB/netGstPayable with 1A=total/11 invariant, /accounting/bas.csv downloads with text/csv + Content-Disposition attachment header, public POST /online/orders + PATCH .../status returns deliveryReceipts with reason='not_configured' (no SendGrid/Twilio keys — graceful fallback, no crash). Frontend: /inventory-accounting page renders with 5 tabs (Ingredients, Recipes, Invoices->Stock, Stock-take, BAS/GST), recipe editor opens on product pick with line editor + save button + ingredient/unit selects, stock-take save shows shrinkage toast, BAS report tile group rendered with FY2026 Q3 (2026-01-01 -> 2026-03-31) period + 8 tiles (G1/1A/G11/1B/Net GST/Sales count/Stock on hand/Stock received).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Global", "issues": ["8 repeated 404 console errors on every page load — same empty src='' issue carried over from iteration 29 (not introduced by this iteration). Cosmetic only."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration30_inventory_accounting.py",
+    "/app/test_reports/pytest/pytest_iteration30.xml"
+  ],
+  "action_items": [
+    "(Already fixed by testing agent) BAS CSV download was returning 500 due to unicode '->' (U+2192) in Content-Disposition filename which cannot be encoded as latin-1 by Starlette. Fixed in /app/backend/routes/inventory_accounting.py:455 — sanitize the period label to ASCII before building the filename header. Main agent should review the fix and consider applying similar ASCII-sanitization to any other export endpoints (CSV/PDF download responses) that interpolate period labels."
+  ],
+  "critical_code_review_comments": [
+    "inventory_accounting.py:_quarter_range has dead-code: 'start = date(year - 1, sm, 1) if quarter == \"Q2\" else date(year - 1, sm, 1)' (both branches identical) and 'start' is then re-assigned on the very next line. Simplify to a single line.",
+    "inventory_accounting.py:assign_invoice_to_stock — when prev_stock is 0 and prev_cost is 0, the WMA formula collapses to line_total/qty_base which is correct, but the floor 'else prev_cost' branch is unreachable in practice (covered by the outer if). Minor cleanup.",
+    "inventory_accounting.py:bas_report mixes datetime querying for transactions.timestamp (BSON datetime) with ISO-string range for createdAt — works but fragile. Standardize on one timestamp format across the codebase (recommend BSON datetime everywhere) for consistent date-range queries.",
+    "transactions.py:create_transaction swallows ALL exceptions from deduct_recipe_stock with bare 'except Exception: pass'. If recipe deduction silently fails (e.g. DB transient error) the POS sale completes but stock isn't deducted with NO log entry. Add at minimum: logger.exception('recipe-deduct-failed product=%s', item.productId).",
+    "notifications.py: send_email + send_sms swallow exceptions and return reason=str(e)[:120] but don't surface to the caller distinguishably from 'not_configured'. The caller (notify_order) just collects receipts — there is no retry queue. Consider adding a 'sent_pending' status + dead-letter persistence on failure for production.",
+    "inventory_accounting.py:deduct_recipe_stock has no idempotency guard despite the docstring saying 'Idempotency comes from the caller passing the transaction id as ref' — but the current implementation does NOT actually persist a ref or check for duplicates. A re-tried POST /transactions on network failure could double-deduct. Add a stock_movements row with txnId + unique index, or rely on transactions.id uniqueness."
+  ],
+  "updated_files": [
+    "/app/backend/routes/inventory_accounting.py (sanitize BAS CSV filename header for latin-1)",
+    "/app/backend/tests/test_iteration30_inventory_accounting.py (NEW — 16 pytest cases, all passing)"
+  ],
+  "success_rate": {"backend": "100% (16/16)", "frontend": "100% (5/5 tabs render + recipe editor + stock-take save + BAS report generation)"},
+  "test_credentials_used": ["owner@nuva.com / NuvaOwner2026!"],
+  "seed_data_creation": "Created and cleaned up TEST_Coffee_xxxxxx + TEST_Milk_xxxxxx ingredients (deleted after run via test_zzz_cleanup). Created one TEST_LowItem ingredient (deleted in-test). Created one INV-TEST-xxxxxx invoice doc directly via pymongo for the assign-stock test (NOT cleaned up — main agent may want to delete from db.invoices where id starts with 'INV-TEST-'). Placed 2 TEST_NotifyBuyer + TEST_StatusBuyer online orders (still in db.online_orders). Recorded one stock-take with note 'TEST_stocktake' (still in db.stock_takes).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All iteration-30 features (ingredients, recipes, POS-driven recipe deduction, invoice->stock WMA, stock-take with shrinkage, BAS quarterly + window report + CSV, notification fallback when SendGrid/Twilio keys absent) verified end-to-end. The BAS CSV unicode bug was fixed in this iteration. Two test online orders + one test stock-take + one test invoice remain in DB as test fixtures (see seed_data_creation). The notification dispatch attempts BOTH SendGrid (email) and Twilio (SMS) when customer has phone+email — both return delivered=false reason='not_configured' as expected. If SendGrid/Twilio keys are later added to backend/.env, re-run test_online_order_notify_no_keys to confirm the 'happy path' returns delivered=true.",
+  "rca of the issue": "BAS CSV 500 RCA: Starlette HTTP headers MUST be latin-1 encodable; the BAS report 'period' label was 'FY2026 Q3 (2026-01-01 -> 2026-03-31)' where '->' is U+2192 (RIGHTWARDS ARROW). When this string was placed into the Content-Disposition filename, Starlette's init_headers tried to .encode('latin-1') and raised UnicodeEncodeError leading to a 500. Mitigation: ASCII-sanitize the period string before header interpolation. Reproduction: GET /api/accounting/bas.csv?fy=2026&quarter=Q3 (any quarter — the arrow is added by inventory_accounting.py:_quarter_range building 'FY{fy} {quarter} ({start} -> {end})'). Fixed."
+}
