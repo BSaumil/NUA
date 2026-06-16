@@ -206,6 +206,33 @@ Kitchen: kitchen@nuva.com / Staff2026!
 
 ---
 
+## v26.4 — Iteration 30 (Feb 2026): Notifications + Ingredients + Recipes + BAS + Stock-take
+
+### Backend
+- **`utils/notifications.py`** — channel abstraction `send_email` (SendGrid), `send_sms` (Twilio), `notify_order` (both, best-effort). Drops to `delivered:false / reason:not_configured` when env vars absent. **Wiring real channels is now a config change, not a code change** — just drop `SENDGRID_API_KEY`/`SENDGRID_FROM_EMAIL` + `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/`TWILIO_FROM_PHONE` into backend/.env.
+- **Order notifications wired**: `/online/orders` (place) + `/online/orders/{id}/status` now call `notify_order` and store `deliveryReceipts[]` on the order.
+- **`routes/inventory_accounting.py`** — new module:
+  - **Ingredients** with canonical `baseUnit` (g / mL / ea). CRUD + low-stock alert + reorderLevel guard.
+  - **Recipes** (`PUT /recipes/product/{id}`) — auto-converts kg↔g, L↔mL, cl→mL. Rejects incompatible conversions (g↔mL). Computes product cost = `Σ qtyBase × ingredient.unitCost` and pushes back to the products collection so margin chips stay accurate.
+  - **Auto stock deduction** on POS sale — `routes/transactions.py` calls `deduct_recipe_stock(productId, qty)` per item.
+  - **Invoice → Ingredient assignment** (`POST /invoices/{id}/assign-stock`) — increments stock with unit conversion, updates unitCost as **weighted moving average**, posts a `stock_movements` audit row, then **cascade re-rolls** every recipe that uses the touched ingredients.
+  - **Stock-take** (`POST /stock-takes`) — counts vs expected → variance + totalShrinkageValue.
+  - **Australian BAS / GST report** (`GET /accounting/bas`) — G1 sales (incl GST), 1A GST collected (= total/11), G11 purchases (incl), 1B GST credits, netGstPayable. Supports `?fy=2026&quarter=Q3` or arbitrary `?monthStart&monthEnd`. CSV export at `/accounting/bas.csv` (ASCII-safe filename).
+
+### Frontend (`pages/InventoryAccounting.jsx`)
+- New 5-tab page at `/inventory-accounting`:
+  1. **Ingredients** — inline add-form + table with low-stock alert banner.
+  2. **Recipes** — product list ↔ recipe editor with kg/g/L/mL/ea selects, computed-cost preview.
+  3. **Invoices → Stock** — pick a parsed invoice from AI Pantry, map each line to an ingredient + unit, one-click "Apply" updates stock + WMA cost + cascades recipe re-cost.
+  4. **Stock-take** — table of all ingredients with expected vs counted vs Δ + history sidebar.
+  5. **BAS / GST** — financial-year + quarter selector + 8 KPI tiles in system colours + CSV download.
+
+### Test status — Iteration 30
+- Backend **16/16 PASS** — every flow above + notification fallback (no keys → graceful `not_configured`).
+- Frontend tabs all render, recipe editor + stock-take + BAS all interact.
+- One issue auto-fixed by testing agent: CSV download filename was using Unicode arrow; now ASCII-sanitised.
+- `retest_needed=false`.
+
 ## v26.3 — Iteration 29 (Feb 2026): Online Ordering + AI ETA + Invoice OCR + Item Insights
 
 ### Backend additions
