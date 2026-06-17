@@ -69,6 +69,16 @@ export default function SwipeableCartItem({ item, onUpdateQty, onRemove, onRepea
             <div className="flex-1 min-w-0">
               <p className="font-semibold text-sm truncate">{item.name}</p>
               <p className="text-xs text-gray-500">${item.price.toFixed(2)} each</p>
+              {item.selectedModifiers && item.selectedModifiers.length > 0 && (
+                <div className="mt-0.5 space-y-0.5" data-testid={`cart-mods-${item.id}`}>
+                  {item.selectedModifiers.map((sm, i) => (
+                    <p key={i} className="text-[10px] text-gray-600 leading-tight">
+                      <span className="text-gray-400">{sm.modifierName}:</span>{' '}
+                      {(sm.options || []).map(o => o.name + (o.price > 0 ? ` (+$${o.price.toFixed(2)})` : '')).join(', ')}
+                    </p>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-1.5" data-no-swipe>
               <Button size="sm" variant="outline" onClick={() => onUpdateQty(item.id, item.quantity - 1)} className="w-7 h-7 p-0" data-testid={`cart-minus-${item.id}`}><Minus size={12} /></Button>

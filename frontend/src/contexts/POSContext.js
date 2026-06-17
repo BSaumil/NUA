@@ -17,15 +17,33 @@ export const POSProvider = ({ children }) => {
   // Gift cards being SOLD in this cart (pending_activation → activate after payment).
   const [pendingGiftActivations, setPendingGiftActivations] = useState([]);
 
-  const addToCart = (product, quantity = 1) => {
+  const addToCart = (product, quantity = 1, selectedModifiers = null, extraPrice = 0) => {
     setCart(prev => {
+      // Items with modifier selections become their own unique lines (don't merge).
+      if (selectedModifiers && selectedModifiers.length > 0) {
+        const shortId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+          ? crypto.randomUUID().slice(0, 8)
+          : Math.random().toString(36).slice(2, 10);
+        const lineId = `${product.id}__${shortId}`;
+        return [...prev, {
+          ...product,
+          id: lineId,            // unique per line for React keys + remove/update
+          productId: product.id, // original product id for tx api
+          quantity,
+          selectedModifiers,
+          price: (product.price || 0) + (extraPrice || 0),
+          basePrice: product.price || 0,
+          modifierSurcharge: extraPrice || 0,
+        }];
+      }
+      // No modifiers — merge same product id (legacy behaviour).
       const existing = prev.find(item => item.id === product.id);
       if (existing) {
         return prev.map(item =>
           item.id === product.id ? { ...item, quantity: item.quantity + quantity } : item
         );
       }
-      return [...prev, { ...product, quantity }];
+      return [...prev, { ...product, quantity, productId: product.id }];
     });
   };
 

@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 32 — Verified POS modifier picker flow end-to-end (UI + backend persistence). Flat White opens ModifierSheet with all 6 attached groups; Required/Optional badges + per-option surcharges correct; Add stays disabled until 3 required groups picked; mod-validation lists missing groups; single-select Milk Type cycles (Almond replaces Whole, count stays 1); confirm produces a unique cart line with cart-mods-{lineId} block showing 'Milk Type: Almond (+$0.50), Milk Choice: Full Cream, Cooking Preference: Rare'; line price = $5.20 + surcharges, totals reflect via GST. Backend test (4/4 PASS) confirms POST /api/transactions with modifiers array round-trips through GET /api/transactions/{id} with modifiers field populated for the item.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "models/transaction.py — Transaction.tableNumber", "issue": "Declared as Optional[int] but frontend POSTerminal sends string ('1'..'10' or freetext). Pydantic coerces numeric strings OK, but a non-numeric 'Other' value (e.g. 'Patio') would 422. Recommend Optional[str]."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration32_modifiers.py",
+    "/app/test_reports/pytest/pytest_iteration32.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: Widen Transaction.tableNumber to Optional[str] in /app/backend/models/transaction.py — frontend already sends string values from table picker / 'Other' freetext input; current Optional[int] would 422 on non-numeric custom table names."
+  ],
+  "critical_code_review_comments": [
+    "ModifierSheet.jsx lines 35-38 — selection-reset on product change is done DURING render (`if (open && product?.id !== lastProductId) setLastProductId/setSelected`). Calling setState inside render works but triggers React's noisy warning in strict mode and risks an extra render loop. Move into a `useEffect([product?.id, open])`.",
+    "POSContext.addToCart uses `Math.random().toString(36).slice(2, 10)` as fallback when crypto.randomUUID is missing — fine for React keys but the line id is also persisted as productId in tx via toTxItem. Verified toTxItem uses item.productId || item.id and we already set productId=product.id on the line, so original id flows through. Good.",
+    "POSTerminal.handleProductClick gates on `modifiers.length > 0`. If /api/modifiers is slow/fails the user can tap a Flat White and it would add without modifiers silently. Consider falling back to opening the sheet anyway when product.modifierIds is set but defs haven't loaded (or show a small toast 'modifiers loading…').",
+    "Backend transaction.py — TransactionItem.modifiers default = [] is fine; SelectedModifier required keys (modifierId, modifierName, optionId, optionName, price) all flow correctly. Tested with real Cash POST + GET round-trip.",
+    "ModifierSheet computes surcharge in render every keypress; not a problem at ≤6 groups but if a product attached 30+ modifiers the loop is O(groups × options). Memoise with useMemo if scaling."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration32_modifiers.py (NEW — 4 pytest cases, all passing)"
+  ],
+  "success_rate": {
+    "backend": "100% (4/4 pytest — modifiers GET, Flat White modifierIds present, POST tx persists modifiers, legacy no-mod tx still works)",
+    "frontend": "100% (modifier sheet opens, 6 groups rendered, 3 required + 3 optional badges, validation message tracks remaining required, Add disabled correctly, single-select cycle, surcharge math, cart-mods-{lineId} block displayed, +N options hint on card)"
+  },
+  "test_credentials_used": ["owner@nuva.com / NuvaOwner2026!"],
+  "seed_data_creation": "test_iteration32 POSTs two real test transactions (one with modifiers, one legacy) — these remain in db.transactions with cashier='TEST_iter32' / 'TEST_iter32_legacy' and location='TEST_LOC' for trail. No products / modifiers / customers were created or modified. Idempotent — safe to re-run.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "POS modifier picker end-to-end works. Live verified: tapping a product with modifierIds opens ModifierSheet, mandatory groups gated Add button, single + multi-select rules respected, surcharges roll into line price, modifier text shown under cart line, modifiers persist into TransactionItem.modifiers on /api/transactions and survive GET /api/transactions/{id}. Backend signature: items[].modifiers = [{modifierId, modifierName, optionId, optionName, price}]. Two flow gaps NOT regressions but worth a follow-up: (a) tableNumber column is Optional[int] — would 422 on non-numeric 'Other' values like 'Patio'; (b) handleProductClick silently bypasses sheet when /api/modifiers hasn't loaded yet (race). Neither blocks the user feedback this iteration addressed.",
+  "rca of the issue": "Original user feedback ('Why item in cart is not asking for modifier option selection?'): RCA was that addToCart was always merging products by id and never consulted product.modifierIds. Fix landed in this iteration: (1) POSTerminal.handleProductClick checks product.modifierIds.length > 0 and opens ModifierSheet rather than calling addToCart directly; (2) POSContext.addToCart now branches — items with selectedModifiers create a unique lineId so two Flat Whites with different milk are separate cart lines; (3) toTxItem flattens selectedModifiers→backend SelectedModifier shape so persistence works. Verified live via UI + pytest round-trip."
+}

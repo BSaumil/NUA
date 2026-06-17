@@ -19,6 +19,7 @@ import VoiceOrderButton from '../components/VoiceOrderButton';
 import SwipeableCartItem from '../components/pos/SwipeableCartItem';
 import CustomerCombobox from '../components/pos/CustomerCombobox';
 import { QrPaymentDialog, UpiPaymentDialog, SplitPaymentDialog } from '../components/pos/PaymentDialogs';
+import ModifierSheet from '../components/pos/ModifierSheet';
 import { CategoryIcon } from './Categories';
 
 // SwipeableCartItem and CustomerCombobox now live in components/pos/.
@@ -96,6 +97,44 @@ const POSTerminal = () => {
 
   // Categories with icons + colors (kept as full objects, not just names)
   const [categories, setCategories] = useState([{ id: 'all', name: 'All', icon: 'Sparkles', color: '#6366f1' }]);
+
+  // Modifier definitions (loaded once); ModifierSheet state for click-to-add flow
+  const [modifiers, setModifiers] = useState([]);
+  const [modifierSheetProduct, setModifierSheetProduct] = useState(null);
+
+  // Smart add-to-cart: if a product has modifierIds, open the picker first.
+  // Otherwise add directly.
+  const handleProductClick = useCallback((product) => {
+    if (product.eightySixed) return;
+    if ((product.modifierIds || []).length > 0 && modifiers.length > 0) {
+      setModifierSheetProduct(product);
+    } else {
+      addToCart(product);
+    }
+  }, [addToCart, modifiers]);
+
+  // Map a cart line into a backend TransactionItem (flattens selectedModifiers
+  // → modifiers list of {modifierId, modifierName, optionId, optionName, price}).
+  const toTxItem = useCallback((item, includeCategory = false) => {
+    const modifiersFlat = (item.selectedModifiers || []).flatMap(sm =>
+      (sm.options || []).map(o => ({
+        modifierId: sm.modifierId,
+        modifierName: sm.modifierName,
+        optionId: o.name,
+        optionName: o.name,
+        price: o.price || 0,
+      }))
+    );
+    const out = {
+      productId: item.productId || item.id,
+      productName: item.name,
+      quantity: item.quantity,
+      price: item.price,
+      modifiers: modifiersFlat,
+    };
+    if (includeCategory) out.category = item.category;
+    return out;
+  }, []);
 
   useEffect(() => { fetchData(); }, []);
 
@@ -240,11 +279,12 @@ const POSTerminal = () => {
   const fetchData = async () => {
     try {
       // Run all initial fetches in parallel for max speed
-      const [productsRes, promotionsRes, customersRes, catsRes, loyaltyRes, labelsRes, trainingRes] = await Promise.allSettled([
+      const [productsRes, promotionsRes, customersRes, catsRes, modsRes, loyaltyRes, labelsRes, trainingRes] = await Promise.allSettled([
         productsAPI.getAll(),
         promotionsAPI.getActive(),
         customersAPI.getAll(),
         fetch(`${process.env.REACT_APP_BACKEND_URL}/api/categories`).then(r => r.json()).catch(() => []),
+        fetch(`${process.env.REACT_APP_BACKEND_URL}/api/modifiers`).then(r => r.json()).catch(() => []),
         loyaltyEngineAPI.getConfig(),
         v15API.getLabels(localStorage.getItem('nua_lang') || 'en'),
         advancedAPI.getTrainingMode(),
@@ -258,6 +298,9 @@ const POSTerminal = () => {
           .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99))
           .map(c => ({ id: c.id, name: c.name, icon: c.icon || 'Tag', color: c.color || '#6366f1' }));
         setCategories([{ id: 'all', name: 'All', icon: 'Sparkles', color: '#6366f1' }, ...active]);
+      }
+      if (modsRes.status === 'fulfilled' && Array.isArray(modsRes.value)) {
+        setModifiers(modsRes.value);
       }
       if (loyaltyRes.status === 'fulfilled') setLoyaltyCfg(loyaltyRes.value.data || { minRedeem: 50, redeemRate: 0.01 });
       if (labelsRes.status === 'fulfilled') setLabels(labelsRes.value.data || {});
@@ -320,7 +363,7 @@ const POSTerminal = () => {
     setLoading(true);
     try {
       const res = await transactionsAPI.create({
-        items: cart.map(item => ({ productId: item.id, productName: item.name, quantity: item.quantity, price: item.price, category: item.category })),
+        items: cart.map(item => toTxItem(item, true)),
         paymentMethod, customerId: selectedCustomer?.id || null, location: currentLocation, cashier: currentUser.name,
         orderType, tableNumber: orderType === 'dine-in' ? tableNumber : null, walkInName: orderType === 'takeaway' ? walkInName : null,
         pointsRedeemed: pointsToRedeem, pointsDiscount: redeemDiscount,
@@ -385,7 +428,7 @@ const POSTerminal = () => {
     try {
       await paymentAPI.confirm(qrData.paymentId);
       const res = await transactionsAPI.create({
-        items: cart.map(item => ({ productId: item.id, productName: item.name, quantity: item.quantity, price: item.price })),
+        items: cart.map(item => toTxItem(item)),
         paymentMethod: paymentView === 'upi' ? 'UPI' : 'QR Code',
         customerId: selectedCustomer?.id || null, location: currentLocation, cashier: currentUser.name,
       });
@@ -449,7 +492,7 @@ const POSTerminal = () => {
       const allPaid = updatedParts.every(s => s.status === 'confirmed');
       if (allPaid) {
         const res = await transactionsAPI.create({
-          items: cart.map(item => ({ productId: item.id, productName: item.name, quantity: item.quantity, price: item.price })),
+          items: cart.map(item => toTxItem(item)),
           paymentMethod: 'Split Payment',
           customerId: selectedCustomer?.id || null, location: currentLocation, cashier: currentUser.name,
           splitDetails: updatedParts.map(s => ({ payerName: s.payerName, amount: s.amount, method: s.method })),
@@ -593,7 +636,7 @@ const POSTerminal = () => {
                   <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(130px,1fr))]">
                     {prods.map(product => (
                       <button key={product.id}
-                        onClick={() => !product.eightySixed && addToCart(product)}
+                        onClick={() => handleProductClick(product)}
                         disabled={product.eightySixed}
                         className={`bg-white rounded-lg border transition-all overflow-hidden text-left active:scale-95 relative ${product.eightySixed ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-md hover:-translate-y-0.5'}`}
                         data-testid={`product-${product.id}`}
@@ -608,6 +651,11 @@ const POSTerminal = () => {
                             <span className="text-sm font-bold" style={{ color: theme.primary }}>${product.price.toFixed(2)}</span>
                             <span className="text-[9px] text-gray-400">{product.stock}</span>
                           </div>
+                          {(product.modifierIds || []).length > 0 && (
+                            <span className="text-[9px] mt-0.5 inline-block" style={{ color: theme.secondary }} data-testid={`pos-prod-mod-hint-${product.id}`}>
+                              + {product.modifierIds.length} option{product.modifierIds.length > 1 ? 's' : ''}
+                            </span>
+                          )}
                         </div>
                       </button>
                     ))}
@@ -622,7 +670,7 @@ const POSTerminal = () => {
             <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(130px,1fr))]">
               {filteredProducts.map(product => (
                 <button key={product.id}
-                  onClick={() => !product.eightySixed && addToCart(product)}
+                  onClick={() => handleProductClick(product)}
                   disabled={product.eightySixed}
                   className={`bg-white rounded-lg border transition-all overflow-hidden text-left active:scale-95 relative ${product.eightySixed ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-md hover:-translate-y-0.5'}`}
                   data-testid={`product-${product.id}`}
@@ -637,6 +685,11 @@ const POSTerminal = () => {
                       <span className="text-sm font-bold" style={{ color: theme.primary }}>${product.price.toFixed(2)}</span>
                       <span className="text-[9px] text-gray-400">{product.stock}</span>
                     </div>
+                    {(product.modifierIds || []).length > 0 && (
+                      <span className="text-[9px] mt-0.5 inline-block" style={{ color: theme.secondary }} data-testid={`pos-prod-mod-hint-flat-${product.id}`}>
+                        + {product.modifierIds.length} option{product.modifierIds.length > 1 ? 's' : ''}
+                      </span>
+                    )}
                   </div>
                 </button>
               ))}
@@ -1074,6 +1127,20 @@ const POSTerminal = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Modifier picker — opens when a product with attached modifierIds is tapped */}
+      <ModifierSheet
+        product={modifierSheetProduct}
+        modifiers={modifiers}
+        open={!!modifierSheetProduct}
+        onClose={() => setModifierSheetProduct(null)}
+        themeColor={theme.primary}
+        onConfirm={(selections, extra) => {
+          addToCart(modifierSheetProduct, 1, selections, extra);
+          toast({ title: 'Added', description: `${modifierSheetProduct.name} with ${selections.length} option${selections.length !== 1 ? 's' : ''}` });
+          setModifierSheetProduct(null);
+        }}
+      />
 
     </div>
   );
