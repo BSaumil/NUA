@@ -15,8 +15,10 @@ export default function StaffAvailability() {
   const [data, setData] = useState({ weeklyAvailable: [], blackoutDates: [] });
 
   useEffect(() => {
-    fetch(`${process.env.REACT_APP_BACKEND_URL}/api/auth/users`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
-      .then(r => r.json()).then(setStaff).catch(() => {});
+    fetch(`${process.env.REACT_APP_BACKEND_URL}/api/auth/users`, { headers: { Authorization: `Bearer ${localStorage.getItem('nuva_token')}` } })
+      .then(r => r.json())
+      .then(d => setStaff(Array.isArray(d) ? d : []))
+      .catch(() => setStaff([]));
   }, []);
 
   const load = async (s) => {

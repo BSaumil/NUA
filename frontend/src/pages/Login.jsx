@@ -54,11 +54,13 @@ export default function Login() {
           {/* Mode Toggle */}
           <div className="flex gap-1 mb-6 bg-gray-800 rounded-lg p-1">
             <button onClick={() => setMode('email')} data-testid="mode-email"
-              className={`flex-1 py-2 text-sm rounded-md font-medium transition-colors ${mode === 'email' ? 'bg-emerald-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+              className={`flex-1 py-2 text-sm rounded-md font-medium transition-colors ${mode === 'email' ? 'text-white' : 'text-gray-400 hover:text-white'}`}
+              style={mode === 'email' ? { backgroundColor: '#f58c14' } : {}}>
               <Mail size={14} className="inline mr-1" /> Email
             </button>
             <button onClick={() => setMode('pin')} data-testid="mode-pin"
-              className={`flex-1 py-2 text-sm rounded-md font-medium transition-colors ${mode === 'pin' ? 'bg-emerald-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+              className={`flex-1 py-2 text-sm rounded-md font-medium transition-colors ${mode === 'pin' ? 'text-white' : 'text-gray-400 hover:text-white'}`}
+              style={mode === 'pin' ? { backgroundColor: '#f58c14' } : {}}>
               <Hash size={14} className="inline mr-1" /> PIN Code
             </button>
           </div>
@@ -81,7 +83,7 @@ export default function Login() {
                 <Input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)}
                   className="pl-10 bg-gray-800 border-gray-700 text-white" required data-testid="login-password" />
               </div>
-              <Button type="submit" className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white font-medium" disabled={loading} data-testid="login-submit">
+              <Button type="submit" className="w-full h-11 text-white font-medium hover:opacity-90" style={{ backgroundColor: '#f58c14' }} disabled={loading} data-testid="login-submit">
                 {loading ? 'Signing in...' : 'Sign In'}
               </Button>
             </form>
@@ -96,7 +98,7 @@ export default function Login() {
                   className="text-center text-3xl tracking-[0.5em] font-mono w-48 h-16 bg-gray-800 border-gray-700 text-white"
                   data-testid="login-pin" />
               </div>
-              <Button type="submit" className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white font-medium" disabled={loading || pin.length < 2} data-testid="pin-submit">
+              <Button type="submit" className="w-full h-11 text-white font-medium hover:opacity-90" style={{ backgroundColor: '#f58c14' }} disabled={loading || pin.length < 2} data-testid="pin-submit">
                 {loading ? 'Signing in...' : 'Sign In with PIN'}
               </Button>
             </form>

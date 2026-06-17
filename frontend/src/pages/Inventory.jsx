@@ -90,7 +90,7 @@ const Inventory = () => {
               return (
                 <tr key={product.id} className="border-t hover:bg-gray-50" data-testid={`inventory-row-${product.id}`}>
                   <td className="p-4"><div className="flex items-center gap-3">
-                    <img src={product.image} alt={product.name} className="w-10 h-10 rounded object-cover" />
+                    <img src={product.image || 'https://placehold.co/40x40/e5e7eb/9ca3af?text=NUA'} alt={product.name} className="w-10 h-10 rounded object-cover" />
                     <span className="font-medium">{product.name}</span>
                   </div></td>
                   <td className="p-4 font-mono text-sm text-gray-600">{product.sku}</td>

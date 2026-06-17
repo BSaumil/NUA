@@ -1,5 +1,36 @@
 # NUA POS — PRD v26.0 (Enterprise Licensing & Entitlements)
 
+## v26.5 — Iteration 31 (Feb 2026): NUA Brand Identity + Items: Categories & Multi-Modifiers + V25/V26 Page Split
+
+### Brand Identity Applied
+- **ThemeContext default:** primary `#f58c14` (orange), secondary `#8b5cf6` (purple), accent `#ec4899` (pink). Legacy indigo (`#6366f1`) auto-migrates from localStorage to NUA orange on next load.
+- **Dark / Light toggle** added to BottomDock (Sun/Moon icon, `data-testid='dock-theme-toggle'`). Flips body bg between NUA dark `#0b0b0f` and light `#f6f7fb`. CSS vars exposed: `--nua-bg`, `--nua-surface`, `--nua-card`, `--nua-text`, `--nua-muted`, `--nua-primary/secondary/accent`.
+- **StaffLayout** now uses `darkMode` for body bg + text color (no more hard-coded `bg-gray-50`).
+- **Login page** Sign-In button + Email/PIN tabs now use brand orange (was emerald).
+
+### Items — Categories & Multi-Modifier Assignment (new requirement)
+- **Backend** `models/product.py` — added `categoryId: Optional[str]` and `modifierIds: List[str] = []` to `Product`, `ProductCreate`, `ProductUpdate`. Empty list `[]` is honored by PUT (verified by pytest).
+- **Frontend** `pages/Products.jsx`:
+  - Loads `categoriesAPI.getAll()` + `modifiersAPI.getAll()` dynamically (no more hardcoded Beverages/Food/Bakery dropdown).
+  - Add/Edit Product dialog has dynamic category `<select>` (`data-testid='product-category-select'`) populated from `/api/categories`, sorted by `sortOrder`, filtered to active.
+  - Add/Edit Product dialog has new multi-toggle modifier chips area (`data-testid='product-modifiers-picker'`). Each modifier chip is `data-testid='mod-toggle-{id}'`. Tap-to-toggle persists `modifierIds: []` on save.
+  - Product cards now show a "{n} modifier(s) attached" line under SKU when `modifierIds` is non-empty.
+
+### V25 / V26 Page Split (refactor, no behaviour change)
+- `pages/V25Pages.jsx` (688 lines) → barrel re-export. Implementations live in `/pages/v25/*.jsx` (21 files: `ShiftManager`, `AutoMarketing`, `Exceptions`, `HardwareHealth`, `Disputes`, `SupplierMarketplace`, `GiftCards`, `PredictiveOrders`, `WasteTracking`, `Concierge`, `Reputation`, `Franchise`, `FraudDetection`, `MarginGuardrails`, `StationReadiness`, `KioskMode`, `CFD`, `ChurnRisk`, `RecipeCosting`, `DynamicPricing`, `Subscriptions`).
+- `pages/V26Pages.jsx` (599 lines) → barrel re-export. Implementations live in `/pages/v26/*.jsx` (5 files: `VoucherManager`, `EventsManager`, `StaffAvailability`, `GiftCardSale`, `MarketingEmails`).
+- `App.js` imports unchanged.
+
+### Iteration 31 Bug Fixes (post-test-agent)
+- `pages/v26/StaffAvailability.jsx` — was reading `localStorage.getItem('token')` (returns `null`) instead of the actual `'nuva_token'` key. Auth-failed response then crashed `.filter`. Fixed key + added `Array.isArray(d) ? d : []` guard. Page now renders cleanly.
+- `Inventory.jsx` + `Products.jsx` `<img>` tags — added placeholder fallback for empty `product.image` to eliminate 404 spam.
+
+### Test Status — Iteration 31
+- **Backend 7/7 PASS** — `categoryId`/`modifierIds` POST + PUT + GET persistence + empty-list semantics.
+- **Frontend 12/12 PASS after fixes** — theme toggle, Products modifier picker, staff-availability render, all 26 v25/v26 routes.
+
+
+
 ## v26 (Feb 2026) — Iteration 27 — LICENSING RELEASE
 
 ### New backend module — `routes/licensing.py` (12 endpoints, prefix `/license`)

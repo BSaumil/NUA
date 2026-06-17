@@ -212,7 +212,7 @@ const Products = () => {
               <Card key={product.id} className={`hover:shadow-lg transition-shadow ${product.eightySixed ? 'opacity-60' : ''}`} data-testid={`product-card-${product.id}`}>
                 <CardContent className="p-4">
                   <div className="relative">
-                    <img src={product.image} alt={product.name} className="w-full h-40 object-cover rounded-lg mb-4" />
+                    <img src={product.image || 'https://placehold.co/300x200/e5e7eb/9ca3af?text=NUA'} alt={product.name} className="w-full h-40 object-cover rounded-lg mb-4" />
                     {product.eightySixed && (
                       <span className="absolute top-1 left-1 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">86</span>
                     )}
