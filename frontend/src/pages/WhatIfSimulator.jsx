@@ -20,6 +20,7 @@ export default function WhatIfSimulator() {
   const [changes, setChanges] = useState([]);
   const [results, setResults] = useState(null);
   const [selectedProduct, setSelectedProduct] = useState('');
+  const [bulkCategory, setBulkCategory] = useState('');
 
   useEffect(() => {
     api.get('/products').then(r => setProducts(r.data)).catch(console.error);
@@ -73,6 +74,27 @@ export default function WhatIfSimulator() {
       <Card className="border-0 shadow-sm">
         <CardHeader className="pb-2"><CardTitle className="text-sm">Configure Changes</CardTitle></CardHeader>
         <CardContent className="space-y-4">
+          {/* Bulk add by category — picks all products in selected category at once */}
+          <div className="flex gap-2 items-center" data-testid="sim-bulk-row">
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Bulk</span>
+            <Select value={bulkCategory} onValueChange={setBulkCategory}>
+              <SelectTrigger className="flex-1" data-testid="sim-category-select"><SelectValue placeholder="Add an entire category…" /></SelectTrigger>
+              <SelectContent>
+                {[...new Set(products.map(p => p.category).filter(Boolean))].map(c => (
+                  <SelectItem key={c} value={c}>{c} ({products.filter(p => p.category === c).length} items)</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="outline" onClick={() => {
+              if (!bulkCategory) return;
+              const additions = products
+                .filter(p => p.category === bulkCategory && !changes.find(c => c.productId === p.id))
+                .map(p => ({ productId: p.id, productName: p.name, currentPrice: p.price, newPrice: p.price, newCost: p.cost, projectedQty: 100 }));
+              setChanges(c => [...c, ...additions]);
+              setBulkCategory('');
+            }} disabled={!bulkCategory} data-testid="add-sim-category">+ Add all</Button>
+            <Button variant="outline" className="text-red-500" onClick={() => setChanges([])} disabled={changes.length === 0} data-testid="clear-sim">Clear</Button>
+          </div>
           <div className="flex gap-2">
             <Select value={selectedProduct} onValueChange={setSelectedProduct}>
               <SelectTrigger className="flex-1" data-testid="sim-product-select"><SelectValue placeholder="Select a product to simulate..." /></SelectTrigger>

@@ -71,7 +71,7 @@ import VoiceRecipe from './pages/VoiceRecipe';
 import KitchenLoad from './pages/KitchenLoad';
 import PriceTune from './pages/PriceTune';
 import EnterpriseCommandCenter from './pages/EnterpriseCommandCenter';
-import AshPro from './pages/AshPro';
+import NuaPro from './pages/NuaPro';
 import ProfitGuardian from './pages/ProfitGuardian';
 import DigitalTwin from './pages/DigitalTwin';
 import {
@@ -86,11 +86,19 @@ import OrderOnline from './pages/OrderOnline';
 import TrackOrder from './pages/TrackOrder';
 import AskNuaPanel, { AskNuaButton } from './components/AskNua';
 import { useState as useGlobalState } from 'react';
+import { useTheme } from './contexts/ThemeContext';
 
 function StaffLayout({ children }) {
   const [askOpen, setAskOpen] = useGlobalState(false);
+  const { darkMode } = useTheme();
   return (
-    <div className="min-h-screen bg-gray-50 pb-20">
+    <div
+      className="min-h-screen pb-20 transition-colors"
+      style={{
+        backgroundColor: darkMode ? '#0b0b0f' : '#f6f7fb',
+        color: darkMode ? '#eaeaea' : '#1f2937',
+      }}
+    >
       <LicenseBanner />
       <LicenseLockScreen />
       <div className="px-6 py-6 max-w-screen-2xl mx-auto">{children}</div>
@@ -171,7 +179,8 @@ function ProtectedRoutes() {
         <Route path="/price-tune" element={<PriceTune />} />
         {/* v25 Enterprise Suite */}
         <Route path="/enterprise" element={<EnterpriseCommandCenter />} />
-        <Route path="/ash-pro" element={<AshPro />} />
+        <Route path="/ash-pro" element={<NuaPro />} />
+        <Route path="/nua-pro" element={<NuaPro />} />
         <Route path="/profit-guardian" element={<ProfitGuardian />} />
         <Route path="/digital-twin" element={<DigitalTwin />} />
         <Route path="/shift-manager" element={<ShiftManager />} />

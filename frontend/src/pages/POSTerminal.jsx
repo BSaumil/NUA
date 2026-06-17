@@ -84,6 +84,16 @@ const POSTerminal = () => {
   const [giftCodeInput, setGiftCodeInput] = useState('');
   const [giftLoading, setGiftLoading] = useState(false);
 
+  // Order context: table # / takeaway / walk-in customer name
+  const [orderType, setOrderType] = useState('dine-in'); // dine-in | takeaway
+  const [tableNumber, setTableNumber] = useState('');
+  const [walkInName, setWalkInName] = useState('');
+
+  // Active promotions (only currently-live ones for staff context)
+  const [activePromos, setActivePromos] = useState([]);
+  // Collapsed category sections in the "All" grouped view
+  const [collapsedCats, setCollapsedCats] = useState([]);
+
   // Categories with icons + colors (kept as full objects, not just names)
   const [categories, setCategories] = useState([{ id: 'all', name: 'All', icon: 'Sparkles', color: '#6366f1' }]);
 
@@ -135,10 +145,28 @@ const POSTerminal = () => {
       v26API.cfdPush({
         cart: cart.map(i => ({ id: i.id, name: i.name, price: i.price, quantity: i.quantity, image: i.image })),
         selectedCustomer: selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name, membershipTier: selectedCustomer.membershipTier } : null,
+        tableNumber, walkInName,
       }).catch(() => {});
     }, 400);
     return () => clearTimeout(t);
-  }, [cart, selectedCustomer]);
+  }, [cart, selectedCustomer, tableNumber, walkInName]);
+
+  // Live-update products & categories every 12s + on tab focus so any edit done in
+  // another window reflects without a manual refresh.
+  useEffect(() => {
+    const refresh = async () => {
+      try {
+        const [p, c] = await Promise.all([productsAPI.getAll(), v26API.activePromos?.()]);
+        if (Array.isArray(p?.data)) setProducts(p.data);
+        if (Array.isArray(c?.data)) setActivePromos(c.data);
+      } catch {}
+    };
+    refresh();
+    const id = setInterval(refresh, 12000);
+    const onFocus = () => refresh();
+    window.addEventListener('focus', onFocus);
+    return () => { clearInterval(id); window.removeEventListener('focus', onFocus); };
+  }, []);
 
   // Load available vouchers once when discount picker opens
   useEffect(() => {
@@ -294,6 +322,7 @@ const POSTerminal = () => {
       const res = await transactionsAPI.create({
         items: cart.map(item => ({ productId: item.id, productName: item.name, quantity: item.quantity, price: item.price, category: item.category })),
         paymentMethod, customerId: selectedCustomer?.id || null, location: currentLocation, cashier: currentUser.name,
+        orderType, tableNumber: orderType === 'dine-in' ? tableNumber : null, walkInName: orderType === 'takeaway' ? walkInName : null,
         pointsRedeemed: pointsToRedeem, pointsDiscount: redeemDiscount,
       });
       setLastTxnId(res.data?.id || null);
@@ -492,7 +521,23 @@ const POSTerminal = () => {
               try { const r = await v15API.getTabs(); setOpenTabs(r.data || []); setShowTabsDialog(true); } catch {}
             }} data-testid="recall-tab-btn">Tabs</Button>
           </div>
-          <div className="flex gap-2 overflow-x-auto pb-1.5">
+          {activePromos.length > 0 && (
+            <div className="flex gap-1.5 overflow-x-auto pb-1.5" data-testid="active-promos-strip">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 flex items-center bg-amber-100 px-2 rounded-full shrink-0">
+                🔥 Live now
+              </span>
+              {activePromos.map(p => (
+                <span key={p.id}
+                  className="text-[11px] font-semibold whitespace-nowrap px-2.5 py-1 rounded-full border shrink-0"
+                  style={{ background: `${theme.primary}10`, borderColor: `${theme.primary}40`, color: theme.primary }}
+                  title={`${p.discount}% off · ${(p.activeDays || []).join(',') || 'all days'} ${p.startTime || ''}–${p.endTime || ''}`}
+                  data-testid={`active-promo-${p.id}`}>
+                  {p.name} · {p.discount}% off
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-2 overflow-x-auto pb-1.5 justify-center">
             {categories.map(cat => {
               const active = selectedCategory === cat.name;
               return (
@@ -531,14 +576,20 @@ const POSTerminal = () => {
             <div className="space-y-5">
               {Object.entries(groupedByCategory).map(([cat, prods]) => {
                 const meta = categories.find(c => c.name === cat);
+                const collapsed = collapsedCats.includes(cat);
                 return (
                 <div key={cat} data-testid={`pos-category-section-${cat}`}>
-                  <div className="flex items-center gap-2 mb-2 sticky top-0 bg-gray-50 py-1.5 z-[1]">
+                  <button
+                    onClick={() => setCollapsedCats(cs => cs.includes(cat) ? cs.filter(x => x !== cat) : [...cs, cat])}
+                    className="flex items-center gap-2 mb-2 sticky top-0 bg-gray-50 py-1.5 z-[1] w-full"
+                    data-testid={`collapse-toggle-${cat}`}>
+                    <span className="text-gray-400 text-xs">{collapsed ? '▶' : '▼'}</span>
                     {meta && <div className="w-6 h-6 rounded-md flex items-center justify-center text-white" style={{ background: meta.color }}><CategoryIcon name={meta.icon} size={13} /></div>}
                     <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">{cat}</h3>
                     <span className="text-[10px] text-gray-400">{prods.length} items</span>
                     <div className="flex-1 border-b border-dashed"></div>
-                  </div>
+                  </button>
+                  {!collapsed && (
                   <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(130px,1fr))]">
                     {prods.map(product => (
                       <button key={product.id}
@@ -561,6 +612,7 @@ const POSTerminal = () => {
                       </button>
                     ))}
                   </div>
+                  )}
                 </div>
               );})}
             </div>
@@ -634,18 +686,58 @@ const POSTerminal = () => {
               )}
             </div>
           ) : (
-            <CustomerCombobox
-              customers={customers}
-              value={null}
-              theme={theme}
-              onChange={async (c) => {
-                setSelectedCustomer(c);
-                if (c) {
-                  try { const r = await loyaltyEngineAPI.getBalance(c.id); setPointsBalance(r.data?.points || 0); } catch {}
-                  try { const r = await phaseEFAPI.yourUsual(c.id); setYourUsual(r.data?.items || []); } catch {}
-                } else { setYourUsual([]); }
-              }}
-            />
+            <>
+              <CustomerCombobox
+                customers={customers}
+                value={null}
+                theme={theme}
+                onChange={async (c) => {
+                  setSelectedCustomer(c);
+                  if (c) {
+                    try { const r = await loyaltyEngineAPI.getBalance(c.id); setPointsBalance(r.data?.points || 0); } catch {}
+                    try { const r = await phaseEFAPI.yourUsual(c.id); setYourUsual(r.data?.items || []); } catch {}
+                  } else { setYourUsual([]); }
+                }}
+              />
+              {/* Order-type strip — Dine-in / Takeaway + table picker + walk-in name */}
+              <div className="mt-2 space-y-2" data-testid="order-type-strip">
+                <div className="flex gap-1.5">
+                  {[
+                    { k: 'dine-in', label: '🍽️ Dine-in' },
+                    { k: 'takeaway', label: '🥡 Takeaway' },
+                  ].map(o => (
+                    <button key={o.k}
+                      onClick={() => { setOrderType(o.k); if (o.k === 'takeaway') setTableNumber(''); }}
+                      className={`flex-1 px-2 py-1.5 rounded-md text-xs font-semibold transition ${orderType === o.k ? 'text-white shadow-sm' : 'bg-white border hover:border-gray-400'}`}
+                      style={orderType === o.k ? { background: theme.primary } : {}}
+                      data-testid={`order-type-${o.k}`}>
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+                {orderType === 'dine-in' ? (
+                  <div className="flex gap-1.5 items-center" data-testid="table-row">
+                    <span className="text-xs text-gray-500">Table</span>
+                    <div className="flex gap-1 overflow-x-auto">
+                      {['1','2','3','4','5','6','7','8','9','10'].map(t => (
+                        <button key={t}
+                          onClick={() => setTableNumber(t)}
+                          className={`w-7 h-7 rounded-md border text-xs font-semibold transition ${tableNumber === t ? 'text-white' : 'bg-white hover:border-gray-400'}`}
+                          style={tableNumber === t ? { background: theme.primary } : {}}
+                          data-testid={`table-${t}`}>{t}</button>
+                      ))}
+                    </div>
+                    <Input placeholder="Other" value={!['1','2','3','4','5','6','7','8','9','10'].includes(tableNumber) ? tableNumber : ''}
+                      onChange={e => setTableNumber(e.target.value)}
+                      className="h-7 w-16 text-xs" data-testid="table-other" />
+                  </div>
+                ) : (
+                  <Input placeholder="Customer name for takeaway"
+                    value={walkInName} onChange={e => setWalkInName(e.target.value)}
+                    className="h-8 text-xs" data-testid="walk-in-name" />
+                )}
+              </div>
+            </>
           )}
         </CardContent></Card>
 

@@ -14,14 +14,14 @@ export default function Modifiers() {
   const [modifiers, setModifiers] = useState([]);
   const [showDialog, setShowDialog] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ name: '', type: 'list', mandatory: false, multiSelect: false, maxSelections: 1, options: [], printWithItem: true });
+  const [form, setForm] = useState({ name: '', type: 'list', mandatory: false, multiSelect: false, maxSelections: 1, options: [], printWithItem: true, channels: ['dine-in','pickup','delivery'], availableFrom: '', availableTo: '', activeDays: [] });
   const [newOption, setNewOption] = useState({ name: '', price: '' });
 
   useEffect(() => { fetchData(); }, []);
   const fetchData = async () => { try { const r = await itemsSystemAPI.getModifiers(); setModifiers(r.data); } catch {} };
 
-  const openAdd = () => { setEditing(null); setForm({ name: '', type: 'list', mandatory: false, multiSelect: false, maxSelections: 1, options: [], printWithItem: true }); setShowDialog(true); };
-  const openEdit = (m) => { setEditing(m); setForm({ name: m.name, type: m.type, mandatory: m.mandatory, multiSelect: m.multiSelect, maxSelections: m.maxSelections, options: m.options || [], printWithItem: m.printWithItem !== false }); setShowDialog(true); };
+  const openAdd = () => { setEditing(null); setForm({ name: '', type: 'list', mandatory: false, multiSelect: false, maxSelections: 1, options: [], printWithItem: true, channels: ['dine-in','pickup','delivery'], availableFrom: '', availableTo: '', activeDays: [] }); setShowDialog(true); };
+  const openEdit = (m) => { setEditing(m); setForm({ name: m.name, type: m.type, mandatory: m.mandatory, multiSelect: m.multiSelect, maxSelections: m.maxSelections, options: m.options || [], printWithItem: m.printWithItem !== false, channels: m.channels || ['dine-in','pickup','delivery'], availableFrom: m.availableFrom || '', availableTo: m.availableTo || '', activeDays: m.activeDays || [] }); setShowDialog(true); };
 
   const addOption = () => {
     if (!newOption.name) return;
@@ -94,6 +94,40 @@ export default function Modifiers() {
                 <Input type="number" step="0.01" placeholder="$" className="w-20 h-8 text-sm" value={newOption.price} onChange={e => setNewOption({ ...newOption, price: e.target.value })} />
                 <Button size="sm" variant="outline" className="h-8" onClick={addOption} data-testid="add-option-btn"><Plus size={12} /></Button>
               </div>
+            </div>
+            {/* Channels + timing — where + when this modifier is offered */}
+            <div className="border-t pt-3 space-y-2">
+              <p className="text-sm font-medium">Available on</p>
+              <div className="flex flex-wrap gap-1.5" data-testid="mod-channels-row">
+                {['dine-in','pickup','delivery','uber-eats','doordash','online','store-website'].map(ch => {
+                  const on = (form.channels || []).includes(ch);
+                  return (
+                    <button key={ch} type="button"
+                      onClick={() => setForm({ ...form, channels: on ? form.channels.filter(c => c !== ch) : [...(form.channels || []), ch] })}
+                      className={`px-2 py-1 text-[11px] rounded-full transition ${on ? 'text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                      style={on ? { background: theme.primary } : {}}
+                      data-testid={`mod-channel-${ch}`}>{ch}</button>
+                  );
+                })}
+              </div>
+              <p className="text-sm font-medium pt-2">Available time / days</p>
+              <div className="grid grid-cols-2 gap-2">
+                <Input type="time" value={form.availableFrom || ''} onChange={e => setForm({ ...form, availableFrom: e.target.value })} placeholder="From" data-testid="mod-available-from" />
+                <Input type="time" value={form.availableTo || ''} onChange={e => setForm({ ...form, availableTo: e.target.value })} placeholder="To" data-testid="mod-available-to" />
+              </div>
+              <div className="flex gap-1 flex-wrap" data-testid="mod-days-row">
+                {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d => {
+                  const on = (form.activeDays || []).includes(d);
+                  return (
+                    <button key={d} type="button"
+                      onClick={() => setForm({ ...form, activeDays: on ? form.activeDays.filter(x => x !== d) : [...(form.activeDays || []), d] })}
+                      className={`px-2 py-1 text-[10px] rounded-full ${on ? 'text-white' : 'bg-gray-100 text-gray-500'}`}
+                      style={on ? { background: theme.primary } : {}}
+                      data-testid={`mod-day-${d}`}>{d}</button>
+                  );
+                })}
+              </div>
+              <p className="text-[10px] text-gray-400">Leave times empty for all-day; leave days empty for every day.</p>
             </div>
             <Button className="w-full" style={{ backgroundColor: theme.primary }} onClick={handleSave} data-testid="save-mod-btn">{editing ? 'Update' : 'Create'} Modifier</Button>
           </div>

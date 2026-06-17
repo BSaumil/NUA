@@ -19,6 +19,7 @@ class Product(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
     category: str
+    categoryId: Optional[str] = None
     price: float
     cost: float
     stock: int
@@ -26,6 +27,9 @@ class Product(BaseModel):
     image: str
     gstRate: float = 10.0
     modifiers: List[ProductModifier] = []
+    # IDs of modifiers (from /api/modifiers) attached to this product.
+    # A product can have multiple modifiers.
+    modifierIds: List[str] = []
     # Enhanced fields
     locations: List[str] = ["Main"]
     onlineChannels: List[str] = []  # uber_eats, doordash, website, etc.
@@ -42,6 +46,7 @@ class Product(BaseModel):
 class ProductCreate(BaseModel):
     name: str
     category: str
+    categoryId: Optional[str] = None
     price: float
     cost: float
     stock: int
@@ -49,6 +54,7 @@ class ProductCreate(BaseModel):
     image: str
     gstRate: float = 10.0
     modifiers: List[ProductModifier] = []
+    modifierIds: List[str] = []
     locations: List[str] = ["Main"]
     onlineChannels: List[str] = []
     seoDescription: str = ""
@@ -57,6 +63,7 @@ class ProductCreate(BaseModel):
 class ProductUpdate(BaseModel):
     name: Optional[str] = None
     category: Optional[str] = None
+    categoryId: Optional[str] = None
     price: Optional[float] = None
     cost: Optional[float] = None
     stock: Optional[int] = None
@@ -64,6 +71,7 @@ class ProductUpdate(BaseModel):
     image: Optional[str] = None
     gstRate: Optional[float] = None
     modifiers: Optional[List[ProductModifier]] = None
+    modifierIds: Optional[List[str]] = None
     locations: Optional[List[str]] = None
     onlineChannels: Optional[List[str]] = None
     seoDescription: Optional[str] = None

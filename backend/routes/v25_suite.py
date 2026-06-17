@@ -19,7 +19,7 @@ SHOULD HAVE
 - Menu margin guardrails      GET        /api/v25/margin-guardrails
 
 TIER 1-5 EXTRAS
-- Ash Pro (AI GM) approval     POST       /api/v25/ash-pro/plan + /approve
+- NUA Pro (AI GM) approval     POST       /api/v25/ash-pro/plan + /approve
 - Profit Guardian nightly      GET        /api/v25/profit-guardian
 - Digital twin forecast        GET        /api/v25/digital-twin
 - AI Shift Manager alerts      GET        /api/v25/shift-manager
@@ -598,7 +598,7 @@ async def margin_guardrails(request: Request):
 
 
 # ============================================================================
-# TIER 1 — Ash Pro: AI General Manager (executes plans on approval)
+# TIER 1 — NUA Pro: AI General Manager (executes plans on approval)
 # ============================================================================
 @router.get("/ash-pro/plan")
 async def ash_plan(request: Request):

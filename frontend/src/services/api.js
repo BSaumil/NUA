@@ -518,7 +518,7 @@ export const v25API = {
   winBack: (customerIds, voucherValue) => api.post('/v25/recovery/win-back', { customerIds, voucherValue }),
   stationReadiness: () => api.get('/v25/station-readiness'),
   marginGuardrails: () => api.get('/v25/margin-guardrails'),
-  // Tier 1 — Ash Pro & co
+  // Tier 1 — NUA Pro & co
   ashPlan: () => api.get('/v25/ash-pro/plan'),
   ashApprove: (planId, actionIds) => api.post('/v25/ash-pro/approve', { planId, actionIds }),
   profitGuardian: () => api.get('/v25/profit-guardian'),
@@ -580,6 +580,7 @@ export const v26API = {
   recordRedemption: (vid, data) => api.post(`/v26/vouchers/${vid}/redeem`, data),
   // Auto-apply promotions
   applyPromos: (cart) => api.post('/v26/cart/apply-promos', { cart }),
+  activePromos: () => api.get('/v26/promotions/active-now'),
   // Subscriptions
   updateSubPlan: (id, data) => api.patch(`/v26/subscriptions/plans/${id}`, data),
   deleteSubPlan: (id) => api.delete(`/v26/subscriptions/plans/${id}`),

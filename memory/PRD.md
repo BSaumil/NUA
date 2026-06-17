@@ -107,7 +107,7 @@
 
 ### New frontend
 - `EnterpriseCommandCenter.jsx` — 24-tile launcher + 3 live KPI cards (Station Readiness, Expected Revenue, Live Alerts)
-- `AshPro.jsx` — Signals + actions + Approve All (one-click executor)
+- `NuaPro.jsx` — Signals + actions + Approve All (one-click executor)
 - `ProfitGuardian.jsx`, `DigitalTwin.jsx` — dedicated rich pages
 - `V25Pages.jsx` — 21 compact pages: ShiftManager, AutoMarketing, Exceptions, HardwareHealth, Disputes, SupplierMarketplace, GiftCards, PredictiveOrders, WasteTracking, Concierge, Reputation, Franchise, FraudDetection, MarginGuardrails, StationReadiness, KioskMode, CFD, ChurnRisk, RecipeCosting, DynamicPricing, Subscriptions
 - BottomDock — new "Enterprise (v25)" group with 25 entries; owner quick-action now shows "Enterprise" instead of Dashboard

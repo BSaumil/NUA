@@ -285,6 +285,17 @@ async def apply_promos_to_cart(data: dict, request: Request):
     return {"applied": applied, "totalDiscount": round(total, 2)}
 
 
+@router.get("/promotions/active-now")
+async def list_active_promotions_now(request: Request):
+    """POS-facing: returns every promotion that is *currently* live based on
+    today's date, weekday, and current time of day. Staff use this so they know
+    exactly what's running without scrolling through inactive promos."""
+    from routes.auth import get_current_user
+    await get_current_user(request)
+    promos = await db.promotions.find({"active": True}, {"_id": 0}).to_list(500)
+    return [p for p in promos if _promotion_active_now(p)]
+
+
 # ============================================================================
 # SUBSCRIPTIONS — rich plan model + edit/delete
 # ============================================================================

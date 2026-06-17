@@ -1,0 +1,57 @@
+{
+  "summary": "Iteration 31 — Validated NUA brand identity, dark/light theme toggle, Products dynamic categories + multi-modifier picker (backend + UI), backend Product model categoryId + modifierIds, v25/v26 page-split refactor (21 + 5 files via barrel re-export), POS Terminal render. Backend: 7/7 pytest PASS (100%) including categoryId/modifierIds POST + PUT + GET persistence + empty list. Frontend: theme toggle flips body bg between exact NUA colors #f6f7fb -> #0b0b0f via dock-theme-toggle, Products dialog renders dynamic product-category-select + product-modifiers-picker with 12 mod-toggles selectable, POS terminal renders cart + dock + Table/Takeaway/Walk-in picker, modifiers page renders 12+ modifier cards. ONE CRITICAL BUG FOUND: /staff-availability route crashes with 'staff.filter is not a function' producing a blank page — root cause is wrong localStorage key (uses 'token' instead of actual 'nuva_token' set by login), causing the fetch to /api/auth/users to receive an auth-error object which is then set as the staff array.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "v26/StaffAvailability.jsx",
+        "issue": "Page crashes with 'staff.filter is not a function' — blank page rendered. Root cause: line 18 reads localStorage.getItem('token') but login stores token under key 'nuva_token'. Auth header becomes 'Bearer null', /api/auth/users returns an error object (not an array), which is then setStaff()'d. Subsequent staff.filter(...) crashes the component subtree.",
+        "selector": "[data-testid='staff-availability-page']",
+        "priority": "CRITICAL"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "/login",
+        "issues": ["Sign In button is emerald green instead of NUA brand orange (#f58c14). Other branded buttons in the app (Run Simulation, Add Product, dock star icon) correctly use #f58c14. Login page appears to use hardcoded Tailwind emerald instead of theme.primary."]
+      },
+      {
+        "screen": "Global",
+        "issues": ["~8 repeated 404 console errors on every page load (same as iteration 29/30 — empty src='' image issue, carried over)."]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration31_products_nua.py",
+    "/app/test_reports/pytest/pytest_iteration31.xml"
+  ],
+  "action_items": [
+    "CRITICAL: Fix /app/frontend/src/pages/v26/StaffAvailability.jsx line 18 — change localStorage.getItem('token') to localStorage.getItem('nuva_token'), AND add defensive guard: `.then(r => r.json()).then(d => setStaff(Array.isArray(d) ? d : []))`. The same key mismatch may exist in other v25/v26 pages — grep the whole frontend for `localStorage.getItem('token')` and migrate to 'nuva_token'.",
+    "MINOR: Apply NUA brand primary color (theme.primary or #f58c14) to the /login Sign In button — currently emerald green, inconsistent with the rest of the app.",
+    "CLEANUP: Investigate the empty-src image 404s (carried over from iter 29/30) — find component rendering <img src=''> and add a fallback or omit when src is missing."
+  ],
+  "critical_code_review_comments": [
+    "Token key inconsistency across frontend — login stores 'nuva_token' in localStorage but StaffAvailability.jsx reads 'token'. Need a centralized auth helper (e.g., getAuthToken()) to avoid this drift; many other pages probably make the same mistake silently when the backend tolerates anonymous reads.",
+    "StaffAvailability.jsx line 19 does `.then(setStaff)` directly — must validate the response shape. Add `Array.isArray(d) ? d : []` defensive default. Same defensive pattern recommended for any fetch().then(setState) in the codebase.",
+    "Products.jsx duplicate state for category — keeps both `category` (name string) and `categoryId` (id). handleCategoryChange syncs them but any direct setProductForm({category: ...}) elsewhere would diverge. Consider deriving `category` from categoryId+categories list at render time instead of storing both.",
+    "Backend products.py PUT update_data uses `if v is not None` filter — this means a caller cannot explicitly clear modifierIds back to [] via PUT (an empty list is treated as 'don't change'). Actually empty list `[]` is not None so it works — verified in test_empty_modifier_ids_allowed PASS. OK but a comment explaining the semantic helps.",
+    "Login page Sign In button color drift from NUA brand orange suggests the login form is not wired to ThemeContext or is using a literal Tailwind class instead of style={{background: theme.primary}}."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration31_products_nua.py (NEW — 7 pytest cases, all passing)"
+  ],
+  "success_rate": {
+    "backend": "100% (7/7)",
+    "frontend": "85% — 11/12 features validated; /staff-availability crashes (1 critical UI bug)"
+  },
+  "test_credentials_used": ["owner@nuva.com / NuvaOwner2026!"],
+  "seed_data_creation": "test_iteration31 creates one TEST_NUA_xxxxxx product via POST /api/products with categoryId + modifierIds, then exercises PUT updates, then DELETEs in fixture teardown. No residual test data remains in db.products. All cleanup verified.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend Product model with categoryId + modifierIds works end-to-end (POST/PUT/GET, empty list allowed). Dark/light theme toggle on dock confirmed flipping body bg to exact NUA palette (#f6f7fb light / #0b0b0f dark). Products dialog modifier multi-select works (12 toggles enumerated). v25/v26 split renders for all spot-checked routes EXCEPT /staff-availability which crashes due to localStorage token key mismatch ('token' vs actual 'nuva_token'). If the main agent fixes the token key in StaffAvailability.jsx, re-test /staff-availability and also grep the codebase for any other components reading localStorage.getItem('token'). The /login button color is the only NUA brand drift identified.",
+  "rca of the issue": "BUG: /staff-availability blank page. Repro: log in as owner -> navigate to /staff-availability -> page renders empty (0 chars body text). Console shows: 'PAGEERR: staff.filter is not a function'. RCA: /app/frontend/src/pages/v26/StaffAvailability.jsx:18 reads `localStorage.getItem('token')`, but login (and the rest of the app) stores the JWT under key 'nuva_token' (confirmed via Object.keys(localStorage) = ['nua_lang','nuva_token','nua-device-id','nua_dark','posTheme']). Thus the Authorization header becomes 'Bearer null', the backend returns an auth-error JSON object {detail: 'Not authenticated'}, the component calls setStaff(<object>), and the subsequent `.filter(...)` call throws a TypeError that crashes the component subtree (React renders nothing). Mitigation: (1) read the correct key 'nuva_token', and (2) guard with `Array.isArray(d) ? d : []` before setStaff. Both fixes are 1-line each in StaffAvailability.jsx."
+}

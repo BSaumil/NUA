@@ -9,7 +9,7 @@ import {
   FlaskConical, Sunrise, Brain, Plug, Users2, LogOut, Mail, ClipboardList,
   Trophy, Printer, PieChart, MoreHorizontal, X, FileText, DollarSign, Tag,
   Link2, Ban, Receipt, Calendar, MapPin, Clock, Sparkles, BookOpen, Shield, ShoppingBag,
-  ShieldAlert, AlertTriangle, Flame, ArrowLeftRight, Key
+  ShieldAlert, AlertTriangle, Flame, ArrowLeftRight, Key, Sun, Moon
 } from 'lucide-react';
 
 // Role-default quick actions (left → right) on the bottom dock.
@@ -106,7 +106,7 @@ const ALL_FEATURES = [
   ]},
   { group: 'Enterprise (v25)', items: [
     { path: '/enterprise', label: 'Command Center', icon: Brain, access: ['owner', 'manager'] },
-    { path: '/ash-pro', label: 'Ash Pro · AI GM', icon: Brain, access: ['owner'] },
+    { path: '/ash-pro', label: 'NUA Pro · AI GM', icon: Brain, access: ['owner'] },
     { path: '/profit-guardian', label: 'Profit Guardian', icon: Shield, access: ['owner', 'manager'] },
     { path: '/digital-twin', label: 'Digital Twin', icon: Sparkles, access: ['owner', 'manager'] },
     { path: '/shift-manager', label: 'Shift Manager', icon: Zap, access: ['owner', 'manager'] },
@@ -140,7 +140,7 @@ const ALL_FEATURES = [
     { path: '/inventory-accounting', label: 'Inventory & BAS', icon: Receipt, access: ['owner', 'manager'] },
   ]},
   { group: 'Analytics & AI', items: [
-    { path: '/agent', label: 'Ash AI Agent', icon: Brain, access: ['owner', 'manager'] },
+    { path: '/agent', label: 'NUA AI Agent', icon: Brain, access: ['owner', 'manager'] },
     { path: '/agent-autonomy', label: 'Ash Autonomy', icon: Zap, access: ['owner'] },
     { path: '/phone-agent', label: 'AI Phone Agent', icon: Sparkles, access: ['owner', 'manager'] },
     { path: '/ab-tests', label: 'Menu A/B Tests', icon: FlaskConical, access: ['owner', 'manager'] },
@@ -161,7 +161,7 @@ const ALL_FEATURES = [
 ];
 
 export default function BottomDock() {
-  const { theme } = useTheme();
+  const { theme, darkMode, toggleDarkMode } = useTheme();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -174,7 +174,7 @@ export default function BottomDock() {
     if (!['owner', 'manager'].includes(user.role)) return;
     const tick = async () => {
       if (document.visibilityState !== 'visible') return;
-      try { const r = await v15API.getBadges(); setBadges(r.data || {}); } catch {}
+      try { const r = await v15API.getBadges(); setBadges(r.data || {}); } catch { /* badge poll best-effort */ }
     };
     tick();
     const id = setInterval(tick, 60000); // poll every 60s
@@ -203,11 +203,15 @@ export default function BottomDock() {
   return (
     <>
       {/* BOTTOM DOCK */}
-      <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-gray-200 shadow-[0_-4px_20px_rgba(0,0,0,0.06)]" data-testid="bottom-dock">
+      <div
+        className={`fixed bottom-0 left-0 right-0 z-40 backdrop-blur-md border-t shadow-[0_-4px_20px_rgba(0,0,0,0.06)] ${darkMode ? 'border-white/10' : 'border-gray-200'}`}
+        style={{ backgroundColor: darkMode ? 'rgba(21,21,29,0.95)' : 'rgba(255,255,255,0.95)' }}
+        data-testid="bottom-dock"
+      >
         <div className="max-w-screen-2xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-1 text-sm">
             <span className="font-bold tracking-wider px-2" style={{ color: theme.primary }}>NUA</span>
-            <span className="text-[10px] text-gray-400 mr-2 hidden sm:inline">{user.name} · {role}</span>
+            <span className={`text-[10px] mr-2 hidden sm:inline ${darkMode ? 'text-zinc-500' : 'text-gray-400'}`}>{user.name} · {role}</span>
           </div>
           <div className="flex items-center gap-1 flex-1 justify-center max-w-xl">
             {quick.map(q => {
@@ -222,7 +226,7 @@ export default function BottomDock() {
                 <button
                   key={q.path}
                   onClick={() => navigate(q.path)}
-                  className={`relative flex flex-col items-center gap-0.5 px-3 py-2 rounded-xl transition-all min-w-[64px] ${isActive ? 'text-white' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100'}`}
+                  className={`relative flex flex-col items-center gap-0.5 px-3 py-2 rounded-xl transition-all min-w-[64px] ${isActive ? 'text-white' : (darkMode ? 'text-zinc-400 hover:text-white hover:bg-white/5' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100')}`}
                   style={isActive ? { backgroundColor: theme.primary } : {}}
                   data-testid={`dock-${q.path.replace('/', '')}`}
                 >
@@ -240,21 +244,31 @@ export default function BottomDock() {
             })}
             <button
               onClick={() => setShowMore(true)}
-              className="flex flex-col items-center gap-0.5 px-3 py-2 rounded-xl text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition-all min-w-[64px]"
+              className={`flex flex-col items-center gap-0.5 px-3 py-2 rounded-xl transition-all min-w-[64px] ${darkMode ? 'text-zinc-400 hover:text-white hover:bg-white/5' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100'}`}
               data-testid="dock-more"
             >
               <MoreHorizontal size={18} />
               <span className="text-[10px] font-medium">More</span>
             </button>
           </div>
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-1 px-3 py-2 rounded-xl text-gray-400 hover:text-red-500 hover:bg-red-50 transition-all"
-            data-testid="dock-logout"
-          >
-            <LogOut size={16} />
-            <span className="text-xs hidden sm:inline">Sign Out</span>
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={toggleDarkMode}
+              className={`flex items-center justify-center w-9 h-9 rounded-xl transition-all ${darkMode ? 'text-amber-400 hover:bg-white/5' : 'text-zinc-500 hover:bg-gray-100'}`}
+              title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+              data-testid="dock-theme-toggle"
+            >
+              {darkMode ? <Sun size={16} /> : <Moon size={16} />}
+            </button>
+            <button
+              onClick={handleLogout}
+              className={`flex items-center gap-1 px-3 py-2 rounded-xl transition-all ${darkMode ? 'text-zinc-500 hover:text-red-400 hover:bg-red-500/10' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
+              data-testid="dock-logout"
+            >
+              <LogOut size={16} />
+              <span className="text-xs hidden sm:inline">Sign Out</span>
+            </button>
+          </div>
         </div>
       </div>
 

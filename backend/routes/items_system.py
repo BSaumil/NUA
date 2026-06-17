@@ -303,12 +303,18 @@ async def create_modifier(data: dict, request: Request):
     mod = {
         "id": f"mod-{str(uuid.uuid4())[:8]}",
         "name": data.get("name", ""),
-        "type": data.get("type", "list"),  # list or dropdown
+        "type": data.get("type", "list"),
         "mandatory": data.get("mandatory", False),
         "multiSelect": data.get("multiSelect", False),
         "maxSelections": data.get("maxSelections", 1),
-        "options": data.get("options", []),  # [{name, price}]
+        "options": data.get("options", []),
         "assignedCategories": data.get("assignedCategories", []),
+        # Where this modifier is offered + when it's available on each channel.
+        # channels = ["dine-in","pickup","delivery","uber-eats","doordash","online"]
+        "channels": data.get("channels", ["dine-in", "pickup", "delivery"]),
+        "availableFrom": data.get("availableFrom"),   # "HH:MM"
+        "availableTo": data.get("availableTo"),       # "HH:MM"
+        "activeDays": data.get("activeDays", []),     # ["Mon",...,"Sun"] empty=all
         "printWithItem": data.get("printWithItem", True),
         "createdAt": datetime.now(timezone.utc).isoformat(),
     }
@@ -322,8 +328,11 @@ async def update_modifier(mod_id: str, data: dict, request: Request):
     user = await get_current_user(request)
     if user["role"] not in ("owner", "manager"):
         raise HTTPException(status_code=403, detail="Owner/Manager access only")
-    allowed = {"name", "type", "mandatory", "multiSelect", "maxSelections", "options", "assignedCategories", "printWithItem"}
+    allowed = {"name", "type", "mandatory", "multiSelect", "maxSelections", "options",
+               "assignedCategories", "printWithItem",
+               "channels", "availableFrom", "availableTo", "activeDays"}
     update = {k: v for k, v in data.items() if k in allowed}
+    update["updatedAt"] = datetime.now(timezone.utc).isoformat()
     result = await db.modifiers.find_one_and_update({"id": mod_id}, {"$set": update}, return_document=True)
     if not result:
         raise HTTPException(status_code=404, detail="Not found")

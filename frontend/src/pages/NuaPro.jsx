@@ -7,7 +7,7 @@ import { useToast } from '../hooks/use-toast';
 import { useTheme } from '../contexts/ThemeContext';
 import { Brain, CheckCircle, AlertCircle, Zap, TrendingUp, RefreshCw } from 'lucide-react';
 
-export default function AshPro() {
+export default function NuaPro() {
   const { theme } = useTheme();
   const { toast } = useToast();
   const [plan, setPlan] = useState(null);
@@ -38,7 +38,7 @@ export default function AshPro() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-2" style={{ color: theme.text }}>
-            <Brain className="text-violet-600" /> Ash Pro · AI General Manager
+            <Brain className="text-violet-600" /> NUA Pro · AI General Manager
           </h1>
           <p className="text-sm text-gray-500 mt-1">One-click execution of Ash's daily plan</p>
         </div>

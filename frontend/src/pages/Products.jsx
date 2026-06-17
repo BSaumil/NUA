@@ -5,11 +5,19 @@ import { Input } from '../components/ui/input';
 import { Card, CardContent } from '../components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
-import { productsAPI, promotionsAPI, categoriesAPI, aiPantryAPI } from '../services/api';
+import { productsAPI, promotionsAPI, categoriesAPI, modifiersAPI, aiPantryAPI } from '../services/api';
 import { toast } from 'sonner';
 
-const EMPTY_PRODUCT = { name: '', category: 'Beverages', price: '', cost: '', stock: '', sku: '', image: '', gstRate: 10, locations: ['Main'], onlineChannels: [], seoDescription: '', description: '' };
-const EMPTY_PROMO = { name: '', type: 'category', discount: '', schedule: '', active: true, category: '', products: [], startDate: '', endDate: '', activeDays: [], startTime: '', endTime: '' };
+const makeEmptyProduct = () => ({
+  name: '', category: '', categoryId: '', price: '', cost: '', stock: '', sku: '',
+  image: '', gstRate: 10, locations: ['Main'], onlineChannels: [],
+  seoDescription: '', description: '', modifierIds: [],
+});
+const makeEmptyPromo = () => ({
+  name: '', type: 'category', discount: '', schedule: '', active: true,
+  category: '', products: [], startDate: '', endDate: '',
+  activeDays: [], startTime: '', endTime: '',
+});
 
 const Products = () => {
   const { theme } = useTheme();
@@ -17,13 +25,15 @@ const Products = () => {
   const [view, setView] = useState('products');
   const [products, setProducts] = useState([]);
   const [promotions, setPromotions] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [modifiers, setModifiers] = useState([]);
   const [insights, setInsights] = useState({});  // {productId: {weeklyUnitsSold, marginPct, ...}}
   const [showProductDialog, setShowProductDialog] = useState(false);
   const [showPromoDialog, setShowPromoDialog] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [editingPromo, setEditingPromo] = useState(null);
-  const [productForm, setProductForm] = useState(EMPTY_PRODUCT);
-  const [promoForm, setPromoForm] = useState(EMPTY_PROMO);
+  const [productForm, setProductForm] = useState(makeEmptyProduct);
+  const [promoForm, setPromoForm] = useState(makeEmptyPromo);
 
   useEffect(() => { fetchData(); fetchInsights(); }, []);
 
@@ -33,22 +43,47 @@ const Products = () => {
       const map = {};
       (r.data || []).forEach(i => { map[i.productId] = i; });
       setInsights(map);
-    } catch {}
+    } catch { /* ignore: insights are optional */ }
   };
 
   const fetchData = async () => {
     try {
-      const [p, pr] = await Promise.all([productsAPI.getAll(), promotionsAPI.getAll()]);
-      setProducts(p.data);
-      setPromotions(pr.data);
+      const [productsRes, promotionsRes, categoriesRes, modifiersRes] = await Promise.all([
+        productsAPI.getAll(),
+        promotionsAPI.getAll(),
+        categoriesAPI.getAll(),
+        modifiersAPI.getAll(),
+      ]);
+      setProducts(productsRes.data);
+      setPromotions(promotionsRes.data);
+      const activeCats = (categoriesRes.data || []).filter(c => c.active !== false);
+      const sortedCats = Array.from(activeCats).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+      setCategories(sortedCats);
+      setModifiers(modifiersRes.data || []);
     } catch { toast.error('Failed to load data'); }
   };
 
   // === Product CRUD ===
-  const openAddProduct = () => { setEditingProduct(null); setProductForm(EMPTY_PRODUCT); setShowProductDialog(true); };
+  function openAddProduct() {
+    const firstCat = categories[0];
+    setEditingProduct(null);
+    setProductForm({
+      name: '', category: firstCat?.name || '', categoryId: firstCat?.id || '',
+      price: '', cost: '', stock: '', sku: '', image: '', gstRate: 10,
+      locations: ['Main'], onlineChannels: [], seoDescription: '', description: '',
+      modifierIds: [],
+    });
+    setShowProductDialog(true);
+  }
   const openEditProduct = (p) => {
     setEditingProduct(p);
-    setProductForm({ name: p.name, category: p.category, price: p.price, cost: p.cost, stock: p.stock, sku: p.sku, image: p.image, gstRate: p.gstRate, locations: p.locations || ['Main'], onlineChannels: p.onlineChannels || [], seoDescription: p.seoDescription || '', description: p.description || '' });
+    setProductForm({
+      name: p.name, category: p.category, categoryId: p.categoryId || '',
+      price: p.price, cost: p.cost, stock: p.stock, sku: p.sku, image: p.image,
+      gstRate: p.gstRate, locations: p.locations || ['Main'], onlineChannels: p.onlineChannels || [],
+      seoDescription: p.seoDescription || '', description: p.description || '',
+      modifierIds: p.modifierIds || [],
+    });
     setShowProductDialog(true);
   };
   const saveProduct = async () => {
@@ -64,8 +99,21 @@ const Products = () => {
     try { await productsAPI.delete(id); toast.success('Product deleted'); fetchData(); } catch { toast.error('Failed to delete'); }
   };
 
+  const toggleModifierForProduct = (mid) => {
+    const arr = productForm.modifierIds || [];
+    setProductForm({
+      ...productForm,
+      modifierIds: arr.includes(mid) ? arr.filter(x => x !== mid) : [...arr, mid],
+    });
+  };
+
+  const handleCategoryChange = (catId) => {
+    const c = categories.find(x => x.id === catId);
+    setProductForm({ ...productForm, categoryId: catId, category: c?.name || '' });
+  };
+
   // === Promotion CRUD ===
-  const openAddPromo = () => { setEditingPromo(null); setPromoForm(EMPTY_PROMO); setShowPromoDialog(true); };
+  const openAddPromo = () => { setEditingPromo(null); setPromoForm(makeEmptyPromo()); setShowPromoDialog(true); };
   const openEditPromo = (p) => {
     setEditingPromo(p);
     setPromoForm({ name: p.name, type: p.type, discount: p.discount, schedule: p.schedule, active: p.active, category: p.category || '', products: p.products || [], startDate: p.startDate || '', endDate: p.endDate || '', activeDays: p.activeDays || [], startTime: p.startTime || '', endTime: p.endTime || '' });
@@ -179,6 +227,11 @@ const Products = () => {
                     <span className="text-sm text-gray-500">{product.category}</span>
                     <span className="text-xs bg-gray-100 px-2 py-1 rounded font-mono">{product.sku}</span>
                   </div>
+                  {(product.modifierIds || []).length > 0 && (
+                    <p className="text-[10px] mt-1 font-medium" style={{ color: theme.secondary }} data-testid={`product-mods-${product.id}`}>
+                      {product.modifierIds.length} modifier{product.modifierIds.length > 1 ? 's' : ''} attached
+                    </p>
+                  )}
                   <div className="flex items-center justify-between mt-2">
                     <div>
                       <p className="text-2xl font-bold" style={{ color: theme.primary }}>${Number(product.price).toFixed(2)}</p>
@@ -254,9 +307,15 @@ const Products = () => {
           <DialogHeader><DialogTitle>{editingProduct ? 'Edit Product' : 'Add Product'}</DialogTitle></DialogHeader>
           <div className="space-y-3 py-2 max-h-[60vh] overflow-y-auto">
             <Input placeholder="Product name" value={productForm.name} onChange={e => setProductForm({ ...productForm, name: e.target.value })} data-testid="product-name-input" />
-            <select className="w-full p-2 border rounded-md text-sm" value={productForm.category} onChange={e => setProductForm({ ...productForm, category: e.target.value })} data-testid="product-category-select">
-              <option value="Beverages">Beverages</option><option value="Food">Food</option><option value="Bakery">Bakery</option><option value="Alcohol">Alcohol</option><option value="Other">Other</option>
-            </select>
+            <div>
+              <label className="text-xs font-medium text-gray-500 mb-1 block">Category</label>
+              <select className="w-full p-2 border rounded-md text-sm" value={productForm.categoryId} onChange={e => handleCategoryChange(e.target.value)} data-testid="product-category-select">
+                <option value="">— Select a category —</option>
+                {categories.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
             <div className="grid grid-cols-2 gap-2">
               <Input type="number" step="0.01" placeholder="Price" value={productForm.price} onChange={e => setProductForm({ ...productForm, price: e.target.value })} data-testid="product-price-input" />
               <Input type="number" step="0.01" placeholder="Cost" value={productForm.cost} onChange={e => setProductForm({ ...productForm, cost: e.target.value })} data-testid="product-cost-input" />
@@ -285,6 +344,36 @@ const Products = () => {
                   </button>
                 ))}
               </div>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-500 mb-1 block">Modifiers (select multiple)</label>
+              {modifiers.length === 0 ? (
+                <p className="text-xs text-gray-400 italic">No modifiers defined yet. Create some at <span className="font-mono">/modifiers</span> to use them here.</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-2 border rounded-md bg-gray-50" data-testid="product-modifiers-picker">
+                  {modifiers.map(m => {
+                    const selected = (productForm.modifierIds || []).includes(m.id);
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => toggleModifierForProduct(m.id)}
+                        className={`px-2.5 py-1 text-xs rounded-full font-medium transition-colors border ${selected ? 'text-white border-transparent' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'}`}
+                        style={selected ? { background: theme.primary } : {}}
+                        data-testid={`mod-toggle-${m.id}`}
+                        title={`${m.options?.length || 0} options${m.mandatory ? ' · required' : ''}`}
+                      >
+                        {m.name}
+                        {m.mandatory ? <span className="ml-1 opacity-70">*</span> : null}
+                        {m.multiSelect ? <span className="ml-1 opacity-70">+</span> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {(productForm.modifierIds || []).length > 0 && (
+                <p className="text-[10px] text-gray-500 mt-1">{productForm.modifierIds.length} selected · tap a chip to toggle</p>
+              )}
             </div>
             <Button className="w-full" style={{ backgroundColor: theme.primary }} onClick={saveProduct} data-testid="save-product-btn">
               {editingProduct ? 'Update Product' : 'Create Product'}

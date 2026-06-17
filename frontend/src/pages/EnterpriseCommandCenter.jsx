@@ -12,7 +12,7 @@ import {
 
 const TILES = [
   // Tier 1
-  { path: '/ash-pro', label: 'Ash Pro · AI GM', icon: Brain, color: 'violet', desc: 'One-click execution of daily plan' },
+  { path: '/ash-pro', label: 'NUA Pro · AI GM', icon: Brain, color: 'violet', desc: 'One-click execution of daily plan' },
   { path: '/profit-guardian', label: 'Profit Guardian', icon: Shield, color: 'emerald', desc: 'Nightly margin alerts' },
   { path: '/digital-twin', label: 'Digital Twin', icon: Activity, color: 'cyan', desc: 'Today\'s revenue + wait forecast' },
   { path: '/shift-manager', label: 'AI Shift Manager', icon: TrendingUp, color: 'orange', desc: 'Real-time intervention alerts' },
