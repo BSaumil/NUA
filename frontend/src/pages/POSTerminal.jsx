@@ -103,15 +103,17 @@ const POSTerminal = () => {
   const [modifierSheetProduct, setModifierSheetProduct] = useState(null);
 
   // Smart add-to-cart: if a product has modifierIds, open the picker first.
-  // Otherwise add directly.
+  // If modifier defs haven't loaded yet but the product has modifierIds,
+  // still open the sheet (it will show a loading hint) rather than silently
+  // skipping the selection step.
   const handleProductClick = useCallback((product) => {
     if (product.eightySixed) return;
-    if ((product.modifierIds || []).length > 0 && modifiers.length > 0) {
+    if ((product.modifierIds || []).length > 0) {
       setModifierSheetProduct(product);
     } else {
       addToCart(product);
     }
-  }, [addToCart, modifiers]);
+  }, [addToCart]);
 
   // Map a cart line into a backend TransactionItem (flattens selectedModifiers
   // → modifiers list of {modifierId, modifierName, optionId, optionName, price}).

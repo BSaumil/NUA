@@ -1,5 +1,28 @@
 # NUA POS — PRD v26.0 (Enterprise Licensing & Entitlements)
 
+## v26.5 — Iteration 32 (Feb 2026): POS Modifier Picker End-to-End
+
+### What landed
+- **ModifierSheet** (`/app/frontend/src/components/pos/ModifierSheet.jsx`) — opens on every product tap when the product has `modifierIds.length > 0`. Required vs Optional badges, single-select / multi-select with `maxSelections`, per-option surcharges. Add button gated until all mandatory groups have ≥1 pick. data-testids: `modifier-sheet`, `mod-group-{id}`, `mod-opt-{modId}-{optName}`, `mod-confirm`, `mod-cancel`, `mod-validation`, `mod-loading`.
+- **POSContext.addToCart** extended to `(product, qty, selectedModifiers, extraPrice)`. Items with modifier picks get a unique synthetic line id `${productId}__${shortUuid}` while preserving the original `productId` field — so two Flat Whites with different milk are separate cart lines but still resolve to the right product on the backend.
+- **SwipeableCartItem** displays selected modifiers under the product name (`data-testid='cart-mods-{lineId}'`).
+- **POSTerminal**: loads `/api/modifiers` once in parallel with categories. `handleProductClick` opens the sheet when `modifierIds` is non-empty (no longer gated on defs being loaded — sheet shows a loading hint and disables Confirm during the race). Both product card layouts (categorised + flat) show a `+N options` hint (`data-testid='pos-prod-mod-hint-{id}'`).
+- **Transactions**: new helper `toTxItem` flattens each line's `selectedModifiers` into the backend `TransactionItem.modifiers: List[SelectedModifier]` shape — `{modifierId, modifierName, optionId, optionName, price}` — verified round-trips via GET /api/transactions/{id}.
+- **Backend** `transaction.py` — widened `Transaction.tableNumber` and `TransactionCreate.tableNumber` to `Optional[str]` (was `Optional[int]`) since the frontend sends string table numbers and freeform 'Other' values.
+
+### Verified (iter32, 4/4 backend + 100% frontend)
+- Flat White: 6 modifier groups render, Required/Optional badges, surcharges, single-select cycle, multi-select cap, validation message.
+- Cart shows the modifier breakdown per line.
+- Cash transaction persists modifier picks; GET /api/transactions returns them.
+- Items without modifiers (Soft Drink, Smoothies, etc.) bypass the sheet and merge as before.
+
+### Files added / changed (iter32)
+- NEW: `components/pos/ModifierSheet.jsx`
+- CHANGED: `contexts/POSContext.js`, `components/pos/SwipeableCartItem.jsx`, `pages/POSTerminal.jsx`, `backend/models/transaction.py`
+- NEW pytest: `backend/tests/test_iteration32_modifiers.py`
+
+
+
 ## v26.5 — Iteration 31 (Feb 2026): NUA Brand Identity + Items: Categories & Multi-Modifiers + V25/V26 Page Split
 
 ### Brand Identity Applied

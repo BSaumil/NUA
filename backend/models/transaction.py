@@ -49,7 +49,7 @@ class Transaction(BaseModel):
     printed: bool = False
     emailReceipt: Optional[str] = None
     smsReceipt: Optional[str] = None
-    tableNumber: Optional[int] = None
+    tableNumber: Optional[str] = None
     orderType: str = "retail"
 
 class TransactionCreate(BaseModel):
@@ -64,5 +64,5 @@ class TransactionCreate(BaseModel):
     discount: Optional[TransactionDiscount] = None
     emailReceipt: Optional[str] = None
     smsReceipt: Optional[str] = None
-    tableNumber: Optional[int] = None
+    tableNumber: Optional[str] = None
     orderType: str = "retail"

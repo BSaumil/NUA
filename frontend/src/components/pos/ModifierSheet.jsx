@@ -62,9 +62,12 @@ export default function ModifierSheet({ product, modifiers, open, onClose, onCon
     });
   };
 
-  // Validation: all mandatory modifiers must have ≥1 selection
+  // Validation: all mandatory modifiers must have ≥1 selection.
+  // If modifier definitions haven't loaded yet for a product that DOES have modifierIds,
+  // block confirm until they arrive.
+  const isLoadingDefs = (product.modifierIds || []).length > 0 && productModifiers.length === 0;
   const missing = productModifiers.filter(m => m.mandatory && (!(selected[m.id]) || selected[m.id].size === 0));
-  const canConfirm = missing.length === 0;
+  const canConfirm = !isLoadingDefs && missing.length === 0;
 
   // Compute extra price across all selected option prices
   const extra = productModifiers.reduce((sum, m) => {
@@ -100,7 +103,13 @@ export default function ModifierSheet({ product, modifiers, open, onClose, onCon
 
         <div className="space-y-4 max-h-[60vh] overflow-y-auto py-1">
           {productModifiers.length === 0 ? (
-            <p className="text-center text-gray-400 text-sm py-6">No modifiers — tap Confirm to add</p>
+            (product.modifierIds || []).length > 0 ? (
+              <p className="text-center text-amber-600 text-sm py-6" data-testid="mod-loading">
+                Loading modifiers… please retry in a moment
+              </p>
+            ) : (
+              <p className="text-center text-gray-400 text-sm py-6">No modifiers — tap Confirm to add</p>
+            )
           ) : productModifiers.map(mod => {
             const chosenNames = selected[mod.id] || new Set();
             return (
