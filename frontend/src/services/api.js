@@ -96,6 +96,18 @@ export const categoriesAPI = {
   create: (data) => api.post('/categories', data),
 };
 
+// Product Image Library
+export const productImagesAPI = {
+  list: (params = {}) => api.get('/product-images', { params }),
+  upload: (data) => api.post('/product-images', data),
+  delete: (id) => api.delete(`/product-images/${id}`),
+};
+
+// Products bulk-edit (separate from CRUD for clarity)
+export const productsBulkAPI = {
+  bulkEdit: (payload) => api.post('/products/bulk-edit', payload),
+};
+
 // Modifiers API
 export const modifiersAPI = {
   getAll: () => api.get('/modifiers'),

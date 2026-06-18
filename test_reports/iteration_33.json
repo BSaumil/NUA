@@ -1,0 +1,45 @@
+{
+  "summary": "Iteration 33 — Verified new Items page features: filter chips, sort, layout toggle, bulk select/edit/delete, inline edit, Image Library, and CSV export. Backend pytest 10/10 PASS covering POST /api/products/bulk-edit (pricePercentDelta, cost/gst/category, eightySixed un/86, invalid productIds → failed[], empty productIds → 400, modifier add/remove/replace) and /api/product-images CRUD (valid upload, list, delete, non-data URL → 400, oversize >1.5MB → 413, delete 404). Frontend smoke: sort by Price desc reorders products live, 6 category chips render with proper testids, table view renders, 'Select all visible' shows bulk-action-bar (64 selected), bulk-edit dialog opens with bulk-pick-image present, inline price click → input → Enter fires PUT /api/products/{id} and value persists ($9.99 shown), product edit dialog Library button opens image-library modal with upload button, CSV export downloads products-2026-06-18.csv.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/products/bulk-edit", "issue": "pricePercentDelta operates on float(prod.price) with no upper-bound or sign check — sending pricePercentDelta=-150 would persist a negative price. Recommend clamping to >=0 or rejecting <-100."},
+      {"endpoint": "POST /api/product-images", "issue": "MAX_IMAGE_BYTES (1_500_000) is the raw length of the data URL (base64 inflated). Actual decoded payload cap ≈ 1.1MB. Doc nit; not user-facing."},
+      {"endpoint": "POST /api/product-images", "issue": "No auth dependency on /api/product-images CRUD — anyone with the public URL can list/upload/delete images. Owner-restrict via existing auth dep used elsewhere."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration33_items.py",
+    "/app/test_reports/pytest/pytest_iteration33.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: Validate pricePercentDelta in bulk-edit so price cannot go negative (>= -100 or post-compute max(0, ...)).",
+    "OPTIONAL: Add auth guard on /api/product-images (list/upload/delete) — currently open. Other product endpoints in the same router are also open; if intentional ignore.",
+    "OPTIONAL: ProductCreate requires 'image' as a mandatory field — admin UI defaults it to a URL string, but blank submission via API returns 422. Consider Optional[str] = '' to match the spirit of the inline-edit UX."
+  ],
+  "critical_code_review_comments": [
+    "Products.jsx is 955 lines — well past the 700-line guideline. Bulk-edit dialog, image library modal, toolbar, and table view are inlined. Recommend splitting BulkEditDialog, ProductTable, and Toolbar into sibling components under /components/products/.",
+    "Backend bulk-edit response always returns 200 even when productIds is non-empty but ALL invalid (updated=0, failed=[ids]). Acceptable design but expose this clearly in API docs; frontend currently displays 'updated: 0' silently.",
+    "ImageLibraryEntry stores entire base64 dataUrl directly in MongoDB document (db.product_images.dataUrl). With 1.5MB raw cap and a 500-row pagination limit, GET /product-images can return ~750MB of base64 in a single response. Recommend (a) GET only metadata (omit dataUrl) and add a separate GET /product-images/{id}/raw endpoint, or (b) store images in object storage (S3/GCS) and persist only URLs.",
+    "/api/products/bulk-edit fires N separate Mongo update_one calls in a Python loop. For 100+ products this is O(N) RTTs to Mongo. Use update_many with $set or bulk_write for a single roundtrip when pricePercentDelta is not per-product.",
+    "Frontend inline-edit PUTs every keystroke-committed value but does not handle 4xx — if validation fails (e.g. negative price), the UI still shows the optimistic value. Add a catch + revert on response.status >= 400."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration33_items.py (NEW — 10 pytest, all passing)"
+  ],
+  "success_rate": {
+    "backend": "100% (10/10 pytest — bulk-edit price/cost/gst/category/eightySixed/modifier ops, invalid+empty IDs, image upload/list/delete, non-data URL 400, oversize 413, delete 404)",
+    "frontend": "100% (toolbar testids all present, sort by price persists, category chip filter works, grid↔table layout toggle works, select-all-visible shows bulk-action-bar with correct count, bulk-edit-dialog opens with bulk-pick-image, inline price edit fires PUT and persists, image-library modal opens, CSV export downloads products-2026-06-18.csv)"
+  },
+  "test_credentials_used": ["owner@nuva.com / NuvaOwner2026!"],
+  "seed_data_creation": "Backend test creates 3 throwaway products (name prefix 'TEST_iter33_prod_'). All deleted on fixture teardown. Image library test uploads one tiny PNG and deletes it. Net zero db state change after run. Idempotent.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 33 items page features fully validated. New backend endpoints (POST /api/products/bulk-edit, GET/POST/DELETE /api/product-images) are live and well-behaved. Frontend Products.jsx with toolbar, bulk-edit-dialog, image-library, inline edits, and CSV export all wired correctly with data-testid coverage. 3 minor backend hardening items remain (negative price guard, image auth, payload location for /product-images) — none blocking. Note for next iteration: Products.jsx is 955 lines and should be split. Auto-cleanup restored Eye Fillet Steak price to $34 after inline-edit smoke test.",
+  "rca of the issue": "N/A — feature additions; no existing bugs reproduced. Spec from main agent matches implementation 1:1."
+}
