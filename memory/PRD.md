@@ -1,5 +1,40 @@
 # NUA POS — PRD v26.0 (Enterprise Licensing & Entitlements)
 
+## v26.6 — Iteration 33 (Feb 2026): Items Page Power Tools — Filter, Sort, Bulk Edit, Image Library, Inline Edit
+
+### What landed
+- **Toolbar**: search by Name OR SKU, sort by name/category/price/stock/margin/recent-edit with asc/desc toggle, status filter (all/active/86), grid ↔ table layout toggle, CSV export of current view.
+- **Category filter chips** — multi-select. Tap chips to OR-filter; tap 'All' to clear.
+- **Selection + bulk actions**: per-row checkboxes, "Select all visible", bulk action bar appears when items selected. Supports:
+  - bulk **change category**
+  - bulk **±% price** (clamped to ≥-99% server-side to avoid negative prices)
+  - bulk **set cost / GST rate**
+  - bulk **set image** (pick from Image Library)
+  - bulk **86 / un-86**
+  - bulk **add/remove modifier ids**
+  - bulk **delete**
+- **Image Library** (NEW): `/app/frontend/src/components/ImageLibrary.jsx`. Owner uploads pictures once — auto-compressed client-side to ≤800px / 0.85 JPEG (~150-400 KB). Stored as base64 `dataUrl` in `db.product_images`. Search by name, tag-filter, delete. Pickable from single-product dialog **and** bulk-edit dialog.
+- **Inline edit** on cards & table rows for `name`, `price`, `stock` — click → input → Enter → PUT /api/products/{id}. 4xx responses re-fetch instead of leaving stale optimistic UI.
+- **Per-row quick 86 toggle**.
+
+### New API surface
+- `POST /api/products/bulk-edit` — body `{productIds, category?, categoryId?, pricePercentDelta?, cost?, gstRate?, image?, eightySixed?, active?, addModifierIds?, removeModifierIds?, replaceModifierIds?, onlineChannels?}` → `{updated, failed}`. `pricePercentDelta` clamped to ≥-99 and final price floored at 0.
+- `GET  /api/product-images?search=&tag=&limit=` (default 100, max 500)
+- `POST /api/product-images` — `{name, contentType, dataUrl, tags?, createdBy?}` — rejects non-data: URLs (400) and payloads >1.5MB (413)
+- `DELETE /api/product-images/{id}`
+- `ProductCreate.image` is now `Optional[str] = ""` (was required) to match the inline-edit UX
+
+### Iteration 33 Tests
+- Backend pytest **10/10 PASS** — bulk-edit price/cost/gst/category/eightySixed/modifier-ops, invalid+empty IDs, image upload/list/delete, non-data URL 400, oversize 413, delete 404.
+- Frontend smoke **100%** — toolbar testids all present, sort by price persists, category chip filter works, grid↔table toggle, bulk-action-bar with correct count, bulk-edit-dialog with bulk-pick-image, inline price → Enter persists, image-library modal opens, CSV download works.
+
+### Backlog from iteration 33 test report (P2)
+- Split Products.jsx (~960 lines) into `components/products/{Toolbar,ProductTable,BulkEditDialog}.jsx`
+- Auth guard on /api/product-images (currently open)
+- Optimise bulk-edit with `update_many` when no per-row math
+
+
+
 ## v26.5 — Iteration 32 (Feb 2026): POS Modifier Picker End-to-End
 
 ### What landed

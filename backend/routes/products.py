@@ -116,8 +116,11 @@ async def bulk_edit_products(payload: BulkProductEdit):
         if payload.onlineChannels is not None:
             patch["onlineChannels"] = payload.onlineChannels
         if payload.pricePercentDelta is not None:
+            # Clamp to avoid driving prices below zero (a -100% would zero them;
+            # anything < -99 is almost certainly a typo).
+            delta = max(-99.0, float(payload.pricePercentDelta))
             base_price = float(prod.get("price", 0) or 0)
-            patch["price"] = round(base_price * (1 + payload.pricePercentDelta / 100.0), 2)
+            patch["price"] = round(max(0.0, base_price * (1 + delta / 100.0)), 2)
         # Modifier ops
         existing_mods = list(prod.get("modifierIds", []) or [])
         if payload.replaceModifierIds is not None:
@@ -155,13 +158,16 @@ class ImageUploadBody(BaseModel):
 MAX_IMAGE_BYTES = 1_500_000  # ~1.5MB after base64 — keep db lean
 
 @router.get("/product-images", response_model=List[ImageLibraryEntry])
-async def list_images(search: Optional[str] = None, tag: Optional[str] = None):
+async def list_images(search: Optional[str] = None, tag: Optional[str] = None, limit: int = 100):
+    # Cap list size — each entry can carry ~1.5MB base64 so a large list quickly
+    # exhausts response bandwidth. Default 100 is plenty for a hand-curated library.
+    limit = max(1, min(500, limit))
     query: dict = {}
     if search:
         query["name"] = {"$regex": search, "$options": "i"}
     if tag:
         query["tags"] = tag
-    rows = await db.product_images.find(query).sort("createdAt", -1).to_list(500)
+    rows = await db.product_images.find(query).sort("createdAt", -1).to_list(limit)
     out = []
     for r in rows:
         out.append(ImageLibraryEntry(

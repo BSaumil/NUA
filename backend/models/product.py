@@ -51,7 +51,7 @@ class ProductCreate(BaseModel):
     cost: float
     stock: int
     sku: str
-    image: str
+    image: Optional[str] = ""
     gstRate: float = 10.0
     modifiers: List[ProductModifier] = []
     modifierIds: List[str] = []

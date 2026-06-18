@@ -267,11 +267,19 @@ const Products = () => {
     let value = inlineValue;
     if (field === 'price' || field === 'cost') value = parseFloat(value) || 0;
     if (field === 'stock') value = parseInt(value, 10) || 0;
+    if ((field === 'price' || field === 'cost') && value < 0) {
+      toast.error('Value cannot be negative');
+      setInlineEditCell(null);
+      return;
+    }
     try {
       await productsAPI.update(id, { [field]: value });
       toast.success(`${field} updated`);
       fetchData();
-    } catch (e) { toast.error(e?.response?.data?.detail || 'Failed'); }
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Failed — refreshing');
+      fetchData();
+    }
     setInlineEditCell(null);
   };
 
