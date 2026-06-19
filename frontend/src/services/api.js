@@ -108,6 +108,23 @@ export const productsBulkAPI = {
   bulkEdit: (payload) => api.post('/products/bulk-edit', payload),
 };
 
+// AI Bookings Inbox — unified inbound channels (DM, phone, web)
+export const bookingsInboxAPI = {
+  list: (params = {}) => api.get('/bookings/inbox', { params }),
+  ingest: (data) => api.post('/bookings/inbox', data),
+  ack: (id, data) => api.post(`/bookings/inbox/${id}/ack`, data),
+  dismiss: (id) => api.post(`/bookings/inbox/${id}/dismiss`),
+};
+
+// Awards (Fair Work / multi-country) + Super calc
+export const awardsAPI = {
+  catalogue: (country) => api.get('/awards/catalogue', { params: country ? { country } : {} }),
+  installed: () => api.get('/awards/installed'),
+  install: (code) => api.post('/awards/install', { code }),
+  uninstall: (code) => api.delete(`/awards/${code}`),
+  superByAward: (payload) => api.post('/payruns/super-by-award', payload),
+};
+
 // Modifiers API
 export const modifiersAPI = {
   getAll: () => api.get('/modifiers'),

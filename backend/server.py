@@ -27,6 +27,8 @@ from routes.members import router as members_router
 from routes.multi_tenant import router as multi_tenant_router, seed_default_business
 from routes.advanced_features import router as advanced_features_router
 from routes.staff_management import router as staff_mgmt_router
+from routes.awards import router as awards_router
+from routes.bookings_inbox import router as bookings_inbox_router
 from routes.menu_features import router as menu_features_router
 from routes.enterprise_features import router as enterprise_router
 from routes.gamification import router as gamification_router
@@ -65,6 +67,8 @@ api_router.include_router(ai_pantry_router)
 api_router.include_router(members_router)
 api_router.include_router(advanced_features_router)  # Must be before multi_tenant to avoid /business/settings conflict
 api_router.include_router(staff_mgmt_router)
+api_router.include_router(awards_router)
+api_router.include_router(bookings_inbox_router)
 api_router.include_router(menu_features_router)
 api_router.include_router(enterprise_router)
 api_router.include_router(gamification_router)

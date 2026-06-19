@@ -6,7 +6,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { useTheme } from '../contexts/ThemeContext';
-import { inventoryAPI, productsAPI, aiPantryAPI } from '../services/api';
+import { inventoryAPI, productsAPI, aiPantryAPI, awardsAPI, staffMgmtAPI } from '../services/api';
 import { useToast } from '../hooks/use-toast';
 
 const BASE_UNITS = ['g', 'mL', 'ea'];
@@ -30,6 +30,7 @@ export default function InventoryAccounting() {
           { k: 'invoices', label: 'Invoices → Stock' },
           { k: 'stocktake', label: 'Stock-take' },
           { k: 'bas', label: 'BAS / GST' },
+          { k: 'super', label: 'Super (Awards)' },
         ].map(t => (
           <button key={t.k} onClick={() => setTab(t.k)}
             className={`px-4 py-2 rounded-full text-sm font-semibold whitespace-nowrap transition ${tab === t.k ? 'text-white shadow' : 'bg-white border hover:border-gray-400'}`}
@@ -42,6 +43,7 @@ export default function InventoryAccounting() {
       {tab === 'invoices' && <InvoiceAssignmentPanel />}
       {tab === 'stocktake' && <StockTakePanel />}
       {tab === 'bas' && <BASPanel />}
+      {tab === 'super' && <SuperAwardsPanel />}
     </div>
   );
 }
@@ -391,7 +393,7 @@ function BASPanel() {
       const r = await inventoryAPI.basCsv({ fy, quarter });
       const url = window.URL.createObjectURL(new Blob([r.data]));
       const a = document.createElement('a'); a.href = url; a.download = `BAS-FY${fy}-${quarter}.csv`; a.click();
-    } catch {}
+    } catch { /* download failed silently */ }
   };
   return (
     <div className="space-y-4">
@@ -435,3 +437,170 @@ function BASPanel() {
     </div>
   );
 }
+
+// ============================================================================
+// Super (Awards) Panel — computes superannuation per staff from payruns using
+// installed Award rates (Fair Work Australia + multi-country catalogue).
+// ============================================================================
+function SuperAwardsPanel() {
+  const { theme } = useTheme();
+  const { toast } = useToast();
+  const [catalogue, setCatalogue] = useState([]);
+  const [country, setCountry] = useState('AU');
+  const [payrun, setPayrun] = useState(null);
+  const [period, setPeriod] = useState('week');
+  const [globalAward, setGlobalAward] = useState('');
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = async () => {
+    try {
+      const c = await awardsAPI.catalogue(country);
+      setCatalogue(c.data || []);
+    } catch { /* no awards available yet */ toast({ title: 'Could not load awards', variant: 'destructive' }); }
+  };
+
+  useEffect(() => { refresh(); /* eslint-disable-next-line */ }, [country]);
+
+  const install = async (code) => {
+    try { await awardsAPI.install(code); toast({ title: 'Award installed' }); refresh(); }
+    catch (e) { toast({ title: 'Failed', description: e?.response?.data?.detail, variant: 'destructive' }); }
+  };
+  const uninstall = async (code) => {
+    if (!window.confirm('Uninstall this award? Any payruns referencing it will fall back to 11.5%.')) return;
+    try { await awardsAPI.uninstall(code); toast({ title: 'Uninstalled' }); refresh(); }
+    catch { toast({ title: 'Failed', variant: 'destructive' }); }
+  };
+
+  const loadPayrun = async () => {
+    try {
+      const r = await staffMgmtAPI.calculatePayrun({ period });
+      setPayrun(r.data);
+    } catch { toast({ title: 'No payrun data', description: 'Make sure timesheets / shifts have been logged.' }); }
+  };
+
+  const compute = async () => {
+    if (!payrun?.staffPayroll?.length) { return toast({ title: 'Load a payrun first', variant: 'destructive' }); }
+    setBusy(true);
+    try {
+      const r = await awardsAPI.superByAward({ awardCode: globalAward || null, payrun });
+      setResult(r.data);
+      toast({ title: 'Super computed', description: `Total: $${r.data.totalSuper.toFixed(2)}` });
+    } catch (e) { toast({ title: 'Failed', description: e?.response?.data?.detail, variant: 'destructive' }); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="space-y-4 mt-4" data-testid="super-awards-panel">
+      <Card><CardContent className="p-5 space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <h2 className="font-bold text-lg">Award Catalogue</h2>
+            <p className="text-xs text-gray-500">Install awards from Fair Work Australia (or country regulator). Each award carries its base hourly, loadings and super rate.</p>
+          </div>
+          <select className="border rounded p-2 text-sm" value={country} onChange={e => setCountry(e.target.value)} data-testid="award-country">
+            <option value="AU">Australia</option>
+            <option value="NZ">New Zealand</option>
+            <option value="UK">United Kingdom</option>
+            <option value="US">United States</option>
+          </select>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm" data-testid="award-catalogue-table">
+            <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+              <tr>
+                <th className="text-left px-3 py-2">Code</th>
+                <th className="text-left px-3 py-2">Name</th>
+                <th className="text-left px-3 py-2">Industry</th>
+                <th className="text-right px-3 py-2">Super %</th>
+                <th className="text-right px-3 py-2">Classifications</th>
+                <th className="text-right px-3 py-2">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {catalogue.map(a => (
+                <tr key={a.code} className="border-t" data-testid={`award-row-${a.code}`}>
+                  <td className="px-3 py-2 font-mono text-xs">{a.code}</td>
+                  <td className="px-3 py-2 font-medium">{a.name}</td>
+                  <td className="px-3 py-2 text-xs text-gray-600">{a.industry}</td>
+                  <td className="px-3 py-2 text-right font-bold">{a.superRate}%</td>
+                  <td className="px-3 py-2 text-right text-xs">{(a.classifications || []).length}</td>
+                  <td className="px-3 py-2 text-right">
+                    {a.installed ? (
+                      <Button size="sm" variant="outline" className="text-red-600" onClick={() => uninstall(a.code)} data-testid={`uninstall-${a.code}`}>Uninstall</Button>
+                    ) : (
+                      <Button size="sm" onClick={() => install(a.code)} style={{ background: theme.primary }} className="text-white" data-testid={`install-${a.code}`}>Install</Button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent></Card>
+
+      <Card><CardContent className="p-5 space-y-3" data-testid="super-payrun-card">
+        <h2 className="font-bold text-lg">Compute Super from a Payrun</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label className="text-xs uppercase text-gray-500 mb-1 block">Period</label>
+            <select className="w-full border rounded p-2 text-sm" value={period} onChange={e => setPeriod(e.target.value)}>
+              <option value="week">Week</option>
+              <option value="fortnight">Fortnight</option>
+              <option value="month">Month</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs uppercase text-gray-500 mb-1 block">Default Award (applied to staff without one)</label>
+            <select className="w-full border rounded p-2 text-sm" value={globalAward} onChange={e => setGlobalAward(e.target.value)} data-testid="default-award">
+              <option value="">— Fall back to 11.5% —</option>
+              {catalogue.filter(a => a.installed).map(a => (
+                <option key={a.code} value={a.code}>{a.name} ({a.superRate}%)</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-end gap-2">
+            <Button onClick={loadPayrun} variant="outline" data-testid="load-payrun">Load Payrun</Button>
+            <Button onClick={compute} disabled={busy} style={{ background: theme.primary }} className="text-white" data-testid="compute-super">{busy ? 'Computing…' : 'Compute Super'}</Button>
+          </div>
+        </div>
+        {payrun && (
+          <p className="text-xs text-gray-500">Loaded payrun · {payrun?.staffPayroll?.length || 0} staff · gross ${payrun?.totals?.grossPay || 0}</p>
+        )}
+        {result && (
+          <div className="space-y-2 pt-2 border-t" data-testid="super-result">
+            <p className="text-sm">Total super: <span className="text-2xl font-bold" style={{ color: theme.primary }}>${result.totalSuper.toFixed(2)}</span></p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+                  <tr>
+                    <th className="text-left px-3 py-2">Staff</th>
+                    <th className="text-left px-3 py-2">Role</th>
+                    <th className="text-left px-3 py-2">Award</th>
+                    <th className="text-right px-3 py-2">Gross</th>
+                    <th className="text-right px-3 py-2">Rate</th>
+                    <th className="text-right px-3 py-2">Super</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.staffSuper.map((s, i) => (
+                    <tr key={i} className="border-t">
+                      <td className="px-3 py-2 font-medium">{s.name || s.staffName}</td>
+                      <td className="px-3 py-2 text-xs text-gray-600">{s.role}</td>
+                      <td className="px-3 py-2 text-xs">{s.awardName || s.awardCode || <span className="text-gray-400">— default —</span>}</td>
+                      <td className="px-3 py-2 text-right font-mono">${(s.grossPay || 0).toFixed(2)}</td>
+                      <td className="px-3 py-2 text-right">{s.superRate}%</td>
+                      <td className="px-3 py-2 text-right font-bold">${s.superContribution.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-gray-400">Super is calculated on Ordinary Time Earnings (OTE). Pay via SuperStream-compliant clearing house once approved.</p>
+          </div>
+        )}
+      </CardContent></Card>
+    </div>
+  );
+}
+

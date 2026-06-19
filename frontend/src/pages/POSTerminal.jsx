@@ -20,6 +20,7 @@ import SwipeableCartItem from '../components/pos/SwipeableCartItem';
 import CustomerCombobox from '../components/pos/CustomerCombobox';
 import { QrPaymentDialog, UpiPaymentDialog, SplitPaymentDialog } from '../components/pos/PaymentDialogs';
 import ModifierSheet from '../components/pos/ModifierSheet';
+import POSHeaderBar from '../components/pos/POSHeaderBar';
 import { CategoryIcon } from './Categories';
 
 // SwipeableCartItem and CustomerCombobox now live in components/pos/.
@@ -532,9 +533,10 @@ const POSTerminal = () => {
       {/* Products Grid — smaller cards, category-wise */}
       <div className="flex-1 flex flex-col min-w-0">
         <div className="mb-3">
-          <h1 className="text-xl font-bold mb-2" style={{ color: theme.text }}
-            onDoubleClick={() => { if (user?.role === 'owner') setShowGhost(true); }}
-            data-testid="pos-title">POS Terminal</h1>
+          {/* Compact status bar replaces the bulky "POS Terminal" title */}
+          <div onDoubleClick={() => { if (user?.role === 'owner') setShowGhost(true); }} data-testid="pos-title">
+            <POSHeaderBar themeColor={theme.primary} />
+          </div>
           <div className="relative mb-3 flex gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={16} />
@@ -771,25 +773,27 @@ const POSTerminal = () => {
                   ))}
                 </div>
                 {orderType === 'dine-in' ? (
-                  <div className="flex gap-1.5 items-center" data-testid="table-row">
-                    <span className="text-xs text-gray-500">Table</span>
-                    <div className="flex gap-1 overflow-x-auto">
-                      {['1','2','3','4','5','6','7','8','9','10'].map(t => (
-                        <button key={t}
-                          onClick={() => setTableNumber(t)}
-                          className={`w-7 h-7 rounded-md border text-xs font-semibold transition ${tableNumber === t ? 'text-white' : 'bg-white hover:border-gray-400'}`}
-                          style={tableNumber === t ? { background: theme.primary } : {}}
-                          data-testid={`table-${t}`}>{t}</button>
-                      ))}
-                    </div>
-                    <Input placeholder="Other" value={!['1','2','3','4','5','6','7','8','9','10'].includes(tableNumber) ? tableNumber : ''}
+                  <div className="flex gap-2 items-center" data-testid="table-row">
+                    <span className="text-xs text-gray-500 whitespace-nowrap">Table #</span>
+                    <Input
+                      placeholder="e.g. 12, Patio-A, Bar-3"
+                      value={tableNumber}
                       onChange={e => setTableNumber(e.target.value)}
-                      className="h-7 w-16 text-xs" data-testid="table-other" />
+                      className="h-8 text-xs flex-1"
+                      data-testid="table-input"
+                    />
                   </div>
                 ) : (
-                  <Input placeholder="Customer name for takeaway"
-                    value={walkInName} onChange={e => setWalkInName(e.target.value)}
-                    className="h-8 text-xs" data-testid="walk-in-name" />
+                  <div className="flex gap-2 items-center">
+                    <span className="text-xs text-gray-500 whitespace-nowrap">Name</span>
+                    <Input
+                      placeholder="Customer name for takeaway"
+                      value={walkInName}
+                      onChange={e => setWalkInName(e.target.value)}
+                      className="h-8 text-xs flex-1"
+                      data-testid="walk-in-name"
+                    />
+                  </div>
                 )}
               </div>
             </>

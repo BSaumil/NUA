@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from typing import List, Optional
 from datetime import datetime, timezone
 import uuid
@@ -9,6 +9,13 @@ from models.modifier import Modifier, ModifierCreate
 from pydantic import BaseModel
 
 router = APIRouter()
+
+async def _require_owner_or_manager(request: Request):
+    from routes.auth import get_current_user
+    user = await get_current_user(request)
+    if user.get("role") not in ("owner", "manager"):
+        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+    return user
 
 # ============ PRODUCTS API ============
 @router.get("/products", response_model=List[Product])
@@ -86,35 +93,56 @@ class BulkProductEdit(BaseModel):
     onlineChannels: Optional[List[str]] = None
 
 @router.post("/products/bulk-edit")
-async def bulk_edit_products(payload: BulkProductEdit):
+async def bulk_edit_products(payload: BulkProductEdit, request: Request):
+    await _require_owner_or_manager(request)
     if not payload.productIds:
         raise HTTPException(status_code=400, detail="productIds is required")
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # ---- Fast path: when no per-row math (pricePercentDelta) AND no modifier
+    # add/remove (which require per-row union/difference), apply update_many.
+    needs_per_row = (
+        payload.pricePercentDelta is not None
+        or bool(payload.addModifierIds)
+        or bool(payload.removeModifierIds)
+    )
+    common: dict = {"updatedAt": now_iso}
+    if payload.category is not None:
+        common["category"] = payload.category
+    if payload.categoryId is not None:
+        common["categoryId"] = payload.categoryId
+    if payload.cost is not None:
+        common["cost"] = payload.cost
+    if payload.gstRate is not None:
+        common["gstRate"] = payload.gstRate
+    if payload.image is not None:
+        common["image"] = payload.image
+    if payload.eightySixed is not None:
+        common["eightySixed"] = payload.eightySixed
+        common["eightySixedAt"] = now_iso if payload.eightySixed else None
+    if payload.active is not None:
+        common["active"] = payload.active
+    if payload.onlineChannels is not None:
+        common["onlineChannels"] = payload.onlineChannels
+    if payload.replaceModifierIds is not None:
+        common["modifierIds"] = list(payload.replaceModifierIds)
+
+    if not needs_per_row:
+        res = await db.products.update_many(
+            {"id": {"$in": payload.productIds}},
+            {"$set": common},
+        )
+        return {"updated": res.modified_count, "failed": [], "mode": "update_many"}
+
+    # ---- Slow path: per-row math
     updated = 0
     failed: List[str] = []
-    now_iso = datetime.now(timezone.utc).isoformat()
     for pid in payload.productIds:
         prod = await db.products.find_one({"id": pid})
         if not prod:
             failed.append(pid)
             continue
-        patch: dict = {"updatedAt": now_iso}
-        if payload.category is not None:
-            patch["category"] = payload.category
-        if payload.categoryId is not None:
-            patch["categoryId"] = payload.categoryId
-        if payload.cost is not None:
-            patch["cost"] = payload.cost
-        if payload.gstRate is not None:
-            patch["gstRate"] = payload.gstRate
-        if payload.image is not None:
-            patch["image"] = payload.image
-        if payload.eightySixed is not None:
-            patch["eightySixed"] = payload.eightySixed
-            patch["eightySixedAt"] = now_iso if payload.eightySixed else None
-        if payload.active is not None:
-            patch["active"] = payload.active
-        if payload.onlineChannels is not None:
-            patch["onlineChannels"] = payload.onlineChannels
+        patch: dict = dict(common)
         if payload.pricePercentDelta is not None:
             # Clamp to avoid driving prices below zero (a -100% would zero them;
             # anything < -99 is almost certainly a typo).
@@ -122,19 +150,16 @@ async def bulk_edit_products(payload: BulkProductEdit):
             base_price = float(prod.get("price", 0) or 0)
             patch["price"] = round(max(0.0, base_price * (1 + delta / 100.0)), 2)
         # Modifier ops
-        existing_mods = list(prod.get("modifierIds", []) or [])
-        if payload.replaceModifierIds is not None:
-            existing_mods = list(payload.replaceModifierIds)
-        else:
+        if payload.replaceModifierIds is None and (payload.addModifierIds or payload.removeModifierIds):
+            existing_mods = list(prod.get("modifierIds", []) or [])
             if payload.addModifierIds:
                 existing_mods = list({*existing_mods, *payload.addModifierIds})
             if payload.removeModifierIds:
                 existing_mods = [m for m in existing_mods if m not in payload.removeModifierIds]
-        if payload.replaceModifierIds is not None or payload.addModifierIds or payload.removeModifierIds:
             patch["modifierIds"] = existing_mods
         await db.products.update_one({"id": pid}, {"$set": patch})
         updated += 1
-    return {"updated": updated, "failed": failed}
+    return {"updated": updated, "failed": failed, "mode": "per_row"}
 
 
 # ============ PRODUCT IMAGE LIBRARY ============
@@ -158,7 +183,11 @@ class ImageUploadBody(BaseModel):
 MAX_IMAGE_BYTES = 1_500_000  # ~1.5MB after base64 — keep db lean
 
 @router.get("/product-images", response_model=List[ImageLibraryEntry])
-async def list_images(search: Optional[str] = None, tag: Optional[str] = None, limit: int = 100):
+async def list_images(request: Request, search: Optional[str] = None, tag: Optional[str] = None, limit: int = 100):
+    # Any signed-in staff can browse the library (cashiers need to see images);
+    # owner/manager required for mutations below.
+    from routes.auth import get_current_user
+    await get_current_user(request)
     # Cap list size — each entry can carry ~1.5MB base64 so a large list quickly
     # exhausts response bandwidth. Default 100 is plenty for a hand-curated library.
     limit = max(1, min(500, limit))
@@ -178,7 +207,8 @@ async def list_images(search: Optional[str] = None, tag: Optional[str] = None, l
     return out
 
 @router.post("/product-images", response_model=ImageLibraryEntry)
-async def upload_image(body: ImageUploadBody):
+async def upload_image(body: ImageUploadBody, request: Request):
+    user = await _require_owner_or_manager(request)
     if not body.dataUrl.startswith("data:"):
         raise HTTPException(status_code=400, detail="dataUrl must be a data: URL")
     size = len(body.dataUrl)
@@ -191,14 +221,15 @@ async def upload_image(body: ImageUploadBody):
         dataUrl=body.dataUrl,
         tags=body.tags,
         createdAt=datetime.now(timezone.utc).isoformat(),
-        createdBy=body.createdBy,
+        createdBy=body.createdBy or user.get("name"),
         sizeBytes=size,
     )
     await db.product_images.insert_one(entry.dict())
     return entry
 
 @router.delete("/product-images/{image_id}")
-async def delete_image(image_id: str):
+async def delete_image(image_id: str, request: Request):
+    await _require_owner_or_manager(request)
     res = await db.product_images.delete_one({"id": image_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Image not found")

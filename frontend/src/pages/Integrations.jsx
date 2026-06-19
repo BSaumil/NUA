@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import {
   Plug, Search, ExternalLink, Check, X, RefreshCw,
-  Truck, CreditCard, Calculator, Users, CalendarDays, UtensilsCrossed, Award, Layers
+  Truck, CreditCard, Calculator, Users, CalendarDays, UtensilsCrossed, Award, Layers,
+  Building2, Wallet
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -18,6 +19,8 @@ const CATEGORY_ICONS = {
   'Delivery': Truck,
   'Middleware': Layers,
   'Payments': CreditCard,
+  'Payment Terminals': Wallet,
+  'Banks (AU)': Building2,
   'Accounting': Calculator,
   'Rostering': Users,
   'Reservations': CalendarDays,

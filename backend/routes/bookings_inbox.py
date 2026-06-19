@@ -1,0 +1,166 @@
+"""
+AI Bookings Inbox.
+
+A unified inbox that captures booking requests from any inbound channel
+(social media DM, phone-call transcription, email, in-store form) and runs
+them through an LLM to extract structured info (date, time, party size,
+special requests, customer contact). The owner can acknowledge or convert
+each into a Reservation.
+
+Channels are stored as free-text strings so we can absorb new ones without a
+migration.
+"""
+from fastapi import APIRouter, HTTPException
+from typing import Optional, List
+from datetime import datetime, timezone
+from pydantic import BaseModel
+from database import db
+import os
+import json
+import uuid
+
+router = APIRouter()
+
+class BookingInboxItem(BaseModel):
+    id: str
+    channel: str                # 'instagram_dm' | 'facebook_dm' | 'whatsapp' | 'sms' | 'phone' | 'email' | 'web_form' | 'walkin'
+    rawMessage: str
+    fromHandle: Optional[str] = None
+    receivedAt: str
+    parsed: Optional[dict] = None   # {date, time, partySize, name, phone, notes}
+    aiSummary: Optional[str] = None
+    suggestedReply: Optional[str] = None
+    status: str = "new"             # new | acknowledged | converted | dismissed
+    reservationId: Optional[str] = None
+    acknowledgedAt: Optional[str] = None
+    acknowledgedBy: Optional[str] = None
+
+class IngestBody(BaseModel):
+    channel: str
+    rawMessage: str
+    fromHandle: Optional[str] = None
+
+@router.get("/bookings/inbox")
+async def list_inbox(status: Optional[str] = None, channel: Optional[str] = None, limit: int = 100):
+    q: dict = {}
+    if status:
+        q["status"] = status
+    if channel:
+        q["channel"] = channel
+    limit = max(1, min(500, limit))
+    rows = await db.booking_inbox.find(q, {"_id": 0}).sort("receivedAt", -1).to_list(limit)
+    return rows
+
+@router.post("/bookings/inbox")
+async def ingest_booking(body: IngestBody):
+    """Accept a raw inbound message — run AI parse + suggested reply."""
+    item = {
+        "id": str(uuid.uuid4()),
+        "channel": body.channel,
+        "rawMessage": body.rawMessage,
+        "fromHandle": body.fromHandle,
+        "receivedAt": datetime.now(timezone.utc).isoformat(),
+        "status": "new",
+    }
+
+    parsed, summary, reply = await _ai_parse(body.rawMessage, body.channel)
+    item["parsed"] = parsed
+    item["aiSummary"] = summary
+    item["suggestedReply"] = reply
+
+    await db.booking_inbox.insert_one(dict(item))
+    item.pop("_id", None)
+    return item
+
+@router.post("/bookings/inbox/{item_id}/ack")
+async def acknowledge_booking(item_id: str, body: dict):
+    """Mark as acknowledged. Optionally convert to a reservation."""
+    convert = bool(body.get("convertToReservation", False))
+    user = body.get("user", "system")
+
+    row = await db.booking_inbox.find_one({"id": item_id}, {"_id": 0})
+    if not row:
+        raise HTTPException(status_code=404, detail="Inbox item not found")
+
+    now = datetime.now(timezone.utc).isoformat()
+    patch = {"status": "acknowledged", "acknowledgedAt": now, "acknowledgedBy": user}
+
+    if convert:
+        parsed = row.get("parsed") or {}
+        res = {
+            "id": f"res-{uuid.uuid4().hex[:8]}",
+            "customerName": parsed.get("name") or row.get("fromHandle") or "Guest",
+            "customerPhone": parsed.get("phone") or "",
+            "date": parsed.get("date") or "",
+            "time": parsed.get("time") or "",
+            "partySize": int(parsed.get("partySize") or 2),
+            "notes": parsed.get("notes") or "",
+            "source": f"ai-inbox/{row.get('channel', 'unknown')}",
+            "status": "confirmed",
+            "createdAt": now,
+        }
+        await db.reservations.insert_one(dict(res))
+        patch["status"] = "converted"
+        patch["reservationId"] = res["id"]
+
+    await db.booking_inbox.update_one({"id": item_id}, {"$set": patch})
+    return {"ok": True, **patch}
+
+@router.post("/bookings/inbox/{item_id}/dismiss")
+async def dismiss(item_id: str):
+    res = await db.booking_inbox.update_one({"id": item_id}, {"$set": {"status": "dismissed"}})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"ok": True}
+
+# -- helpers ---------------------------------------------------------------
+async def _ai_parse(message: str, channel: str):
+    """Best-effort LLM parse. Falls back to a simple heuristic if no key."""
+    fallback_parsed = {
+        "date": None, "time": None, "partySize": None,
+        "name": None, "phone": None, "notes": None,
+    }
+    fallback_summary = f"{channel.title()} message: {message[:120]}"
+    fallback_reply = (
+        "Thanks for the message — could you confirm the date, time, and party size?"
+    )
+
+    api_key = os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        return fallback_parsed, fallback_summary, fallback_reply
+
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        prompt = (
+            "You are NUA, a restaurant booking assistant. From the inbound "
+            f"{channel} message below, extract a JSON object with fields: "
+            "date (YYYY-MM-DD or null), time (HH:MM 24h or null), partySize "
+            "(int or null), name (string or null), phone (string or null), "
+            "notes (string or null), summary (one short sentence), reply (a "
+            "warm 1-2 sentence reply to send back). Return ONLY valid JSON.\n\n"
+            f"Message: {message}"
+        )
+        session_id = f"bookings-{uuid.uuid4().hex[:8]}"
+        chat = LlmChat(api_key=api_key, session_id=session_id, system_message="Be precise; never invent details").with_model("openai", "gpt-4o-mini")
+        msg = UserMessage(text=prompt)
+        raw = await chat.send_message(msg)
+        # Strip code fences if present
+        text = (raw or "").strip()
+        if text.startswith("```"):
+            text = text.strip("`")
+            text = text.split("\n", 1)[1] if "\n" in text else text
+            if text.endswith("```"):
+                text = text[:-3]
+        data = json.loads(text)
+        parsed = {
+            "date": data.get("date"),
+            "time": data.get("time"),
+            "partySize": data.get("partySize"),
+            "name": data.get("name"),
+            "phone": data.get("phone"),
+            "notes": data.get("notes"),
+        }
+        return parsed, data.get("summary") or fallback_summary, data.get("reply") or fallback_reply
+    except Exception as e:
+        # Never fail the ingest just because the LLM stumbled
+        return fallback_parsed, f"{fallback_summary} (AI parse skipped: {type(e).__name__})", fallback_reply

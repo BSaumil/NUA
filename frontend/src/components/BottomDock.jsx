@@ -58,6 +58,7 @@ const ALL_FEATURES = [
   ]},
   { group: 'Reservations', items: [
     { path: '/reservations', label: 'Bookings', icon: Utensils, access: ['owner', 'manager', 'cashier'] },
+    { path: '/bookings-inbox', label: 'AI Bookings Inbox', icon: Mail, access: ['owner', 'manager', 'cashier'] },
     { path: '/floor-plan', label: 'Floor Plan', icon: MapPin, access: ['owner', 'manager', 'cashier'] },
     { path: '/waitlist', label: 'Waitlist', icon: Clock, access: ['owner', 'manager', 'cashier'] },
     { path: '/table-layout', label: 'Table Layout', icon: MapPin, access: ['owner', 'manager'] },
