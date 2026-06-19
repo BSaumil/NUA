@@ -198,6 +198,7 @@ async def super_by_award(body: dict):
 
     out = []
     total = 0.0
+    unresolved: set[str] = set()
     for row in staff:
         gross = float(row.get("grossPay", 0) or 0)
         code = row.get("awardCode") or awardCode
@@ -209,8 +210,8 @@ async def super_by_award(body: dict):
                 rate = float(doc.get("superRate", 11.5))
                 award_name = doc.get("name")
             else:
-                # Not installed — return a hint so the UI can prompt install
-                pass
+                # Referenced but not installed — surface to UI so it can prompt
+                unresolved.add(code)
         contribution = round(gross * (rate / 100.0), 2)
         out.append({
             **row,
@@ -224,5 +225,6 @@ async def super_by_award(body: dict):
     return {
         "totalSuper": round(total, 2),
         "staffSuper": out,
+        "unresolvedAwards": sorted(unresolved),
         "computedAt": datetime.now(timezone.utc).isoformat(),
     }

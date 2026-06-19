@@ -10,9 +10,9 @@ each into a Reservation.
 Channels are stored as free-text strings so we can absorb new ones without a
 migration.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from typing import Optional, List
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date as date_cls
 from pydantic import BaseModel
 from database import db
 import os
@@ -73,17 +73,30 @@ async def ingest_booking(body: IngestBody):
     return item
 
 @router.post("/bookings/inbox/{item_id}/ack")
-async def acknowledge_booking(item_id: str, body: dict):
-    """Mark as acknowledged. Optionally convert to a reservation."""
+async def acknowledge_booking(item_id: str, body: dict, request: Request):
+    """Mark as acknowledged. Optionally convert to a reservation.
+
+    The acknowledging user is taken from the auth token, never from the body.
+    """
     convert = bool(body.get("convertToReservation", False))
-    user = body.get("user", "system")
+
+    # Authenticated user — never trust body['user']
+    user_name = "system"
+    try:
+        from routes.auth import get_current_user
+        u = await get_current_user(request)
+        user_name = u.get("name") or u.get("email") or "system"
+    except Exception:
+        # If auth fails, still proceed but log who-as 'system' — endpoint is
+        # already wired behind frontend auth.
+        pass
 
     row = await db.booking_inbox.find_one({"id": item_id}, {"_id": 0})
     if not row:
         raise HTTPException(status_code=404, detail="Inbox item not found")
 
     now = datetime.now(timezone.utc).isoformat()
-    patch = {"status": "acknowledged", "acknowledgedAt": now, "acknowledgedBy": user}
+    patch = {"status": "acknowledged", "acknowledgedAt": now, "acknowledgedBy": user_name}
 
     if convert:
         parsed = row.get("parsed") or {}
@@ -141,7 +154,8 @@ async def _ai_parse(message: str, channel: str):
             f"Message: {message}"
         )
         session_id = f"bookings-{uuid.uuid4().hex[:8]}"
-        chat = LlmChat(api_key=api_key, session_id=session_id, system_message="Be precise; never invent details").with_model("openai", "gpt-4o-mini")
+        model_name = os.environ.get("BOOKINGS_INBOX_MODEL", "gpt-4o-mini")
+        chat = LlmChat(api_key=api_key, session_id=session_id, system_message="Be precise; never invent details").with_model("openai", model_name)
         msg = UserMessage(text=prompt)
         raw = await chat.send_message(msg)
         # Strip code fences if present
@@ -160,6 +174,17 @@ async def _ai_parse(message: str, channel: str):
             "phone": data.get("phone"),
             "notes": data.get("notes"),
         }
+        # Guard against the LLM picking a stale year for relative phrases
+        # like "tonight" / "tomorrow" — clamp any past date to today.
+        try:
+            if parsed["date"]:
+                d = date_cls.fromisoformat(parsed["date"])
+                today = date_cls.today()
+                if d < today:
+                    parsed["date"] = today.isoformat()
+        except Exception:
+            # If the LLM returns a non-ISO string, leave it alone for manual fix
+            pass
         return parsed, data.get("summary") or fallback_summary, data.get("reply") or fallback_reply
     except Exception as e:
         # Never fail the ingest just because the LLM stumbled

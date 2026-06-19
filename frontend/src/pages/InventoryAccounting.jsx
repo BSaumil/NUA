@@ -570,6 +570,13 @@ function SuperAwardsPanel() {
         {result && (
           <div className="space-y-2 pt-2 border-t" data-testid="super-result">
             <p className="text-sm">Total super: <span className="text-2xl font-bold" style={{ color: theme.primary }}>${result.totalSuper.toFixed(2)}</span></p>
+            {result.unresolvedAwards && result.unresolvedAwards.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded p-2 text-xs" data-testid="unresolved-awards">
+                <p className="font-medium text-amber-800 mb-1">⚠ Some staff reference awards that aren’t installed — they fell back to 11.5%:</p>
+                <p className="text-amber-700">{result.unresolvedAwards.join(', ')}</p>
+                <p className="text-amber-600 mt-1">Install them above to apply the correct super rate.</p>
+              </div>
+            )}
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 text-xs uppercase text-gray-500">

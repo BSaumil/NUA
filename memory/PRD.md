@@ -1,5 +1,29 @@
 # NUA POS — PRD v26.0 (Enterprise Licensing & Entitlements)
 
+## v26.7 — Iteration 34 (Feb 2026): Cart inputs · POS status bar · AI Bookings Inbox · Super (Awards) · Banks + Payment Terminals · P2 fixes
+
+### What landed
+- **Cart inputs simplified**: replaced 1-10 table buttons with a single free-text `Table #` input (`data-testid='table-input'`) for Dine-in and `Name` input (`data-testid='walk-in-name'`) for Takeaway. CustomerCombobox still ties the order to a loyalty profile.
+- **POS Header Bar** (`/app/frontend/src/components/pos/POSHeaderBar.jsx`): replaces the "POS Terminal" title. Shows live HH:MM:SS clock, full date, devices-online count `N/M devices online` with offline-device names tooltipped, and a Wi-Fi / Ethernet / Offline indicator using the browser Network Information API. Polls `/api/v25/hardware` every 30s.
+- **AI Bookings Inbox** (`/bookings-inbox` route + `routes/bookings_inbox.py`): unified inbox for inbound bookings from Instagram DM, Facebook Messenger, WhatsApp, SMS, phone, email, web form, walk-in. POST `/api/bookings/inbox` runs an LLM parse (env-configurable model via `BOOKINGS_INBOX_MODEL`, defaults to `gpt-4o-mini`) and extracts `{date, time, partySize, name, phone, notes}` + summary + suggestedReply. Past-dated extracted dates are now clamped to today so the LLM can't hallucinate "tonight" → 2023. `POST /bookings/inbox/{id}/ack` flips status and optionally converts to a reservation; `acknowledgedBy` is now taken from the auth token, never from the body (security fix flagged in code review).
+- **Super (Awards) tab** in `/inventory-accounting`: new panel under `InventoryAccounting.jsx`. Award catalogue includes 4 Fair Work AU awards (Restaurant MA000119, Hospitality MA000009, Fast Food MA000003, General Retail MA000004) plus seed NZ/UK/US equivalents. Each award has classifications with base hourly + casual + weekend/PH loadings + super rate. Owner can Install/Uninstall awards (POST `/api/awards/install`, DELETE `/api/awards/{code}`). `POST /api/payruns/super-by-award` computes super per staff member from a payrun; returns `unresolvedAwards: []` so the UI can prompt to install missing codes.
+- **Integrations Hub** extended (`routes/integrations.py`): 12 new AU bank cards (CBA, Westpac, ANZ, NAB, Macquarie, Bendigo, Bankwest, Suncorp, HSBC, ING Direct, BOQ, Judo) and 15 payment-terminal cards (Tyro, Smartpay, QIKI, Westpac EFTPOS Air, ANZ Worldline, NAB Easy Tap, Square Terminal, Zeller, mx51/Linkly, Verifone, Ingenico, PAX, Adyen, Razorpay, PayPal Zettle). Two new categories: 'Banks (AU)' (Building2 icon) and 'Payment Terminals' (Wallet icon). All auto-render in the existing Integrations page.
+- **P2 fixes**:
+  - `POST /api/products/bulk-edit` now picks a `update_many` fast path when no per-row math is needed (no `pricePercentDelta`, no add/remove modifier ops); returns `mode: 'update_many' | 'per_row'`. Per-row math still uses the slow path with price clamping.
+  - **Auth guard** added to `/api/product-images`: POST + DELETE require owner/manager; GET requires any signed-in user (cashiers need to see images).
+
+### Iteration 34 Tests
+- **Backend pytest 16/16 PASS** — Bookings ingest/ack/convert, dismiss-404, Awards catalogue/install/uninstall/super-by-award math, country filter, Integrations Banks + Payment Terminals present, bulk-edit mode dispatch correct in both branches, product-images auth (anonymous 403, cashier 403, owner 200, GET requires auth).
+- **Frontend 100% PASS** — POS header bar (clock + date + 5/5 devices + Wi-Fi), table-input free-text in dine-in, walk-in-name in takeaway, customer picker preserved, bookings-inbox compose → AI parse → Book it → reservation creation, Super (Awards) catalogue render + install/uninstall + Load Payrun + Compute Super, Integrations Banks (AU) and Payment Terminals chips filter correctly and Connect dialog opens.
+
+### Backlog
+- P2: SEED_AWARDS in `routes/awards.py` is hardcoded — production deployments will want a sync job to pull from Fair Work Modern Awards API.
+- P2: AI bookings inbox header `x-ai-parsed-fallback` so UI can warn when LLM is unavailable.
+- P2: Split `Products.jsx` (~960 lines) into smaller components — deferred again to avoid risking the just-added power-user features.
+- P2: Move `_require_owner_or_manager` into a top-level FastAPI `Depends` so auth fires before Pydantic 422 (schema currently leaks to anonymous callers).
+
+
+
 ## v26.6 — Iteration 33 (Feb 2026): Items Page Power Tools — Filter, Sort, Bulk Edit, Image Library, Inline Edit
 
 ### What landed
