@@ -1,0 +1,58 @@
+{
+  "iteration": 35,
+  "date": "2026-01-20",
+  "focus": "P0 auth-precedence refactor (Depends pattern) + Channel Menus + AI Kitchen Heat + AI Slow-Mover Discount + Reservations AI auto-assign + Fair Work Awards + Bookings AI Inbox",
+  "summary": "42/42 backend tests PASS. P0 auth refactor is fully validated: all 12 target POST endpoints now return 401 (anon) or 403 (cashier) BEFORE Pydantic 422 body validation. Happy-path flows for Products bulk-edit, Modifiers CRUD, Product Images, Channel Menus CRUD, AI Kitchen Heat, AI Slow-Mover Discount, Reservations AI auto-assign/seat/complete, Fair Work Awards (catalogue/install/sync/super-by-award), and Bookings AI Inbox (with real Emergent LLM AI parse) all work end-to-end. Regression on products/transactions/customers also green.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/bookings/inbox", "issue": "Response uses `aiSummary`/`suggestedReply` keys while review_request spec said `summary`/`reply`. Functionally correct; consider aliasing for spec compliance."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_results": {
+    "TestAuthPrecedence_anon_401": "PASS 12/12 (products/bulk-edit, modifiers, categories, discounts, comp-void, payment-links, product-images, channel-menus website patch/bulk-price/ai-prep-times/ai-discount-slow, seed/catalog)",
+    "TestAuthPrecedence_cashier_403": "PASS 12/12 (same endpoints, cashier-role JWT)",
+    "TestProductsBulkEdit": "PASS - returns {updated, failed, mode}",
+    "TestModifiersCRUD": "PASS - create/update/delete",
+    "TestProductImages": "PASS - upload (dataUrl + contentType), list, delete",
+    "TestChannelMenus.channels_list": "PASS - 8 channels returned",
+    "TestChannelMenus.website_listing": "PASS - merged product list",
+    "TestChannelMenus.patch_bulk_delete": "PASS - patch override, bulk +10% nearest_5c, delete",
+    "TestAIChannelMenu.ai_prep_times": "PASS - returns {updated, heat, multiplier, activeTickets}",
+    "TestAIChannelMenu.ai_discount_slow": "PASS - returns `applied` list with discounted newPrice",
+    "TestReservationsAI": "PASS - create -> ai-assign-table -> seat -> complete",
+    "TestFairWorkAwards.catalogue": "PASS - 7+ seed awards",
+    "TestFairWorkAwards.install_and_list": "PASS - MA000119 installed and listed",
+    "TestFairWorkAwards.sync_fairwork": "PASS - returns {stale, count, awards}",
+    "TestFairWorkAwards.super_by_award": "PASS",
+    "TestBookingsInbox": "PASS - ingest (AI parse via Emergent LLM working), list, ack -> reservation",
+    "TestRegression": "PASS - products list/create, transactions, customers"
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_p0_auth_refactor.py",
+    "/app/test_reports/pytest/iteration_p0_auth.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: Consider aliasing Bookings Inbox response keys to match spec (`summary` alongside `aiSummary`, `reply` alongside `suggestedReply`) — current names are functional but differ from review_request wording."
+  ],
+  "critical_code_review_comments": [
+    "P0 auth refactor implemented correctly via /app/backend/deps.py — get_user / require_owner / require_owner_or_manager are wired as top-level Depends so auth fires before body validation. Verified by 24/24 401-vs-422 and 403-vs-422 tests across 12 endpoints.",
+    "AI integrations (channel-menus ai-prep-times, ai-discount-slow, bookings inbox parse) all return real data structures — Emergent LLM key working.",
+    "Fair Work `sync-fairwork` correctly returns `stale: true` when live feed unreachable, with fallback seed catalogue — no crash.",
+    "Reservations AI auto-assign + seat + complete chain works with `guestName/date/time` schema (note: spec said `customerName/dateTime` but backend uses the former — frontend likely already aligned).",
+    "Product Images endpoint expects `dataUrl` + `contentType` (not just `image`)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_p0_auth_refactor.py (new)"
+  ],
+  "success_rate": {"backend": "100% (42/42)", "frontend": "N/A (skipped per request)"},
+  "test_credentials": {
+    "owner": "owner@nuva.com / NuvaOwner2026!",
+    "cashier": "cashier@nuva.com / Staff2026!"
+  },
+  "seed_data_creation": "Test rows prefixed TEST_ (modifiers/images/products/customers/reservations/awards). Modifier and product-image rows are cleaned up; reservations/customers/awards persist but are namespaced.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "P0 auth-precedence refactor (deps.py top-level Depends) is fully validated. All 12 protected POST endpoints return 401/403 before 422. AI features (channel-menus, bookings inbox) work via Emergent LLM. Reservations API schema: guestName/date/time. Product schema requires name, price, cost, stock, sku, image. Product images take dataUrl + contentType. Channel-menus bulk-price uses deltaPercent (not percent). Bookings inbox uses rawMessage, response uses aiSummary/suggestedReply."
+}

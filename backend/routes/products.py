@@ -1,21 +1,15 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
 from datetime import datetime, timezone
 import uuid
 from database import db
+from deps import get_user, require_owner_or_manager
 from models.product import Product, ProductCreate, ProductUpdate
 from models.category import Category, CategoryCreate
 from models.modifier import Modifier, ModifierCreate
 from pydantic import BaseModel
 
 router = APIRouter()
-
-async def _require_owner_or_manager(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user.get("role") not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
-    return user
 
 # ============ PRODUCTS API ============
 @router.get("/products", response_model=List[Product])
@@ -93,8 +87,7 @@ class BulkProductEdit(BaseModel):
     onlineChannels: Optional[List[str]] = None
 
 @router.post("/products/bulk-edit")
-async def bulk_edit_products(payload: BulkProductEdit, request: Request):
-    await _require_owner_or_manager(request)
+async def bulk_edit_products(payload: BulkProductEdit, user: dict = Depends(require_owner_or_manager)):
     if not payload.productIds:
         raise HTTPException(status_code=400, detail="productIds is required")
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -183,11 +176,9 @@ class ImageUploadBody(BaseModel):
 MAX_IMAGE_BYTES = 1_500_000  # ~1.5MB after base64 — keep db lean
 
 @router.get("/product-images", response_model=List[ImageLibraryEntry])
-async def list_images(request: Request, search: Optional[str] = None, tag: Optional[str] = None, limit: int = 100):
+async def list_images(_: dict = Depends(get_user), search: Optional[str] = None, tag: Optional[str] = None, limit: int = 100):
     # Any signed-in staff can browse the library (cashiers need to see images);
     # owner/manager required for mutations below.
-    from routes.auth import get_current_user
-    await get_current_user(request)
     # Cap list size — each entry can carry ~1.5MB base64 so a large list quickly
     # exhausts response bandwidth. Default 100 is plenty for a hand-curated library.
     limit = max(1, min(500, limit))
@@ -207,8 +198,7 @@ async def list_images(request: Request, search: Optional[str] = None, tag: Optio
     return out
 
 @router.post("/product-images", response_model=ImageLibraryEntry)
-async def upload_image(body: ImageUploadBody, request: Request):
-    user = await _require_owner_or_manager(request)
+async def upload_image(body: ImageUploadBody, user: dict = Depends(require_owner_or_manager)):
     if not body.dataUrl.startswith("data:"):
         raise HTTPException(status_code=400, detail="dataUrl must be a data: URL")
     size = len(body.dataUrl)
@@ -228,8 +218,7 @@ async def upload_image(body: ImageUploadBody, request: Request):
     return entry
 
 @router.delete("/product-images/{image_id}")
-async def delete_image(image_id: str, request: Request):
-    await _require_owner_or_manager(request)
+async def delete_image(image_id: str, _: dict = Depends(require_owner_or_manager)):
     res = await db.product_images.delete_one({"id": image_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Image not found")

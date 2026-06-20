@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Depends
 from database import db
 from datetime import datetime, timezone
 import uuid
+from deps import require_owner, require_owner_or_manager
 
 router = APIRouter()
 
@@ -23,11 +24,7 @@ async def get_categories():
     return cats
 
 @router.post("/categories")
-async def create_category(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def create_category(data: dict, _: dict = Depends(require_owner_or_manager)):
     cat = {
         "id": f"cat-{str(uuid.uuid4())[:8]}",
         "name": data.get("name", ""), "sortOrder": data.get("sortOrder", 99),
@@ -44,11 +41,7 @@ async def create_category(data: dict, request: Request):
     return cat
 
 @router.put("/categories/{cat_id}")
-async def update_category(cat_id: str, data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def update_category(cat_id: str, data: dict, _: dict = Depends(require_owner_or_manager)):
     allowed = {"name", "sortOrder", "active", "icon", "color", "prepTime", "channels"}
     update = {k: v for k, v in data.items() if k in allowed}
     if "prepTime" in update: update["prepTime"] = int(update["prepTime"] or 0)
@@ -60,14 +53,10 @@ async def update_category(cat_id: str, data: dict, request: Request):
 
 
 @router.post("/categories/cleanup-legacy")
-async def cleanup_legacy_categories(request: Request):
+async def cleanup_legacy_categories(_: dict = Depends(require_owner)):
     """Owner one-click: removes ANY category that has zero products attached
     AND is not in the canonical seed-catalog set (Coffee/Burgers/Mains/
     Cakes & Slices/Pasta). Safe — products are unaffected."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner only")
     canonical = {c["name"] for c in SEED_CATEGORIES}
     all_cats = await db.categories.find({}, {"_id": 0}).to_list(200)
     removed, kept = [], []
@@ -83,11 +72,7 @@ async def cleanup_legacy_categories(request: Request):
     return {"removed": removed, "keptWithProducts": kept}
 
 @router.delete("/categories/{cat_id}")
-async def delete_category(cat_id: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
+async def delete_category(cat_id: str, _: dict = Depends(require_owner)):
     await db.categories.delete_one({"id": cat_id})
     return {"message": "Category deleted"}
 
@@ -229,13 +214,9 @@ SEED_MODIFIERS = [
 
 
 @router.post("/seed/catalog")
-async def seed_catalog(request: Request):
+async def seed_catalog(_: dict = Depends(require_owner)):
     """Owner-only: seed 5 categories, 60 products, 10 modifiers. Idempotent —
     skips items that already exist by name+category."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner only")
     # Categories
     cat_added = 0
     for c in SEED_CATEGORIES:
@@ -295,11 +276,7 @@ async def get_modifiers():
     return mods
 
 @router.post("/modifiers")
-async def create_modifier(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def create_modifier(data: dict, _: dict = Depends(require_owner_or_manager)):
     mod = {
         "id": f"mod-{str(uuid.uuid4())[:8]}",
         "name": data.get("name", ""),
@@ -323,11 +300,7 @@ async def create_modifier(data: dict, request: Request):
     return mod
 
 @router.put("/modifiers/{mod_id}")
-async def update_modifier(mod_id: str, data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def update_modifier(mod_id: str, data: dict, _: dict = Depends(require_owner_or_manager)):
     allowed = {"name", "type", "mandatory", "multiSelect", "maxSelections", "options",
                "assignedCategories", "printWithItem",
                "channels", "availableFrom", "availableTo", "activeDays"}
@@ -340,11 +313,7 @@ async def update_modifier(mod_id: str, data: dict, request: Request):
     return result
 
 @router.delete("/modifiers/{mod_id}")
-async def delete_modifier(mod_id: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def delete_modifier(mod_id: str, _: dict = Depends(require_owner_or_manager)):
     await db.modifiers.delete_one({"id": mod_id})
     return {"message": "Modifier deleted"}
 
@@ -355,11 +324,7 @@ async def get_discounts():
     return discounts
 
 @router.post("/discounts")
-async def create_discount(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
+async def create_discount(data: dict, _: dict = Depends(require_owner)):
     disc = {
         "id": f"DISC-{str(uuid.uuid4())[:8].upper()}",
         "name": data.get("name", ""),
@@ -375,11 +340,7 @@ async def create_discount(data: dict, request: Request):
     return disc
 
 @router.put("/discounts/{disc_id}")
-async def update_discount(disc_id: str, data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
+async def update_discount(disc_id: str, data: dict, _: dict = Depends(require_owner)):
     allowed = {"name", "type", "value", "conditions", "active", "startDate", "endDate"}
     update = {k: v for k, v in data.items() if k in allowed}
     result = await db.discounts.find_one_and_update({"id": disc_id}, {"$set": update}, return_document=True)
@@ -389,21 +350,13 @@ async def update_discount(disc_id: str, data: dict, request: Request):
     return result
 
 @router.delete("/discounts/{disc_id}")
-async def delete_discount(disc_id: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
+async def delete_discount(disc_id: str, _: dict = Depends(require_owner)):
     await db.discounts.delete_one({"id": disc_id})
     return {"message": "Discount deleted"}
 
 # ============ COMP / VOID ============
 @router.post("/comp-void")
-async def create_comp_void(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def create_comp_void(data: dict, user: dict = Depends(require_owner_or_manager)):
     record = {
         "id": f"CV-{str(uuid.uuid4())[:8].upper()}",
         "type": data.get("type", "comp"),  # comp or void
@@ -420,21 +373,13 @@ async def create_comp_void(data: dict, request: Request):
     return record
 
 @router.get("/comp-void")
-async def get_comp_voids(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def get_comp_voids(_: dict = Depends(require_owner_or_manager)):
     records = await db.comp_voids.find({}, {"_id": 0}).sort("processedAt", -1).to_list(500)
     return records
 
 # ============ PAYMENT LINKS ============
 @router.post("/payment-links")
-async def create_payment_link(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def create_payment_link(data: dict, _: dict = Depends(require_owner_or_manager)):
     link = {
         "id": f"PLINK-{str(uuid.uuid4())[:8].upper()}",
         "productId": data.get("productId"),
@@ -454,10 +399,6 @@ async def get_payment_links():
     return links
 
 @router.delete("/payment-links/{link_id}")
-async def delete_payment_link(link_id: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def delete_payment_link(link_id: str, _: dict = Depends(require_owner_or_manager)):
     await db.payment_links.delete_one({"id": link_id})
     return {"message": "Payment link deleted"}

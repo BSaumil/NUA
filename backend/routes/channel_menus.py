@@ -12,11 +12,12 @@ Data model (collection: channel_menus):
     modifierPriceMultiplier (%), prepTimeMin, lastSyncedAt, source
   }
 """
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel
 from database import db
+from deps import require_owner_or_manager
 import os
 import json
 import uuid
@@ -36,12 +37,7 @@ SUPPORTED_CHANNELS = [
 ]
 
 # ---- auth helper (re-used pattern from products.py) ---------------------
-async def _owner_or_manager(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user.get("role") not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
-    return user
+# Now uses central deps.require_owner_or_manager for consistency.
 
 # ---- Models -------------------------------------------------------------
 class ChannelMenuRow(BaseModel):
@@ -110,7 +106,7 @@ class ChannelMenuPatch(BaseModel):
     prepTimeMin: Optional[int] = None
 
 @router.post("/channel-menus/{channel}/patch")
-async def patch_row(channel: str, body: ChannelMenuPatch, _: dict = Depends(_owner_or_manager)):
+async def patch_row(channel: str, body: ChannelMenuPatch, _: dict = Depends(require_owner_or_manager)):
     update: dict = {k: v for k, v in body.dict().items() if k != "productId" and v is not None}
     if not update:
         return {"updated": 0}
@@ -131,7 +127,7 @@ class BulkPriceBody(BaseModel):
     roundingMode: str = "nearest_5c"            # nearest_5c | nearest_10c | psychological_99 | none
 
 @router.post("/channel-menus/{channel}/bulk-price")
-async def bulk_price(channel: str, body: BulkPriceBody, _: dict = Depends(_owner_or_manager)):
+async def bulk_price(channel: str, body: BulkPriceBody, _: dict = Depends(require_owner_or_manager)):
     """Apply a ± percent and/or ± dollars delta to a channel's prices, with
     rounding. Modifier multipliers are stored as a per-product factor so they
     cascade automatically at order time.
@@ -176,7 +172,7 @@ async def bulk_price(channel: str, body: BulkPriceBody, _: dict = Depends(_owner
 
 # ---- AI prep time sync (kitchen heat) -----------------------------------
 @router.post("/channel-menus/{channel}/ai-prep-times")
-async def ai_prep_times(channel: str, _: dict = Depends(_owner_or_manager)):
+async def ai_prep_times(channel: str, _: dict = Depends(require_owner_or_manager)):
     """Synchronise per-channel prep times based on current kitchen load.
 
     Heat = active KDS tickets in the last 30 minutes. We bump prep time by
@@ -219,7 +215,7 @@ async def ai_prep_times(channel: str, _: dict = Depends(_owner_or_manager)):
 
 # ---- AI auto-discount on slow-movers ------------------------------------
 @router.post("/channel-menus/{channel}/ai-discount-slow")
-async def ai_discount_slow_movers(channel: str, body: dict, _: dict = Depends(_owner_or_manager)):
+async def ai_discount_slow_movers(channel: str, body: dict, _: dict = Depends(require_owner_or_manager)):
     """Apply an AI-recommended discount to the bottom-N slowest-selling
     products of the last 7 days. Aims to clear stock + drive upsell.
     body: { discountPercent?: 15, bottomN?: 5, daysWindow?: 7 }
@@ -277,6 +273,6 @@ async def ai_discount_slow_movers(channel: str, body: dict, _: dict = Depends(_o
 
 
 @router.delete("/channel-menus/{channel}/{product_id}")
-async def remove_override(channel: str, product_id: str, _: dict = Depends(_owner_or_manager)):
+async def remove_override(channel: str, product_id: str, _: dict = Depends(require_owner_or_manager)):
     res = await db.channel_menus.delete_one({"channel": channel, "productId": product_id})
     return {"deleted": res.deleted_count}
