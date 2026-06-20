@@ -12,7 +12,8 @@ Unit conversion is canonical: every ingredient declares its `baseUnit` (g, mL,
 ea); all stock movements convert to that base before recording. This is what
 lets "kg" invoice lines correctly add to "g" recipes.
 """
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
+from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone, timedelta, date
 from typing import Optional
@@ -54,19 +55,13 @@ def to_base(qty: float, from_unit: str, base_unit: str) -> float:
 # INGREDIENTS — master + stock ledger
 # =============================================================================
 @router.get("/ingredients")
-async def list_ingredients(request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def list_ingredients(_: dict = Depends(get_user)):
     rows = await db.ingredients.find({}, {"_id": 0}).sort("name", 1).to_list(500)
     return rows
 
 
 @router.post("/ingredients")
-async def create_ingredient(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def create_ingredient(data: dict, user: dict = Depends(require_owner_or_manager)):
     base_unit = data.get("baseUnit", "g")
     if base_unit not in ("g", "mL", "ea"):
         raise HTTPException(status_code=400, detail="baseUnit must be g, mL or ea")
@@ -89,11 +84,7 @@ async def create_ingredient(data: dict, request: Request):
 
 
 @router.put("/ingredients/{ing_id}")
-async def update_ingredient(ing_id: str, data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def update_ingredient(ing_id: str, data: dict, _: dict = Depends(require_owner_or_manager)):
     allowed = {"name", "category", "baseUnit", "stock", "unitCost", "supplierName",
                "gstInclusive", "reorderLevel", "reorderQty"}
     upd = {k: v for k, v in data.items() if k in allowed}
@@ -104,11 +95,7 @@ async def update_ingredient(ing_id: str, data: dict, request: Request):
 
 
 @router.delete("/ingredients/{ing_id}")
-async def delete_ingredient(ing_id: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner only")
+async def delete_ingredient(ing_id: str, _: dict = Depends(require_owner)):
     in_recipe = await db.recipes.count_documents({"lines.ingredientId": ing_id})
     if in_recipe > 0:
         raise HTTPException(status_code=400, detail=f"Used in {in_recipe} recipe(s) — remove first")
@@ -117,9 +104,7 @@ async def delete_ingredient(ing_id: str, request: Request):
 
 
 @router.get("/ingredients/low-stock")
-async def low_stock(request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def low_stock(_: dict = Depends(get_user)):
     rows = await db.ingredients.find(
         {"$expr": {"$lte": ["$stock", "$reorderLevel"]}, "reorderLevel": {"$gt": 0}},
         {"_id": 0},
@@ -131,27 +116,19 @@ async def low_stock(request: Request):
 # RECIPES — productId → ingredient lines
 # =============================================================================
 @router.get("/recipes")
-async def list_recipes(request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def list_recipes(_: dict = Depends(get_user)):
     rows = await db.recipes.find({}, {"_id": 0}).to_list(2000)
     return rows
 
 
 @router.get("/recipes/product/{product_id}")
-async def get_recipe(product_id: str, request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def get_recipe(product_id: str, _: dict = Depends(get_user)):
     r = await db.recipes.find_one({"productId": product_id}, {"_id": 0})
     return r or {"productId": product_id, "lines": []}
 
 
 @router.put("/recipes/product/{product_id}")
-async def upsert_recipe(product_id: str, data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def upsert_recipe(product_id: str, data: dict, user: dict = Depends(require_owner_or_manager)):
     # Validate every line + canonicalise unit qty
     lines = []
     ing_cache = {}
@@ -204,10 +181,8 @@ async def deduct_recipe_stock(product_id: str, quantity_sold: int) -> dict:
 
 
 @router.post("/stock/deduct-recipe")
-async def deduct_recipe_endpoint(data: dict, request: Request):
+async def deduct_recipe_endpoint(data: dict, _: dict = Depends(get_user)):
     """Manual hook (called by transactions module + tests). Body: {productId, qty}."""
-    from routes.auth import get_current_user
-    await get_current_user(request)
     return await deduct_recipe_stock(data.get("productId"), int(data.get("qty", 1)))
 
 
@@ -215,11 +190,7 @@ async def deduct_recipe_endpoint(data: dict, request: Request):
 # STOCK-TAKE — count + reconcile
 # =============================================================================
 @router.post("/stock-takes")
-async def create_stock_take(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def create_stock_take(data: dict, user: dict = Depends(require_owner_or_manager)):
     rows = data.get("counts") or []   # [{ingredientId, countedBase}]
     variances = []
     for row in rows:
@@ -244,9 +215,7 @@ async def create_stock_take(data: dict, request: Request):
 
 
 @router.get("/stock-takes")
-async def list_stock_takes(request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def list_stock_takes(_: dict = Depends(get_user)):
     rows = await db.stock_takes.find({}, {"_id": 0}).sort("performedAt", -1).to_list(50)
     return rows
 
@@ -255,14 +224,10 @@ async def list_stock_takes(request: Request):
 # INVOICE → INGREDIENT ASSIGNMENT (incoming stock)
 # =============================================================================
 @router.post("/invoices/{invoice_id}/assign-stock")
-async def assign_invoice_to_stock(invoice_id: str, data: dict, request: Request):
+async def assign_invoice_to_stock(invoice_id: str, data: dict, user: dict = Depends(require_owner_or_manager)):
     """Owner reviews a parsed invoice and tells us which lines map to which
     ingredient + which unit. We convert to base, increment stock, and update
     unitCost as a weighted moving average. Posts a stock_movements row per line."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
     inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not inv: raise HTTPException(status_code=404, detail="Invoice not found")
     assigns = data.get("assignments") or []

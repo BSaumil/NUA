@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
+from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone
 import uuid
@@ -12,11 +13,7 @@ async def get_table_combinations():
     return combos
 
 @router.post("/tables/combinations")
-async def create_table_combination(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def create_table_combination(data: dict, _: dict = Depends(require_owner_or_manager)):
     combo = {
         "id": f"COMBO-{str(uuid.uuid4())[:8].upper()}",
         "name": data.get("name", f"Combo {data.get('tableIds', [])}"),
@@ -29,11 +26,7 @@ async def create_table_combination(data: dict, request: Request):
     return combo
 
 @router.delete("/tables/combinations/{combo_id}")
-async def delete_table_combination(combo_id: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def delete_table_combination(combo_id: str, _: dict = Depends(require_owner_or_manager)):
     await db.table_combinations.delete_one({"id": combo_id})
     return {"message": "Combination deleted"}
 
@@ -49,11 +42,7 @@ async def get_booking_rules():
     }
 
 @router.post("/booking/rules")
-async def save_booking_rules(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
+async def save_booking_rules(data: dict, _: dict = Depends(require_owner)):
     await db.settings.update_one({"key": "booking_rules"}, {"$set": {"key": "booking_rules", "value": data}}, upsert=True)
     return {"message": "Booking rules saved"}
 
@@ -70,11 +59,7 @@ async def get_booking_schedule():
     return shifts
 
 @router.post("/booking/schedule")
-async def save_booking_schedule(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def save_booking_schedule(data: dict, _: dict = Depends(require_owner_or_manager)):
     shifts = data.get("shifts", [])
     await db.booking_shifts.delete_many({})
     for s in shifts:
@@ -90,11 +75,7 @@ async def get_experiences():
     return exps
 
 @router.post("/booking/experiences")
-async def create_experience(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def create_experience(data: dict, _: dict = Depends(require_owner_or_manager)):
     exp = {
         "id": f"EXP-{str(uuid.uuid4())[:8].upper()}",
         "name": data.get("name", ""), "description": data.get("description", ""),
@@ -110,11 +91,7 @@ async def create_experience(data: dict, request: Request):
     return exp
 
 @router.put("/booking/experiences/{exp_id}")
-async def update_experience(exp_id: str, data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def update_experience(exp_id: str, data: dict, _: dict = Depends(require_owner_or_manager)):
     result = await db.booking_experiences.find_one_and_update({"id": exp_id}, {"$set": data}, return_document=True)
     if not result:
         raise HTTPException(status_code=404, detail="Not found")
@@ -122,11 +99,7 @@ async def update_experience(exp_id: str, data: dict, request: Request):
     return result
 
 @router.delete("/booking/experiences/{exp_id}")
-async def delete_experience(exp_id: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def delete_experience(exp_id: str, _: dict = Depends(require_owner_or_manager)):
     await db.booking_experiences.delete_one({"id": exp_id})
     return {"message": "Experience deleted"}
 
@@ -137,11 +110,7 @@ async def get_club_offers():
     return offers
 
 @router.post("/clubmember/offers")
-async def create_club_offer(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
+async def create_club_offer(data: dict, _: dict = Depends(require_owner)):
     discount = data.get("discount", 20)
     if discount < 20 or discount > 50:
         raise HTTPException(status_code=400, detail="Discount must be between 20% and 50%")
@@ -161,11 +130,7 @@ async def create_club_offer(data: dict, request: Request):
     return offer
 
 @router.put("/clubmember/offers/{offer_id}")
-async def update_club_offer(offer_id: str, data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
+async def update_club_offer(offer_id: str, data: dict, _: dict = Depends(require_owner)):
     allowed = {"title", "description", "discount", "startDate", "startTime", "endDate", "endTime", "totalSlots", "active", "socialPlatforms"}
     update = {k: v for k, v in data.items() if k in allowed}
     result = await db.club_offers.find_one_and_update({"id": offer_id}, {"$set": update}, return_document=True)
@@ -175,11 +140,7 @@ async def update_club_offer(offer_id: str, data: dict, request: Request):
     return result
 
 @router.delete("/clubmember/offers/{offer_id}")
-async def delete_club_offer(offer_id: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
+async def delete_club_offer(offer_id: str, _: dict = Depends(require_owner)):
     await db.club_offers.delete_one({"id": offer_id})
     return {"message": "Offer deleted"}
 
@@ -206,11 +167,7 @@ async def claim_club_offer(offer_id: str, data: dict):
 
 # ============ BOOKING ANALYTICS ============
 @router.get("/booking/analytics")
-async def get_booking_analytics(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def get_booking_analytics(_: dict = Depends(require_owner_or_manager)):
 
     reservations = await db.reservations.find({}, {"_id": 0}).to_list(50000)
     total = len(reservations)
@@ -255,20 +212,12 @@ async def get_booking_analytics(request: Request):
 
 # ============ SOCIAL MEDIA ACCOUNTS (for Clubmember posting) ============
 @router.get("/clubmember/social-accounts")
-async def get_social_accounts(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
+async def get_social_accounts(_: dict = Depends(require_owner)):
     accounts = await db.social_accounts.find({}, {"_id": 0}).to_list(20)
     return accounts
 
 @router.post("/clubmember/social-accounts")
-async def add_social_account(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
+async def add_social_account(data: dict, _: dict = Depends(require_owner)):
     account = {
         "id": f"SOC-{str(uuid.uuid4())[:8].upper()}",
         "platform": data.get("platform", ""),
@@ -282,21 +231,13 @@ async def add_social_account(data: dict, request: Request):
     return account
 
 @router.delete("/clubmember/social-accounts/{account_id}")
-async def remove_social_account(account_id: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
+async def remove_social_account(account_id: str, _: dict = Depends(require_owner)):
     await db.social_accounts.delete_one({"id": account_id})
     return {"message": "Account removed"}
 
 # ============ TEST EMAIL ============
 @router.post("/email/test")
-async def send_test_email(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def send_test_email(data: dict, user: dict = Depends(require_owner_or_manager)):
     recipient = data.get("to", "sambhatt7@gmail.com")
     subject = data.get("subject", "NUVA POS Test Email")
     body = data.get("body", "This is a test email from NUVA POS system.")
@@ -313,19 +254,11 @@ async def send_test_email(data: dict, request: Request):
     return {"message": f"Test email logged (recipient: {recipient})", "emailId": email_record["id"]}
 
 @router.get("/email/settings")
-async def get_email_settings(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
+async def get_email_settings(_: dict = Depends(require_owner)):
     s = await db.settings.find_one({"key": "email_config"}, {"_id": 0})
     return s.get("value", {}) if s else {"testEmail": "sambhatt7@gmail.com", "senderName": "NUVA POS", "senderEmail": ""}
 
 @router.post("/email/settings")
-async def save_email_settings(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
+async def save_email_settings(data: dict, _: dict = Depends(require_owner)):
     await db.settings.update_one({"key": "email_config"}, {"$set": {"key": "email_config", "value": data}}, upsert=True)
     return {"message": "Email settings saved"}

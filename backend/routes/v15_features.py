@@ -2,7 +2,8 @@
 Nano Banana image gen, anomaly detection, auto-rostering, audit log, variants, CSV import,
 cohort retention, booking heatmap, 2FA, GDPR.
 """
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
+from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone, timedelta
 import uuid
@@ -18,9 +19,7 @@ router = APIRouter()
 # DOCK BADGES (live counters)
 # =============================================================================
 @router.get("/dock/badges")
-async def get_dock_badges(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def get_dock_badges(_: dict = Depends(get_user)):
     now = datetime.now(timezone.utc)
     ten_min_ago = (now - timedelta(minutes=10)).isoformat()
     today = now.date().isoformat()
@@ -44,16 +43,12 @@ async def get_dock_badges(request: Request):
 # HOLD / RECALL ORDERS (POS Tabs)
 # =============================================================================
 @router.get("/pos/tabs")
-async def get_tabs(request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def get_tabs(_: dict = Depends(get_user)):
     tabs = await db.pos_tabs.find({"status": "open"}, {"_id": 0}).sort("createdAt", -1).to_list(200)
     return tabs
 
 @router.post("/pos/tabs")
-async def create_tab(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def create_tab(data: dict, user: dict = Depends(get_user)):
     tab = {
         "id": f"TAB-{str(uuid.uuid4())[:8].upper()}",
         "name": data.get("name", f"Tab {datetime.now().strftime('%H:%M')}"),
@@ -69,9 +64,7 @@ async def create_tab(data: dict, request: Request):
     return tab
 
 @router.delete("/pos/tabs/{tab_id}")
-async def delete_tab(tab_id: str, request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def delete_tab(tab_id: str, _: dict = Depends(get_user)):
     await db.pos_tabs.delete_one({"id": tab_id})
     return {"message": "Tab closed"}
 
@@ -80,16 +73,12 @@ async def delete_tab(tab_id: str, request: Request):
 # FAVORITES (Quick Keys)
 # =============================================================================
 @router.get("/pos/favorites")
-async def get_favorites(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def get_favorites(user: dict = Depends(get_user)):
     fav = await db.pos_favorites.find_one({"userId": user["id"]}, {"_id": 0})
     return fav or {"userId": user["id"], "productIds": []}
 
 @router.post("/pos/favorites")
-async def save_favorites(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def save_favorites(data: dict, user: dict = Depends(get_user)):
     product_ids = data.get("productIds", [])
     await db.pos_favorites.update_one(
         {"userId": user["id"]},
@@ -103,11 +92,7 @@ async def save_favorites(data: dict, request: Request):
 # VARIANT MATRIX (size × milk × temp)
 # =============================================================================
 @router.put("/products/{product_id}/variants")
-async def set_variants(product_id: str, data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def set_variants(product_id: str, data: dict, _: dict = Depends(require_owner_or_manager)):
     # data: { axes: [{name:"Size", values:["S","M","L"]}, ...], matrix: {"S|Whole":12.0, ...} }
     await db.products.update_one(
         {"id": product_id},
@@ -121,11 +106,7 @@ async def set_variants(product_id: str, data: dict, request: Request):
 # BULK CSV IMPORT for Items
 # =============================================================================
 @router.post("/items/bulk-import")
-async def bulk_import(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def bulk_import(data: dict, _: dict = Depends(require_owner_or_manager)):
     rows = data.get("rows", [])  # list of {name, category, price, cost, stock, description}
     created = 0
     for row in rows:
@@ -151,9 +132,7 @@ async def bulk_import(data: dict, request: Request):
 # VOICE POS — Whisper transcription
 # =============================================================================
 @router.post("/pos/voice-order")
-async def voice_order(data: dict, request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def voice_order(data: dict, _: dict = Depends(get_user)):
     audio_b64 = data.get("audioBase64", "")
     mime = data.get("mime", "audio/webm")
     if not audio_b64:
@@ -196,11 +175,7 @@ async def voice_order(data: dict, request: Request):
 # ASK NUA — natural-language analytics (LLM)
 # =============================================================================
 @router.post("/ai/ask-nua")
-async def ask_nua(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def ask_nua(data: dict, user: dict = Depends(require_owner_or_manager)):
     question = data.get("question", "")
     if not question: raise HTTPException(status_code=400, detail="question required")
 
@@ -244,11 +219,7 @@ async def ask_nua(data: dict, request: Request):
 # NANO BANANA — item image generation
 # =============================================================================
 @router.post("/items/generate-image")
-async def generate_image(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def generate_image(data: dict, _: dict = Depends(require_owner_or_manager)):
     name = data.get("name", "")
     cuisine = data.get("cuisine", "modern cafe")
     if not name: raise HTTPException(status_code=400, detail="name required")
@@ -269,11 +240,7 @@ async def generate_image(data: dict, request: Request):
 # INVENTORY ANOMALY DETECTION
 # =============================================================================
 @router.get("/analytics/inventory-anomalies")
-async def inventory_anomalies(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def inventory_anomalies(_: dict = Depends(require_owner_or_manager)):
     products = await db.products.find({}, {"_id": 0}).to_list(1000)
     seven_days_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
     anomalies = []
@@ -301,11 +268,7 @@ async def inventory_anomalies(request: Request):
 # AUTO-ROSTERING AI
 # =============================================================================
 @router.post("/staff/auto-roster")
-async def auto_roster(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def auto_roster(data: dict, _: dict = Depends(require_owner_or_manager)):
     week_start = data.get("weekStart")
     # Get demand forecast — use existing data or simple heuristic
     staff = await db.auth_users.find({"role": {"$ne": "owner"}, "status": "active"}, {"_id": 0}).to_list(100)
@@ -375,11 +338,7 @@ async def auto_roster(data: dict, request: Request):
 
 
 @router.post("/staff/roster/commit-auto")
-async def commit_auto_roster(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def commit_auto_roster(data: dict, _: dict = Depends(require_owner_or_manager)):
     shifts = data.get("shifts", [])
     inserted = 0
     for s in shifts:
@@ -394,9 +353,7 @@ async def commit_auto_roster(data: dict, request: Request):
 # SHIFT SWAP REQUESTS
 # =============================================================================
 @router.get("/staff/shift-swaps")
-async def get_swaps(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def get_swaps(user: dict = Depends(get_user)):
     if user["role"] in ("owner", "manager"):
         swaps = await db.shift_swaps.find({}, {"_id": 0}).sort("createdAt", -1).to_list(200)
     else:
@@ -404,9 +361,7 @@ async def get_swaps(request: Request):
     return swaps
 
 @router.post("/staff/shift-swaps")
-async def create_swap(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def create_swap(data: dict, user: dict = Depends(get_user)):
     swap = {
         "id": f"SWAP-{str(uuid.uuid4())[:8].upper()}",
         "shiftId": data.get("shiftId"),
@@ -423,11 +378,7 @@ async def create_swap(data: dict, request: Request):
     return swap
 
 @router.post("/staff/shift-swaps/{swap_id}/approve")
-async def approve_swap(swap_id: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Manager only")
+async def approve_swap(swap_id: str, user: dict = Depends(require_owner_or_manager)):
     swap = await db.shift_swaps.find_one({"id": swap_id})
     if not swap: raise HTTPException(status_code=404, detail="not found")
     # Reassign the shift
@@ -439,11 +390,7 @@ async def approve_swap(swap_id: str, request: Request):
     return {"message": "Swap approved & shift reassigned"}
 
 @router.post("/staff/shift-swaps/{swap_id}/reject")
-async def reject_swap(swap_id: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Manager only")
+async def reject_swap(swap_id: str, _: dict = Depends(require_owner_or_manager)):
     await db.shift_swaps.update_one({"id": swap_id}, {"$set": {"status": "rejected", "rejectedAt": datetime.now(timezone.utc).isoformat()}})
     return {"message": "Swap rejected"}
 
@@ -452,11 +399,7 @@ async def reject_swap(swap_id: str, request: Request):
 # BOOKING HEATMAP (busy hours by day-of-week)
 # =============================================================================
 @router.get("/analytics/booking-heatmap")
-async def booking_heatmap(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def booking_heatmap(_: dict = Depends(require_owner_or_manager)):
     res = await db.reservations.find({}, {"_id": 0, "date": 1, "time": 1, "partySize": 1}).to_list(5000)
     # heatmap[dow][hour] = total guests
     DOW = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
@@ -478,11 +421,7 @@ async def booking_heatmap(request: Request):
 # CUSTOMER COHORT RETENTION
 # =============================================================================
 @router.get("/analytics/cohort-retention")
-async def cohort_retention(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def cohort_retention(_: dict = Depends(require_owner_or_manager)):
     customers = await db.customers.find({}, {"_id": 0, "id": 1, "createdAt": 1}).to_list(5000)
     tx = await db.transactions.find({}, {"_id": 0, "customerId": 1, "createdAt": 1}).to_list(20000)
     # Group customers by month of first signup
@@ -510,11 +449,7 @@ async def cohort_retention(request: Request):
 # AUDIT LOG
 # =============================================================================
 @router.get("/audit/logs")
-async def get_audit_logs(request: Request, limit: int = 200):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def get_audit_logs( limit: int = 200, user: dict = Depends(require_owner_or_manager)):
     # Aggregate from multiple sources: comp_voids, refunds, ghost_discounts, login attempts
     logs = []
     cv = await db.comp_voids.find({}, {"_id": 0}).sort("processedAt", -1).to_list(100)
@@ -540,19 +475,13 @@ async def get_audit_logs(request: Request, limit: int = 200):
 # 2FA OWNER LOGIN (TOTP)
 # =============================================================================
 @router.post("/auth/2fa/setup")
-async def setup_2fa(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner only")
+async def setup_2fa(user: dict = Depends(require_owner)):
     secret = secrets.token_hex(16)  # In production use pyotp.random_base32()
     await db.auth_users.update_one({"id": user["id"]}, {"$set": {"twoFactorSecret": secret, "twoFactorEnabled": False}})
     return {"secret": secret, "qrUri": f"otpauth://totp/NUA:{user['email']}?secret={secret}&issuer=NUA"}
 
 @router.post("/auth/2fa/verify")
-async def verify_2fa(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def verify_2fa(data: dict, user: dict = Depends(get_user)):
     code = data.get("code", "")
     # Stub: accept "123456" for demo (real implementation: pyotp.TOTP(secret).verify(code))
     if code == "123456":
@@ -561,9 +490,7 @@ async def verify_2fa(data: dict, request: Request):
     raise HTTPException(status_code=400, detail="Invalid code")
 
 @router.post("/auth/2fa/disable")
-async def disable_2fa(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def disable_2fa(user: dict = Depends(get_user)):
     await db.auth_users.update_one({"id": user["id"]}, {"$unset": {"twoFactorSecret": "", "twoFactorEnabled": ""}})
     return {"message": "2FA disabled"}
 
@@ -572,11 +499,7 @@ async def disable_2fa(request: Request):
 # GDPR — data export & erase
 # =============================================================================
 @router.get("/customers/{customer_id}/gdpr-export")
-async def gdpr_export(customer_id: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def gdpr_export(customer_id: str, _: dict = Depends(require_owner_or_manager)):
     customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
     if not customer: raise HTTPException(status_code=404, detail="not found")
     tx = await db.transactions.find({"customerId": customer_id}, {"_id": 0}).to_list(5000)
@@ -592,11 +515,7 @@ async def gdpr_export(customer_id: str, request: Request):
     }
 
 @router.delete("/customers/{customer_id}/gdpr-erase")
-async def gdpr_erase(customer_id: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner only")
+async def gdpr_erase(customer_id: str, user: dict = Depends(require_owner)):
     # Anonymize rather than hard-delete to preserve financial records
     anon = {"name": "[REDACTED]", "email": "redacted@nua.local", "phone": "[REDACTED]", "notes": "", "erasedAt": datetime.now(timezone.utc).isoformat(), "erasedBy": user["id"]}
     await db.customers.update_one({"id": customer_id}, {"$set": anon})
@@ -608,11 +527,7 @@ async def gdpr_erase(customer_id: str, request: Request):
 # BAS / GST e-file finalize (stub with audit trail)
 # =============================================================================
 @router.post("/bas-gst/efile/{report_id}")
-async def efile_bas(report_id: str, data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner only")
+async def efile_bas(report_id: str, data: dict, user: dict = Depends(require_owner)):
     abn = data.get("abn", "")
     if not abn or len(abn.replace(" ", "")) != 11:
         raise HTTPException(status_code=400, detail="Valid 11-digit ABN required")

@@ -9,7 +9,8 @@ Implements:
 - Audit log of every state transition
 """
 from __future__ import annotations
-from fastapi import APIRouter, HTTPException, Request, Header
+from fastapi import APIRouter, HTTPException, Request, Header, Depends
+from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -96,16 +97,12 @@ def _compute_state_from_days(failed_at_iso: str) -> str:
 # ONBOARDING — issue a new license (ABN + Stripe subscription required)
 # ============================================================================
 @router.post("/onboard")
-async def onboard(data: dict, request: Request):
+async def onboard(data: dict, user: dict = Depends(require_owner)):
     """Create a tenant license bound to a verified ABN.
 
     Required: tenantId, abn, ownerEmail, plan (optional: stripeSubscriptionId).
     Calls ABR live; refuses to issue without a verified Active ABN.
     """
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner-only operation")
 
     tenant_id = (data.get("tenantId") or user.get("tenantId") or "default").strip()
     abn = (data.get("abn") or "").strip()
@@ -241,13 +238,9 @@ def _build_warnings(lic: dict) -> list[str]:
 # DEVICE ACTIVATION
 # ============================================================================
 @router.post("/device/activate")
-async def activate_device(data: dict, request: Request):
+async def activate_device(data: dict, user: dict = Depends(require_owner_or_manager)):
     """First-time device registration. The POS device generates a stable
     deviceId and submits it with an owner/manager auth header."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager required")
     tenant_id = data.get("tenantId") or user.get("tenantId") or "default"
     device_id = data.get("deviceId")
     name = data.get("name", f"Device {device_id[:6] if device_id else '?'}")
@@ -270,11 +263,7 @@ async def activate_device(data: dict, request: Request):
 
 
 @router.post("/device/revoke")
-async def revoke_device(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner only")
+async def revoke_device(data: dict, user: dict = Depends(require_owner)):
     tenant_id = data.get("tenantId") or user.get("tenantId") or "default"
     device_id = data.get("deviceId")
     res = await db.tenant_licenses.update_one(
@@ -291,14 +280,10 @@ async def revoke_device(data: dict, request: Request):
 # ABN CHANGE REQUEST FLOW
 # ============================================================================
 @router.post("/abn/change-request")
-async def request_abn_change(data: dict, request: Request):
+async def request_abn_change(data: dict, user: dict = Depends(require_owner)):
     """Owner requests an ABN change. License goes into review state immediately.
     Requires owner role + 2FA token (we accept TOTP-style 6-digit OR a 'confirm'
     string for now — pyotp wiring is on the roadmap)."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner only")
     twofa = (data.get("twoFactorCode") or "").strip()
     if not twofa or len(twofa) < 4:
         raise HTTPException(status_code=400, detail="2FA code required for ABN change")
@@ -450,9 +435,7 @@ async def stripe_webhook(request: Request, stripe_signature: Optional[str] = Hea
 # OWNER UI ENDPOINTS
 # ============================================================================
 @router.get("/me")
-async def my_license(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def my_license(user: dict = Depends(get_user)):
     tenant_id = user.get("tenantId") or "default"
     lic = await _get_license(tenant_id)
     if not lic:
@@ -461,23 +444,15 @@ async def my_license(request: Request):
 
 
 @router.get("/audit")
-async def list_audit(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def list_audit(user: dict = Depends(require_owner_or_manager)):
     tenant_id = user.get("tenantId") or "default"
     rows = await db.license_audit.find({"tenantId": tenant_id}, {"_id": 0}).sort("createdAt", -1).to_list(200)
     return rows
 
 
 @router.post("/billing/recovery-link")
-async def billing_recovery_link(data: dict, request: Request):
+async def billing_recovery_link(data: dict, user: dict = Depends(require_owner)):
     """Generate a Stripe Billing Portal session URL so the owner can update their card."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner only")
     tenant_id = user.get("tenantId") or "default"
     lic = await _get_license(tenant_id)
     if not lic or not lic.get("stripeCustomerId"):
@@ -492,11 +467,7 @@ async def billing_recovery_link(data: dict, request: Request):
 
 # Dev-only manual state forcing — useful for QA / demos. Owner-gated.
 @router.post("/dev/force-state")
-async def force_state(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner only")
+async def force_state(data: dict, user: dict = Depends(require_owner)):
     tenant_id = user.get("tenantId") or "default"
     state = data.get("state")
     allowed = {STATE_ACTIVE, STATE_PAST_DUE, STATE_GRACE, STATE_SUSPENDED, STATE_CANCELLED, STATE_ABN_REVIEW}

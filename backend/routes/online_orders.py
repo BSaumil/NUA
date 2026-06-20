@@ -9,7 +9,8 @@ Endpoints:
 - GET    /api/online/orders/track/{code}     — public order tracking
 - GET    /api/online/kitchen/load            — current pending + preparing counts
 """
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
+from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -218,9 +219,7 @@ async def place_order(data: dict):
 # OWNER INBOX + MANAGEMENT
 # =============================================================================
 @router.get("/online/orders")
-async def list_orders(request: Request, status: Optional[str] = None, limit: int = 100):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def list_orders( status: Optional[str] = None, limit: int = 100, user: dict = Depends(get_user)):
     if user["role"] not in ("owner", "manager", "cashier", "kitchen"):
         raise HTTPException(status_code=403, detail="Staff only")
     q = {}
@@ -230,18 +229,14 @@ async def list_orders(request: Request, status: Optional[str] = None, limit: int
 
 
 @router.get("/online/orders/{order_id}")
-async def get_order(order_id: str, request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def get_order(order_id: str, _: dict = Depends(get_user)):
     row = await db.online_orders.find_one({"id": order_id}, {"_id": 0})
     if not row: raise HTTPException(status_code=404, detail="Order not found")
     return row
 
 
 @router.patch("/online/orders/{order_id}/status")
-async def update_status(order_id: str, data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def update_status(order_id: str, data: dict, user: dict = Depends(get_user)):
     if user["role"] not in ("owner", "manager", "cashier", "kitchen"):
         raise HTTPException(status_code=403, detail="Staff only")
     new_status = data.get("status")
@@ -289,9 +284,7 @@ async def update_status(order_id: str, data: dict, request: Request):
 
 
 @router.post("/online/orders/{order_id}/eta")
-async def recompute_eta(order_id: str, request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def recompute_eta(order_id: str, _: dict = Depends(get_user)):
     order = await db.online_orders.find_one({"id": order_id}, {"_id": 0})
     if not order: raise HTTPException(status_code=404, detail="Order not found")
     load = await _kitchen_load()
@@ -304,9 +297,7 @@ async def recompute_eta(order_id: str, request: Request):
 
 
 @router.get("/online/kitchen/load")
-async def kitchen_load_endpoint(request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def kitchen_load_endpoint(_: dict = Depends(get_user)):
     return await _kitchen_load()
 
 

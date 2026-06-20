@@ -6,7 +6,8 @@ Loyalty rules (user spec):
 - Minimum redemption = 50 points
 - 1 point = 1¢ = $0.01 face value at redemption
 """
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
+from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone, timedelta
 import uuid
@@ -34,18 +35,12 @@ async def get_config():
 
 
 @router.get("/loyalty/config")
-async def get_loyalty_config(request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def get_loyalty_config(_: dict = Depends(get_user)):
     return await get_config()
 
 
 @router.put("/loyalty/config")
-async def update_loyalty_config(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner only")
+async def update_loyalty_config(data: dict, _: dict = Depends(require_owner)):
     update = {k: v for k, v in data.items() if k in ("earnRate", "redeemRate", "minRedeem", "categoryMultipliers", "active")}
     update["updatedAt"] = datetime.now(timezone.utc).isoformat()
     await db.loyalty_config.update_one({"id": "default"}, {"$set": {"id": "default", **update}}, upsert=True)
@@ -56,9 +51,7 @@ async def update_loyalty_config(data: dict, request: Request):
 # EARN POINTS (called after a successful transaction)
 # =============================================================================
 @router.post("/loyalty/earn")
-async def earn_points(data: dict, request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def earn_points(data: dict, _: dict = Depends(get_user)):
     customer_id = data.get("customerId")
     items = data.get("items", [])  # [{ category, price, quantity }]
     transaction_id = data.get("transactionId")
@@ -105,9 +98,7 @@ async def earn_points(data: dict, request: Request):
 # REDEEM (points-and-pay at checkout)
 # =============================================================================
 @router.post("/loyalty/redeem")
-async def redeem_points(data: dict, request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def redeem_points(data: dict, _: dict = Depends(get_user)):
     customer_id = data.get("customerId")
     points = int(data.get("points", 0))
     transaction_id = data.get("transactionId")
@@ -139,9 +130,7 @@ async def redeem_points(data: dict, request: Request):
 
 
 @router.get("/loyalty/balance/{customer_id}")
-async def get_balance(customer_id: str, request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def get_balance(customer_id: str, _: dict = Depends(get_user)):
     customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
@@ -157,9 +146,7 @@ async def get_balance(customer_id: str, request: Request):
 
 
 @router.get("/loyalty/ledger/{customer_id}")
-async def get_ledger(customer_id: str, request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def get_ledger(customer_id: str, _: dict = Depends(get_user)):
     entries = await db.loyalty_ledger.find({"customerId": customer_id}, {"_id": 0}).sort("createdAt", -1).to_list(100)
     return entries
 
@@ -204,21 +191,13 @@ async def _record_decision(action_type: str, summary: str, payload: dict, status
 
 
 @router.get("/agent/segments")
-async def get_segments(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def get_segments(_: dict = Depends(require_owner_or_manager)):
     s = await _segment_customers()
     return {"segments": {k: len(v) for k, v in s.items()}, "ids": s}
 
 
 @router.get("/agent/decisions")
-async def get_decisions(request: Request, limit: int = 100):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def get_decisions( limit: int = 100, _: dict = Depends(require_owner_or_manager)):
     decisions = await db.agent_decisions.find({}, {"_id": 0}).sort("createdAt", -1).to_list(limit)
     return decisions
 

@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
+from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 import os
 import uuid
@@ -20,12 +21,8 @@ async def _get_ai_chat():
     return chat
 
 @router.get("/ai-pantry/generate")
-async def generate_pantry_list(request: Request):
+async def generate_pantry_list(user: dict = Depends(require_owner_or_manager)):
     """AI-powered weekly ordering list based on menu, sales, and reservations"""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
 
     # Gather data
     products = await db.products.find({}, {"_id": 0}).to_list(1000)
@@ -117,12 +114,8 @@ Generate a JSON response with this EXACT structure:
     return pantry_doc
 
 @router.get("/ai-pantry/history")
-async def get_pantry_history(request: Request):
+async def get_pantry_history(_: dict = Depends(require_owner_or_manager)):
     """Get previous pantry list generations"""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
     lists = await db.pantry_lists.find({}, {"_id": 0}).sort("generatedAt", -1).to_list(20)
     return lists
 
@@ -131,15 +124,11 @@ async def get_pantry_history(request: Request):
 # INVOICE OCR — upload supplier invoice → LLM extracts → auto-update products
 # ============================================================================
 @router.post("/ai-pantry/parse-invoice")
-async def parse_invoice(data: dict, request: Request):
+async def parse_invoice(data: dict, user: dict = Depends(require_owner_or_manager)):
     """Owner/manager uploads a supplier invoice as a base64 image (or pasted
     text). LLM extracts each line item (name, qty, unit cost) and we attempt to
     match each against existing products by fuzzy name. The caller can then
     confirm + commit price/cost updates via /ai-pantry/apply-invoice."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
     invoice_text = (data.get("text") or "").strip()
     image_b64 = data.get("imageBase64")
     if not invoice_text and not image_b64:
@@ -236,13 +225,9 @@ async def parse_invoice(data: dict, request: Request):
 
 
 @router.post("/ai-pantry/apply-invoice/{invoice_id}")
-async def apply_invoice(invoice_id: str, data: dict, request: Request):
+async def apply_invoice(invoice_id: str, data: dict, user: dict = Depends(require_owner_or_manager)):
     """Apply selected price/cost updates from a parsed invoice. `selections` is
     a list of `{matchedProductId, applyPrice (bool), applyCost (bool), priceOverride}`."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
     inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not inv: raise HTTPException(status_code=404, detail="Invoice not found")
     selections = {s.get("matchedProductId"): s for s in (data.get("selections") or []) if s.get("matchedProductId")}
@@ -276,11 +261,7 @@ async def apply_invoice(invoice_id: str, data: dict, request: Request):
 
 
 @router.get("/ai-pantry/invoices")
-async def list_invoices(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def list_invoices(_: dict = Depends(require_owner_or_manager)):
     rows = await db.invoices.find({}, {"_id": 0}).sort("uploadedAt", -1).to_list(50)
     return rows
 
@@ -289,11 +270,9 @@ async def list_invoices(request: Request):
 # PRODUCT INSIGHTS — weekly sales + margin (for the dashboard tiles)
 # ============================================================================
 @router.get("/products/insights")
-async def product_insights(request: Request):
+async def product_insights(user: dict = Depends(get_user)):
     """Returns per-product weekly sales count and margin %, for use as
     colour-coded badges on the Items dashboard."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
     if user["role"] not in ("owner", "manager", "cashier", "kitchen"):
         raise HTTPException(status_code=403, detail="Staff only")
     now = datetime.now()

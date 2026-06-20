@@ -4,7 +4,8 @@ E: auto-publish roster (within budget), auto-confirm SMS queue, auto-VIP tagging
 voice intents 'void last item' / 'raise espresso 50 cents'
 F: AI Phone Agent, auto-PO generation, live menu A/B testing, guest 'your usual'
 """
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
+from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone, timedelta
 from collections import Counter, defaultdict
@@ -30,19 +31,13 @@ DEFAULT_AUTONOMY = {
 
 
 @router.get("/agent/autonomy")
-async def get_autonomy(request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def get_autonomy(_: dict = Depends(get_user)):
     cfg = await db.agent_autonomy.find_one({"id": "default"}, {"_id": 0})
     return cfg or {"id": "default", **DEFAULT_AUTONOMY}
 
 
 @router.put("/agent/autonomy")
-async def update_autonomy(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner only")
+async def update_autonomy(data: dict, _: dict = Depends(require_owner)):
     update = {k: v for k, v in data.items() if k in DEFAULT_AUTONOMY}
     await db.agent_autonomy.update_one(
         {"id": "default"}, {"$set": {"id": "default", **update}}, upsert=True
@@ -72,11 +67,7 @@ async def auto_tag_vips():
 # E2 — AUTO-CONFIRM SMS QUEUE
 # =============================================================================
 @router.get("/comms/sms-queue")
-async def get_sms_queue(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def get_sms_queue(_: dict = Depends(require_owner_or_manager)):
     q = await db.sms_queue.find({}, {"_id": 0}).sort("createdAt", -1).to_list(200)
     return q
 
@@ -94,9 +85,7 @@ async def queue_sms(to: str, name: str, body: str, kind: str = "manual"):
 
 
 @router.post("/comms/auto-confirm/{reservation_id}")
-async def auto_confirm_reservation(reservation_id: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def auto_confirm_reservation(reservation_id: str, _: dict = Depends(get_user)):
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
     if not res:
         raise HTTPException(status_code=404, detail="Reservation not found")
@@ -115,11 +104,9 @@ async def auto_confirm_reservation(reservation_id: str, request: Request):
 # E3 — VOICE COMMAND ROUTER EXTENSIONS (void last item, raise price)
 # =============================================================================
 @router.post("/agent/voice-extended")
-async def voice_extended(data: dict, request: Request):
+async def voice_extended(data: dict, user: dict = Depends(get_user)):
     """Extended voice routing for commands the basic router doesn't handle.
     Specifically: 'void last item', 'raise espresso 50 cents', '86 the croissant'."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
     text = (data.get("text") or "").lower().strip()
     if not text:
         raise HTTPException(status_code=400, detail="text required")
@@ -231,20 +218,14 @@ async def auto_publish_roster(data: dict, request: Request):
 # F1 — AI PHONE AGENT (inbound voice agent)
 # =============================================================================
 @router.get("/phone-agent/calls")
-async def get_calls(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def get_calls(_: dict = Depends(require_owner_or_manager)):
     calls = await db.phone_calls.find({}, {"_id": 0}).sort("startedAt", -1).to_list(200)
     return calls
 
 
 @router.post("/phone-agent/simulate")
-async def simulate_call(data: dict, request: Request):
+async def simulate_call(data: dict, _: dict = Depends(get_user)):
     """Simulate an inbound call. Sends transcript to LLM, returns intent + actions taken."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
     caller = data.get("caller", "Unknown")
     transcript = data.get("transcript", "").strip()
     if not transcript:
@@ -316,22 +297,14 @@ async def simulate_call(data: dict, request: Request):
 # F2 — AUTO PO GENERATION
 # =============================================================================
 @router.get("/purchase-orders")
-async def get_pos_list(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def get_pos_list(_: dict = Depends(require_owner_or_manager)):
     pos = await db.purchase_orders.find({}, {"_id": 0}).sort("createdAt", -1).to_list(200)
     return pos
 
 
 @router.post("/purchase-orders/generate")
-async def generate_po(request: Request):
+async def generate_po(user: dict = Depends(require_owner_or_manager)):
     """Auto-generate purchase orders from low-stock products grouped by supplier."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
     cfg = await db.agent_autonomy.find_one({"id": "default"}, {"_id": 0}) or DEFAULT_AUTONOMY
     threshold = int(cfg.get("autoReorderThreshold", 5))
     low = await db.products.find({"stock": {"$lte": threshold}, "active": {"$ne": False}}, {"_id": 0}).to_list(500)
@@ -373,11 +346,7 @@ async def generate_po(request: Request):
 
 
 @router.post("/purchase-orders/{po_id}/{action}")
-async def update_po(po_id: str, action: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def update_po(po_id: str, action: str, _: dict = Depends(require_owner_or_manager)):
     if action not in ("approve", "send", "receive", "cancel"):
         raise HTTPException(status_code=400, detail="Invalid action")
     status_map = {"approve": "approved", "send": "sent", "receive": "received", "cancel": "cancelled"}
@@ -397,21 +366,13 @@ async def update_po(po_id: str, action: str, request: Request):
 # F3 — LIVE MENU A/B TESTING
 # =============================================================================
 @router.get("/ab-tests")
-async def get_ab_tests(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def get_ab_tests(_: dict = Depends(require_owner_or_manager)):
     tests = await db.ab_tests.find({}, {"_id": 0}).sort("createdAt", -1).to_list(100)
     return tests
 
 
 @router.post("/ab-tests")
-async def create_ab_test(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def create_ab_test(data: dict, _: dict = Depends(require_owner_or_manager)):
     test = {
         "id": f"AB-{str(uuid.uuid4())[:8].upper()}",
         "productId": data.get("productId"),
@@ -451,11 +412,7 @@ async def record_conversion(test_id: str, data: dict):
 
 
 @router.post("/ab-tests/{test_id}/conclude")
-async def conclude_test(test_id: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def conclude_test(test_id: str, _: dict = Depends(require_owner_or_manager)):
     test = await db.ab_tests.find_one({"id": test_id}, {"_id": 0})
     if not test:
         raise HTTPException(status_code=404, detail="Not found")
@@ -472,9 +429,7 @@ async def conclude_test(test_id: str, request: Request):
 # F4 — GUEST PREDICTIVE "YOUR USUAL"
 # =============================================================================
 @router.get("/customers/{customer_id}/your-usual")
-async def your_usual(customer_id: str, request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def your_usual(customer_id: str, _: dict = Depends(get_user)):
     # Find customer's most-frequent items from transactions
     tx = await db.transactions.find({"customerId": customer_id}, {"_id": 0, "items": 1, "createdAt": 1}).sort("createdAt", -1).limit(20).to_list(20)
     if not tx:

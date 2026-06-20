@@ -1,5 +1,25 @@
 # NUA POS — PRD v26.0 (Enterprise Licensing & Entitlements)
 
+## v26.8 — Iteration 35 (Feb 2026): P0 Auth-Precedence Refactor (Depends Pattern)
+
+### What landed
+- **`/app/backend/deps.py`** is now the single source of truth for FastAPI auth dependencies. Exposes `get_user`, `require_owner`, `require_owner_or_manager` — all wired as top-level `Depends(...)` so the auth check fires BEFORE Pydantic body validation. Anonymous POSTs with bogus payloads now correctly return **401** (not 422); cashier-role calls return **403** instead of leaking the schema.
+- **Refactored routes** to remove inline `from routes.auth import get_current_user` boilerplate:
+  - `routes/products.py` — `bulk-edit`, `product-images` GET/POST/DELETE
+  - `routes/items_system.py` — categories CRUD, modifiers CRUD, discounts CRUD, comp-void, payment-links, seed/catalog
+  - `routes/channel_menus.py` — replaced its local `_owner_or_manager` with the shared dep; all 7 protected endpoints now use `Depends(require_owner_or_manager)`
+- **Channel Menus** (already implemented in iteration 34, validated in 35): `/api/channel-menus/{channel}/ai-prep-times` syncs per-product prep times against current kitchen heat (active KDS tickets ×1.0/1.1/1.25/1.5). `/api/channel-menus/{channel}/ai-discount-slow` applies an N%-off to bottom-N slowest sellers of the last 7 days, with unsold products surfaced first. UI is wired in `pages/ChannelMenus.jsx` via `ai-prep-btn` and `ai-discount-btn`.
+
+### Iteration 35 Tests
+- **Backend 42/42 PASS** — 12 endpoints × {anon 401, cashier 403} = 24 precedence tests, plus happy-path Products bulk-edit / Modifiers CRUD / Product Images / Channel Menus CRUD+AI / Reservations AI assign-seat-complete chain / Fair Work Awards (catalogue, install, sync-fairwork, super-by-award) / Bookings AI Inbox (real LLM parse). Regression on products/transactions/customers green.
+- Test file: `/app/backend/tests/test_iteration_p0_auth_refactor.py`.
+
+### Backlog
+- P2: Apply the same `Depends` refactor to legacy routers (`advanced_features.py`, `loyalty_engine.py`, `phase_ef_wave2.py`, `v25_suite.py`, `v26_commerce.py`, `enterprise_features.py`, `inventory_accounting.py`, `staff_management.py`, etc.) — currently still inline `get_current_user(request)`. Not a behaviour bug, just consistency.
+- P2: Split `Products.jsx` (~960 lines) into `components/products/{Toolbar, ProductTable, BulkEditDialog}.jsx`.
+- P2: AI bookings inbox response header `x-ai-parsed-fallback` so UI can warn when LLM is unavailable.
+- P1: Provide real SendGrid / Twilio API keys to activate the notification abstraction.
+
 ## v26.7 — Iteration 34 (Feb 2026): Cart inputs · POS status bar · AI Bookings Inbox · Super (Awards) · Banks + Payment Terminals · P2 fixes
 
 ### What landed

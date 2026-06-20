@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
+from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from typing import Optional
 import uuid
@@ -9,12 +10,8 @@ router = APIRouter(prefix="/business")
 # ============ MULTI-BUSINESS / MULTI-TENANT ============
 
 @router.post("/create")
-async def create_business(data: dict, request: Request):
+async def create_business(data: dict, user: dict = Depends(require_owner)):
     """Create a new business (Owner only)"""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
 
     business = {
         "id": f"BIZ-{str(uuid.uuid4())[:8].upper()}",
@@ -42,30 +39,20 @@ async def create_business(data: dict, request: Request):
     return business
 
 @router.get("/list")
-async def list_businesses(request: Request):
+async def list_businesses(user: dict = Depends(require_owner)):
     """List all businesses for current owner"""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
     businesses = await db.businesses.find({"ownerId": user["id"]}, {"_id": 0}).to_list(100)
     return businesses
 
 @router.get("/{business_id}")
-async def get_business(business_id: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def get_business(business_id: str, _: dict = Depends(get_user)):
     business = await db.businesses.find_one({"id": business_id}, {"_id": 0})
     if not business:
         raise HTTPException(status_code=404, detail="Business not found")
     return business
 
 @router.put("/{business_id}")
-async def update_business(business_id: str, data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
+async def update_business(business_id: str, data: dict, _: dict = Depends(require_owner)):
     allowed = {"name", "type", "abn", "address", "phone", "email", "timezone", "currency", "taxRate", "settings"}
     update_data = {k: v for k, v in data.items() if k in allowed}
     result = await db.businesses.find_one_and_update(
@@ -77,12 +64,8 @@ async def update_business(business_id: str, data: dict, request: Request):
     return result
 
 @router.get("/{business_id}/export")
-async def export_business_data(business_id: str, request: Request, collection: Optional[str] = None):
+async def export_business_data(business_id: str, collection: Optional[str] = None, _: dict = Depends(require_owner)):
     """Export all data for a specific business (Owner only)"""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
 
     business = await db.businesses.find_one({"id": business_id}, {"_id": 0})
     if not business:
@@ -106,12 +89,8 @@ async def export_business_data(business_id: str, request: Request, collection: O
     return export_data
 
 @router.get("/{business_id}/summary")
-async def get_business_summary(business_id: str, request: Request):
+async def get_business_summary(business_id: str, _: dict = Depends(require_owner)):
     """Quick summary stats for a business"""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
 
     txns = await db.transactions.find({}, {"_id": 0}).to_list(10000)
     products = await db.products.find({}, {"_id": 0}).to_list(1000)

@@ -18,7 +18,8 @@ All issued codes carry a `barcode` (Code-128 friendly string) AND a manualCode
 field so cashiers can scan OR key in by hand.
 """
 from __future__ import annotations
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
+from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -68,9 +69,7 @@ async def _llm_json(session_id: str, system: str, user_text: str):
 # VOUCHERS / COUPONS — unified, editable, scannable
 # ============================================================================
 @router.get("/vouchers")
-async def list_vouchers(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def list_vouchers(user: dict = Depends(get_user)):
     if user["role"] not in ("owner", "manager", "cashier"):
         raise HTTPException(status_code=403, detail="Staff only")
     rows = await db.commerce_vouchers.find({}, {"_id": 0}).sort("createdAt", -1).to_list(500)
@@ -78,11 +77,7 @@ async def list_vouchers(request: Request):
 
 
 @router.post("/vouchers")
-async def create_voucher(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def create_voucher(data: dict, user: dict = Depends(require_owner_or_manager)):
     kind = data.get("kind", "discount")
     codes = _new_code("GC" if kind == "gift" else data.get("codePrefix", "NUA"))
     v = {
@@ -136,11 +131,7 @@ async def create_voucher(data: dict, request: Request):
 
 
 @router.patch("/vouchers/{vid}")
-async def update_voucher(vid: str, data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def update_voucher(vid: str, data: dict, _: dict = Depends(require_owner_or_manager)):
     # Never let the caller rewrite the code or usage counter
     forbidden = {"id", "manualCode", "barcode", "usedCount", "createdAt", "createdBy"}
     update = {k: v for k, v in data.items() if k not in forbidden}
@@ -151,11 +142,7 @@ async def update_voucher(vid: str, data: dict, request: Request):
 
 
 @router.delete("/vouchers/{vid}")
-async def delete_voucher(vid: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner only")
+async def delete_voucher(vid: str, _: dict = Depends(require_owner)):
     r = await db.commerce_vouchers.delete_one({"id": vid})
     if r.deleted_count == 0: raise HTTPException(status_code=404, detail="Not found")
     return {"deleted": True}
@@ -198,10 +185,8 @@ def _voucher_compute(v: dict, cart_items: list) -> dict:
 
 
 @router.post("/vouchers/{code}/apply")
-async def apply_voucher(code: str, data: dict, request: Request):
+async def apply_voucher(code: str, data: dict, _: dict = Depends(get_user)):
     """Cashier scans/types a code → server validates + returns discount to apply."""
-    from routes.auth import get_current_user
-    await get_current_user(request)
     v = await db.commerce_vouchers.find_one(
         {"$or": [{"manualCode": code.upper()}, {"barcode": code.upper()}, {"id": code}]},
         {"_id": 0},
@@ -217,10 +202,8 @@ async def apply_voucher(code: str, data: dict, request: Request):
 
 
 @router.post("/vouchers/{vid}/redeem")
-async def record_redemption(vid: str, data: dict, request: Request):
+async def record_redemption(vid: str, data: dict, user: dict = Depends(get_user)):
     """Called by the POS once a transaction completes with the voucher attached."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
     await db.commerce_vouchers.update_one({"id": vid}, {"$inc": {"usedCount": 1}})
     await db.voucher_redemptions.insert_one({
         "id": _uid("RED"), "voucherId": vid,
@@ -250,11 +233,9 @@ def _promotion_active_now(promo: dict) -> bool:
 
 
 @router.post("/cart/apply-promos")
-async def apply_promos_to_cart(data: dict, request: Request):
+async def apply_promos_to_cart(data: dict, _: dict = Depends(get_user)):
     """Given a cart, return every promotion that auto-fires *right now* plus the
     computed discount. The POS shows them as "auto-applied" chips with × to remove."""
-    from routes.auth import get_current_user
-    await get_current_user(request)
     cart = data.get("cart") or []
     if not cart:
         return {"applied": [], "totalDiscount": 0}
@@ -286,12 +267,10 @@ async def apply_promos_to_cart(data: dict, request: Request):
 
 
 @router.get("/promotions/active-now")
-async def list_active_promotions_now(request: Request):
+async def list_active_promotions_now(_: dict = Depends(get_user)):
     """POS-facing: returns every promotion that is *currently* live based on
     today's date, weekday, and current time of day. Staff use this so they know
     exactly what's running without scrolling through inactive promos."""
-    from routes.auth import get_current_user
-    await get_current_user(request)
     promos = await db.promotions.find({"active": True}, {"_id": 0}).to_list(500)
     return [p for p in promos if _promotion_active_now(p)]
 
@@ -300,9 +279,7 @@ async def list_active_promotions_now(request: Request):
 # SUBSCRIPTIONS — rich plan model + edit/delete
 # ============================================================================
 @router.patch("/subscriptions/plans/{plan_id}")
-async def update_sub_plan(plan_id: str, data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def update_sub_plan(plan_id: str, data: dict, user: dict = Depends(get_user)):
     if user["role"] != "owner": raise HTTPException(status_code=403, detail="Owner only")
     forbidden = {"id", "createdAt"}
     update = {k: v for k, v in data.items() if k not in forbidden}
@@ -318,9 +295,7 @@ async def update_sub_plan(plan_id: str, data: dict, request: Request):
 
 
 @router.delete("/subscriptions/plans/{plan_id}")
-async def delete_sub_plan(plan_id: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def delete_sub_plan(plan_id: str, user: dict = Depends(get_user)):
     if user["role"] != "owner": raise HTTPException(status_code=403, detail="Owner only")
     r = await db.subscription_plans.delete_one({"id": plan_id})
     if r.deleted_count == 0: raise HTTPException(status_code=404, detail="Plan not found")
@@ -331,9 +306,7 @@ async def delete_sub_plan(plan_id: str, request: Request):
 # GIFT CARDS — sell online + at counter + assign to customer
 # ============================================================================
 @router.get("/gift-cards")
-async def list_gift_cards(request: Request, status: Optional[str] = None):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def list_gift_cards( status: Optional[str] = None, _: dict = Depends(get_user)):
     q = {}
     if status: q["status"] = status
     rows = await db.gift_cards.find(q, {"_id": 0}).sort("createdAt", -1).to_list(500)
@@ -341,12 +314,10 @@ async def list_gift_cards(request: Request, status: Optional[str] = None):
 
 
 @router.post("/gift-cards/sell")
-async def sell_gift_card(data: dict, request: Request):
+async def sell_gift_card(data: dict, user: dict = Depends(get_user)):
     """Channel-aware sale. Owner/manager/cashier can sell at counter; the same
     endpoint is used by the public store-front for online purchase (would be
     gated by a separate route in production)."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
     if user["role"] not in ("owner", "manager", "cashier"):
         raise HTTPException(status_code=403, detail="Staff only")
     amount = float(data.get("amount", 0))
@@ -385,9 +356,7 @@ async def sell_gift_card(data: dict, request: Request):
 
 
 @router.post("/gift-cards/{code_or_id}/assign")
-async def assign_gift_card(code_or_id: str, data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def assign_gift_card(code_or_id: str, data: dict, user: dict = Depends(get_user)):
     if user["role"] not in ("owner", "manager", "cashier"):
         raise HTTPException(status_code=403, detail="Staff only")
     customer_id = data.get("customerId")
@@ -416,9 +385,7 @@ async def lookup_gift_card(code: str):
 
 
 @router.get("/gift-cards/{code}/transactions")
-async def gift_card_transactions(code: str, request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def gift_card_transactions(code: str, _: dict = Depends(get_user)):
     card = await db.gift_cards.find_one(
         {"$or": [{"code": code.upper()}, {"barcode": code.upper()}, {"id": code}]},
         {"_id": 0, "id": 1},
@@ -447,12 +414,10 @@ async def _record_gift_txn(card: dict, txn_type: str, amount: float, balance_bef
 
 
 @router.post("/gift-cards/{code}/activate")
-async def activate_gift_card(code: str, data: dict, request: Request):
+async def activate_gift_card(code: str, data: dict, user: dict = Depends(get_user)):
     """Activate a pending gift card. Called by POS *after* the cart payment that
     pays for the card has settled successfully. Idempotent: re-activating an
     already-active card just no-ops with the current state."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
     if user["role"] not in ("owner", "manager", "cashier"):
         raise HTTPException(status_code=403, detail="Staff only")
     card = await db.gift_cards.find_one(
@@ -481,11 +446,9 @@ async def activate_gift_card(code: str, data: dict, request: Request):
 
 
 @router.post("/gift-cards/{code}/redeem")
-async def redeem_gift_card_partial(code: str, data: dict, request: Request):
+async def redeem_gift_card_partial(code: str, data: dict, user: dict = Depends(get_user)):
     """Atomic partial redemption. Requires card.status == 'active' AND sufficient
     balance. Records a ledger entry and returns the new balance."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
     if user["role"] not in ("owner", "manager", "cashier"):
         raise HTTPException(status_code=403, detail="Staff only")
     amount = float(data.get("amount", 0))
@@ -520,9 +483,7 @@ async def redeem_gift_card_partial(code: str, data: dict, request: Request):
 # EVENTS & EXPERIENCES — bookable + AI marketing preview
 # ============================================================================
 @router.get("/events")
-async def list_events(request: Request, upcomingOnly: bool = False):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def list_events( upcomingOnly: bool = False, _: dict = Depends(get_user)):
     q = {}
     if upcomingOnly:
         q["date"] = {"$gte": _now().date().isoformat()}
@@ -531,11 +492,7 @@ async def list_events(request: Request, upcomingOnly: bool = False):
 
 
 @router.post("/events")
-async def create_event(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def create_event(data: dict, user: dict = Depends(require_owner_or_manager)):
     ev = {
         "id": _uid("EVT"),
         "title": data.get("title", "Untitled Event"),
@@ -557,11 +514,7 @@ async def create_event(data: dict, request: Request):
 
 
 @router.patch("/events/{eid}")
-async def update_event(eid: str, data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def update_event(eid: str, data: dict, _: dict = Depends(require_owner_or_manager)):
     update = {k: v for k, v in data.items() if k not in {"id", "createdAt", "bookings"}}
     update["updatedAt"] = _iso(_now())
     r = await db.events.update_one({"id": eid}, {"$set": update})
@@ -570,9 +523,7 @@ async def update_event(eid: str, data: dict, request: Request):
 
 
 @router.delete("/events/{eid}")
-async def delete_event(eid: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def delete_event(eid: str, user: dict = Depends(get_user)):
     if user["role"] != "owner": raise HTTPException(status_code=403, detail="Owner only")
     r = await db.events.delete_one({"id": eid})
     if r.deleted_count == 0: raise HTTPException(status_code=404, detail="Not found")
@@ -580,9 +531,7 @@ async def delete_event(eid: str, request: Request):
 
 
 @router.post("/events/{eid}/book")
-async def book_event(eid: str, data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def book_event(eid: str, data: dict, user: dict = Depends(get_user)):
     ev = await db.events.find_one({"id": eid}, {"_id": 0})
     if not ev: raise HTTPException(status_code=404, detail="Event not found")
     party = int(data.get("partySize", 1))
@@ -602,13 +551,9 @@ async def book_event(eid: str, data: dict, request: Request):
 
 
 @router.post("/events/ai-preview")
-async def event_ai_preview(data: dict, request: Request):
+async def event_ai_preview(data: dict, _: dict = Depends(require_owner_or_manager)):
     """Owner asks: 'given this date, what should we promote?' LLM looks at events
     on that date + the day-of-week + loyalty tiers and drafts marketing copy."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
     date = data.get("date") or _now().date().isoformat()
     events = await db.events.find({"date": date}, {"_id": 0}).to_list(20)
     tiers = await db.loyalty_tiers.find({}, {"_id": 0}).to_list(10)
@@ -628,14 +573,10 @@ async def event_ai_preview(data: dict, request: Request):
 # AI MARKETING EMAILS — autonomous generator
 # ============================================================================
 @router.post("/marketing/email/generate")
-async def generate_marketing_email(data: dict, request: Request):
+async def generate_marketing_email(data: dict, user: dict = Depends(require_owner_or_manager)):
     """LLM drafts a full marketing email featuring upcoming events, active
     vouchers, and tier-specific perks. Returns JSON the owner can edit + send.
     Audience: 'all' | 'tier:Gold' | 'segment:lapsed' | etc."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
     audience = data.get("audience", "all")
     tone = data.get("tone", "friendly")
     horizon_days = int(data.get("horizonDays", 14))
@@ -691,19 +632,13 @@ async def generate_marketing_email(data: dict, request: Request):
 
 
 @router.get("/marketing/emails")
-async def list_marketing_emails(request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def list_marketing_emails(_: dict = Depends(get_user)):
     rows = await db.marketing_emails.find({}, {"_id": 0}).sort("createdAt", -1).to_list(100)
     return rows
 
 
 @router.patch("/marketing/emails/{mid}")
-async def update_marketing_email(mid: str, data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def update_marketing_email(mid: str, data: dict, _: dict = Depends(require_owner_or_manager)):
     update = {k: v for k, v in data.items() if k not in {"id", "createdAt"}}
     update["updatedAt"] = _iso(_now())
     r = await db.marketing_emails.update_one({"id": mid}, {"$set": update})
@@ -712,9 +647,7 @@ async def update_marketing_email(mid: str, data: dict, request: Request):
 
 
 @router.delete("/marketing/emails/{mid}")
-async def delete_marketing_email(mid: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def delete_marketing_email(mid: str, user: dict = Depends(get_user)):
     if user["role"] != "owner": raise HTTPException(status_code=403, detail="Owner only")
     r = await db.marketing_emails.delete_one({"id": mid})
     if r.deleted_count == 0: raise HTTPException(status_code=404, detail="Not found")
@@ -725,19 +658,13 @@ async def delete_marketing_email(mid: str, request: Request):
 # STAFF AVAILABILITY (normal days + blackout periods)
 # ============================================================================
 @router.get("/staff/{staff_id}/availability")
-async def get_availability(staff_id: str, request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def get_availability(staff_id: str, _: dict = Depends(get_user)):
     a = await db.staff_availability.find_one({"staffId": staff_id}, {"_id": 0})
     return a or {"staffId": staff_id, "weeklyAvailable": [], "blackoutDates": []}
 
 
 @router.put("/staff/{staff_id}/availability")
-async def set_availability(staff_id: str, data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def set_availability(staff_id: str, data: dict, user: dict = Depends(require_owner_or_manager)):
     doc = {
         "staffId": staff_id,
         "weeklyAvailable": data.get("weeklyAvailable", []),    # ["Mon","Tue",...]
@@ -753,11 +680,7 @@ async def set_availability(staff_id: str, data: dict, request: Request):
 # ROSTER — clear all + integrity on staff delete
 # ============================================================================
 @router.post("/roster/clear-all")
-async def roster_clear_all(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def roster_clear_all(data: dict, _: dict = Depends(require_owner_or_manager)):
     week = data.get("week")  # optional: "YYYY-WW" or date range
     q = {}
     if week:
@@ -767,13 +690,9 @@ async def roster_clear_all(data: dict, request: Request):
 
 
 @router.post("/roster/sync-staff")
-async def sync_roster_staff(request: Request):
+async def sync_roster_staff(_: dict = Depends(require_owner_or_manager)):
     """Audit + clean: remove shifts referencing deleted staff, dedupe simultaneous
     overlapping shifts of the same person on the same day. Idempotent."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
     staff_ids = {s["id"] for s in await db.auth_users.find({"role": {"$in": ["cashier", "barista", "kitchen", "manager"]}}, {"_id": 0, "id": 1}).to_list(2000)}
     # Drop orphans
     orphans = await db.roster_shifts.delete_many({"staff_id": {"$nin": list(staff_ids)}})
@@ -797,11 +716,9 @@ async def sync_roster_staff(request: Request):
 # CUSTOMER DISPLAY — enriched current cart
 # ============================================================================
 @router.post("/cfd/push")
-async def cfd_push(data: dict, request: Request):
+async def cfd_push(data: dict, user: dict = Depends(get_user)):
     """POS terminal pushes the live cart + customer here so the customer-facing
     display can render it. One doc per terminal/session (keyed by terminalId)."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
     terminal_id = data.get("terminalId") or user["id"]
     doc = {
         "terminalId": terminal_id,

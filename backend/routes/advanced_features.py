@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
+from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone
 import uuid
@@ -39,20 +40,12 @@ async def add_tip(data: dict):
     return tip
 
 @router.get("/tips")
-async def get_tips(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def get_tips(_: dict = Depends(require_owner_or_manager)):
     tips = await db.tips.find({}, {"_id": 0}).sort("createdAt", -1).to_list(5000)
     return tips
 
 @router.get("/tips/summary")
-async def get_tips_summary(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
+async def get_tips_summary(_: dict = Depends(require_owner)):
     tips = await db.tips.find({}, {"_id": 0}).to_list(10000)
     total = sum(t.get("amount", 0) for t in tips)
     by_staff = {}
@@ -71,12 +64,8 @@ async def get_tips_summary(request: Request):
     }
 
 @router.post("/tips/pool-distribute")
-async def distribute_tip_pool(request: Request):
+async def distribute_tip_pool(_: dict = Depends(require_owner)):
     """Distribute pooled tips equally among eligible staff"""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
     pooled = await db.tips.find({"pooled": True, "distributed": {"$ne": True}}, {"_id": 0}).to_list(10000)
     pool_total = sum(t.get("amount", 0) for t in pooled)
     staff = await db.auth_users.find({"role": {"$in": ["cashier", "manager"]}, "status": "active"}, {"_id": 0}).to_list(100)
@@ -94,11 +83,7 @@ async def get_training_mode():
     return {"enabled": setting.get("value", False) if setting else False}
 
 @router.post("/settings/training-mode")
-async def toggle_training_mode(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def toggle_training_mode(data: dict, _: dict = Depends(require_owner_or_manager)):
     enabled = data.get("enabled", False)
     await db.settings.update_one(
         {"key": "training_mode"},
@@ -109,11 +94,7 @@ async def toggle_training_mode(data: dict, request: Request):
 
 # ============ END-OF-DAY REPORTS (Square-style, Comprehensive) ============
 @router.get("/reports/end-of-day")
-async def get_end_of_day_report(request: Request, period: str = "today", start_date: str = None, end_date: str = None):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def get_end_of_day_report( period: str = "today", start_date: str = None, end_date: str = None, _: dict = Depends(require_owner_or_manager)):
 
     # Build date filter
     query = {}
@@ -258,11 +239,7 @@ async def get_end_of_day_report(request: Request, period: str = "today", start_d
 
 # ============ EMAIL MARKETING CAMPAIGNS ============
 @router.post("/marketing/campaigns")
-async def create_campaign(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def create_campaign(data: dict, user: dict = Depends(require_owner_or_manager)):
 
     campaign = {
         "id": f"CMP-{str(uuid.uuid4())[:8].upper()}",
@@ -285,20 +262,12 @@ async def create_campaign(data: dict, request: Request):
     return campaign
 
 @router.get("/marketing/campaigns")
-async def get_campaigns(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def get_campaigns(_: dict = Depends(require_owner_or_manager)):
     campaigns = await db.campaigns.find({}, {"_id": 0}).sort("createdAt", -1).to_list(100)
     return campaigns
 
 @router.post("/marketing/campaigns/{campaign_id}/send")
-async def send_campaign(campaign_id: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def send_campaign(campaign_id: str, _: dict = Depends(require_owner_or_manager)):
 
     campaign = await db.campaigns.find_one({"id": campaign_id}, {"_id": 0})
     if not campaign:
@@ -324,22 +293,14 @@ async def send_campaign(campaign_id: str, request: Request):
     return {"message": f"Campaign sent to {len(members)} members", "recipientCount": len(members)}
 
 @router.delete("/marketing/campaigns/{campaign_id}")
-async def delete_campaign(campaign_id: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def delete_campaign(campaign_id: str, _: dict = Depends(require_owner_or_manager)):
     await db.campaigns.delete_one({"id": campaign_id})
     return {"message": "Campaign deleted"}
 
 
 # ============ AI EOD INSIGHTS ============
 @router.post("/reports/ai-insights")
-async def generate_ai_insights(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def generate_ai_insights(data: dict, _: dict = Depends(require_owner_or_manager)):
 
     report_data = data.get("reportData", {})
     try:

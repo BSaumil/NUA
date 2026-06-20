@@ -1,0 +1,65 @@
+{
+  "iteration": 36,
+  "date": "2026-01-20",
+  "focus": "P2 cleanup — Depends-based auth precedence refactor across ~16 legacy routers (~230 endpoints) + Products.jsx split into Toolbar/Table/BulkEditDialog components.",
+  "summary": "Backend 84/85 PASS (99%). Frontend Products.jsx split FULLY validated end-to-end. The Depends refactor is working correctly for v25_suite, v26_commerce, inventory_accounting, loyalty_engine (POST routes), staff_management, menu_features, gamification, multi_tenant, v15_features — anonymous POSTs now return 401 BEFORE Pydantic body validation. One CRITICAL auth bypass discovered: the legacy /loyalty/redeem route in routes/loyalty.py (NOT loyalty_engine.py) was not refactored and shadows the protected version — it accepts anonymous calls and only Pydantic-422s on missing query params. Two endpoints intentionally remain public (storefront): POST /v25/kiosk/session and POST /online/orders.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/loyalty/redeem",
+        "issue": "Defined in BOTH routes/loyalty.py:30 (NO auth, customer_id/reward_id query params) and routes/loyalty_engine.py:100 (has Depends(get_user)). FastAPI registers routes/loyalty.py FIRST (loaded earlier in server.py via loyalty_router include), so the unprotected legacy route shadows the protected one. Anonymous callers can hit it. Anon POST with empty body returns 422 (missing query params), and a well-formed anon POST WILL deduct points from any customer. AUTH BYPASS.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /v25/kiosk/session and POST /online/orders",
+        "issue": "Review spec listed these in 401-required list, but implementation comments explicitly state public/storefront access. Likely intentional — main agent should clarify if storefront endpoints should remain anonymous (current behaviour) or be gated."
+      },
+      {
+        "endpoint": "POST /v25/hardware/heartbeat",
+        "issue": "Returns 401 'Invalid device secret' for JWT-authed callers — uses device-secret auth not JWT, so the Depends refactor doesn't apply. Already working as designed."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_results": {
+    "anon_post_returns_401_not_422": "23/24 PASS (only /loyalty/redeem fails — see critical bug)",
+    "owner_get_no_500": "43/43 PASS across all refactored routers (v25, v26, inventory, loyalty-engine, staff, online, gamification, multi-tenant, v15)",
+    "owner_post_happy_path": "10/10 PASS (sync-queue, ingredients create, staff roster, pos tabs, print-routing, business branch, v26 voucher, agent tick, online order with valid items)",
+    "iteration35_regression": "7/7 PASS (products/modifiers/categories/discounts/channel-menus list; anon products bulk-edit & modifiers correctly 401)",
+    "frontend_products_split": "ALL PASS — products-page mounts, products-toolbar renders all 10 toolbar testids, 64 product cards load, single-select shows bulk-action-bar, bulk-edit-dialog opens, +5% delta apply shows 'Updated 1 products' toast, toggle-86 works, table view shows products-table, select-all works, inline-price edit input appears, CSV export downloads products-2026-06-20.csv",
+    "frontend_regression": "PASS — /pos, /channel-menus, /reservations, /bookings-inbox, /inventory-accounting all load without console errors or .error elements"
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration36_depends_refactor.py",
+    "/app/test_reports/pytest/pytest_iteration36.xml"
+  ],
+  "action_items": [
+    "CRITICAL: Remove or protect the duplicate /loyalty/redeem in routes/loyalty.py (lines 30-49). Either delete the legacy route (recommended — loyalty_engine.py has the modern implementation) or add `_: dict = Depends(require_owner_or_manager)` to its signature.",
+    "Confirm whether /v25/kiosk/session and /online/orders should remain public storefront endpoints. If they should be gated, add Depends(get_user) to those handlers."
+  ],
+  "critical_code_review_comments": [
+    "Depends pattern is correctly applied across all 16 refactored routers — auth fires BEFORE body validation for endpoints that use Depends(get_user/require_owner/require_owner_or_manager) as a parameter dependency.",
+    "Duplicate route registration risk: routes/loyalty.py and routes/loyalty_engine.py both declare POST /loyalty/redeem (different signatures and security stances). Consider a code-review check or pytest fixture that asserts unique (method, path) registration across all routers.",
+    "/online/orders public-by-design contradicts review_request expectation — recommend a single source of truth (e.g., comments in route + spec).",
+    "Products.jsx split into ProductsToolbar/ProductTable/BulkEditDialog is clean — all required data-testids preserved, integration with parent Products.jsx works (bulk-edit toast, inline-edit persist, view toggle, CSV export download all functional)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration36_depends_refactor.py (new — 85 tests covering anon-401, owner-GET, owner-POST happy path, iter35 regression)"
+  ],
+  "success_rate": {"backend": "99% (84/85)", "frontend": "100% (all Products flows + 5-page regression nav)"},
+  "test_credentials": {
+    "owner": "owner@nuva.com / NuvaOwner2026!",
+    "cashier": "cashier@nuva.com / Staff2026!"
+  },
+  "seed_data_creation": "TEST_-prefixed rows: TEST_ing_36 (ingredient), TEST_staff_36 (roster), TEST_Tab_36 (pos tab), TEST_Branch_36 (business), TEST_V36 (voucher). No automated cleanup — these persist but are namespaced for next iteration to clean up if needed.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter 36 validated 84/85 backend + complete frontend Products.jsx split. The ONE backend issue is a duplicate-route auth bypass at /loyalty/redeem (routes/loyalty.py shadows routes/loyalty_engine.py). When main agent fixes this, re-run /app/backend/tests/test_iteration36_depends_refactor.py — should be 85/85. Two intentionally-public endpoints (kiosk session, online orders) are documented in route comments. Owner JWT works via Bearer header; login returns `token` field. Test seed: TEST_-prefixed rows persist in db.",
+  "rca of the issue": "ROOT CAUSE: routes/loyalty.py was not in the refactor batch list (it's a 'legacy' loyalty rewards CRUD file, separate from loyalty_engine.py which handles modern earn/redeem). When server.py runs `api_router.include_router(loyalty_router)` (line 63) BEFORE `api_router.include_router(loyalty_engine_router)` (line 80), FastAPI registers loyalty.py's /loyalty/redeem first, and that one has no auth check (just `customer_id: str, reward_id: str` as bare params). REPRODUCTION: `curl -X POST $URL/api/loyalty/redeem?customer_id=X&reward_id=Y` — should return 401 but currently performs the redemption logic (200 if customer/reward exist, 404 otherwise). MITIGATION: delete the legacy redeem function in routes/loyalty.py (lines 30-49) since loyalty_engine.py has a superior, auth-protected implementation. Alternatively add `from deps import get_user` import and `_: dict = Depends(get_user)` to the legacy function."
+}

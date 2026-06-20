@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Request, UploadFile, File
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Depends
+from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone
 import uuid, os, base64
@@ -7,12 +8,8 @@ router = APIRouter()
 
 # ============ AI MENU IMPORT (PDF/JPEG) ============
 @router.post("/menu/ai-import")
-async def ai_import_menu(data: dict, request: Request):
+async def ai_import_menu(data: dict, _: dict = Depends(require_owner_or_manager)):
     """AI extracts menu items from uploaded image/PDF data (base64 encoded)"""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
 
     file_data = data.get("fileData", "")  # base64 encoded
     file_type = data.get("fileType", "image")  # image or pdf
@@ -76,12 +73,8 @@ Estimate cost at roughly 30-35% of price if not available.""")
 
 # ============ PRICE ADJUSTMENT (Bulk) ============
 @router.post("/menu/price-adjust")
-async def bulk_price_adjust(data: dict, request: Request):
+async def bulk_price_adjust(data: dict, _: dict = Depends(require_owner_or_manager)):
     """Adjust prices by category with inflation/percentage"""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
 
     category = data.get("category")  # None = all categories
     adjustment_type = data.get("type", "percentage")  # percentage or fixed
@@ -109,12 +102,8 @@ async def bulk_price_adjust(data: dict, request: Request):
 
 # ============ GHOST DISCOUNT / VOID (Secret Owner Feature) ============
 @router.post("/pos/ghost-discount")
-async def apply_ghost_discount(data: dict, request: Request):
+async def apply_ghost_discount(data: dict, user: dict = Depends(require_owner)):
     """Apply a secret discount that doesn't appear in any reports or sales records"""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Access denied")
 
     transaction_id = data.get("transactionId")
     discount_amount = float(data.get("amount", 0))
@@ -149,23 +138,15 @@ async def apply_ghost_discount(data: dict, request: Request):
     return ghost
 
 @router.get("/pos/ghost-discounts")
-async def get_ghost_discounts(request: Request):
+async def get_ghost_discounts(_: dict = Depends(require_owner)):
     """Owner-only: view all ghost discounts (hidden from regular reports)"""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Access denied")
     ghosts = await db.ghost_discounts.find({}, {"_id": 0}).sort("appliedAt", -1).to_list(1000)
     return ghosts
 
 # ============ WHAT-IF SIMULATOR (Enhanced with Quantity) ============
 @router.post("/analytics/what-if-advanced")
-async def what_if_advanced(data: dict, request: Request):
+async def what_if_advanced(data: dict, _: dict = Depends(require_owner_or_manager)):
     """Enhanced what-if with manual quantity projections"""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
 
     changes = data.get("changes", [])
     results = []

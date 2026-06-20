@@ -10,7 +10,8 @@ F7  Dynamic Surge Pricing                    GET  /api/ai/surge-recommendations
 F8  Voice-to-Recipe                          POST /api/ai/voice-recipe
 F9  Kitchen-Load Balancing                   GET  /api/ai/kitchen-load
 """
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
+from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone, timedelta
 from collections import Counter, defaultdict
@@ -54,11 +55,9 @@ async def _llm_json(session_id: str, system: str, user_text: str, model: str = "
 # E5 — AUTO-UPSELL FOR CART
 # ============================================================================
 @router.post("/ai/upsell")
-async def upsell_for_cart(data: dict, request: Request):
+async def upsell_for_cart(data: dict, _: dict = Depends(get_user)):
     """Given the current cart, recommend 1-3 high-margin add-ons.
     Returns {suggestions: [{productId, name, price, reason}]}"""
-    from routes.auth import get_current_user
-    await get_current_user(request)
     cart = data.get("cart", [])
     if not isinstance(cart, list) or len(cart) == 0:
         return {"suggestions": []}
@@ -107,12 +106,8 @@ async def upsell_for_cart(data: dict, request: Request):
 # E6 — AUTO-PRICE-TUNE RECOMMENDATIONS
 # ============================================================================
 @router.get("/ai/price-tune")
-async def price_tune_recs(request: Request):
+async def price_tune_recs(_: dict = Depends(require_owner_or_manager)):
     """Analyze 30-day sales velocity vs current price; return rec'd nudges."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
     cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
     tx = await db.transactions.find(
         {"createdAt": {"$gte": cutoff}}, {"_id": 0, "items": 1}
@@ -153,11 +148,7 @@ async def price_tune_recs(request: Request):
 
 
 @router.post("/ai/price-tune/apply")
-async def apply_price_tune(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def apply_price_tune(data: dict, user: dict = Depends(require_owner_or_manager)):
     pid = data.get("productId")
     new_price = float(data.get("newPrice"))
     if not pid or new_price <= 0:
@@ -197,10 +188,8 @@ async def apply_price_tune(data: dict, request: Request):
 # E7 — OVERBOOKING GUARDRAIL
 # ============================================================================
 @router.post("/ai/overbooking-check")
-async def overbooking_check(data: dict, request: Request):
+async def overbooking_check(data: dict, _: dict = Depends(get_user)):
     """Block reservation if seats + buffer exceeds floor capacity for that slot."""
-    from routes.auth import get_current_user
-    await get_current_user(request)
     date = data.get("date")
     time_str = data.get("time")
     party_size = int(data.get("partySize", 2))
@@ -255,12 +244,8 @@ async def overbooking_check(data: dict, request: Request):
 # F5 — AI COST COACH
 # ============================================================================
 @router.get("/ai/cost-coach")
-async def cost_coach(request: Request):
+async def cost_coach(_: dict = Depends(require_owner_or_manager)):
     """Analyze food cost % vs target, surface top offenders + LLM advice."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
     target_cost_pct = 32.0  # industry standard
 
     products = await db.products.find(
@@ -335,12 +320,8 @@ async def cost_coach(request: Request):
 # F6 — PREDICTIVE LABOR FORECAST
 # ============================================================================
 @router.get("/ai/labor-forecast")
-async def labor_forecast(request: Request):
+async def labor_forecast(_: dict = Depends(require_owner_or_manager)):
     """Forecast next 7 days of staffing needs from historical transactions."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
 
     # Look back 8 weeks to get day-of-week + hour patterns
     cutoff = (datetime.now(timezone.utc) - timedelta(days=56)).isoformat()
@@ -391,12 +372,8 @@ async def labor_forecast(request: Request):
 # F7 — DYNAMIC SURGE PRICING
 # ============================================================================
 @router.get("/ai/surge-recommendations")
-async def surge_recommendations(request: Request):
+async def surge_recommendations(_: dict = Depends(require_owner_or_manager)):
     """Per-hour-of-week surge multipliers based on historical demand peaks."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
     cutoff = (datetime.now(timezone.utc) - timedelta(days=56)).isoformat()
     tx = await db.transactions.find(
         {"createdAt": {"$gte": cutoff}}, {"_id": 0, "createdAt": 1}
@@ -437,12 +414,8 @@ async def surge_recommendations(request: Request):
 
 
 @router.post("/ai/surge/apply")
-async def apply_surge(data: dict, request: Request):
+async def apply_surge(data: dict, _: dict = Depends(require_owner)):
     """Persist a surge rule to settings so POS can pick it up."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner only")
     rules = data.get("rules", [])
     await db.surge_rules.delete_many({})
     if rules:
@@ -467,10 +440,8 @@ async def active_surge():
 # F8 — VOICE-TO-RECIPE
 # ============================================================================
 @router.post("/ai/voice-recipe")
-async def voice_to_recipe(data: dict, request: Request):
+async def voice_to_recipe(data: dict, user: dict = Depends(get_user)):
     """Convert a free-form chef description into a structured recipe spec."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
     if user["role"] not in ("owner", "manager", "kitchen"):
         raise HTTPException(status_code=403, detail="Kitchen/Manager/Owner only")
     text = (data.get("text") or "").strip()
@@ -521,9 +492,7 @@ async def voice_to_recipe(data: dict, request: Request):
 
 
 @router.get("/ai/recipes")
-async def list_recipes(request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def list_recipes(_: dict = Depends(get_user)):
     recipes = await db.recipes.find({}, {"_id": 0}).sort("createdAt", -1).to_list(100)
     return recipes
 
@@ -532,10 +501,8 @@ async def list_recipes(request: Request):
 # F9 — KITCHEN LOAD BALANCING
 # ============================================================================
 @router.get("/ai/kitchen-load")
-async def kitchen_load(request: Request):
+async def kitchen_load(user: dict = Depends(get_user)):
     """Surface station load + recommend rebalancing."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
     if user["role"] not in ("owner", "manager", "kitchen"):
         raise HTTPException(status_code=403, detail="Kitchen/Manager/Owner only")
     # Pull open kitchen orders

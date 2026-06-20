@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
+from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone, timedelta
 import uuid
@@ -15,11 +16,7 @@ async def get_surcharge_settings():
     }
 
 @router.post("/surcharge/settings")
-async def save_surcharge_settings(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
+async def save_surcharge_settings(data: dict, _: dict = Depends(require_owner)):
     await db.settings.update_one({"key": "surcharge_config"}, {"$set": {"key": "surcharge_config", "value": data}}, upsert=True)
     return {"message": "Surcharge settings saved"}
 
@@ -41,11 +38,7 @@ async def check_surcharge():
 
 # ============ LIVE SALES REPORTING ============
 @router.get("/live-sales")
-async def get_live_sales(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def get_live_sales(_: dict = Depends(require_owner_or_manager)):
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     all_txns = await db.transactions.find({}, {"_id": 0}).to_list(50000)
@@ -100,22 +93,14 @@ async def get_all_permissions():
     return ALL_PERMISSIONS
 
 @router.get("/permissions/staff/{staff_id}")
-async def get_staff_permissions(staff_id: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def get_staff_permissions(staff_id: str, _: dict = Depends(require_owner_or_manager)):
     staff = await db.auth_users.find_one({"id": staff_id}, {"_id": 0, "password_hash": 0})
     if not staff:
         raise HTTPException(status_code=404, detail="Staff not found")
     return {"staffId": staff_id, "name": staff.get("name"), "role": staff.get("role"), "customPermissions": staff.get("customPermissions", [])}
 
 @router.post("/permissions/staff/{staff_id}")
-async def set_staff_permissions(staff_id: str, data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
+async def set_staff_permissions(staff_id: str, data: dict, _: dict = Depends(require_owner)):
     permissions = data.get("permissions", [])
     valid = [p for p in permissions if p in ALL_PERMISSIONS]
     await db.auth_users.update_one({"id": staff_id}, {"$set": {"customPermissions": valid}})
@@ -148,11 +133,7 @@ async def get_upsells(request: Request):
 
 # ============ AUTOMATED REPORTING ============
 @router.get("/reports/automated-config")
-async def get_report_config(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
+async def get_report_config(_: dict = Depends(require_owner)):
     s = await db.settings.find_one({"key": "auto_report_config"}, {"_id": 0})
     return s.get("value", {}) if s else {
         "enabled": False, "frequency": "daily", "time": "23:00",
@@ -161,21 +142,13 @@ async def get_report_config(request: Request):
     }
 
 @router.post("/reports/automated-config")
-async def save_report_config(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
+async def save_report_config(data: dict, _: dict = Depends(require_owner)):
     await db.settings.update_one({"key": "auto_report_config"}, {"$set": {"key": "auto_report_config", "value": data}}, upsert=True)
     return {"message": "Automated report settings saved"}
 
 @router.post("/reports/generate")
-async def generate_report(data: dict, request: Request):
+async def generate_report(data: dict, _: dict = Depends(require_owner_or_manager)):
     """Generate a report on demand"""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
 
     report_type = data.get("type", "detailed")  # itemised, category, detailed
     period = data.get("period", "today")
@@ -240,11 +213,7 @@ async def get_printer_configs():
     return printers
 
 @router.post("/hardware/printers")
-async def add_printer(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def add_printer(data: dict, _: dict = Depends(require_owner_or_manager)):
     printer = {
         "id": f"PRT-{str(uuid.uuid4())[:8].upper()}",
         "name": data.get("name", ""), "type": data.get("type", "receipt"),
@@ -258,11 +227,7 @@ async def add_printer(data: dict, request: Request):
     return printer
 
 @router.delete("/hardware/printers/{printer_id}")
-async def delete_printer(printer_id: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def delete_printer(printer_id: str, _: dict = Depends(require_owner_or_manager)):
     await db.hardware_printers.delete_one({"id": printer_id})
     return {"message": "Printer removed"}
 
@@ -272,11 +237,7 @@ async def get_scanner_configs():
     return scanners
 
 @router.post("/hardware/scanners")
-async def add_scanner(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def add_scanner(data: dict, _: dict = Depends(require_owner_or_manager)):
     scanner = {
         "id": f"SCN-{str(uuid.uuid4())[:8].upper()}",
         "name": data.get("name", ""), "type": data.get("type", "barcode"),

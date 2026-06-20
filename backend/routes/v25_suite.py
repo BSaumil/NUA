@@ -39,7 +39,8 @@ TIER 1-5 EXTRAS
 - Data warehouse export       GET        /api/v25/warehouse/export
 - AI fraud detection          GET        /api/v25/fraud-detection
 """
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
+from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone, timedelta
 from collections import Counter, defaultdict
@@ -80,10 +81,8 @@ async def _llm_json(session_id: str, system: str, user_text: str, model: str = "
 # v25 MUST-HAVE — Offline Sync Queue
 # ============================================================================
 @router.post("/sync-queue")
-async def push_sync(data: dict, request: Request):
+async def push_sync(data: dict, user: dict = Depends(get_user)):
     """Receive a batch of pending offline operations from a client."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
     ops = data.get("ops") or []
     accepted, conflicts = [], []
     for op in ops:
@@ -106,15 +105,11 @@ async def list_sync(limit: int = 100):
 
 
 @router.post("/sync-queue/process")
-async def process_sync_queue(request: Request):
+async def process_sync_queue(user: dict = Depends(require_owner_or_manager)):
     """Replay queued offline operations into their target collections. Handles
     the most common op types written by the POS while offline: create
     transaction, create kitchen order, adjust stock, append to held tab.
     Idempotent — already-applied clientOpIds are skipped."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
     pending = await db.sync_ops.find({"status": "applied", "replayedAt": {"$exists": False}},
                                      {"_id": 0}).to_list(500)
     applied, errors = 0, []
@@ -158,11 +153,7 @@ async def process_sync_queue(request: Request):
 # v25 MUST-HAVE — Loss-Control / Exception Center
 # ============================================================================
 @router.get("/exceptions")
-async def list_exceptions(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def list_exceptions(user: dict = Depends(require_owner_or_manager)):
     days = 14
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     tx = await db.transactions.find({"createdAt": {"$gte": cutoff}}, {"_id": 0}).to_list(5000)
@@ -196,9 +187,7 @@ async def list_exceptions(request: Request):
 # v25 MUST-HAVE — Multi-Site Command Center
 # ============================================================================
 @router.get("/sites")
-async def list_sites(request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def list_sites(_: dict = Depends(get_user)):
     sites = await db.sites.find({}, {"_id": 0}).to_list(100)
     if not sites:
         # Seed default
@@ -210,9 +199,7 @@ async def list_sites(request: Request):
 
 
 @router.post("/sites")
-async def create_site(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def create_site(data: dict, user: dict = Depends(get_user)):
     if user["role"] != "owner": raise HTTPException(status_code=403, detail="Owner only")
     site = {"id": _uid("SITE"), "name": data.get("name", "New Site"), "city": data.get("city", ""),
             "active": True, "createdAt": _now()}
@@ -221,10 +208,8 @@ async def create_site(data: dict, request: Request):
 
 
 @router.post("/sites/publish")
-async def publish_to_sites(data: dict, request: Request):
+async def publish_to_sites(data: dict, user: dict = Depends(get_user)):
     """Push a menu/pricing/promo bundle to selected sites with rollback support."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
     if user["role"] != "owner": raise HTTPException(status_code=403, detail="Owner only")
     publish = {
         "id": _uid("PUB"), "siteIds": data.get("siteIds", []),
@@ -236,9 +221,7 @@ async def publish_to_sites(data: dict, request: Request):
 
 
 @router.post("/sites/rollback/{pub_id}")
-async def rollback_publish(pub_id: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def rollback_publish(pub_id: str, user: dict = Depends(get_user)):
     if user["role"] != "owner": raise HTTPException(status_code=403, detail="Owner only")
     r = await db.publications.update_one({"id": pub_id}, {"$set": {"rolledBack": True, "rolledBackAt": _now()}})
     if r.matched_count == 0: raise HTTPException(status_code=404, detail="Publication not found")
@@ -249,9 +232,7 @@ async def rollback_publish(pub_id: str, request: Request):
 # v25 MUST-HAVE — Hardware Health
 # ============================================================================
 @router.get("/hardware")
-async def hardware_status(request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def hardware_status(_: dict = Depends(get_user)):
     devices = await db.hardware.find({}, {"_id": 0}).to_list(200)
     if not devices:
         # Seed a baseline fleet so the UI has something to show
@@ -286,18 +267,14 @@ async def hardware_heartbeat(data: dict, request: Request):
 # v25 MUST-HAVE — Chargebacks/Disputes Console
 # ============================================================================
 @router.get("/disputes")
-async def list_disputes(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def list_disputes(user: dict = Depends(get_user)):
     if user["role"] not in ("owner", "manager"): raise HTTPException(status_code=403, detail="Owner/Manager only")
     rows = await db.disputes.find({}, {"_id": 0}).sort("openedAt", -1).to_list(200)
     return rows
 
 
 @router.post("/disputes")
-async def open_dispute(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def open_dispute(data: dict, user: dict = Depends(get_user)):
     if user["role"] not in ("owner", "manager"): raise HTTPException(status_code=403, detail="Owner/Manager only")
     d = {
         "id": _uid("DSP"), "txId": data.get("txId"), "amount": float(data.get("amount", 0) or 0),
@@ -309,10 +286,8 @@ async def open_dispute(data: dict, request: Request):
 
 
 @router.post("/disputes/{dispute_id}/evidence")
-async def attach_evidence(dispute_id: str, data: dict, request: Request):
+async def attach_evidence(dispute_id: str, data: dict, user: dict = Depends(get_user)):
     """Auto-assemble an evidence pack: transaction details + items + signature + IP."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
     if user["role"] not in ("owner", "manager"): raise HTTPException(status_code=403, detail="Owner/Manager only")
     d = await db.disputes.find_one({"id": dispute_id}, {"_id": 0})
     if not d: raise HTTPException(status_code=404, detail="Not found")
@@ -331,12 +306,8 @@ async def attach_evidence(dispute_id: str, data: dict, request: Request):
 # v25 MUST-HAVE — Supplier Marketplace
 # ============================================================================
 @router.get("/suppliers/compare")
-async def compare_suppliers(item: str = "", request: Request = None):
+async def compare_suppliers(item: str = "", _: dict = Depends(require_owner_or_manager)):
     """Compare quotes per ingredient across suppliers."""
-    if request is None: raise HTTPException(status_code=400)
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"): raise HTTPException(status_code=403, detail="Owner/Manager only")
     q = {} if not item else {"item": {"$regex": item, "$options": "i"}}
     quotes = await db.supplier_quotes.find(q, {"_id": 0}).to_list(500)
     # Group by item, sort by price
@@ -356,9 +327,7 @@ async def compare_suppliers(item: str = "", request: Request = None):
 
 
 @router.post("/suppliers/quote")
-async def add_quote(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def add_quote(data: dict, user: dict = Depends(get_user)):
     if user["role"] not in ("owner", "manager"): raise HTTPException(status_code=403, detail="Owner/Manager only")
     q = {"id": _uid("QTE"), **data, "createdAt": _now(), "createdBy": user["id"]}
     await db.supplier_quotes.insert_one(q); q.pop("_id", None)
@@ -393,9 +362,7 @@ async def kiosk_checkout(sid: str):
 
 
 @router.get("/kiosk/sessions")
-async def kiosk_list(request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def kiosk_list(_: dict = Depends(get_user)):
     rows = await db.kiosk_sessions.find({}, {"_id": 0}).sort("startedAt", -1).to_list(50)
     return rows
 
@@ -444,11 +411,9 @@ async def cfd_current():
 # v27 SHOULD-HAVE — Smart Substitution / 86 fallback
 # ============================================================================
 @router.post("/substitute")
-async def substitute(data: dict, request: Request):
+async def substitute(data: dict, _: dict = Depends(get_user)):
     """Given an 86'd product, suggest the best substitute with a human-readable
     reason per pick. Ranked by (1) modifier overlap, (2) price proximity, (3) stock."""
-    from routes.auth import get_current_user
-    await get_current_user(request)
     pid = data.get("productId")
     if not pid: raise HTTPException(status_code=400, detail="productId required")
     target = await db.products.find_one({"id": pid}, {"_id": 0})
@@ -509,9 +474,7 @@ async def toggle_86(product_id: str, data: dict, request: Request):
 # v27 SHOULD-HAVE — Guest Recovery automation
 # ============================================================================
 @router.get("/recovery/churn-risk")
-async def churn_risk(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def churn_risk(user: dict = Depends(get_user)):
     if user["role"] not in ("owner", "manager"): raise HTTPException(status_code=403, detail="Owner/Manager only")
     # Customer hasn't visited in 30+ days but visited 3+ times historically
     cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
@@ -526,9 +489,7 @@ async def churn_risk(request: Request):
 
 
 @router.post("/recovery/win-back")
-async def trigger_win_back(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def trigger_win_back(data: dict, user: dict = Depends(get_user)):
     if user["role"] not in ("owner", "manager"): raise HTTPException(status_code=403, detail="Owner/Manager only")
     cids = data.get("customerIds", [])
     voucher_value = float(data.get("voucherValue", 15))
@@ -546,9 +507,7 @@ async def trigger_win_back(data: dict, request: Request):
 # v28 SHOULD-HAVE — Station Readiness Score
 # ============================================================================
 @router.get("/station-readiness")
-async def station_readiness(request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def station_readiness(_: dict = Depends(get_user)):
     # Combine: open prep tickets (lower=better), staff rostered, stock OK, printer status
     pending = await db.kitchen_orders.count_documents({"status": {"$in": ["pending", "in_progress"]}})
     today = datetime.now(timezone.utc).date().isoformat()
@@ -578,9 +537,7 @@ async def station_readiness(request: Request):
 # v28 SHOULD-HAVE — Menu Margin Guardrails
 # ============================================================================
 @router.get("/margin-guardrails")
-async def margin_guardrails(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def margin_guardrails(user: dict = Depends(get_user)):
     if user["role"] not in ("owner", "manager"): raise HTTPException(status_code=403, detail="Owner/Manager only")
     products = await db.products.find({"active": {"$ne": False}}, {"_id": 0}).to_list(500)
     warnings = []
@@ -601,10 +558,8 @@ async def margin_guardrails(request: Request):
 # TIER 1 — NUA Pro: AI General Manager (executes plans on approval)
 # ============================================================================
 @router.get("/ash-pro/plan")
-async def ash_plan(request: Request):
+async def ash_plan(user: dict = Depends(get_user)):
     """Aggregate today's signals into a single approval plan."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
     if user["role"] not in ("owner", "manager"): raise HTTPException(status_code=403, detail="Owner/Manager only")
     # Gather signals
     now = datetime.now(timezone.utc)
@@ -674,9 +629,7 @@ async def ash_approve(data: dict, request: Request):
 # TIER 1 — Profit Guardian (nightly margin check)
 # ============================================================================
 @router.get("/profit-guardian")
-async def profit_guardian(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def profit_guardian(user: dict = Depends(get_user)):
     if user["role"] not in ("owner", "manager"): raise HTTPException(status_code=403, detail="Owner/Manager only")
     # Compare last-7d cost % vs prior 7-day window for each product
     now = datetime.now(timezone.utc)
@@ -719,9 +672,7 @@ async def profit_guardian(request: Request):
 # TIER 1 — Digital Twin Forecast
 # ============================================================================
 @router.get("/digital-twin")
-async def digital_twin(request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def digital_twin(_: dict = Depends(get_user)):
     now = datetime.now(timezone.utc)
     # 8-week average revenue per weekday
     cutoff = (now - timedelta(days=56)).isoformat()
@@ -754,9 +705,7 @@ async def digital_twin(request: Request):
 # TIER 1 — AI Shift Manager (real-time alerts)
 # ============================================================================
 @router.get("/shift-manager")
-async def shift_manager(request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def shift_manager(_: dict = Depends(get_user)):
     alerts = []
     # Check kitchen station overload
     pending = await db.kitchen_orders.count_documents({"status": "pending"})
@@ -780,9 +729,7 @@ async def shift_manager(request: Request):
 # TIER 1 — Autonomous Marketing Engine
 # ============================================================================
 @router.post("/marketing/auto")
-async def auto_marketing(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def auto_marketing(data: dict, user: dict = Depends(get_user)):
     if user["role"] not in ("owner", "manager"): raise HTTPException(status_code=403, detail="Owner/Manager only")
     audience = data.get("audience", "all")
     target = await db.customers.find({} if audience == "all" else {"membershipTier": audience}, {"_id": 0}).to_list(2000)
@@ -803,9 +750,7 @@ async def auto_marketing(data: dict, request: Request):
 
 
 @router.get("/marketing/auto")
-async def list_marketing(request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def list_marketing(_: dict = Depends(get_user)):
     rows = await db.marketing_campaigns.find({}, {"_id": 0}).sort("createdAt", -1).to_list(50)
     return rows
 
@@ -820,9 +765,7 @@ async def list_dynamic_rules():
 
 
 @router.post("/dynamic-pricing")
-async def add_dynamic_rule(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def add_dynamic_rule(data: dict, user: dict = Depends(get_user)):
     if user["role"] != "owner": raise HTTPException(status_code=403, detail="Owner only")
     rule = {
         "id": _uid("DPR"),
@@ -853,9 +796,7 @@ async def list_sub_plans():
 
 
 @router.post("/subscriptions/plans")
-async def add_sub_plan(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def add_sub_plan(data: dict, user: dict = Depends(get_user)):
     if user["role"] != "owner": raise HTTPException(status_code=403, detail="Owner only")
     # Mint scannable barcode + manual code so the membership can be scanned at POS.
     import secrets as _secrets
@@ -879,9 +820,7 @@ async def add_sub_plan(data: dict, request: Request):
 
 
 @router.post("/subscriptions/enroll")
-async def enroll_sub(data: dict, request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def enroll_sub(data: dict, _: dict = Depends(get_user)):
     sub = {"id": _uid("SUBSC"), "customerId": data.get("customerId"), "planId": data.get("planId"),
            "status": "active", "startedAt": _now()}
     await db.subscriptions.insert_one(sub); sub.pop("_id", None)
@@ -889,9 +828,7 @@ async def enroll_sub(data: dict, request: Request):
 
 
 @router.get("/subscriptions/members")
-async def list_sub_members(request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def list_sub_members(_: dict = Depends(get_user)):
     rows = await db.subscriptions.find({}, {"_id": 0}).to_list(500)
     return rows
 
@@ -900,17 +837,13 @@ async def list_sub_members(request: Request):
 # TIER 2 — Smart Gift Cards
 # ============================================================================
 @router.get("/gift-cards")
-async def list_gift_cards(request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def list_gift_cards(_: dict = Depends(get_user)):
     rows = await db.gift_cards.find({}, {"_id": 0}).sort("createdAt", -1).to_list(200)
     return rows
 
 
 @router.post("/gift-cards")
-async def issue_gift_card(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def issue_gift_card(data: dict, user: dict = Depends(get_user)):
     if user["role"] not in ("owner", "manager"): raise HTTPException(status_code=403, detail="Owner/Manager only")
     card = {
         "id": _uid("GC"),
@@ -949,18 +882,14 @@ async def redeem_gift_card(code: str, data: dict):
 # TIER 3 — Recipe Costing Engine
 # ============================================================================
 @router.get("/recipes/list")
-async def list_recipes_costed(request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def list_recipes_costed(_: dict = Depends(get_user)):
     recipes = await db.product_recipes.find({}, {"_id": 0}).to_list(500)
     return recipes
 
 
 @router.post("/recipes/upsert")
-async def upsert_recipe(data: dict, request: Request):
+async def upsert_recipe(data: dict, user: dict = Depends(get_user)):
     """Attach a recipe of ingredients (productId + qty + costPerUnit) to a product."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
     if user["role"] not in ("owner", "manager"): raise HTTPException(status_code=403, detail="Owner/Manager only")
     pid = data.get("productId")
     if not pid: raise HTTPException(status_code=400, detail="productId required")
@@ -975,9 +904,7 @@ async def upsert_recipe(data: dict, request: Request):
 
 
 @router.get("/recipes/{product_id}")
-async def get_recipe(product_id: str, request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def get_recipe(product_id: str, _: dict = Depends(get_user)):
     r = await db.product_recipes.find_one({"productId": product_id}, {"_id": 0})
     return r or {"productId": product_id, "ingredients": [], "computedCost": 0}
 
@@ -986,10 +913,8 @@ async def get_recipe(product_id: str, request: Request):
 # TIER 3 — Predictive Ordering
 # ============================================================================
 @router.post("/predictive-orders")
-async def predictive_orders(request: Request):
+async def predictive_orders(user: dict = Depends(get_user)):
     """Generate next-week supplier orders based on velocity + bookings + weather hints."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
     if user["role"] not in ("owner", "manager"): raise HTTPException(status_code=403, detail="Owner/Manager only")
     cutoff = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat()
     tx = await db.transactions.find({"createdAt": {"$gte": cutoff}}, {"_id": 0, "items": 1}).to_list(5000)
@@ -1019,17 +944,13 @@ async def predictive_orders(request: Request):
 # TIER 3 — Waste Tracking
 # ============================================================================
 @router.get("/waste")
-async def list_waste(request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def list_waste(_: dict = Depends(get_user)):
     rows = await db.waste_log.find({}, {"_id": 0}).sort("createdAt", -1).to_list(500)
     return rows
 
 
 @router.post("/waste")
-async def log_waste(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def log_waste(data: dict, user: dict = Depends(get_user)):
     entry = {
         "id": _uid("WST"), "productId": data.get("productId"), "productName": data.get("productName", ""),
         "quantity": float(data.get("quantity", 0)), "reason": data.get("reason", "spoilage"),
@@ -1041,9 +962,7 @@ async def log_waste(data: dict, request: Request):
 
 
 @router.get("/waste/insights")
-async def waste_insights(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def waste_insights(user: dict = Depends(get_user)):
     if user["role"] not in ("owner", "manager"): raise HTTPException(status_code=403, detail="Owner/Manager only")
     cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
     rows = await db.waste_log.find({"createdAt": {"$gte": cutoff}}, {"_id": 0}).to_list(2000)
@@ -1058,9 +977,7 @@ async def waste_insights(request: Request):
 # TIER 4 — Universal Guest Profile
 # ============================================================================
 @router.get("/guest/{customer_id}")
-async def universal_guest(customer_id: str, request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def universal_guest(customer_id: str, _: dict = Depends(get_user)):
     c = await db.customers.find_one({"id": customer_id}, {"_id": 0})
     if not c: raise HTTPException(status_code=404, detail="Customer not found")
     visits = await db.transactions.count_documents({"customerId": customer_id})
@@ -1117,9 +1034,7 @@ async def concierge(data: dict, request: Request):
 # TIER 4 — Reputation Command Center
 # ============================================================================
 @router.get("/reputation")
-async def reputation(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def reputation(user: dict = Depends(get_user)):
     if user["role"] not in ("owner", "manager"): raise HTTPException(status_code=403, detail="Owner/Manager only")
     reviews = await db.reviews.find({}, {"_id": 0}).sort("createdAt", -1).to_list(500)
     if not reviews:
@@ -1142,9 +1057,7 @@ async def reputation(request: Request):
 
 
 @router.post("/reputation/respond")
-async def respond_review(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def respond_review(data: dict, user: dict = Depends(get_user)):
     if user["role"] not in ("owner", "manager"): raise HTTPException(status_code=403, detail="Owner/Manager only")
     rid = data.get("reviewId"); response = (data.get("response") or "").strip()
     if not response:
@@ -1163,9 +1076,7 @@ async def respond_review(data: dict, request: Request):
 # TIER 4 — Smart Recovery (negative review intercept)
 # ============================================================================
 @router.post("/recovery-action")
-async def recovery_action(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def recovery_action(data: dict, user: dict = Depends(get_user)):
     if user["role"] not in ("owner", "manager"): raise HTTPException(status_code=403, detail="Owner/Manager only")
     customer_id = data.get("customerId"); voucher = float(data.get("voucherAmount", 20))
     apology = data.get("apologyMessage", "We're sorry — please come back, on us.")
@@ -1184,9 +1095,7 @@ async def recovery_action(data: dict, request: Request):
 # TIER 5 — Franchise Command Center
 # ============================================================================
 @router.get("/franchise/dashboard")
-async def franchise_dashboard(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def franchise_dashboard(user: dict = Depends(get_user)):
     if user["role"] != "owner": raise HTTPException(status_code=403, detail="Owner only")
     sites = await db.sites.find({}, {"_id": 0}).to_list(100)
     publications = await db.publications.find({}, {"_id": 0}).sort("publishedAt", -1).to_list(20)
@@ -1197,9 +1106,7 @@ async def franchise_dashboard(request: Request):
 # TIER 5 — Multi-Store Benchmarking
 # ============================================================================
 @router.get("/benchmark")
-async def benchmark(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def benchmark(user: dict = Depends(get_user)):
     if user["role"] != "owner": raise HTTPException(status_code=403, detail="Owner only")
     sites = await db.sites.find({}, {"_id": 0}).to_list(100)
     # Without per-site data we still return a single-site summary so the UI works
@@ -1241,9 +1148,7 @@ async def warehouse_export(collection: str = "transactions", limit: int = 1000, 
 # TIER 5 — AI Fraud Detection
 # ============================================================================
 @router.get("/fraud-detection")
-async def fraud_detection(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def fraud_detection(user: dict = Depends(get_user)):
     if user["role"] not in ("owner", "manager"): raise HTTPException(status_code=403, detail="Owner/Manager only")
     cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
     tx = await db.transactions.find({"createdAt": {"$gte": cutoff}}, {"_id": 0}).to_list(5000)

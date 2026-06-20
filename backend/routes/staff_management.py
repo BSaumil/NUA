@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
+from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone, timedelta
 import uuid
@@ -26,12 +27,8 @@ async def pin_login(data: dict):
     return {"user": user, "token": token}
 
 @router.post("/auth/staff/{staff_id}/set-pin")
-async def set_staff_pin(staff_id: str, data: dict, request: Request):
+async def set_staff_pin(staff_id: str, data: dict, _: dict = Depends(require_owner)):
     """Owner assigns a PIN to staff member"""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
     pin = str(data.get("pin", ""))
     if not pin or len(pin) < 2 or len(pin) > 4 or not pin.isdigit():
         raise HTTPException(status_code=400, detail="PIN must be 2-4 digits")
@@ -43,9 +40,7 @@ async def set_staff_pin(staff_id: str, data: dict, request: Request):
 
 # ============ TIMECARDS — CLOCK IN/OUT ============
 @router.post("/staff/clock-in")
-async def clock_in(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def clock_in(user: dict = Depends(get_user)):
     active = await db.timecards.find_one({"staffId": user["id"], "clockOut": None}, {"_id": 0})
     if active:
         raise HTTPException(status_code=400, detail="Already clocked in")
@@ -61,9 +56,7 @@ async def clock_in(request: Request):
     return tc
 
 @router.post("/staff/clock-out")
-async def clock_out(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def clock_out(data: dict, user: dict = Depends(get_user)):
     tc = await db.timecards.find_one({"staffId": user["id"], "clockOut": None})
     if not tc:
         raise HTTPException(status_code=400, detail="Not clocked in")
@@ -84,16 +77,12 @@ async def clock_out(data: dict, request: Request):
     return tc
 
 @router.get("/staff/my-status")
-async def my_clock_status(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def my_clock_status(user: dict = Depends(get_user)):
     active = await db.timecards.find_one({"staffId": user["id"], "clockOut": None}, {"_id": 0})
     return {"clockedIn": active is not None, "currentShift": active}
 
 @router.get("/staff/timecards")
-async def get_timecards(request: Request, staff_id: str = None, period: str = "week"):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def get_timecards( staff_id: str = None, period: str = "week", user: dict = Depends(get_user)):
     if user["role"] not in ("owner", "manager"):
         staff_id = user["id"]
     query = {}
@@ -104,11 +93,7 @@ async def get_timecards(request: Request, staff_id: str = None, period: str = "w
 
 # ============ STAFF ROSTER ============
 @router.get("/staff/roster")
-async def get_roster(request: Request, week_start: str = None):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def get_roster( week_start: str = None, _: dict = Depends(require_owner_or_manager)):
     query = {}
     if week_start:
         query["weekStart"] = week_start
@@ -116,11 +101,7 @@ async def get_roster(request: Request, week_start: str = None):
     return shifts
 
 @router.post("/staff/roster")
-async def create_roster_shift(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def create_roster_shift(data: dict, _: dict = Depends(require_owner_or_manager)):
     shift = {
         "id": f"SHIFT-{str(uuid.uuid4())[:8].upper()}",
         "staffId": data.get("staffId"), "staffName": data.get("staffName"),
@@ -134,11 +115,7 @@ async def create_roster_shift(data: dict, request: Request):
     return shift
 
 @router.put("/staff/roster/{shift_id}")
-async def update_roster_shift(shift_id: str, data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def update_roster_shift(shift_id: str, data: dict, _: dict = Depends(require_owner_or_manager)):
     allowed = {"date", "startTime", "endTime", "role", "notes", "staffId", "staffName", "weekStart"}
     update = {k: v for k, v in data.items() if k in allowed}
     result = await db.roster_shifts.find_one_and_update({"id": shift_id}, {"$set": update}, return_document=True)
@@ -148,21 +125,13 @@ async def update_roster_shift(shift_id: str, data: dict, request: Request):
     return result
 
 @router.delete("/staff/roster/{shift_id}")
-async def delete_roster_shift(shift_id: str, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def delete_roster_shift(shift_id: str, _: dict = Depends(require_owner_or_manager)):
     await db.roster_shifts.delete_one({"id": shift_id})
     return {"message": "Shift deleted"}
 
 # ============ PAYRUN ============
 @router.get("/payrun/calculate")
-async def calculate_payrun(request: Request, period: str = "week"):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
+async def calculate_payrun( period: str = "week", _: dict = Depends(require_owner)):
 
     now = datetime.now(timezone.utc)
     if period == "week":
@@ -220,11 +189,7 @@ async def calculate_payrun(request: Request, period: str = "week"):
     }
 
 @router.post("/payrun/process")
-async def process_payrun(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
+async def process_payrun(data: dict, user: dict = Depends(require_owner)):
 
     payrun = {
         "id": f"PAY-{str(uuid.uuid4())[:8].upper()}",
@@ -262,21 +227,13 @@ async def process_payrun(data: dict, request: Request):
     return payrun
 
 @router.get("/payrun/history")
-async def get_payrun_history(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
+async def get_payrun_history(_: dict = Depends(require_owner)):
     runs = await db.payruns.find({}, {"_id": 0}).sort("processedAt", -1).to_list(100)
     return runs
 
 # ============ STAFF REPORTS ============
 @router.get("/staff/reports")
-async def get_staff_reports(request: Request, period: str = "week"):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def get_staff_reports( period: str = "week", _: dict = Depends(require_owner_or_manager)):
 
     staff = await db.auth_users.find({"status": "active"}, {"_id": 0, "password_hash": 0}).to_list(100)
     timecards = await db.timecards.find({}, {"_id": 0}).to_list(50000)
@@ -326,11 +283,7 @@ async def get_receipt_settings():
     }
 
 @router.post("/receipt/settings")
-async def save_receipt_settings(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def save_receipt_settings(data: dict, _: dict = Depends(require_owner_or_manager)):
     await db.settings.update_one(
         {"key": "receipt_config"},
         {"$set": {"key": "receipt_config", "value": data}},

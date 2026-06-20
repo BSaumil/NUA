@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
+from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone, timedelta
 import uuid, os
@@ -7,9 +8,7 @@ router = APIRouter()
 
 # ============ STAFF LEADERBOARD ============
 @router.get("/staff/leaderboard")
-async def get_staff_leaderboard(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
+async def get_staff_leaderboard(_: dict = Depends(get_user)):
 
     staff = await db.auth_users.find({"status": "active", "role": {"$ne": "owner"}}, {"_id": 0, "password_hash": 0}).to_list(100)
     txns = await db.transactions.find({}, {"_id": 0}).to_list(50000)
@@ -46,12 +45,8 @@ async def get_staff_leaderboard(request: Request):
 
 # ============ SMART TIP DISTRIBUTION (Hours + Performance) ============
 @router.post("/tips/smart-distribute")
-async def smart_distribute_tips(request: Request):
+async def smart_distribute_tips(_: dict = Depends(require_owner)):
     """Distribute pooled tips based on hours worked and performance score"""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
 
     tips = await db.tips.find({"pooled": True, "distributed": {"$ne": True}}, {"_id": 0}).to_list(10000)
     pool_total = sum(t.get("amount", 0) for t in tips)
@@ -107,11 +102,7 @@ async def smart_distribute_tips(request: Request):
 
 # ============ QUARTERLY REVIEW (Top/Worst Items + AI Alternatives) ============
 @router.get("/reports/quarterly-review")
-async def quarterly_review(request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def quarterly_review(_: dict = Depends(require_owner_or_manager)):
 
     txns = await db.transactions.find({}, {"_id": 0}).to_list(50000)
     products = await db.products.find({}, {"_id": 0}).to_list(10000)
@@ -151,12 +142,8 @@ async def quarterly_review(request: Request):
     }
 
 @router.post("/reports/quarterly-review/ai-alternatives")
-async def quarterly_ai_alternatives(data: dict, request: Request):
+async def quarterly_ai_alternatives(data: dict, _: dict = Depends(require_owner)):
     """AI suggests alternatives for worst-performing items"""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner access only")
 
     items = data.get("items", [])
     try:
@@ -203,19 +190,13 @@ async def get_print_routing():
     }
 
 @router.post("/print-routing/config")
-async def save_print_routing(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager access only")
+async def save_print_routing(data: dict, _: dict = Depends(require_owner_or_manager)):
     await db.settings.update_one({"key": "print_routing"}, {"$set": {"key": "print_routing", "value": data}}, upsert=True)
     return {"message": "Print routing saved"}
 
 @router.post("/print-routing/send")
-async def send_to_printers(data: dict, request: Request):
+async def send_to_printers(data: dict, _: dict = Depends(get_user)):
     """Route order items to appropriate printers based on category"""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
 
     order_items = data.get("items", [])
     order_id = data.get("orderId", f"ORD-{str(uuid.uuid4())[:8].upper()}")
