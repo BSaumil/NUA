@@ -1,5 +1,28 @@
 # NUA POS — PRD v26.0 (Enterprise Licensing & Entitlements)
 
+## v26.9 — Iteration 36 (Feb 2026): Full Auth-Depends Refactor + Products.jsx Split
+
+### What landed
+- **Backend `Depends` refactor — 16 legacy routers, ~230 endpoints**: `advanced_features.py`, `ai_pantry.py`, `enterprise_features.py`, `gamification.py`, `inventory_accounting.py`, `licensing.py`, `loyalty_engine.py`, `menu_features.py`, `multi_tenant.py`, `online_orders.py`, `phase_ef.py`, `phase_ef_wave2.py`, `reservation_features.py`, `staff_management.py`, `v15_features.py`, `v25_suite.py`, `v26_commerce.py` — all inline `from routes.auth import get_current_user` patterns converted to top-level `Depends(get_user / require_owner / require_owner_or_manager)` from `/app/backend/deps.py`. Anonymous POSTs now reliably return **401 BEFORE Pydantic 422**, cashier-role calls return **403**. Edge cases that referenced `request` after the auth block (~8 endpoints) were intentionally skipped and remain on the inline pattern.
+- **CRITICAL bug fix — `/loyalty/redeem` auth bypass**: the legacy `routes/loyalty.py` was registering `POST /loyalty/redeem` BEFORE the auth-protected version in `routes/loyalty_engine.py`, allowing anonymous callers to deduct points from any customer. The legacy unprotected handler has been **removed**; `routes/loyalty.py` now also guards `POST /loyalty/rewards` and `DELETE /loyalty/rewards/{id}` with `Depends(require_owner_or_manager)`. A code comment in the file marks the redeem endpoint as owned by `loyalty_engine.py`.
+- **Frontend — `Products.jsx` split (963 → 618 lines)**: extracted into three pure, presentational components under `/app/frontend/src/components/products/`:
+  - `ProductsToolbar.jsx` (160 lines) — search, sort, status filter, layout toggle, CSV export, category chips, bulk-action bar, select-all checkbox.
+  - `ProductTable.jsx` (307 lines) — both grid and table renderings of the catalog, with inline price/stock/name edit and 86 toggle.
+  - `BulkEditDialog.jsx` (161 lines) — bulk-edit form with category/price-delta/cost/GST/status/image/modifier add+remove.
+  All `data-testid` attributes preserved; bulk-edit, inline-edit, layout toggle, 86 toggle, CSV export and Image Library wiring all validated end-to-end.
+
+### Iteration 36 Tests
+- **Backend 85/85 PASS** (after fix). Anon-401 across 24 endpoints, owner-GET across 43 endpoints, owner-POST happy-path across 10 endpoints, iter-35 regression intact. Test: `/app/backend/tests/test_iteration36_depends_refactor.py`.
+- **Frontend** — Products.jsx split fully validated: toolbar renders, bulk-edit dialog opens + applies +5% delta, inline price persists, table view loads, select-all works, CSV downloads. Smoke-tested /pos, /channel-menus, /reservations, /bookings-inbox, /inventory-accounting all clean.
+
+### Note on intentionally-public storefront endpoints
+- `POST /api/v25/kiosk/session*` and `POST /api/online/orders` remain **public by design** (guest kiosk checkout & customer-facing online ordering). Documented in route comments.
+
+### Backlog
+- P2: ~8 remaining inline-auth endpoints across `v25_suite.py`, `phase_ef.py`, `phase_ef_wave2.py`, `licensing.py`, `inventory_accounting.py`, `loyalty_engine.py` that use `request` after the auth block (custom role mixes or signed-device-secret auth) — skipped intentionally, would need bespoke refactor.
+- P2: AI bookings inbox response header `x-ai-parsed-fallback` so the UI can warn when the LLM is unavailable.
+- P1: Provide real SendGrid / Twilio API keys to fully activate the notification abstraction.
+
 ## v26.8 — Iteration 35 (Feb 2026): P0 Auth-Precedence Refactor (Depends Pattern)
 
 ### What landed

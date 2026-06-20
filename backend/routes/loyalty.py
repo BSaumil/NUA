@@ -1,9 +1,9 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
 from datetime import datetime
 from database import db
+from deps import get_user, require_owner_or_manager
 from models.loyalty import LoyaltyReward, LoyaltyRedemption, Event, EventCreate
-from fastapi import HTTPException
 import uuid
 
 router = APIRouter()
@@ -15,7 +15,7 @@ async def get_loyalty_rewards():
     return rewards
 
 @router.post("/loyalty/rewards")
-async def create_loyalty_reward(reward: dict):
+async def create_loyalty_reward(reward: dict, _: dict = Depends(require_owner_or_manager)):
     reward_id = f"REWARD-{str(uuid.uuid4())[:8].upper()}"
     reward_doc = {"id": reward_id, **{k: v for k, v in reward.items() if k != "id"}, "createdAt": datetime.utcnow().isoformat()}
     await db.loyalty_rewards.insert_one(reward_doc)
@@ -23,30 +23,16 @@ async def create_loyalty_reward(reward: dict):
     return reward_doc
 
 @router.delete("/loyalty/rewards/{reward_id}")
-async def delete_loyalty_reward(reward_id: str):
+async def delete_loyalty_reward(reward_id: str, _: dict = Depends(require_owner_or_manager)):
     await db.loyalty_rewards.delete_one({"id": reward_id})
     return {"message": "Reward deleted"}
 
-@router.post("/loyalty/redeem")
-async def redeem_loyalty_reward(customer_id: str, reward_id: str):
-    customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
-    if not customer:
-        raise HTTPException(status_code=404, detail="Customer not found")
-    reward = await db.loyalty_rewards.find_one({"id": reward_id}, {"_id": 0})
-    if not reward:
-        raise HTTPException(status_code=404, detail="Reward not found")
-    points_cost = reward.get("pointsCost", 0)
-    if customer.get("points", 0) < points_cost:
-        raise HTTPException(status_code=400, detail="Insufficient points")
-    await db.customers.update_one({"id": customer_id}, {"$inc": {"points": -points_cost}})
-    redemption = {
-        "id": f"REDEEM-{str(uuid.uuid4())[:8].upper()}", "customerId": customer_id,
-        "rewardId": reward_id, "rewardName": reward.get("name", ""), "pointsSpent": points_cost,
-        "redeemedAt": datetime.utcnow().isoformat(),
-    }
-    await db.loyalty_redemptions.insert_one(redemption)
-    redemption.pop("_id", None)
-    return redemption
+# NOTE: POST /loyalty/redeem is owned by routes/loyalty_engine.py (the modern,
+# auth-protected earn/redeem engine). The legacy unprotected redeem handler
+# that used to live here was removed in iteration 36 — it was being registered
+# first by server.py and shadowing the protected version, creating a points
+# bypass. Do not re-add it here. If you need anonymous redemption (e.g. via
+# QR code), wire it through a signed redemption token instead.
 
 @router.get("/loyalty/tiers")
 async def get_loyalty_tiers():
