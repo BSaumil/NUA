@@ -29,6 +29,7 @@ from routes.advanced_features import router as advanced_features_router
 from routes.staff_management import router as staff_mgmt_router
 from routes.awards import router as awards_router
 from routes.bookings_inbox import router as bookings_inbox_router
+from routes.channel_menus import router as channel_menus_router
 from routes.menu_features import router as menu_features_router
 from routes.enterprise_features import router as enterprise_router
 from routes.gamification import router as gamification_router
@@ -69,6 +70,7 @@ api_router.include_router(advanced_features_router)  # Must be before multi_tena
 api_router.include_router(staff_mgmt_router)
 api_router.include_router(awards_router)
 api_router.include_router(bookings_inbox_router)
+api_router.include_router(channel_menus_router)
 api_router.include_router(menu_features_router)
 api_router.include_router(enterprise_router)
 api_router.include_router(gamification_router)

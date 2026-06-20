@@ -15,7 +15,7 @@ import {
 } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { useTheme } from '../contexts/ThemeContext';
-import { reservationsAPI, floorPlansAPI, aiWave2API } from '../services/api';
+import { reservationsAPI, floorPlansAPI, aiWave2API, reservationsAIAPI } from '../services/api';
 import { toast } from 'sonner';
 
 const TIME_SLOTS = [];
@@ -135,11 +135,23 @@ export default function Reservations() {
 
   const handleAutoAssign = async (id) => {
     try {
-      const res = await reservationsAPI.autoAssign(id);
-      if (res.data.assigned) toast.success(`Auto-assigned to Table ${res.data.table.number}`);
-      else toast.warning(res.data.message);
+      // Prefer the AI-aware endpoint (handles time conflicts + section pref);
+      // fall back to the legacy auto-assign if it fails for any reason.
+      let res;
+      try {
+        res = await reservationsAIAPI.aiAssignTable(id);
+        if (res.data.assigned) {
+          toast.success(`AI assigned ${res.data.tableName}${res.data.section ? ` · ${res.data.section}` : ''}`);
+        } else {
+          toast.warning(res.data.reason || 'No suitable table');
+        }
+      } catch {
+        res = await reservationsAPI.autoAssign(id);
+        if (res.data.assigned) toast.success(`Auto-assigned to Table ${res.data.table?.number}`);
+        else toast.warning(res.data.message);
+      }
       fetchData();
-    } catch (e) { toast.error('Auto-assign failed'); }
+    } catch { toast.error('Auto-assign failed'); }
   };
 
   const shiftDate = (days) => {
@@ -172,9 +184,26 @@ export default function Reservations() {
           <h1 className="text-2xl font-bold" style={{ color: theme.text }}>Reservations</h1>
           <p className="text-sm text-gray-500 mt-1">Manage bookings, tables & guest seating</p>
         </div>
-        <Button data-testid="new-reservation-btn" onClick={openNew} style={{ background: theme.primary }}>
-          <Plus size={16} className="mr-2" /> New Reservation
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={async () => {
+              const partySize = parseInt(prompt('Walk-in party size?', '2') || '0');
+              if (!partySize) return;
+              try {
+                const r = await reservationsAIAPI.aiAssignWalkin({ partySize });
+                if (r.data.assigned) toast.success(`Walk-in seated at ${r.data.tableName}${r.data.section ? ` · ${r.data.section}` : ''}`);
+                else toast.warning(r.data.reason || 'No table free');
+              } catch (e) { toast.error(e?.response?.data?.detail || 'Failed'); }
+            }}
+            data-testid="walkin-ai-assign"
+          >
+            <Users size={16} className="mr-1.5" /> Walk-in → AI Seat
+          </Button>
+          <Button data-testid="new-reservation-btn" onClick={openNew} style={{ background: theme.primary }}>
+            <Plus size={16} className="mr-2" /> New Reservation
+          </Button>
+        </div>
       </div>
 
       {/* Stats Row */}
@@ -292,7 +321,33 @@ export default function Reservations() {
                             {st.label}
                           </Badge>
                         </td>
-                        <td className="px-4 py-3 text-xs text-gray-500 capitalize">{r.source?.replace('_', ' ')}</td>
+                        <td className="px-4 py-3">
+                          {(() => {
+                            const src = (r.source || 'walk_in').toLowerCase();
+                            const meta = {
+                              walk_in: { label: 'Walk-in', color: '#64748b' },
+                              walkin: { label: 'Walk-in', color: '#64748b' },
+                              web: { label: 'Web', color: '#0ea5e9' },
+                              website: { label: 'Web', color: '#0ea5e9' },
+                              phone: { label: 'Phone', color: '#f59e0b' },
+                              email: { label: 'Email', color: '#6366f1' },
+                              instagram: { label: 'Instagram', color: '#ec4899' },
+                              instagram_dm: { label: 'Instagram', color: '#ec4899' },
+                              facebook: { label: 'Facebook', color: '#3b82f6' },
+                              facebook_dm: { label: 'Facebook', color: '#3b82f6' },
+                              whatsapp: { label: 'WhatsApp', color: '#22c55e' },
+                              sms: { label: 'SMS', color: '#8b5cf6' },
+                              opentable: { label: 'OpenTable', color: '#ef4444' },
+                              dine_in: { label: 'Walk-in', color: '#64748b' },
+                            };
+                            const m = Object.entries(meta).find(([k]) => src.includes(k))?.[1] || { label: src.replace('_', ' '), color: '#64748b' };
+                            return (
+                              <Badge style={{ background: `${m.color}15`, color: m.color, border: `1px solid ${m.color}40` }} data-testid={`src-${r.id}`}>
+                                {m.label}
+                              </Badge>
+                            );
+                          })()}
+                        </td>
                         <td className="px-4 py-3 text-xs text-gray-500 max-w-[150px] truncate">{r.specialRequests || r.notes || '—'}</td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-1 justify-end">

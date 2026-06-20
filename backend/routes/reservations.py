@@ -256,3 +256,111 @@ async def remove_from_waitlist(entry_id: str):
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Entry not found")
     return {"message": "Removed from waitlist"}
+
+
+# ============ AI TABLE AUTO-ASSIGN ============
+@router.post("/reservations/{reservation_id}/ai-assign-table")
+async def ai_assign_table(reservation_id: str):
+    """Auto-pick the best table for a reservation based on:
+      • party size fits seats (smallest fit wins to save large tables for big parties)
+      • current table status (prefer available > reserved-for-different-party > occupied later)
+      • section preference if set on reservation
+      • time conflict avoidance (skip tables booked within ±90min of this slot)
+    """
+    res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
+    if not res:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    party = int(res.get("partySize", 2) or 2)
+
+    tables = await db.floor_tables.find({}, {"_id": 0}).to_list(500)
+    if not tables:
+        return {"assigned": False, "reason": "No floor tables defined yet"}
+
+    # Time window check — pull same-day reservations conflicting with this slot
+    same_day = await db.reservations.find({"date": res.get("date"), "id": {"$ne": reservation_id}}, {"_id": 0}).to_list(500)
+    def conflicts(table_id: str) -> bool:
+        for r in same_day:
+            if r.get("tableId") != table_id:
+                continue
+            try:
+                t1 = datetime.fromisoformat(f"{res['date']}T{res['time']}:00")
+                t2 = datetime.fromisoformat(f"{r['date']}T{r['time']}:00")
+                if abs((t1 - t2).total_seconds()) < 90 * 60:
+                    return True
+            except Exception:
+                continue
+        return False
+
+    preferred_section = (res.get("section") or "").lower()
+    candidates = []
+    for t in tables:
+        capacity = int(t.get("capacity", 0) or 0)
+        if capacity < party:
+            continue
+        if conflicts(t["id"]):
+            continue
+        score = capacity - party                     # smaller fit wins
+        if preferred_section and (t.get("section") or "").lower() == preferred_section:
+            score -= 5                               # boost section match
+        if t.get("status") == "available":
+            score -= 2
+        candidates.append((score, t))
+
+    if not candidates:
+        return {"assigned": False, "reason": "No table fits this party / time slot"}
+
+    candidates.sort(key=lambda x: x[0])
+    chosen = candidates[0][1]
+    await db.reservations.update_one(
+        {"id": reservation_id},
+        {"$set": {"tableId": chosen["id"], "tableNumber": chosen.get("number") or chosen.get("name"), "updatedAt": datetime.utcnow().isoformat()}}
+    )
+    await db.floor_tables.update_one(
+        {"id": chosen["id"]},
+        {"$set": {"status": "reserved", "currentReservationId": reservation_id}}
+    )
+    return {
+        "assigned": True,
+        "tableId": chosen["id"],
+        "tableName": chosen.get("name") or chosen.get("number"),
+        "section": chosen.get("section"),
+        "score": candidates[0][0],
+    }
+
+@router.post("/walkins/ai-assign")
+async def ai_assign_walkin(body: dict):
+    """Walk-in helper: pick a table NOW for an unscheduled walk-in.
+    body: { partySize, section?, customerId? }
+    """
+    party = int(body.get("partySize", 1) or 1)
+    section = (body.get("section") or "").lower()
+    tables = await db.floor_tables.find({}, {"_id": 0}).to_list(500)
+    if not tables:
+        raise HTTPException(status_code=404, detail="No floor tables defined")
+    candidates = []
+    for t in tables:
+        if t.get("status") not in (None, "available", "cleaning"):
+            continue
+        cap = int(t.get("capacity", 0) or 0)
+        if cap < party:
+            continue
+        score = cap - party
+        if section and (t.get("section") or "").lower() == section:
+            score -= 5
+        if t.get("status") == "available":
+            score -= 1
+        candidates.append((score, t))
+    if not candidates:
+        return {"assigned": False, "reason": "No suitable table free right now"}
+    candidates.sort(key=lambda x: x[0])
+    chosen = candidates[0][1]
+    walkin_id = f"WALK-{datetime.utcnow().strftime('%H%M%S')}"
+    await db.floor_tables.update_one(
+        {"id": chosen["id"]},
+        {"$set": {"status": "occupied", "currentReservationId": walkin_id}}
+    )
+    return {
+        "assigned": True, "walkinId": walkin_id,
+        "tableId": chosen["id"], "tableName": chosen.get("name") or chosen.get("number"),
+        "section": chosen.get("section"), "score": candidates[0][0],
+    }

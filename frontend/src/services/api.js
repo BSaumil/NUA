@@ -123,6 +123,24 @@ export const awardsAPI = {
   install: (code) => api.post('/awards/install', { code }),
   uninstall: (code) => api.delete(`/awards/${code}`),
   superByAward: (payload) => api.post('/payruns/super-by-award', payload),
+  syncFairwork: () => api.post('/awards/sync-fairwork'),
+};
+
+// Channel Menus — per-channel pricing, availability, prep, AI discounts
+export const channelMenusAPI = {
+  channels: () => api.get('/channel-menus/channels'),
+  list: (channel) => api.get(`/channel-menus/${channel}`),
+  patch: (channel, body) => api.post(`/channel-menus/${channel}/patch`, body),
+  bulkPrice: (channel, body) => api.post(`/channel-menus/${channel}/bulk-price`, body),
+  aiPrepTimes: (channel) => api.post(`/channel-menus/${channel}/ai-prep-times`),
+  aiDiscountSlow: (channel, body) => api.post(`/channel-menus/${channel}/ai-discount-slow`, body),
+  removeOverride: (channel, productId) => api.delete(`/channel-menus/${channel}/${productId}`),
+};
+
+// Reservations: AI table auto-assign
+export const reservationsAIAPI = {
+  aiAssignTable: (reservationId) => api.post(`/reservations/${reservationId}/ai-assign-table`),
+  aiAssignWalkin: (body) => api.post('/walkins/ai-assign', body),
 };
 
 // Modifiers API

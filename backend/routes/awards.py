@@ -3,9 +3,10 @@ Award + Superannuation engine.
 Stores award catalogues (Fair Work Australia + multi-country) and computes
 super contributions from existing payruns.
 
-Award data here is intentionally a curated seed list — the user can extend or
-override per-business. Real-world deployments typically sync from Fair Work
-Modern Awards API (fairwork.gov.au) and country-equivalent regulators.
+The seed catalogue ships with the app. The /awards/sync-fairwork endpoint
+attempts to fetch the latest published rates from fairwork.gov.au's open
+data feed; if the network or feed is unavailable, it falls back to the seed
++ flags a stale-data warning so the UI can prompt the user.
 """
 from fastapi import APIRouter, HTTPException
 from typing import List, Optional
@@ -13,6 +14,12 @@ from datetime import datetime, timezone
 from pydantic import BaseModel
 from database import db
 import uuid
+import os
+
+try:
+    import httpx
+except ImportError:  # pragma: no cover — httpx is in requirements
+    httpx = None
 
 router = APIRouter()
 
@@ -175,6 +182,44 @@ async def uninstall_award(code: str):
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Not installed")
     return {"deleted": True}
+
+
+# --- Fair Work / regulator sync -------------------------------------------
+FAIRWORK_FEED = os.environ.get("FAIRWORK_AWARDS_FEED", "https://api.fwc.gov.au/v1/awards")
+
+@router.post("/awards/sync-fairwork")
+async def sync_fairwork():
+    """Best-effort sync against the Fair Work Modern Awards feed.
+
+    Returns the merged catalogue and a `stale: bool` flag — when stale is
+    True the response was served from the seed (network or feed unavailable).
+    """
+    if httpx is None:
+        return {"stale": True, "reason": "httpx not installed", "count": len(SEED_AWARDS), "awards": SEED_AWARDS}
+
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get(FAIRWORK_FEED)
+            resp.raise_for_status()
+            data = resp.json()
+        # Caller can adapt — we only consume `awards` list of {code, name, classifications, superRate, ...}
+        live = data.get("awards") if isinstance(data, dict) else data
+        if not isinstance(live, list) or not live:
+            return {"stale": True, "reason": "Feed returned no awards", "count": len(SEED_AWARDS), "awards": SEED_AWARDS}
+        # Persist a cache entry for resilience
+        now_iso = datetime.now(timezone.utc).isoformat()
+        await db.award_cache.update_one(
+            {"_id": "fairwork-latest"},
+            {"$set": {"fetchedAt": now_iso, "awards": live}},
+            upsert=True,
+        )
+        return {"stale": False, "fetchedAt": now_iso, "count": len(live), "awards": live}
+    except Exception as e:
+        # Try the cached snapshot first
+        cached = await db.award_cache.find_one({"_id": "fairwork-latest"})
+        if cached and cached.get("awards"):
+            return {"stale": True, "reason": f"Live feed unreachable ({type(e).__name__}); served from cache", "fetchedAt": cached.get("fetchedAt"), "count": len(cached["awards"]), "awards": cached["awards"]}
+        return {"stale": True, "reason": f"Live feed unreachable ({type(e).__name__}); served from seed", "count": len(SEED_AWARDS), "awards": SEED_AWARDS}
 
 # --- Super calc from payruns ----------------------------------------------
 @router.post("/payruns/super-by-award")
