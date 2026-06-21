@@ -25,7 +25,8 @@ async def get_products(category: Optional[str] = None, search: Optional[str] = N
 @router.post("/products", response_model=Product)
 async def create_product(product: ProductCreate):
     product_dict = product.dict()
-    product_obj = Product(**product_dict)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    product_obj = Product(**product_dict, createdAt=now_iso, updatedAt=now_iso)
     await db.products.insert_one(product_obj.dict())
     return product_obj
 

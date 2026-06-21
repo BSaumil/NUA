@@ -57,6 +57,11 @@ const Products = () => {
   const [bulkPatch, setBulkPatch] = useState(emptyBulkPatch);
   const [inlineEditCell, setInlineEditCell] = useState(null);
   const [inlineValue, setInlineValue] = useState('');
+  // Optimistic edit-time map: product id -> ISO timestamp the client touched
+  // it. Lets the Recently Edited sidebar reflect edits IMMEDIATELY instead of
+  // waiting for the backend round-trip + a fresh GET.
+  const [touchTimes, setTouchTimes] = useState({});
+  const markTouched = (id) => setTouchTimes(prev => ({ ...prev, [id]: new Date().toISOString() }));
 
   useEffect(() => { fetchData(); fetchInsights(); }, []);
 
@@ -113,8 +118,15 @@ const Products = () => {
       stock: parseInt(productForm.stock), gstRate: parseFloat(productForm.gstRate),
     };
     try {
-      if (editingProduct) { await productsAPI.update(editingProduct.id, data); toast.success('Product updated'); }
-      else { await productsAPI.create(data); toast.success('Product created'); }
+      if (editingProduct) {
+        await productsAPI.update(editingProduct.id, data);
+        markTouched(editingProduct.id);
+        toast.success('Product updated');
+      } else {
+        const r = await productsAPI.create(data);
+        if (r?.data?.id) markTouched(r.data.id);
+        toast.success('Product created');
+      }
       setShowProductDialog(false); fetchData();
     } catch (e) { toast.error(e.response?.data?.detail || 'Failed to save product'); }
   };
@@ -232,6 +244,8 @@ const Products = () => {
 
     try {
       const r = await productsBulkAPI.bulkEdit(payload);
+      // Mark every touched product so they all bubble up in Recently Edited.
+      payload.productIds.forEach(markTouched);
       toast.success(`Updated ${r.data?.updated || 0} products`);
       setBulkOpen(false);
       setBulkPatch(emptyBulkPatch());
@@ -256,6 +270,7 @@ const Products = () => {
   const toggleEightySix = async (p) => {
     try {
       await productsBulkAPI.bulkEdit({ productIds: [p.id], eightySixed: !p.eightySixed });
+      markTouched(p.id);
       toast.success(p.eightySixed ? 'Un-86\'d' : 'Marked as 86 (out of stock)');
       fetchData();
     } catch { toast.error('Failed'); }
@@ -278,6 +293,7 @@ const Products = () => {
     }
     try {
       await productsAPI.update(id, { [field]: value });
+      markTouched(id);
       toast.success(`${field} updated`);
       fetchData();
     } catch (e) {
@@ -395,6 +411,7 @@ const Products = () => {
               <RecentlyEditedSidebar
                 theme={theme}
                 products={products}
+                touchTimes={touchTimes}
                 onEdit={openEditProduct}
               />
             )}

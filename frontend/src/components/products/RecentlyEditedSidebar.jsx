@@ -31,14 +31,14 @@ const isToday = (iso) => {
     && d.getDate() === now.getDate();
 };
 
-export const RecentlyEditedSidebar = ({ theme, products, onEdit }) => {
+export const RecentlyEditedSidebar = ({ theme, products, touchTimes = {}, onEdit }) => {
   const recents = useMemo(() => {
     return [...products]
-      .map(p => ({ ...p, _ts: p.updatedAt || p.createdAt }))
+      .map(p => ({ ...p, _ts: touchTimes[p.id] || p.updatedAt || p.createdAt }))
       .filter(p => isToday(p._ts))
       .sort((a, b) => (b._ts || '').localeCompare(a._ts || ''))
       .slice(0, 10);
-  }, [products]);
+  }, [products, touchTimes]);
 
   return (
     <aside

@@ -40,8 +40,8 @@ class Product(BaseModel):
     eightySixed: bool = False
     eightySixedAt: Optional[datetime] = None
     eightySixedBy: Optional[str] = None
-    createdAt: datetime = Field(default_factory=datetime.utcnow)
-    updatedAt: datetime = Field(default_factory=datetime.utcnow)
+    createdAt: Optional[datetime] = None
+    updatedAt: Optional[datetime] = None
 
 class ProductCreate(BaseModel):
     name: str

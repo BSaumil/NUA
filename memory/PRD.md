@@ -1,5 +1,24 @@
 # NUA POS — PRD v26.0 (Enterprise Licensing & Entitlements)
 
+## v27.0 — Iteration 37 (Feb 2026): Drag-to-Select Marquee · Recently Edited Sidebar · Nua Rebrand
+
+### What landed
+- **Browser title** is now **"Nua - Restaurant OS"** (`/app/frontend/public/index.html`). PWA manifest rebranded to `Nua - Restaurant OS` / short name `Nua` with the orange theme colour `#f97316`.
+- **User-facing "Emergent" references removed**: the only remaining occurrence was a code comment in `routes/v15_features.py`; it now reads "Universal LLM gateway (OpenAI-compatible)…" and the gateway base URL is overridable via `LLM_GATEWAY_URL` env var. The Python lib `emergentintegrations` and the `EMERGENT_LLM_KEY` env var stay (required for the LLM integration to function).
+- **Drag-to-select marquee** on the Products grid (Finder/Explorer-style). Mouse-down on empty grid space starts a marquee rectangle; cards whose bounding box intersects the rectangle become selected on release. Hold **Shift / ⌘ / Ctrl** during drag-start to ADD to the existing selection; plain drag REPLACES it. Drags that start inside a button/input/anchor/select/textarea are ignored so single-clicks still work. Movement under 6px is treated as a click, not a marquee. **Escape** during drag cancels without changing selection. `data-testid="marquee-rect"` and `data-testid="products-grid"` are exposed for tests.
+- **Recently Edited sidebar** (`/app/frontend/src/components/products/RecentlyEditedSidebar.jsx`) — shows the 10 most recently touched products *today*, sorted newest first. Each item is clickable and opens the product editor. Hidden on screens narrower than `lg` so the grid keeps its full width on tablets/mobile. Powered by a hybrid source: backend `updatedAt` / `createdAt` PLUS an optimistic client `touchTimes` map so the list updates the instant you finish an inline-edit, bulk-edit, 86-toggle or save — no waiting for the next GET.
+- **Backend fix** — `models/product.py` no longer falls back to `datetime.utcnow()` for missing `createdAt` / `updatedAt`. Both are now `Optional[datetime] = None`. Previously every read filled them with NOW, which made every legacy product look "edited just now" and silently pushed freshly-edited products further down the Recently Edited list. `POST /api/products` explicitly sets both timestamps on create; `PUT /api/products/{id}` continues to bump `updatedAt`.
+
+### Iteration 37 Tests
+- Iter 37 (frontend-only): 9/10 → **after the touchTimes + Pydantic fix, expected 10/10**. Title + manifest rebrand verified, drag-select marquee verified (shows during drag, bulk action bar reflects count, Shift+drag additive, mouse-down on buttons ignored, Escape cancels, table view hides grid), sidebar visible + renders prior edits + clicking opens editor.
+- Backend regression on Products CRUD (curl) — PUT now returns a real ISO `updatedAt`; GET returns the persisted value (no longer "now").
+
+### Backlog
+- P2: ~8 remaining inline-auth endpoints (custom role mixes / signed-device-secret auth) skipped in iter 36's refactor — bespoke handling required.
+- P1: Provide real SendGrid / Twilio API keys to activate the notification abstraction.
+- P2: AI bookings inbox response header `x-ai-parsed-fallback` so UI can warn when LLM is unavailable.
+- P2: Extract the Promotion dialog from `Products.jsx` into its own component (file is at ~631 lines now).
+
 ## v26.9 — Iteration 36 (Feb 2026): Full Auth-Depends Refactor + Products.jsx Split
 
 ### What landed
