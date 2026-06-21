@@ -1,21 +1,21 @@
 {
-  "name": "NUA POS",
-  "short_name": "NUA",
-  "description": "Enterprise restaurant POS & hospitality suite",
+  "name": "Nua - Restaurant OS",
+  "short_name": "Nua",
+  "description": "Restaurant operating system — POS, kitchen, reservations, inventory and AI-powered insights",
   "start_url": "/pos",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#ffffff",
-  "theme_color": "#6366f1",
+  "theme_color": "#f97316",
   "icons": [
     {
-      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='32' fill='%236366f1'/><text x='96' y='128' text-anchor='middle' font-family='Inter,sans-serif' font-size='80' font-weight='800' fill='white'>NUA</text></svg>",
+      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='32' fill='%23f97316'/><text x='96' y='128' text-anchor='middle' font-family='Inter,sans-serif' font-size='80' font-weight='800' fill='white'>Nua</text></svg>",
       "sizes": "192x192",
       "type": "image/svg+xml"
     },
     {
-      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='80' fill='%236366f1'/><text x='256' y='340' text-anchor='middle' font-family='Inter,sans-serif' font-size='220' font-weight='800' fill='white'>NUA</text></svg>",
+      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='80' fill='%23f97316'/><text x='256' y='340' text-anchor='middle' font-family='Inter,sans-serif' font-size='220' font-weight='800' fill='white'>Nua</text></svg>",
       "sizes": "512x512",
       "type": "image/svg+xml"
     }

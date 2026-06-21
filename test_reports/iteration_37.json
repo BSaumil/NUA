@@ -1,0 +1,35 @@
+{
+  "summary": "Iter 37 frontend-only UX testing on /products: rebrand (title + PWA manifest), Recently-Edited sidebar, drag-to-select marquee. 9/10 assertions pass. Only failure: after inline-edit of a product price the edited product does NOT appear in [data-testid=recently-edited-list] as the new top item (sidebar didn't refresh / backend may not bump updatedAt on partial PATCH).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "RecentlyEditedSidebar / Products.commitInlineEdit",
+        "issue": "After inline-edit of a product price (click [data-testid=price-{id}] -> type -> Enter), the edited product does NOT show up as [data-testid=recent-{id}] at the top of [data-testid=recently-edited-list] after fetchData. Reproduced on Affogato (id=9a10cf0f-...): edit committed, toast.success normally fires, fetchData runs, sidebar still shows previously edited items (Truffle Mac & Cheese etc.). Most likely root cause: backend PATCH /api/products/{id} (partial update) is not bumping `updatedAt` server-side, so the client-side `isToday(p.updatedAt || p.createdAt)` + sort-by-updatedAt logic never surfaces the freshly-edited product. Possible secondary: inline edit silently failing (need to inspect commitInlineEdit network response).",
+        "selector": "[data-testid=recently-edited-list], [data-testid=recent-{id}]",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_37.json"],
+  "action_items": [
+    "Verify backend products PATCH endpoint sets updatedAt on partial update (most likely culprit). Alternatively, RecentlyEditedSidebar could fall back to a client-tracked timestamp injected by commitInlineEdit so the UI updates immediately regardless of backend.",
+    "Consider having commitInlineEdit optimistically push the edited product id with Date.now() into a local 'recentlyTouched' state so the sidebar reflects the edit even before the next fetchData round-trip."
+  ],
+  "critical_code_review_comments": [
+    "RecentlyEditedSidebar relies entirely on backend-supplied updatedAt/createdAt. If the PATCH endpoint forgets to bump updatedAt the sidebar feature silently fails — add a client-side fallback or assert backend behavior in a unit test.",
+    "ProductTable.jsx drag-to-select marquee logic is well-isolated and correctly ignores BUTTON/A/INPUT/SELECT/TEXTAREA/LABEL elements. Marquee threshold (>6px) and additive flag from shiftKey/metaKey/ctrlKey at mousedown look correct.",
+    "Products.jsx is at 631 lines — close to the 700-line guideline; further extraction of the Promotion dialog into its own file would help.",
+    "Manifest start_url is /pos which is fine, but service-worker handling in index.html is fairly aggressive (forced reload on controllerchange) — keep an eye on UX during deploys."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped per request)", "frontend": "90% (9/10 critical assertions)"},
+  "test_credentials": "owner@nuva.com / NuvaOwner2026! (from /app/memory/test_credentials.md) — worked.",
+  "seed_data_creation": "None. Used existing seeded catalog (64 products).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Frontend-only iteration. Title + manifest rebrand verified. Drag-to-select grid marquee verified (marquee visible during drag, bulk action bar appears after release with correct count, plain drag replaces selection, mousedown on buttons ignored, Escape cancels, table view hides grid+sidebar). Recently-edited sidebar is visible and renders prior edits, but a freshly inline-edited product was NOT pushed to the top of the list — investigate whether backend PATCH bumps updatedAt or whether commitInlineEdit needs an optimistic client-side timestamp. Shift+drag additive test was inconclusive due to drag-region overlap; code path looks correct, recommend a re-test with explicit non-overlapping regions.",
+  "rca_of_the_issue": "Symptom: edited product missing from RecentlyEditedSidebar. Reproduction: login owner -> /products grid -> click [data-testid=price-{id}] on any product -> change value -> Enter -> wait 2.5s -> [data-testid=recent-{id}] is absent. Likely root cause: backend partial PATCH on /api/products/{id} does not update the `updatedAt` field, so sidebar's `isToday(p.updatedAt || p.createdAt)` filter + descending sort never surfaces it. Mitigation A (backend): ensure all product mutation paths set updatedAt=now(). Mitigation B (frontend): in commitInlineEdit, after success keep a Map of {id -> Date.now().toISOString()} and merge into product._ts inside RecentlyEditedSidebar so UX is correct even if backend is slow."
+}

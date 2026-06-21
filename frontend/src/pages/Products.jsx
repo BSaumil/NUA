@@ -10,6 +10,7 @@ import ImageLibrary from '../components/ImageLibrary';
 import { ProductsToolbar } from '../components/products/ProductsToolbar';
 import { ProductTable } from '../components/products/ProductTable';
 import { BulkEditDialog } from '../components/products/BulkEditDialog';
+import { RecentlyEditedSidebar } from '../components/products/RecentlyEditedSidebar';
 import { toast } from 'sonner';
 
 const makeEmptyProduct = () => ({
@@ -389,26 +390,38 @@ const Products = () => {
             onBulkDelete={bulkDelete}
           />
 
-          <ProductTable
-            theme={theme}
-            layoutMode={layoutMode}
-            filteredProducts={filteredProducts}
-            insights={insights}
-            selected={selected}
-            toggleSelect={toggleSelect}
-            allVisibleSelected={allVisibleSelected}
-            selectAllVisible={selectAllVisible}
-            clearSelection={clearSelection}
-            inlineEditCell={inlineEditCell}
-            inlineValue={inlineValue}
-            setInlineValue={setInlineValue}
-            setInlineEditCell={setInlineEditCell}
-            startInlineEdit={startInlineEdit}
-            commitInlineEdit={commitInlineEdit}
-            toggleEightySix={toggleEightySix}
-            openEditProduct={openEditProduct}
-            deleteProduct={deleteProduct}
-          />
+          <div className="flex gap-4 items-start" data-testid="products-layout">
+            {layoutMode === 'grid' && (
+              <RecentlyEditedSidebar
+                theme={theme}
+                products={products}
+                onEdit={openEditProduct}
+              />
+            )}
+            <div className="flex-1 min-w-0">
+              <ProductTable
+                theme={theme}
+                layoutMode={layoutMode}
+                filteredProducts={filteredProducts}
+                insights={insights}
+                selected={selected}
+                toggleSelect={toggleSelect}
+                setSelected={setSelected}
+                allVisibleSelected={allVisibleSelected}
+                selectAllVisible={selectAllVisible}
+                clearSelection={clearSelection}
+                inlineEditCell={inlineEditCell}
+                inlineValue={inlineValue}
+                setInlineValue={setInlineValue}
+                setInlineEditCell={setInlineEditCell}
+                startInlineEdit={startInlineEdit}
+                commitInlineEdit={commitInlineEdit}
+                toggleEightySix={toggleEightySix}
+                openEditProduct={openEditProduct}
+                deleteProduct={deleteProduct}
+              />
+            </div>
+          </div>
         </>
       )}
 

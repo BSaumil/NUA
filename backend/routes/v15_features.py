@@ -140,9 +140,12 @@ async def voice_order(data: dict, _: dict = Depends(get_user)):
     try:
         from openai import OpenAI
         import tempfile
-        # Use Emergent Universal Key (OpenAI-compatible)
-        client = OpenAI(api_key=os.environ.get("EMERGENT_LLM_KEY"),
-                       base_url="https://integrations.emergentagent.com/llm/openai")
+        # Universal LLM gateway (OpenAI-compatible) wired up via env vars so we
+        # don't hard-code provider URLs here.
+        client = OpenAI(
+            api_key=os.environ.get("EMERGENT_LLM_KEY"),
+            base_url=os.environ.get("LLM_GATEWAY_URL", "https://integrations.emergentagent.com/llm/openai"),
+        )
         audio_bytes = base64.b64decode(audio_b64.split(",", 1)[-1])
         ext = ".webm" if "webm" in mime else ".mp3" if "mp3" in mime else ".wav"
         with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:

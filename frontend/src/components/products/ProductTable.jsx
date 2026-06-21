@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Edit, Trash2, CheckSquare, Square, TrendingUp, TrendingDown } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -8,6 +8,12 @@ import { Card, CardContent } from '../ui/card';
  * Renders the catalog as either a card grid or a data table (same data).
  * Inline-edit controls for name/price/stock fields and quick 86 toggles are
  * built in. Pure presentational — all mutations flow through callbacks.
+ *
+ * Grid view ships a Finder-style drag-to-select rectangle: mouse-down on
+ * empty grid space starts a marquee; cards whose bounding box intersects
+ * the marquee become selected on mouse-up. Hold Shift to add to the
+ * existing selection instead of replacing it. Drags that originate inside
+ * a button, link, input or card are ignored so single-clicks still work.
  */
 export const ProductTable = ({
   theme,
@@ -16,6 +22,7 @@ export const ProductTable = ({
   insights,
   selected,
   toggleSelect,
+  setSelected,
   allVisibleSelected,
   selectAllVisible,
   clearSelection,
@@ -29,9 +36,105 @@ export const ProductTable = ({
   openEditProduct,
   deleteProduct,
 }) => {
+  // ---- Drag-to-select state (grid view only) ----
+  const gridRef = useRef(null);
+  const [drag, setDrag] = useState(null);   // {x0,y0,x1,y1,additive}
+  const dragStartedRef = useRef(false);
+
+  const isInteractive = (el) => {
+    while (el && el !== gridRef.current) {
+      const tag = el.tagName;
+      if (tag === 'BUTTON' || tag === 'A' || tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'LABEL') return true;
+      if (el.getAttribute && el.getAttribute('data-no-marquee') === '1') return true;
+      el = el.parentElement;
+    }
+    return false;
+  };
+
+  const onMouseDown = (e) => {
+    if (e.button !== 0) return;                  // primary button only
+    if (!gridRef.current) return;
+    if (isInteractive(e.target)) return;          // don't hijack clicks
+    const rect = gridRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left + gridRef.current.scrollLeft;
+    const y = e.clientY - rect.top + gridRef.current.scrollTop;
+    setDrag({ x0: x, y0: y, x1: x, y1: y, additive: e.shiftKey || e.metaKey || e.ctrlKey });
+    dragStartedRef.current = true;
+  };
+
+  useEffect(() => {
+    if (!drag) return;
+    const move = (e) => {
+      const rect = gridRef.current.getBoundingClientRect();
+      const x = e.clientX - rect.left + gridRef.current.scrollLeft;
+      const y = e.clientY - rect.top + gridRef.current.scrollTop;
+      setDrag(prev => prev ? { ...prev, x1: x, y1: y } : null);
+    };
+    const up = () => {
+      // Compute intersection with each card
+      if (!gridRef.current) { setDrag(null); return; }
+      const gridRect = gridRef.current.getBoundingClientRect();
+      const r = {
+        left:   Math.min(drag.x0, drag.x1),
+        right:  Math.max(drag.x0, drag.x1),
+        top:    Math.min(drag.y0, drag.y1),
+        bottom: Math.max(drag.y0, drag.y1),
+      };
+      // Only treat as a marquee if user actually moved more than a few pixels.
+      const moved = Math.abs(drag.x1 - drag.x0) + Math.abs(drag.y1 - drag.y0) > 6;
+      if (moved) {
+        const cards = gridRef.current.querySelectorAll('[data-card-id]');
+        const next = new Set(drag.additive ? selected : []);
+        cards.forEach((node) => {
+          const c = node.getBoundingClientRect();
+          const cx0 = c.left - gridRect.left + gridRef.current.scrollLeft;
+          const cy0 = c.top  - gridRect.top  + gridRef.current.scrollTop;
+          const cx1 = cx0 + c.width;
+          const cy1 = cy0 + c.height;
+          const intersects = !(cx1 < r.left || cx0 > r.right || cy1 < r.top || cy0 > r.bottom);
+          if (intersects) next.add(node.getAttribute('data-card-id'));
+        });
+        if (setSelected) setSelected(next);
+      }
+      setDrag(null);
+    };
+    const key = (e) => { if (e.key === 'Escape') setDrag(null); };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    window.addEventListener('keydown', key);
+    return () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      window.removeEventListener('keydown', key);
+    };
+  }, [drag, selected, setSelected]);
+
   if (layoutMode === 'grid') {
+    const marquee = drag ? {
+      left:   Math.min(drag.x0, drag.x1),
+      top:    Math.min(drag.y0, drag.y1),
+      width:  Math.abs(drag.x1 - drag.x0),
+      height: Math.abs(drag.y1 - drag.y0),
+    } : null;
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+      <div
+        ref={gridRef}
+        onMouseDown={onMouseDown}
+        className="relative grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 select-none"
+        data-testid="products-grid"
+      >
+        {marquee && marquee.width + marquee.height > 4 && (
+          <div
+            className="absolute pointer-events-none rounded-sm border-2 z-20"
+            style={{
+              left: marquee.left, top: marquee.top,
+              width: marquee.width, height: marquee.height,
+              borderColor: theme.primary,
+              background: `${theme.primary}15`,
+            }}
+            data-testid="marquee-rect"
+          />
+        )}
         {filteredProducts.map(product => {
           const ins = insights[product.id] || {};
           const sold = ins.weeklyUnitsSold || 0;
@@ -43,6 +146,7 @@ export const ProductTable = ({
           return (
             <Card
               key={product.id}
+              data-card-id={product.id}
               className={`hover:shadow-lg transition-shadow ${product.eightySixed ? 'opacity-60' : ''} ${selected.has(product.id) ? 'ring-2' : ''}`}
               style={selected.has(product.id) ? { boxShadow: `0 0 0 2px ${theme.primary}` } : {}}
               data-testid={`product-card-${product.id}`}
