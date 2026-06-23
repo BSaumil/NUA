@@ -72,6 +72,7 @@ const ALL_FEATURES = [
     { path: '/categories', label: 'Categories', icon: Tag, access: ['owner', 'manager'] },
     { path: '/modifiers', label: 'Modifiers', icon: ClipboardList, access: ['owner', 'manager'] },
     { path: '/channel-menus', label: 'Channel Menus', icon: Link2, access: ['owner', 'manager'] },
+    { path: '/social-media', label: 'Social Media', icon: Sparkles, access: ['owner', 'manager'] },
     { path: '/discounts', label: 'Discounts & Offers', icon: DollarSign, access: ['owner', 'manager'] },
     { path: '/comp-void', label: 'Comp / Void', icon: Ban, access: ['owner', 'manager'] },
     { path: '/payment-links', label: 'Payment Links', icon: Link2, access: ['owner', 'manager'] },

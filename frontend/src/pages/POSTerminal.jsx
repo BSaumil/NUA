@@ -67,7 +67,7 @@ const POSTerminal = () => {
   // v17: Points-and-Pay
   const [pointsBalance, setPointsBalance] = useState(null);
   const [pointsToRedeem, setPointsToRedeem] = useState(0);
-  const [loyaltyCfg, setLoyaltyCfg] = useState({ minRedeem: 50, redeemRate: 0.01 });
+  const [loyaltyCfg, setLoyaltyCfg] = useState({ minRedeem: 10, redeemRate: 0.01 });
 
   // Wave 2: AI Upsell suggestions
   const [upsells, setUpsells] = useState([]);
@@ -305,7 +305,7 @@ const POSTerminal = () => {
       if (modsRes.status === 'fulfilled' && Array.isArray(modsRes.value)) {
         setModifiers(modsRes.value);
       }
-      if (loyaltyRes.status === 'fulfilled') setLoyaltyCfg(loyaltyRes.value.data || { minRedeem: 50, redeemRate: 0.01 });
+      if (loyaltyRes.status === 'fulfilled') setLoyaltyCfg(loyaltyRes.value.data || { minRedeem: 10, redeemRate: 0.01 });
       if (labelsRes.status === 'fulfilled') setLabels(labelsRes.value.data || {});
       if (trainingRes.status === 'fulfilled') setTrainingMode(trainingRes.value.data?.enabled || false);
     } catch (error) {
@@ -331,7 +331,7 @@ const POSTerminal = () => {
   }, [filteredProducts]);
 
   const totalsRaw = calculateTotal();
-  const redeemDiscount = pointsToRedeem >= (loyaltyCfg.minRedeem || 50) ? pointsToRedeem * (loyaltyCfg.redeemRate || 0.01) : 0;
+  const redeemDiscount = pointsToRedeem >= (loyaltyCfg.minRedeem || 10) ? pointsToRedeem * (loyaltyCfg.redeemRate || 0.01) : 0;
   const totals = redeemDiscount > 0
     ? { ...totalsRaw, total: Math.max(0, parseFloat(totalsRaw.total) - redeemDiscount).toFixed(2),
         balanceDue: Math.max(0, parseFloat(totalsRaw.balanceDue || totalsRaw.total) - redeemDiscount).toFixed(2),
@@ -373,7 +373,7 @@ const POSTerminal = () => {
       });
       setLastTxnId(res.data?.id || null);
       // Loyalty: redeem first (if applicable), then earn on net spend
-      if (selectedCustomer && pointsToRedeem >= (loyaltyCfg.minRedeem || 50)) {
+      if (selectedCustomer && pointsToRedeem >= (loyaltyCfg.minRedeem || 10)) {
         try { await loyaltyEngineAPI.redeem({ customerId: selectedCustomer.id, points: pointsToRedeem, transactionId: res.data?.id }); } catch {}
       }
       if (selectedCustomer) {
@@ -479,10 +479,25 @@ const POSTerminal = () => {
   const splitRemaining = Math.max(0, Math.round((totalNum - splitPaid) * 100) / 100);
 
   const handlePaySplit = async (idx) => {
+    const part = splitParts[idx];
+    // ---- Validation: catch wrong / missing / overshoot amounts BEFORE we charge.
+    const amt = Number(part.amount) || 0;
+    if (amt <= 0) {
+      toast({ title: "Invalid amount", description: `Split #${idx + 1} must be greater than $0.`, variant: "destructive" });
+      return;
+    }
+    // Tolerate 1¢ rounding noise, but reject anything that overshoots the bill.
+    if (amt > splitRemaining + 0.005) {
+      toast({
+        title: "Amount exceeds remaining",
+        description: `Only $${splitRemaining.toFixed(2)} remaining — Split #${idx + 1} is $${amt.toFixed(2)}.`,
+        variant: "destructive",
+      });
+      return;
+    }
     setActiveSplitIndex(idx);
     setLoading(true);
     try {
-      const part = splitParts[idx];
       if (part.method === 'UPI' || part.method === 'QR Code') {
         const res = await paymentAPI.generateQR({ amount: part.amount, method: part.method === 'UPI' ? 'upi' : 'qr_code' });
         await paymentAPI.confirm(res.data.paymentId);
@@ -490,10 +505,22 @@ const POSTerminal = () => {
       updateSplitPart(idx, 'status', 'confirmed');
       toast({ title: `Split #${idx + 1} Paid`, description: `$${part.amount.toFixed(2)} from ${part.payerName}` });
 
-      // Check if all paid
+      // Check if all paid AND the maths balances
       const updatedParts = splitParts.map((s, i) => i === idx ? { ...s, status: 'confirmed' } : s);
       const allPaid = updatedParts.every(s => s.status === 'confirmed');
       if (allPaid) {
+        const totalPaid = updatedParts.reduce((sum, s) => sum + Number(s.amount || 0), 0);
+        // Defensive: refuse to finalise if the splits don't add up.
+        if (Math.abs(totalPaid - totalNum) > 0.01) {
+          toast({
+            title: "Split doesn't balance",
+            description: `Collected $${totalPaid.toFixed(2)} vs bill $${totalNum.toFixed(2)}. Adjust amounts before closing.`,
+            variant: "destructive",
+          });
+          // Revert the just-confirmed status so the cashier can fix it
+          updateSplitPart(idx, 'status', 'pending');
+          return;
+        }
         const res = await transactionsAPI.create({
           items: cart.map(item => toTxItem(item)),
           paymentMethod: 'Split Payment',

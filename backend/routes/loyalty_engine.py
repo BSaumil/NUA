@@ -22,8 +22,8 @@ router = APIRouter()
 # =============================================================================
 DEFAULT_CONFIG = {
     "earnRate": 1.0,         # 1 point per $1 base
-    "redeemRate": 0.01,      # 1 point = $0.01
-    "minRedeem": 50,         # min points to redeem
+    "redeemRate": 0.01,      # 1 point = $0.01 (so 10 points = 10c)
+    "minRedeem": 10,         # minimum 10 points (= $0.10) to redeem
     "categoryMultipliers": {},  # { "Coffee": 2.0, "Pastry": 1.5 }
     "active": True,
 }
@@ -105,7 +105,7 @@ async def redeem_points(data: dict, _: dict = Depends(get_user)):
     if not customer_id or points <= 0:
         raise HTTPException(status_code=400, detail="customerId + points (>0) required")
     cfg = await get_config()
-    min_redeem = int(cfg.get("minRedeem", 50))
+    min_redeem = int(cfg.get("minRedeem", 10))
     if points < min_redeem:
         raise HTTPException(status_code=400, detail=f"Minimum {min_redeem} points required")
     customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
@@ -140,8 +140,8 @@ async def get_balance(customer_id: str, _: dict = Depends(get_user)):
         "customerId": customer_id,
         "points": pts,
         "value": round(pts * float(cfg.get("redeemRate", 0.01)), 2),
-        "minRedeem": int(cfg.get("minRedeem", 50)),
-        "canRedeem": pts >= int(cfg.get("minRedeem", 50)),
+        "minRedeem": int(cfg.get("minRedeem", 10)),
+        "canRedeem": pts >= int(cfg.get("minRedeem", 10)),
     }
 
 

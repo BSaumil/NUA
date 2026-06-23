@@ -17,6 +17,7 @@ import Inventory from './pages/Inventory';
 import InventoryAccounting from './pages/InventoryAccounting';
 import BookingsInbox from './pages/BookingsInbox';
 import ChannelMenus from './pages/ChannelMenus';
+import SocialMedia from './pages/SocialMedia';
 import Accounting from './pages/Accounting';
 import BASGST from './pages/BASGST';
 import Settings from './pages/Settings';
@@ -129,6 +130,7 @@ function ProtectedRoutes() {
         <Route path="/reservations" element={<Reservations />} />
         <Route path="/bookings-inbox" element={<BookingsInbox />} />
         <Route path="/channel-menus" element={<ChannelMenus />} />
+        <Route path="/social-media" element={<SocialMedia />} />
         <Route path="/floor-plan" element={<FloorPlan />} />
         <Route path="/waitlist" element={<WaitlistPage />} />
         <Route path="/table-layout" element={<TableLayout />} />

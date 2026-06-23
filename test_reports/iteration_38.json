@@ -1,0 +1,50 @@
+{
+  "summary": "Iter 38 — Backend + Frontend testing for Social Media Marketing (new), Promotion dialog extraction, split-payment validation, loyalty minRedeem 50→10. Backend: 20/20 pytest passed (platforms, accounts CRUD with anon-401 / cashier-403-precedence / duplicate-409 / invalid-platform-400, AI generation with real Claude Sonnet 4.6 returning non-fallback content, posts create/list/publish/delete, account delete, loyalty config minRedeem=10/redeemRate=0.01). Frontend: SocialMedia page renders, 5 platform cards, connect dialog flow works (toast 'instagram connected (mock OAuth)' fires), AI composer (source-special + prompt + generate-btn) produced a real Claude-generated caption with hashtags in ~5s, publish-instagram moved post to posts-history-card with 'published' badge. PromotionDialog (extracted) opens via add-promo-btn, save-promo-btn creates promo and toast fires. Split-payment custom mode disables Pay on 0/negative amounts and on excess; split-imbalance-warning shows correctly. Loyalty cart UI shows 'Points & Pay (1 pt = $0.01, min 10)' — min=10 honoured. BottomDock 'More' menu contains a 'Social Media' link that navigates to /social-media.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/social/accounts", "issue": "Legacy doc in the same `social_accounts` collection (id SOC-BE695A8E, shape: {platform, accountName, accessToken, connected}) is returned alongside the new schema docs; it lacks `handle`/`platformLabel`/`tokenStatus`. Frontend renders this as 'Instagram@' (empty handle). Recommend either a Pydantic response model that drops malformed legacy docs, or a one-off migration to either delete or normalise legacy social_accounts rows. Could also filter by `tokenStatus` exists in the find()."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "SocialMedia / accounts-row Instagram card", "issue": "Instagram card displays '@' with empty handle even when a new account (e.g. nuva_e2e) was just connected. Root cause is the backend legacy doc surfacing first (see backend minor issue) — UI picks the first match for the platform and renders its empty handle.", "selector": "[data-testid=accounts-row]", "priority": "MEDIUM"},
+      {"component": "SocialMedia accounts", "issue": "Per-platform card data-testids (e.g. `platform-card-instagram`) are NOT present — only the accounts-row wrapper has a testid. Spec mentioned `[data-testid=accounts-row]` lists 5 platform cards; if the agent intent was individual testids, add `data-testid=platform-card-{key}` to each card for deterministic E2E.", "selector": "n/a", "priority": "LOW"},
+      {"component": "SocialMedia / Connect flow", "issue": "`[data-testid=mock-oauth-banner]` was not found in the DOM after connect; instead a toast 'instagram connected (mock OAuth)' fires (which is fine UX). If the persistent banner is part of the iteration spec, it's missing.", "selector": "[data-testid=mock-oauth-banner]", "priority": "LOW"},
+      {"component": "POS Loyalty", "issue": "`[data-testid=points-pay-block]` not found, although the underlying UI ('Points & Pay (1 pt = $0.01, min 10)' input row) DOES render correctly when a customer with points is selected. Add a wrapper data-testid for testability.", "selector": "[data-testid=points-pay-block]", "priority": "LOW"},
+      {"component": "POS Loyalty", "issue": "Spec referenced `[data-testid=customer-search]` and `[data-testid=redeem-value]`. Actual testids in the DOM are `customer-search-input` / `customer-option-{id}`; no `redeem-value` testid was found on the points input row. Add a `data-testid=redeem-value` span to expose the computed 'Discount: $0.10' text for E2E assertions.", "selector": "[data-testid=redeem-value]", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "SocialMedia", "issues": ["Two DialogContent warnings: 'Missing Description or aria-describedby={undefined}' for the connect dialog — non-blocking a11y warning; add a DialogDescription."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration38_social_loyalty.py",
+    "/app/test_reports/pytest/pytest_iteration38.xml"
+  ],
+  "action_items": [
+    "Filter or migrate legacy social_accounts docs so GET /api/social/accounts only returns documents matching the new shape (handle/platformLabel/tokenStatus). Suggested: `db.social_accounts.find({\"tokenStatus\":{\"$exists\":true}}, {\"_id\":0})` or response_model=List[ConnectedAccount].",
+    "Add per-platform `data-testid=platform-card-{key}` on each card inside accounts-row for E2E determinism.",
+    "Add `data-testid=mock-oauth-banner` (or remove from spec) — currently only a toast is shown.",
+    "Add `data-testid=points-pay-block` wrapper + `data-testid=redeem-value` span on the POS loyalty redemption row.",
+    "Add `<DialogDescription>` to the Connect dialog to silence Radix a11y warning."
+  ],
+  "critical_code_review_comments": [
+    "social_media.py GET /social/accounts has no response model — any legacy doc in the collection is leaked verbatim. Either tighten the Mongo query (`tokenStatus`: {$exists: true}) or add a Pydantic response_model and project_only the fields used by the UI.",
+    "social_media.py:113 list_posts() uses .sort('createdAt', -1) — good. But create_post does `**body.dict()` which means caller-supplied `status` is honoured for both 'draft' AND any other value (e.g. 'published') without validation. Constrain status to {draft,scheduled,published,failed} or strip it before insert.",
+    "Reusing the `social_accounts` collection across two different feature modules (legacy channel/v25 vs the new social_media route) is risky. Consider renaming the new collection to `social_marketing_accounts` to avoid silent shape collisions.",
+    "_generate_for_platform() catches all exceptions and falls back silently — that's the right default but the `aiError` is only attached to the per-platform output; nothing surfaces this in a UI banner. Consider exposing a top-level `partialFailures` array on the response so the UI can warn 'Used template (LLM error)'.",
+    "loyalty_engine.py DEFAULT_CONFIG.minRedeem updated to 10 but the comment block at top of file still says 'Minimum redemption = 50 points' — stale documentation, please update."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration38_social_loyalty.py"
+  ],
+  "success_rate": {"backend": "100% (20/20)", "frontend": "~88% (Social Media create/generate/publish, Promotion dialog, Split validation, Loyalty min=10 all verified; minor testid gaps + legacy doc handle bug)"},
+  "test_credentials": "owner@nuva.com / NuvaOwner2026! (from /app/memory/test_credentials.md). Cashier 403 verified with cashier@nuva.com / Staff2026!.",
+  "seed_data_creation": "TEST_promo_iter38 promotion was created via the UI and remains in /products (please delete in cleanup). nuva_qa instagram account was created+deleted via backend tests (clean). nuva_e2e instagram account was created via UI test — still in db.social_accounts. Test posts were created+deleted (clean).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend is solid (20/20). Frontend critical flows pass. The only real bug is the legacy social_accounts doc being returned by GET /api/social/accounts which causes Instagram card to render empty handle — fix server-side filter or migrate. Other notes are testid-completeness items, not functional bugs. Real AI (Claude Sonnet 4.6) responds in ~5s with isFallback=false. Split-pay validation + loyalty min=10 verified in UI. PromotionDialog extraction is working. Social Media nav link is under BottomDock > More.",
+  "rca_of_the_issue": "Symptom: Instagram account card in /social-media shows 'Instagram@' (no handle) after connecting. Repro: login owner → /social-media → click Connect Account → select Instagram → enter any handle → submit. The toast fires and the card shows '@' empty. Root cause: db.social_accounts collection contains a legacy document (id=SOC-BE695A8E, shape {platform:'instagram', accountName, accessToken, connected:true}) inserted by an older module (channel_menus/v25). The new GET /api/social/accounts runs `db.social_accounts.find({}, {'_id': 0})` with no schema filter, so the legacy doc is returned. SocialMedia.jsx renders the first connection it finds for each platform and tries to show `acc.handle` which is undefined → renders '@'. Fix: in list_accounts() query, add `{'tokenStatus': {'$exists': True}}` OR migrate legacy docs."
+}

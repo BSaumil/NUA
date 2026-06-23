@@ -708,4 +708,17 @@ export const v15API = {
   getLabels: (lang) => api.get(`/i18n/labels/${lang}`),
 };
 
+// ============ Social Media Marketing ============
+export const socialAPI = {
+  listAccounts: () => api.get('/social/accounts'),
+  connectAccount: (data) => api.post('/social/accounts', data),
+  disconnectAccount: (id) => api.delete(`/social/accounts/${id}`),
+  listPosts: (params = {}) => api.get('/social/posts', { params }),
+  createPost: (data) => api.post('/social/posts', data),
+  deletePost: (id) => api.delete(`/social/posts/${id}`),
+  publishPost: (id) => api.post(`/social/posts/${id}/publish`),
+  aiGenerate: (data) => api.post('/social/ai-generate', data),
+  listPlatforms: () => api.get('/social/platforms'),
+};
+
 export default api;

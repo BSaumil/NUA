@@ -74,10 +74,24 @@ export function SplitPaymentDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center justify-between">
             <span>Split Payment — ${total.toFixed(2)}</span>
-            {splitRemaining > 0 && <Badge variant="outline" className="text-orange-600 border-orange-300">${splitRemaining.toFixed(2)} remaining</Badge>}
+            {splitRemaining > 0 && <Badge variant="outline" className="text-orange-600 border-orange-300" data-testid="split-remaining-badge">${splitRemaining.toFixed(2)} remaining</Badge>}
             {splitRemaining === 0 && splitParts.length > 0 && <Badge className="bg-green-600 text-white">All paid</Badge>}
           </DialogTitle>
         </DialogHeader>
+        {(() => {
+          if (splitMode === 'custom' && splitParts.length > 0) {
+            const sum = splitParts.reduce((s, p) => s + Number(p.amount || 0), 0);
+            const off = Math.round((sum - total) * 100) / 100;
+            if (Math.abs(off) > 0.005) {
+              return (
+                <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700" data-testid="split-imbalance-warning">
+                  Splits {off > 0 ? 'exceed' : 'are below'} the bill by ${Math.abs(off).toFixed(2)} — fix before closing.
+                </div>
+              );
+            }
+          }
+          return null;
+        })()}
         <div className="space-y-4 py-2">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
@@ -131,8 +145,9 @@ export function SplitPaymentDialog({
                       </div>
                     </div>
                     {part.status !== 'confirmed' ? (
-                      <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white h-8 px-3"
-                        onClick={() => onPayPart(idx)} disabled={loading && activeSplitIndex === idx}
+                      <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white h-8 px-3 disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={() => onPayPart(idx)}
+                        disabled={(loading && activeSplitIndex === idx) || Number(part.amount || 0) <= 0 || Number(part.amount || 0) > splitRemaining + 0.005}
                         data-testid={`split-pay-${idx}`}>
                         {loading && activeSplitIndex === idx ? '...' : 'Pay'}
                       </Button>
