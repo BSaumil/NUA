@@ -203,7 +203,7 @@ const SocialMedia = () => {
           const Icon = PLATFORM_ICON[p.key] || Share2;
           const connected = accounts.find(a => a.platform === p.key);
           return (
-            <Card key={p.key} className={`border-2 ${connected ? '' : 'border-dashed opacity-60'}`} data-testid={`platform-${p.key}`}>
+            <Card key={p.key} className={`border-2 ${connected ? '' : 'border-dashed opacity-60'}`} data-testid={`platform-card-${p.key}`}>
               <CardContent className="p-3 flex items-center gap-3">
                 <Icon size={28} style={{ color: connected ? theme.primary : '#9ca3af' }} />
                 <div className="flex-1 min-w-0">

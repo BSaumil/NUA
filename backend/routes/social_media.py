@@ -64,7 +64,13 @@ class AIGenerateIn(BaseModel):
 # ============ ACCOUNT CRUD ============
 @router.get("/social/accounts")
 async def list_accounts(_: dict = Depends(get_user)):
-    accounts = await db.social_accounts.find({}, {"_id": 0}).to_list(50)
+    # Only return rows that match the new schema. Legacy docs from older
+    # modules (channel_menus / v25) lived in the same collection and had a
+    # different shape — they would render as empty cards in the UI.
+    accounts = await db.social_accounts.find(
+        {"tokenStatus": {"$exists": True}},
+        {"_id": 0},
+    ).to_list(50)
     return accounts
 
 
@@ -120,6 +126,9 @@ async def create_post(body: SocialPostIn, user: dict = Depends(require_owner_or_
         raise HTTPException(400, f"Platform must be one of {SUPPORTED_PLATFORMS}")
     if body.postType not in ("post", "story", "reel"):
         raise HTTPException(400, "postType must be post | story | reel")
+    # Constrain status — never trust the caller to mark something already published.
+    if body.status and body.status not in ("draft", "scheduled", "published", "failed"):
+        raise HTTPException(400, "status must be draft | scheduled | published | failed")
     # Must have a connected account for that platform
     if not await db.social_accounts.find_one({"platform": body.platform}):
         raise HTTPException(400, f"No connected {body.platform} account — connect one first")

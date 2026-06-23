@@ -3,7 +3,7 @@
 Loyalty rules (user spec):
 - 1 USD spent = 1 point (base)
 - Categories can have a multiplier configured by owner (e.g. Coffee 2x)
-- Minimum redemption = 50 points
+- Minimum redemption = 10 points (= $0.10)
 - 1 point = 1¢ = $0.01 face value at redemption
 """
 from fastapi import APIRouter, HTTPException, Request, Depends

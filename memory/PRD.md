@@ -1,5 +1,33 @@
 # NUA POS — PRD v26.0 (Enterprise Licensing & Entitlements)
 
+## v27.1 — Iteration 38 (Feb 2026): Social Media Marketing · Loyalty 10pt Floor · Split Validation · Promotion Dialog Extract
+
+### What landed
+- **Social Media Marketing** — new top-level feature at **`/social-media`**:
+  - **Backend** `routes/social_media.py` with full CRUD for connections (Instagram/Facebook/TikTok/X/Google Business), draft + scheduled + published posts, and an AI generation endpoint. Mock OAuth at the connection boundary; actual cross-posting is a stub on `POST /social/posts/{id}/publish` (status flip + logged).
+  - **AI content** via **Claude Sonnet 4.6** through the Emergent LLM Key. Pick a product, promotion, or describe a daily special → returns platform-tuned `{caption, hashtags[], imageAlt, isFallback}` per platform. Falls back to templated copy if the LLM key is missing or upstream errors (with `aiError` flag). Validated: real generations come back in ~5s, `isFallback: false`.
+  - **Frontend** `pages/SocialMedia.jsx` — composer card (source toggle product/promotion/special, tone/format/platforms/image picker/schedule), drafts preview with editable captions and clickable hashtag chips, posts history table with per-row publish/delete. Wired to the existing **Image Library** for hero images. Mock-OAuth banner clearly communicates that connections are sandboxed.
+  - **Nav** — added to `BottomDock` (More menu) with the Sparkles icon.
+- **Promotion dialog extracted** to `components/products/PromotionDialog.jsx` (117 lines). `Products.jsx` is now 608 lines.
+- **Split payment validation** (`PaymentDialogs.jsx` + `POSTerminal.handlePaySplit`):
+  - Pay button **disabled** when amount ≤ $0 OR exceeds remaining.
+  - **Imbalance warning banner** (`split-imbalance-warning`) when custom-mode splits don't add to bill total.
+  - Final txn refuses to create if splits don't balance within 1¢ (reverts the just-confirmed status so the cashier can fix it).
+- **Loyalty floor lowered**: `minRedeem` 50 → **10 points (= $0.10)** in `routes/loyalty_engine.py` DEFAULT_CONFIG + live config row updated. POS POS displays "min 10" prompt and 10 points discount = $0.10. CRM still records earnings/visits/lastVisit/totalSpent on every txn.
+- **Components interconnection (verified, not new)**:
+  - `routes/transactions.py` already decrements `products.stock`, fires `deduct_recipe_stock()`, and increments customer `totalSpent/visits/points + lastVisit` per sale.
+  - 86-toggle persists via `products.eightySixed` and is honoured throughout grid/table/POS.
+
+### Iteration 38 Tests
+- **Backend 20/20 PASS** (`tests/test_iteration38_social_loyalty.py`). Anonymous 401 / cashier 403 / duplicate 409 / invalid platform 400 / invalid status 400 / AI generation real (non-fallback) / accounts + posts CRUD / publish / delete / loyalty config minRedeem=10.
+- **Frontend ~88% PASS**. SocialMedia create → generate → publish flow live; Promotion dialog extraction works; split-pay validation works; loyalty 10pt floor honoured. Bug found: legacy `social_accounts` doc (channel_menus / v25 era) leaking into `GET /social/accounts` → **FIXED** by filtering `{tokenStatus: {$exists: True}}` and adding `data-testid="platform-card-{key}"` for E2E determinism.
+
+### Backlog
+- **P2** Real Meta / TikTok / X OAuth integration to lift the publish stub.
+- **P2** ~8 inline-auth endpoints (custom role mixes / signed-device-secret) still on the legacy pattern — bespoke refactor required.
+- **P2** `social_media_router` `partialFailures` top-level field so the UI can warn when LLM fell back.
+- **P1** Real SendGrid / Twilio API keys to activate notifications.
+
 ## v27.0 — Iteration 37 (Feb 2026): Drag-to-Select Marquee · Recently Edited Sidebar · Nua Rebrand
 
 ### What landed
