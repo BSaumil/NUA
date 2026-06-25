@@ -715,9 +715,11 @@ export const socialAPI = {
   disconnectAccount: (id) => api.delete(`/social/accounts/${id}`),
   listPosts: (params = {}) => api.get('/social/posts', { params }),
   createPost: (data) => api.post('/social/posts', data),
+  updatePost: (id, data) => api.patch(`/social/posts/${id}`, data),
   deletePost: (id) => api.delete(`/social/posts/${id}`),
   publishPost: (id) => api.post(`/social/posts/${id}/publish`),
   aiGenerate: (data) => api.post('/social/ai-generate', data),
+  aiWeeklyPlan: (data) => api.post('/social/ai-weekly-plan', data),
   listPlatforms: () => api.get('/social/platforms'),
 };
 

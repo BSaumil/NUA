@@ -11,7 +11,7 @@ flags it locally — the platform call is logged but stubbed.
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
 from pydantic import BaseModel
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import uuid
 import os
 import logging
@@ -142,6 +142,25 @@ async def create_post(body: SocialPostIn, user: dict = Depends(require_owner_or_
     await db.social_posts.insert_one(doc)
     doc.pop("_id", None)
     return doc
+
+
+@router.patch("/social/posts/{post_id}")
+async def update_post(post_id: str, body: dict, _: dict = Depends(require_owner_or_manager)):
+    """Patch an existing post — used by the calendar's drag-to-reschedule
+    flow. Only a small, explicit set of fields is mutable; status is
+    validated against the same allow-list as create_post."""
+    allowed = {"caption", "hashtags", "imageUrl", "scheduledFor", "status", "postType"}
+    update = {k: v for k, v in body.items() if k in allowed}
+    if "status" in update and update["status"] not in ("draft", "scheduled", "published", "failed"):
+        raise HTTPException(400, "status must be draft | scheduled | published | failed")
+    if "postType" in update and update["postType"] not in ("post", "story", "reel"):
+        raise HTTPException(400, "postType must be post | story | reel")
+    if not update:
+        raise HTTPException(400, "Nothing to update")
+    res = await db.social_posts.update_one({"id": post_id}, {"$set": update})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Post not found")
+    return await db.social_posts.find_one({"id": post_id}, {"_id": 0})
 
 
 @router.delete("/social/posts/{post_id}")
@@ -303,3 +322,162 @@ async def list_platforms(_: dict = Depends(get_user)):
     return [
         {"key": k, "label": PLATFORM_LABELS[k]} for k in SUPPORTED_PLATFORMS
     ]
+
+
+# ============ AI WEEKLY CONTENT PLAN ============
+class WeeklyPlanIn(BaseModel):
+    daysAhead: int = 7
+    postTime: Optional[str] = "12:00"   # local HH:MM the plan should fire each day
+    tone: Optional[str] = "warm"
+    platforms: Optional[List[str]] = None     # default: every connected platform
+    save: bool = True                          # if False, returns a preview without persisting
+
+
+@router.post("/social/ai-weekly-plan")
+async def ai_weekly_plan(body: WeeklyPlanIn, user: dict = Depends(require_owner_or_manager)):
+    """Generate a 7-day cross-platform social plan from top-selling products
+    + active promotions, distributed one post per day per platform.
+
+    Source rotation per day:
+      - Day 0,3,6 → product (top sellers, cycled)
+      - Day 1,4   → promotion (active, cycled)
+      - Day 2,5   → 'special' (free-form prompt seeded from the day-of-week)
+    Falls back to product → product if no promotions exist.
+
+    The endpoint is idempotent enough to re-run: any prior `auto_plan_*`
+    scheduled-but-unpublished post in the target window is dismissed before
+    new ones land, so the cashier never ends up with duplicate posts.
+    """
+    days = max(1, min(14, body.daysAhead or 7))
+    tone = body.tone or "warm"
+    try:
+        hour, minute = (body.postTime or "12:00").split(":")
+        target_hour, target_min = int(hour), int(minute)
+    except Exception:
+        target_hour, target_min = 12, 0
+
+    # 1. Pick the platforms — default to all connected accounts.
+    if body.platforms:
+        platforms = [p for p in body.platforms if p in SUPPORTED_PLATFORMS]
+    else:
+        accs = await db.social_accounts.find(
+            {"tokenStatus": {"$exists": True}}, {"_id": 0, "platform": 1},
+        ).to_list(50)
+        platforms = sorted({a["platform"] for a in accs})
+    if not platforms:
+        raise HTTPException(400, "No connected social accounts — connect at least one first")
+
+    # 2. Compute top-selling products (last 7 days). Falls back gracefully
+    # when there aren't enough transactions to mine.
+    since = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    pipeline = [
+        {"$match": {"timestamp": {"$gte": since}}},
+        {"$unwind": "$items"},
+        {"$group": {"_id": "$items.productId", "qty": {"$sum": "$items.quantity"}}},
+        {"$sort": {"qty": -1}}, {"$limit": 7},
+    ]
+    try:
+        top = await db.transactions.aggregate(pipeline).to_list(7)
+        top_ids = [t["_id"] for t in top if t.get("_id")]
+    except Exception:
+        top_ids = []
+    if not top_ids:
+        fallback = await db.products.find(
+            {"eightySixed": {"$ne": True}}, {"_id": 0, "id": 1},
+        ).to_list(7)
+        top_ids = [p["id"] for p in fallback]
+    products_for_plan = []
+    for pid in top_ids:
+        p = await db.products.find_one({"id": pid}, {"_id": 0})
+        if p:
+            products_for_plan.append(p)
+    if not products_for_plan:
+        raise HTTPException(400, "No products available to seed a plan — add a product or run a sale first")
+
+    # 3. Active promotions
+    promos = await db.promotions.find({"active": True}, {"_id": 0}).to_list(10)
+
+    # 4. Wipe any leftover auto-plan posts in the upcoming window so re-runs
+    # don't pile up duplicates.
+    window_end = (datetime.now(timezone.utc) + timedelta(days=days + 1)).isoformat()
+    await db.social_posts.delete_many({
+        "autoPlanRun": True,
+        "status": "scheduled",
+        "scheduledFor": {"$gte": datetime.now(timezone.utc).isoformat(), "$lte": window_end},
+    })
+
+    # 5. Walk N days × P platforms, alternating the source type.
+    SPECIAL_SEEDS = [
+        "Chef's Choice tonight — limited covers, intimate vibe.",
+        "Weekend brunch is on — bring the crew.",
+        "Pairing night: every main paired with a hand-picked sip.",
+        "Hidden-menu Tuesday — DM us for the secret order.",
+    ]
+    plan_id = f"plan-{uuid.uuid4().hex[:8]}"
+    saved_posts = []
+    preview = []
+    now = datetime.now(timezone.utc)
+
+    for d in range(days):
+        day = now + timedelta(days=d + 1)
+        scheduled_for = day.replace(hour=target_hour, minute=target_min, second=0, microsecond=0).isoformat()
+        if d % 3 == 1 and promos:
+            promo = promos[d % len(promos)]
+            source_type, source_id, subject_label, subject_detail, image_hint = (
+                "promotion", promo["id"], promo.get("name", "promo"),
+                f"{promo.get('discount', 0)}% off — schedule: {promo.get('schedule', 'ongoing')}",
+                None,
+            )
+        elif d % 3 == 2:
+            seed = SPECIAL_SEEDS[d % len(SPECIAL_SEEDS)]
+            source_type, source_id, subject_label, subject_detail, image_hint = (
+                "special", None, seed[:60], seed, None,
+            )
+        else:
+            prod = products_for_plan[d % len(products_for_plan)]
+            source_type, source_id = "product", prod["id"]
+            subject_label = prod.get("name", "our top dish")
+            subject_detail = (
+                f"Category: {prod.get('category', 'food')}, price ${prod.get('price', 0):.2f}. "
+                f"Description: {prod.get('description') or prod.get('seoDescription') or ''}"
+            )
+            image_hint = prod.get("image")
+
+        for platform in platforms:
+            gen = await _generate_for_platform(
+                platform=platform, post_type="post", tone=tone,
+                subject_label=subject_label, subject_detail=subject_detail, locale="en-AU",
+            )
+            doc = {
+                "id": str(uuid.uuid4()),
+                "platform": platform,
+                "postType": "post",
+                "caption": gen["caption"],
+                "hashtags": gen["hashtags"],
+                "imageAlt": gen.get("imageAlt"),
+                "imageUrl": image_hint,
+                "sourceType": source_type,
+                "sourceId": source_id,
+                "scheduledFor": scheduled_for,
+                "status": "scheduled" if body.save else "preview",
+                "autoPlan": True,
+                "autoPlanRun": body.save,
+                "autoPlanId": plan_id,
+                "isFallback": bool(gen.get("isFallback")),
+                "createdBy": user.get("email"),
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+            if body.save:
+                await db.social_posts.insert_one(doc)
+                doc.pop("_id", None)
+                saved_posts.append(doc)
+            else:
+                preview.append(doc)
+
+    return {
+        "planId": plan_id,
+        "saved": len(saved_posts),
+        "preview": preview if not body.save else [],
+        "posts": saved_posts if body.save else preview,
+        "platformsUsed": platforms,
+    }

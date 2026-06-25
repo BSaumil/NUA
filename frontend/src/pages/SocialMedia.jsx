@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { useTheme } from '../contexts/ThemeContext';
 import { socialAPI, productsAPI, promotionsAPI } from '../services/api';
 import ImageLibrary from '../components/ImageLibrary';
+import { SocialCalendar } from '../components/social/SocialCalendar';
 
 const PLATFORM_ICON = {
   instagram: Instagram,
@@ -60,6 +61,9 @@ const SocialMedia = () => {
   const [connectPlatform, setConnectPlatform] = useState('instagram');
   const [connectHandle, setConnectHandle] = useState('');
   const [connectDisplayName, setConnectDisplayName] = useState('');
+
+  // Tab: composer vs calendar
+  const [view, setView] = useState('composer');
 
   const reload = async () => {
     try {
@@ -197,6 +201,26 @@ const SocialMedia = () => {
         </Button>
       </div>
 
+      {/* Tab toggle */}
+      <div className="flex gap-2" data-testid="social-tabs">
+        <Button
+          variant={view === 'composer' ? 'default' : 'outline'}
+          onClick={() => setView('composer')}
+          style={{ backgroundColor: view === 'composer' ? theme.primary : 'transparent', color: view === 'composer' ? 'white' : theme.text }}
+          data-testid="tab-composer"
+        >
+          <Sparkles className="mr-2" size={16} /> Composer
+        </Button>
+        <Button
+          variant={view === 'calendar' ? 'default' : 'outline'}
+          onClick={() => setView('calendar')}
+          style={{ backgroundColor: view === 'calendar' ? theme.primary : 'transparent', color: view === 'calendar' ? 'white' : theme.text }}
+          data-testid="tab-calendar"
+        >
+          <Calendar className="mr-2" size={16} /> Calendar
+        </Button>
+      </div>
+
       {/* Connected accounts row */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3" data-testid="accounts-row">
         {platforms.map(p => {
@@ -236,7 +260,7 @@ const SocialMedia = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6" data-testid="composer-tab" style={{ display: view === 'composer' ? 'grid' : 'none' }}>
         {/* Composer */}
         <Card data-testid="composer-card">
           <CardContent className="p-4 space-y-3">
@@ -418,7 +442,7 @@ const SocialMedia = () => {
       </div>
 
       {/* Posts history */}
-      <Card data-testid="posts-history-card">
+      <Card data-testid="posts-history-card" style={{ display: view === 'composer' ? 'block' : 'none' }}>
         <CardContent className="p-4">
           <h2 className="text-lg font-bold mb-3" style={{ color: theme.text }}>Recent posts</h2>
           {posts.length === 0 ? (
@@ -476,6 +500,16 @@ const SocialMedia = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* Calendar view */}
+      {view === 'calendar' && (
+        <SocialCalendar
+          theme={theme}
+          posts={posts}
+          accounts={accounts}
+          onReload={reload}
+        />
+      )}
 
       {/* Connect account dialog */}
       <Dialog open={connectOpen} onOpenChange={setConnectOpen}>

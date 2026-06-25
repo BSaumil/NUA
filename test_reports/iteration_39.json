@@ -1,0 +1,43 @@
+{
+  "summary": "Iter 39 — Backend + Frontend testing for Social Media Content Calendar + AI Weekly Plan + PATCH posts. Backend pytest: 8/9 PASS. Real Claude calls succeeded (~80–110s for save=true 7-day plan across 1 platform). Critical functional bug found: save=false (preview) STILL deletes prior autoPlanRun:true posts — the delete_many() runs unconditionally before the save branch in ai_weekly_plan(). 8/9 covers: anonymous-401, save=true returns saved>0 with status='scheduled'+autoPlan=true+autoPlanRun=true, idempotent re-run (fresh ids, prior wiped, same count), PATCH /social/posts/{id} (reschedule 200, bogus status 400, anonymous 401, 404 missing), and no-accounts → 400. Frontend: /social-media → tabs (composer + calendar) visible. Calendar mounts with cal-month-label='June 2026', cal-prev/next/today all navigate correctly (next → July, today → June). KPI strip (kpi-scheduled/published/drafts), ai-weekly-plan-btn, calendar-grid, upcoming-strip ALL render. 12 cal-post-{id} chips rendered (from saved-true backend tests), 25 upcoming-{id} items, 8 upcoming-publish-{id} buttons. Publishing from upcoming flipped chip glyph to ✓. Composer tab regression OK (composer-card, generations-card, posts-history-card all visible). Regression pages /pos /products /channel-menus /reservations /inventory-accounting all load with 0 pageerrors. AI Weekly Plan UI button + drag-to-reschedule UX were not click-tested in browser (real Claude takes 90s+ per platform×day and the backend path is already covered by pytest).",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/social/ai-weekly-plan (save=false)", "issue": "PREVIEW MODE IS DESTRUCTIVE. The delete_many() that wipes prior autoPlanRun:true scheduled posts in the upcoming window runs UNCONDITIONALLY before the `if body.save:` check (social_media.py:402-407). Result: calling preview deletes the user's previously saved weekly plan even though no new posts are persisted. Repro: save=true (creates 7 posts) → save=false on same window → GET /social/posts shows the 7 are GONE. Fix: gate the delete_many inside `if body.save:` (or skip when save=false).", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "POST /api/social/ai-weekly-plan", "issue": "When no platforms resolve (user sends platforms=['nonexistent']), 400 is returned — correct. But the message 'No connected social accounts' is misleading in that case since accounts ARE connected; only the requested platforms didn't match SUPPORTED_PLATFORMS. Minor UX wording."},
+      {"endpoint": "POST /api/social/ai-weekly-plan", "issue": "platformsUsed in response is correct, but the response contract has `preview: []` always populated when save=true and `posts: []` empty when save=false — the field 'posts' is reused for both branches per the spec. Just noting for downstream consumers."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration39_social_calendar.py",
+    "/app/test_reports/pytest/pytest_iteration39.xml"
+  ],
+  "action_items": [
+    "HIGH: In /app/backend/routes/social_media.py, move the `await db.social_posts.delete_many({autoPlanRun:True, ...})` block INSIDE the `if body.save:` branch (lines 402-407) so preview mode (save=false) does NOT destroy the user's previously saved auto-plan. Currently calling 'Preview' wipes the saved plan even though nothing new is persisted.",
+    "(Optional) Make weekly plan error message distinguish 'no connected accounts' from 'no platforms in request matched'."
+  ],
+  "critical_code_review_comments": [
+    "social_media.py:402-407 — delete_many for autoPlanRun runs before the save branch, making preview mode destructive. Must be gated by body.save.",
+    "social_media.py:336 ai_weekly_plan runs N×P real Claude calls inline in the request handler (no streaming, no background task). For 14 days × 5 platforms that's 70 LLM calls in one HTTP request — easy to hit a 60s gateway timeout. Consider moving to a background task or capping daysAhead*len(platforms) per request.",
+    "social_media.py update_post (PATCH) returns the raw mongo doc via find_one — uses projection {_id:0} correctly, but there's no Pydantic response model so the shape is loose.",
+    "social_media.py weekly plan uses `tokenStatus:{$exists:True}` query for picking platforms (good, prior iter 38 minor fix landed), but list_accounts still uses the same filter — fine. Confirmed legacy doc no longer leaks.",
+    "SocialCalendar.jsx PLATFORM_COLORS hardcodes only 5 platforms — fine for now but should fall back to theme.primary not '#888' for brand consistency.",
+    "SocialCalendar.jsx drag-and-drop uses HTML5 native DnD which doesn't work on touch devices. Calendar will be unusable on tablets. Consider react-dnd or @dnd-kit for touch parity (not blocking)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration39_social_calendar.py"
+  ],
+  "success_rate": {"backend": "89% (8/9 pytest)", "frontend": "100% on flows tested (tab switch, calendar mount, navigation, KPI render, chips, upcoming list, publish-from-upcoming, composer regression, 5-page regression). Drag-to-reschedule + AI Weekly Plan button were NOT click-tested in browser — backend paths are covered."},
+  "test_credentials": "owner@nuva.com / NuvaOwner2026! (from /app/memory/test_credentials.md).",
+  "seed_data_creation": "Created instagram account 'nuva_iter39' if no account existed. After backend tests, ~12 scheduled autoPlanRun:true posts remain in db.social_posts (latest re-run), spread across the next 7 days. These chips are what the calendar rendered.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Only one real bug: preview mode (POST /social/ai-weekly-plan with save=false) deletes prior autoPlanRun posts before checking the save flag. Fix is 4 lines in social_media.py — gate the delete_many in the save branch. Frontend calendar + all testids verified end-to-end. AI weekly plan button + native drag-to-reschedule weren't clicked in the browser due to the 90s+ Claude latency × N platforms; backend test already validates the underlying endpoint and PATCH path. After fix, re-run pytest backend/tests/test_iteration39_social_calendar.py — only test_weekly_plan_preview_does_not_persist needs to flip to green.",
+  "rca_of_the_issue": "Symptom: GET /api/social/posts count drops by ~7-12 after calling POST /api/social/ai-weekly-plan with save=false, even though the response says saved=0 and persists nothing. Root cause: In /app/backend/routes/social_media.py:402-407, the delete_many({autoPlanRun:True, status:'scheduled', scheduledFor: in-window}) is executed UNCONDITIONALLY, BEFORE the per-day generation loop branches on body.save. Fix: indent the delete_many block under `if body.save:` (or add a guard `if body.save:` immediately above it). Reproduction: 1) POST /social/ai-weekly-plan save=true daysAhead=7 → saved=7. 2) GET /social/posts → 7 scheduled. 3) POST /social/ai-weekly-plan save=false daysAhead=7 → saved=0. 4) GET /social/posts → 0 scheduled. The user's saved plan is gone."
+}
