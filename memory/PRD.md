@@ -1,5 +1,34 @@
 # NUA POS — PRD v26.0 (Enterprise Licensing & Entitlements)
 
+## v27.2 — Iteration 39 (Feb 2026): Content Calendar · AI Weekly Plan · README
+
+### What landed
+- **Content Calendar** at `/social-media` (Calendar tab):
+  - Month grid (6×7), Monday-first, day-of-week header, prev/next/today nav.
+  - Posts rendered as colour-coded chips per platform (Instagram pink, Facebook blue, TikTok cyan, X black, Google Business green) with status glyph (`✓` published, `◷` scheduled, `✎` draft).
+  - **Drag-to-reschedule** — HTML5 native drag-and-drop. Drop a chip onto any cell → `PATCH /api/social/posts/{id}` bumps `scheduledFor` and flips `draft` → `scheduled` if needed. Published posts are non-draggable.
+  - **AI Weekly Plan button** runs `POST /api/social/ai-weekly-plan` (auth, owner/manager) — pulls top-7 selling products from the last 7 days of transactions (`$unwind` + `$group` pipeline), mixes them with active promos and chef-special seeds, distributes one post per connected platform per day. Idempotent: re-running deletes prior `autoPlanRun:true` scheduled posts in the window before regenerating.
+  - KPI strip: `scheduled / published / drafts` counts.
+  - "Next 7 days" upcoming strip with inline publish/delete.
+- **`PATCH /api/social/posts/{id}`** — small allow-list mutation (`caption`, `hashtags`, `imageUrl`, `scheduledFor`, `status`, `postType`). Status & postType validated against the same enums as create. 404 if not found.
+- **Composer/Calendar tab toggle** on `/social-media` — existing composer + drafts + posts history all preserved.
+- **README** at `/app/README.md` — full timeline from Day 1 through iteration 39, feature map, tech stack, API surface, configuration, testing scorecards, roadmap.
+
+### Iteration 39 Tests
+- **Backend 9/9 PASS** (`tests/test_iteration39_social_calendar.py`, ~130s — real Claude Sonnet 4.6 calls per platform/day). Covers: anon 401, save=true persistence, idempotent re-run, **save=false preview no longer destructive** (post-fix), PATCH reschedule, PATCH 400/401/404, no-accounts → 400.
+- **Frontend 100% on tested flows**: tab toggle, calendar mount + month nav (`June 2026` → `July 2026` → Today), KPI strip render, 12 colour-coded `cal-post-{id}` chips rendering, 25 upcoming items, publish-from-upcoming flips chip to ✓, composer tab regression, 5-page regression (`/pos`, `/products`, `/channel-menus`, `/reservations`, `/inventory-accounting`) with 0 console errors. Drag-to-reschedule was UX-deferred from browser e2e (already covered by backend PATCH tests).
+
+### Bug fixed during testing
+- **CRITICAL** — `POST /social/ai-weekly-plan` preview mode (`save=false`) was destructive: the `delete_many({autoPlanRun:True, scheduledFor: in-window})` ran unconditionally BEFORE the `if body.save:` branch, so calling Preview wiped the user's saved auto-plan. Fixed by gating the delete inside `if body.save:`. Verified end-to-end: save=true creates 7 posts → save=false leaves them intact (preview returns 7 in `preview[]` without persistence).
+
+### Backlog
+- **P2** Move `ai_weekly_plan` to a background task — currently N×P Claude calls run inline (7 days × 5 platforms = 35 LLM calls in one HTTP request — risks gateway timeout in high-platform deployments).
+- **P2** Touch-friendly drag-and-drop for the calendar (HTML5 native DnD doesn't work on tablets) — `@dnd-kit` migration.
+- **P2** Distinguish "no connected accounts" from "no platforms in request matched" in the weekly-plan error message.
+- **P2** ~8 inline-auth endpoints still on legacy pattern (custom role mixes / signed-device-secret) — bespoke refactor pending.
+- **P1** Real SendGrid / Twilio API keys to activate live notifications.
+- **P1** Real Meta / TikTok / X OAuth to lift the social-publish stub.
+
 ## v27.1 — Iteration 38 (Feb 2026): Social Media Marketing · Loyalty 10pt Floor · Split Validation · Promotion Dialog Extract
 
 ### What landed

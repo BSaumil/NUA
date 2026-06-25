@@ -397,14 +397,16 @@ async def ai_weekly_plan(body: WeeklyPlanIn, user: dict = Depends(require_owner_
     # 3. Active promotions
     promos = await db.promotions.find({"active": True}, {"_id": 0}).to_list(10)
 
-    # 4. Wipe any leftover auto-plan posts in the upcoming window so re-runs
-    # don't pile up duplicates.
-    window_end = (datetime.now(timezone.utc) + timedelta(days=days + 1)).isoformat()
-    await db.social_posts.delete_many({
-        "autoPlanRun": True,
-        "status": "scheduled",
-        "scheduledFor": {"$gte": datetime.now(timezone.utc).isoformat(), "$lte": window_end},
-    })
+    # 4. If we're persisting, wipe any leftover auto-plan posts in the upcoming
+    # window so re-runs don't pile up duplicates. Preview (save=false) MUST NOT
+    # touch persisted state.
+    if body.save:
+        window_end = (datetime.now(timezone.utc) + timedelta(days=days + 1)).isoformat()
+        await db.social_posts.delete_many({
+            "autoPlanRun": True,
+            "status": "scheduled",
+            "scheduledFor": {"$gte": datetime.now(timezone.utc).isoformat(), "$lte": window_end},
+        })
 
     # 5. Walk N days × P platforms, alternating the source type.
     SPECIAL_SEEDS = [
