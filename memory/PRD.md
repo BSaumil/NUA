@@ -1,5 +1,41 @@
 # NUA POS — PRD v26.0 (Enterprise Licensing & Entitlements)
 
+## v27.3 — Iteration 40 (25 Jun 2026): Background Worker · Calendar Edit/Reuse · Bespoke Auth Cleanup
+
+### What landed
+- **`POST /social/ai-weekly-plan` is now a background job** (FastAPI `BackgroundTasks`). The HTTP call returns in **~64ms** (verified) with `{planId, status:'queued', expected, platformsUsed, message}`. Progress is streamed into `social_plan_jobs` with `{status, completed, expected, fallbacks}` — polled via new **`GET /social/plan-jobs/{plan_id}`** every 2.5s by the UI. Background worker catches exceptions and flips status to `failed` with the error string preserved. Save=true takes the background path; save=false still runs inline because the caller wants the preview body back synchronously.
+- **`POST /social/posts/{id}/duplicate`** — owner clones any prior post as a fresh draft (or scheduled when `scheduledFor` is provided). Strips `autoPlan*` / `publishedAt` flags, regenerates id+createdAt, records `duplicatedFrom`. Optional body fields (`platform`, `caption`, `hashtags`, `imageUrl`, `scheduledFor`, `status`) allow tweaks at duplicate time. Status enum + platform validated.
+- **Calendar `edit + reuse` UX** (`components/social/SocialCalendar.jsx`):
+  - Click any chip OR the new Pencil icon on the Next-7-Days strip → `[data-testid=edit-post-dialog]` opens pre-filled with caption / hashtags / scheduledFor / imageUrl / status. Save fires `PATCH /api/social/posts/{id}` and reloads.
+  - Inline **Duplicate** button (`Copy` icon) on every upcoming row, plus a Duplicate-as-draft link inside the Edit dialog header.
+  - **Live progress bar** (`plan-progress-bar`) shows during AI Weekly Plan generation; calendar chips appear progressively as posts land; final 'Done — N posts saved' toast on completion.
+- **Improved error wording** on `ai-weekly-plan` — structured `detail` with **`code: 'no_connected_accounts' | 'no_matching_platforms'`** plus `connected[]`, `requested[]`, `message`. UI surfaces `.message` if present, falls back to the raw detail otherwise.
+- **Bespoke auth refactor (last ~8 endpoints) — cleared**:
+  - `accounting/bas` + `accounting/bas.csv` — request dropped, `Depends(require_owner_or_manager)`.
+  - `licensing/abn/approve/{req_id}` — request kept (header read) + `Depends(require_owner)`.
+  - `agent/tick`, `agent/voice-command` (loyalty_engine) — request kept (voice/headers), auth via Depends.
+  - `agent/auto-publish-roster`, `agent/tick-extended` (phase_ef) — Depends-gated.
+  - `v25/products/{id}/86` — owner+manager+kitchen role check kept after Depends auth.
+  - `v25/ash-pro/approve` — Depends(require_owner).
+  - `v25/concierge` — Depends(get_user).
+  - `v25/warehouse/export` — Depends(require_owner). Sig also cleaned (removed `request: Request = None` quirk).
+  - Only `bookings_inbox.ack` retains inline auth — intentional graceful-degradation for webhook callers.
+- **README updated** — Day 1 → 25 Jun 2026 timeline.
+
+### Iteration 40 Tests
+- **Backend 33/33 PASS** (`tests/test_iteration40_background_plan.py`). All 11 refactored endpoints validate anon-401, then owner-200 happy paths. Background job returns ~queued in <500ms. Polling advances queued→in_progress→complete in ~30-35s. Structured errors verified. Duplicate edge cases (anon, missing, status=scheduled without scheduledFor, fresh fields). PATCH (anon, invalid status, missing, success). Idempotency intact (iter 39 destructive-preview fix still holds).
+- **Frontend 100% on tested flows**: AI Weekly Plan queue → progress bar (0→7) → completion toast in ~35s with chips appearing progressively. Edit dialog pre-fills + saves + reloads. Duplicate via upcoming button + via edit-dialog link both work. Composer regression clean.
+
+### Minor (non-blocking)
+- BAS field names — impl returns `g1TotalSales`/`oneA_gstOnSales`/`g11TotalPurchases`/`oneB_gstCredits`. Values correct; only key naming differs from the literal `G1`/`1A`/`G11`/`1B`. Won't change without explicit ATO contract guidance.
+
+### Backlog
+- **P2** Touch-friendly drag-and-drop for the calendar (HTML5 DnD doesn't work on tablets) → `@dnd-kit` migration.
+- **P2** Chargeback / dispute console with evidence packs UI polish.
+- **P2** `x-ai-parsed-fallback` header on AI endpoints so the UI can warn when LLM fell back.
+- **P1** Real SendGrid / Twilio API keys.
+- **P1** Real Meta / TikTok / X OAuth to lift the publish stub.
+
 ## v27.2 — Iteration 39 (Feb 2026): Content Calendar · AI Weekly Plan · README
 
 ### What landed
