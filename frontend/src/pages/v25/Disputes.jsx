@@ -3,7 +3,7 @@ import { Card, CardContent } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { Input } from '../../components/ui/input';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../../components/ui/dialog';
 import { v25API } from '../../services/api';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useToast } from '../../hooks/use-toast';
@@ -216,7 +216,10 @@ export default function Disputes() {
       {/* New dispute dialog */}
       <Dialog open={openDialog} onOpenChange={setOpenDialog}>
         <DialogContent className="max-w-sm" data-testid="new-dispute-dialog">
-          <DialogHeader><DialogTitle>Open a Dispute</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Open a Dispute</DialogTitle>
+            <DialogDescription className="text-xs text-gray-500">Capture the disputed transaction so we can prepare evidence before the bank&apos;s response window closes.</DialogDescription>
+          </DialogHeader>
           <div className="space-y-3 py-2">
             <div>
               <label className="text-[10px] uppercase tracking-widest text-gray-500 block mb-1">Transaction ID</label>
@@ -261,7 +264,10 @@ export default function Disputes() {
       {/* Evidence attach dialog */}
       <Dialog open={!!evidenceFor} onOpenChange={(o) => { if (!o) setEvidenceFor(null); }}>
         <DialogContent className="max-w-md" data-testid="evidence-dialog">
-          <DialogHeader><DialogTitle>Attach Evidence Pack</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Attach Evidence Pack</DialogTitle>
+            <DialogDescription className="text-xs text-gray-500">Auto-bundles the tx snapshot, line items, signature and IP; add any notes the bank should see.</DialogDescription>
+          </DialogHeader>
           {evidenceFor && (
             <div className="space-y-3 py-2">
               <div className="text-xs text-gray-600 bg-gray-50 border rounded p-2">

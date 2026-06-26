@@ -1,5 +1,29 @@
 # NUA POS — PRD v26.0 (Enterprise Licensing & Entitlements)
 
+
+## v27.4 — Iteration 41 (26 Jun 2026): Best-Time-to-Post Analytics · AI Fallback Header · Chargeback Console · For Sam
+
+### What landed
+- **`GET /api/social/best-times`** + reusable `_compute_best_times()` — mines 7-day POS transactions, groups quantity by `(hour-of-day, category)` and filters per platform via `PLATFORM_CATEGORY_AFFINITY`. Each row returns `{platform, platformLabel, recommendedHour, recommendedTime, sampleSize, source ∈ {pos_peak | pos_peak_clamped | default_band}, band [lo,hi]}` so the UI can show *why* it picked that hour.
+- **`WeeklyPlanIn.useBestTimes: bool`** (default `False`) — when `True`, the AI weekly plan applies per-platform best hours from `_compute_best_times()` instead of a fixed `postTime`. Plan-days were refactored to carry `dayBase` (midnight ISO) and a helper `_resolve_scheduled_for(plan_day, platform)` / `_sched_for(...)` (inline preview + background worker) computes the per-platform `scheduledFor`. Job doc now persists `useBestTimes` + `bestTimeMap` so the polling UI knows the schedule shape.
+- **`x-ai-parsed-fallback` header on `POST /api/bookings/inbox`** — `_ai_parse()` returns a 4th `fallback: bool`; the route sets the header (`true`/`false`) and also stores `aiParsedFallback` on the persisted document so historic cards can still surface a warning. `CORS expose_headers = ['x-ai-parsed-fallback']` so SPA `fetch` can read it.
+- **Chargeback / Dispute Console rewrite** (`/app/frontend/src/pages/v25/Disputes.jsx`):
+  - KPI strip: Open / Evidence-In / Won / At-risk $ / Recovered $ with tone-coloured cards.
+  - Filter pills (All/Open/Evidence/Won/Lost), status-keyed badges with icons, monospace IDs, "Attach evidence" CTA opens a proper Radix dialog (with `DialogDescription` for a11y).
+  - New-Dispute dialog replaces the old `prompt()`-driven flow — TX id + amount validation + reason dropdown (`fraud | product_not_received | duplicate | unrecognised | service_not_provided | other`).
+- **Frontend best-time chips** in `SocialCalendar.jsx` — strip below the KPI row showing each platform's recommended time + source pill (POS / POS± / Default) + "Use best times in AI plan & drag-drop" toggle (default on). Drop-to-reschedule now snaps to the platform's best hour when the toggle is on.
+- **`/app/For Sam.md`** — 350-line deployment doc covering Web (Docker + compose + hosting picks), Windows (PWA install OR Electron kiosk), Android (PWA OR TWA via Bubblewrap OR React Native shell), Day-2 ops (backups, secret rotation, monitoring), troubleshooting cheat-sheet, and a 5-year posture section (multi-tenant, offline-first, edge cache, reservations OAuth, hardware health).
+
+### Iteration 41 Tests
+- **Backend 10/10 PASS** (`tests/test_iteration41_best_times_and_inbox.py`). `/best-times` shape contract verified per platform; `ai-weekly-plan` preview honours per-platform hours when `useBestTimes=true`, falls back to fixed `postTime` when `false`; save-path returns queued, polls to complete, posts persisted with correct per-platform `scheduledFor`. Inbox header verified both true/false branches; CORS exposes the header.
+- **Frontend 100%** on tested flows: best-time chip strip renders all 5 platforms with correct chips + toggle, Disputes console renders all 5 KPIs + dialog opens.
+
+### Backlog
+- **P2** Touch-friendly DnD for tablets (`@dnd-kit` migration).
+- **P1** Real Meta / TikTok / X OAuth — playbook pending API keys from user.
+- **P1** SendGrid / Twilio production keys.
+- **P2** Hardware health monitoring (route already exists in `automation.py`).
+
 ## v27.3 — Iteration 40 (25 Jun 2026): Background Worker · Calendar Edit/Reuse · Bespoke Auth Cleanup
 
 ### What landed
