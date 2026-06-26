@@ -143,6 +143,8 @@ app.add_middleware(
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
+    # Custom headers the SPA reads (e.g. AI fallback flag on booking inbox).
+    expose_headers=["x-ai-parsed-fallback"],
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')

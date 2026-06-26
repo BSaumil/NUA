@@ -722,6 +722,7 @@ export const socialAPI = {
   aiGenerate: (data) => api.post('/social/ai-generate', data),
   aiWeeklyPlan: (data) => api.post('/social/ai-weekly-plan', data),
   getPlanJob: (planId) => api.get(`/social/plan-jobs/${planId}`),
+  bestTimes: () => api.get('/social/best-times'),
   listPlatforms: () => api.get('/social/platforms'),
 };
 

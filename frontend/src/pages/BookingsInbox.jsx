@@ -7,7 +7,7 @@ import { Textarea } from '../components/ui/textarea';
 import { useToast } from '../hooks/use-toast';
 import { useTheme } from '../contexts/ThemeContext';
 import { bookingsInboxAPI } from '../services/api';
-import { Inbox, MessageSquare, Phone, Mail, AtSign, Globe, User, CheckCircle, X, Sparkles, Plus } from 'lucide-react';
+import { Inbox, MessageSquare, Phone, Mail, AtSign, Globe, User, CheckCircle, X, Sparkles, Plus, AlertTriangle } from 'lucide-react';
 
 const CHANNEL_META = {
   instagram_dm: { icon: AtSign, label: 'Instagram DM', color: '#ec4899' },
@@ -50,8 +50,13 @@ export default function BookingsInbox() {
     if (!draft.rawMessage.trim()) return toast({ title: 'Paste a message first', variant: 'destructive' });
     setBusy(true);
     try {
-      await bookingsInboxAPI.ingest(draft);
-      toast({ title: 'Captured — AI is parsing' });
+      const r = await bookingsInboxAPI.ingest(draft);
+      const fellBack = (r?.headers?.['x-ai-parsed-fallback'] === 'true') || (r?.data?.aiParsedFallback === true);
+      toast({
+        title: fellBack ? 'Captured — AI fell back to template' : 'Captured — AI is parsing',
+        description: fellBack ? 'No structured fields extracted; please review the message.' : undefined,
+        variant: fellBack ? 'default' : undefined,
+      });
       setDraft({ channel: 'phone', fromHandle: '', rawMessage: '' });
       setComposeOpen(false);
       setFilterStatus('new');
@@ -169,6 +174,11 @@ export default function BookingsInbox() {
                     'bg-amber-100 text-amber-700'
                   } data-testid={`status-${item.id}`}>{item.status}</Badge>
                 </div>
+                {item.aiParsedFallback && (
+                  <div className="flex items-center gap-1 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 w-fit" data-testid={`ai-fallback-${item.id}`}>
+                    <AlertTriangle size={10} /> AI fell back — review manually
+                  </div>
+                )}
                 <p className="text-sm text-gray-800 italic line-clamp-2">“{item.rawMessage}”</p>
                 {item.aiSummary && (
                   <p className="text-xs text-gray-600 flex items-start gap-1"><Sparkles size={12} className="shrink-0 mt-0.5" style={{ color: theme.secondary }} /> {item.aiSummary}</p>

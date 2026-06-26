@@ -369,6 +369,111 @@ async def list_platforms(_: dict = Depends(get_user)):
     ]
 
 
+# ============ BEST TIME TO POST (per platform) ============
+# Mining POS peak hours per category, then mapping to platform audiences.
+# Until real Meta / TikTok / X impression data is available (post-OAuth),
+# this is the most honest signal we have: when does this restaurant's
+# audience actually spend.
+#
+# Mapping (refined from category social-engagement heuristics):
+#   instagram        → café / breakfast / lunch categories  (10:00 – 13:00 peak)
+#   facebook         → all dine-in / dinner categories      (afternoon + dinner)
+#   tiktok           → late-night / desserts / drinks       (19:00 – 22:00 peak)
+#   x                → coffee / specials / fast-casual      (commute hours)
+#   google_business  → general daytime traffic              (lunch window)
+PLATFORM_CATEGORY_AFFINITY = {
+    "instagram":       ["Coffee", "Breakfast", "Brunch", "Lunch", "Cakes", "Pastry"],
+    "facebook":        ["Mains", "Dinner", "Family", "Pasta", "Pizza"],
+    "tiktok":          ["Desserts", "Cocktails", "Drinks", "Late Night", "Snacks"],
+    "x":               ["Coffee", "Specials", "Fast"],
+    "google_business": ["Mains", "Lunch", "Coffee", "Breakfast"],
+}
+# Per-platform timing safety bands (clamps the result to a "reasonable"
+# posting window even when the data is thin):
+PLATFORM_TIME_BANDS = {
+    "instagram":       (8, 13),
+    "facebook":        (12, 20),
+    "tiktok":          (18, 22),
+    "x":               (7, 11),
+    "google_business": (10, 14),
+}
+
+
+@router.get("/social/best-times")
+async def best_times(_: dict = Depends(get_user)):
+    """Suggest a 'best time to post' (local HH:MM) per platform, derived from
+    your own POS peak-hour analytics. Falls back to the platform's safety
+    band when the restaurant has no transactions yet.
+
+    Returns:
+      [{platform, recommendedHour, recommendedTime, sampleSize, source}]
+    """
+    return await _compute_best_times()
+
+
+async def _compute_best_times() -> list:
+    """Internal — same calculation as /social/best-times, callable from
+    the AI weekly-plan flow so each platform's posts get scheduled at
+    that channel's own optimal hour."""
+    since = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    pipeline = [
+        {"$match": {"timestamp": {"$gte": since}}},
+        {"$unwind": "$items"},
+        {
+            "$group": {
+                "_id": {
+                    "hour": {"$hour": {"$dateFromString": {"dateString": "$timestamp"}}},
+                    "category": "$items.category",
+                },
+                "qty": {"$sum": "$items.quantity"},
+            }
+        },
+    ]
+    try:
+        buckets = await db.transactions.aggregate(pipeline).to_list(2000)
+    except Exception:
+        buckets = []
+
+    out = []
+    for platform in SUPPORTED_PLATFORMS:
+        affinity = set(PLATFORM_CATEGORY_AFFINITY.get(platform, []))
+        hour_qty: dict = {}
+        sample = 0
+        for b in buckets:
+            cat = (b.get("_id", {}).get("category") or "").strip()
+            if not cat:
+                continue
+            matches = any(token.lower() in cat.lower() for token in affinity)
+            if not matches:
+                continue
+            h = b["_id"]["hour"]
+            hour_qty[h] = hour_qty.get(h, 0) + b["qty"]
+            sample += b["qty"]
+
+        lo, hi = PLATFORM_TIME_BANDS[platform]
+        in_band = {h: q for h, q in hour_qty.items() if lo <= h <= hi}
+        if in_band:
+            best_h = max(in_band.items(), key=lambda kv: kv[1])[0]
+            source = "pos_peak"
+        elif hour_qty:
+            best_h = max(hour_qty.items(), key=lambda kv: kv[1])[0]
+            best_h = max(lo, min(hi, best_h))
+            source = "pos_peak_clamped"
+        else:
+            best_h = (lo + hi) // 2
+            source = "default_band"
+        out.append({
+            "platform": platform,
+            "platformLabel": PLATFORM_LABELS[platform],
+            "recommendedHour": best_h,
+            "recommendedTime": f"{best_h:02d}:00",
+            "sampleSize": sample,
+            "source": source,
+            "band": [lo, hi],
+        })
+    return out
+
+
 # ============ AI WEEKLY CONTENT PLAN ============
 class WeeklyPlanIn(BaseModel):
     daysAhead: int = 7
@@ -376,6 +481,10 @@ class WeeklyPlanIn(BaseModel):
     tone: Optional[str] = "warm"
     platforms: Optional[List[str]] = None     # default: every connected platform
     save: bool = True                          # if False, returns a preview without persisting
+    # NEW: when true, each platform's scheduled time is auto-selected from
+    # POS peak-hour analytics (see `/social/best-times`), giving each channel
+    # its own optimal posting time instead of one fixed `postTime` for all.
+    useBestTimes: bool = False
 
 
 @router.post("/social/ai-weekly-plan")
@@ -408,6 +517,18 @@ async def ai_weekly_plan(body: WeeklyPlanIn, background_tasks: BackgroundTasks,
         target_hour, target_min = int(hour), int(minute)
     except Exception:
         target_hour, target_min = 12, 0
+
+    # If owner asked for per-platform best times, mine the POS analytics once
+    # up front and build a `{platform: hour}` map. Falls back to `postTime`
+    # silently when the analytics return nothing useful.
+    best_time_map: dict = {}
+    if body.useBestTimes:
+        try:
+            for row in await _compute_best_times():
+                best_time_map[row["platform"]] = int(row["recommendedHour"])
+        except Exception as exc:
+            logger.warning("best-times computation failed (%s) — falling back to fixed postTime", exc)
+            best_time_map = {}
 
     # 1. Pick the platforms — default to all connected accounts. Be specific
     # about WHY the request fails so the UI can give an actionable nudge.
@@ -498,11 +619,13 @@ async def ai_weekly_plan(body: WeeklyPlanIn, background_tasks: BackgroundTasks,
     plan_days = []
     for d in range(days):
         day = now + timedelta(days=d + 1)
-        scheduled_for = day.replace(hour=target_hour, minute=target_min, second=0, microsecond=0).isoformat()
+        # Anchor day at midnight UTC — the per-platform timing kicks in
+        # inside the inner loop so each platform gets its own best hour.
+        day_base = day.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
         if d % 3 == 1 and promos:
             promo = promos[d % len(promos)]
             plan_days.append({
-                "scheduledFor": scheduled_for,
+                "dayBase": day_base,
                 "sourceType": "promotion", "sourceId": promo["id"],
                 "subjectLabel": promo.get("name", "promo"),
                 "subjectDetail": f"{promo.get('discount', 0)}% off — schedule: {promo.get('schedule', 'ongoing')}",
@@ -511,14 +634,14 @@ async def ai_weekly_plan(body: WeeklyPlanIn, background_tasks: BackgroundTasks,
         elif d % 3 == 2:
             seed = SPECIAL_SEEDS[d % len(SPECIAL_SEEDS)]
             plan_days.append({
-                "scheduledFor": scheduled_for,
+                "dayBase": day_base,
                 "sourceType": "special", "sourceId": None,
                 "subjectLabel": seed[:60], "subjectDetail": seed, "imageHint": None,
             })
         else:
             prod = products_for_plan[d % len(products_for_plan)]
             plan_days.append({
-                "scheduledFor": scheduled_for,
+                "dayBase": day_base,
                 "sourceType": "product", "sourceId": prod["id"],
                 "subjectLabel": prod.get("name", "our top dish"),
                 "subjectDetail": (
@@ -530,11 +653,21 @@ async def ai_weekly_plan(body: WeeklyPlanIn, background_tasks: BackgroundTasks,
 
     total_posts = len(plan_days) * len(platforms)
 
+    def _resolve_scheduled_for(plan_day: dict, platform: str) -> str:
+        """Per-platform scheduling: pick best hour if requested, else the
+        fixed `postTime` from the request body. Always returns ISO string."""
+        base = datetime.fromisoformat(plan_day["dayBase"])
+        hour = best_time_map.get(platform, target_hour) if best_time_map else target_hour
+        minute = 0 if best_time_map else target_min
+        return base.replace(hour=hour, minute=minute, second=0, microsecond=0).isoformat()
+
     if body.save:
         # Persist a job doc so the UI can poll. Then defer the LLM work.
         await db.social_plan_jobs.insert_one({
             "planId": plan_id, "status": "queued", "expected": total_posts, "completed": 0,
             "fallbacks": 0, "platformsUsed": platforms, "tone": tone,
+            "useBestTimes": bool(body.useBestTimes),
+            "bestTimeMap": best_time_map,
             "createdBy": user.get("email"),
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "updatedAt": datetime.now(timezone.utc).isoformat(),
@@ -543,12 +676,15 @@ async def ai_weekly_plan(body: WeeklyPlanIn, background_tasks: BackgroundTasks,
             _run_weekly_plan_job,
             plan_id=plan_id, plan_days=plan_days, platforms=platforms,
             tone=tone, created_by=user.get("email"),
+            best_time_map=best_time_map,
+            fallback_hour=target_hour, fallback_minute=target_min,
         )
         return {
             "planId": plan_id,
             "status": "queued",
             "expected": total_posts,
             "platformsUsed": platforms,
+            "bestTimeMap": best_time_map,
             "message": f"Generating {total_posts} posts in the background — refresh the calendar in ~{max(5, total_posts * 2)}s.",
         }
 
@@ -568,7 +704,7 @@ async def ai_weekly_plan(body: WeeklyPlanIn, background_tasks: BackgroundTasks,
                 "caption": gen["caption"], "hashtags": gen["hashtags"],
                 "imageAlt": gen.get("imageAlt"), "imageUrl": plan_day["imageHint"],
                 "sourceType": plan_day["sourceType"], "sourceId": plan_day["sourceId"],
-                "scheduledFor": plan_day["scheduledFor"],
+                "scheduledFor": _resolve_scheduled_for(plan_day, platform),
                 "status": "preview", "autoPlan": True, "autoPlanRun": False,
                 "autoPlanId": plan_id,
                 "isFallback": bool(gen.get("isFallback")),
@@ -582,11 +718,14 @@ async def ai_weekly_plan(body: WeeklyPlanIn, background_tasks: BackgroundTasks,
         "preview": preview,
         "posts": preview,
         "platformsUsed": platforms,
+        "bestTimeMap": best_time_map,
     }
 
 
 async def _run_weekly_plan_job(*, plan_id: str, plan_days: list, platforms: list,
-                                tone: str, created_by: Optional[str]):
+                                tone: str, created_by: Optional[str],
+                                best_time_map: Optional[dict] = None,
+                                fallback_hour: int = 12, fallback_minute: int = 0):
     """Background worker for `ai-weekly-plan`. Streams progress into
     `social_plan_jobs` so the UI can render a progress bar without holding
     the HTTP connection open. Idempotent against partial failures: each post
@@ -599,6 +738,14 @@ async def _run_weekly_plan_job(*, plan_id: str, plan_days: list, platforms: list
     )
     completed = 0
     fallbacks = 0
+    best_time_map = best_time_map or {}
+
+    def _sched_for(plan_day: dict, platform: str) -> str:
+        base = datetime.fromisoformat(plan_day["dayBase"])
+        hour = best_time_map.get(platform, fallback_hour) if best_time_map else fallback_hour
+        minute = 0 if best_time_map else fallback_minute
+        return base.replace(hour=hour, minute=minute, second=0, microsecond=0).isoformat()
+
     try:
         for plan_day in plan_days:
             for platform in platforms:
@@ -616,7 +763,7 @@ async def _run_weekly_plan_job(*, plan_id: str, plan_days: list, platforms: list
                     "caption": gen["caption"], "hashtags": gen["hashtags"],
                     "imageAlt": gen.get("imageAlt"), "imageUrl": plan_day["imageHint"],
                     "sourceType": plan_day["sourceType"], "sourceId": plan_day["sourceId"],
-                    "scheduledFor": plan_day["scheduledFor"],
+                    "scheduledFor": _sched_for(plan_day, platform),
                     "status": "scheduled", "autoPlan": True, "autoPlanRun": True,
                     "autoPlanId": plan_id,
                     "isFallback": bool(gen.get("isFallback")),

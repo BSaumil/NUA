@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, Sparkles, RefreshCcw, Wand2, Trash2, Send, Calendar, Pencil, Copy, X } from 'lucide-react';
+import React, { useMemo, useState, useEffect } from 'react';
+import { ChevronLeft, ChevronRight, Sparkles, RefreshCcw, Wand2, Trash2, Send, Calendar, Pencil, Copy, Clock, TrendingUp } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Card, CardContent } from '../ui/card';
@@ -48,6 +48,25 @@ export const SocialCalendar = ({ theme, posts, accounts, onReload }) => {
   const [hoverDay, setHoverDay] = useState(null);
   const [editingPost, setEditingPost] = useState(null);
   const [editForm, setEditForm] = useState({ caption: '', hashtags: '', scheduledFor: '', imageUrl: '', status: 'scheduled' });
+  const [bestTimes, setBestTimes] = useState([]);     // [{platform, recommendedHour, recommendedTime, sampleSize, source, band}]
+  const [useBestTimes, setUseBestTimes] = useState(true);
+
+  // Pull POS peak-hour analytics once on mount so the chip strip + AI
+  // weekly plan can both lean on the same numbers.
+  useEffect(() => {
+    let cancelled = false;
+    socialAPI.bestTimes()
+      .then(r => { if (!cancelled) setBestTimes(r.data || []); })
+      .catch(() => { /* non-fatal — chips just won't render */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Convenient lookup: { instagram: 12, facebook: 18, ... }
+  const bestHourByPlatform = useMemo(() => {
+    const m = {};
+    bestTimes.forEach(b => { m[b.platform] = b.recommendedHour; });
+    return m;
+  }, [bestTimes]);
 
   // Build a 6-week grid (42 cells) starting at the first Monday on/before
   // the 1st of the anchored month. This keeps the layout stable across
@@ -98,13 +117,20 @@ export const SocialCalendar = ({ theme, posts, accounts, onReload }) => {
     if (!post) return;
     const old = post.scheduledFor ? new Date(post.scheduledFor) : new Date();
     const next = new Date(day);
-    next.setHours(old.getHours() || 12, old.getMinutes() || 0, 0, 0);
+    // If "Use best times" is on AND we have a recommendation for this
+    // platform, snap to it; otherwise preserve the original HH:MM so the
+    // user's intent isn't quietly overridden.
+    if (useBestTimes && bestHourByPlatform[post.platform] !== undefined) {
+      next.setHours(bestHourByPlatform[post.platform], 0, 0, 0);
+    } else {
+      next.setHours(old.getHours() || 12, old.getMinutes() || 0, 0, 0);
+    }
     try {
       await socialAPI.updatePost(id, {
         scheduledFor: next.toISOString(),
         status: post.status === 'draft' ? 'scheduled' : post.status,
       });
-      toast.success(`Rescheduled to ${next.toLocaleDateString()}`);
+      toast.success(`Rescheduled to ${next.toLocaleDateString()} ${next.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
       onReload && onReload();
     } catch {
       toast.error('Reschedule failed');
@@ -120,7 +146,7 @@ export const SocialCalendar = ({ theme, posts, accounts, onReload }) => {
     if (!window.confirm('Generate a 7-day plan? Existing auto-plan posts in the window will be replaced.')) return;
     setPlanning(true);
     try {
-      const r = await socialAPI.aiWeeklyPlan({ daysAhead: 7, save: true, tone: 'warm', postTime: '12:00' });
+      const r = await socialAPI.aiWeeklyPlan({ daysAhead: 7, save: true, tone: 'warm', postTime: '12:00', useBestTimes });
       const job = r.data || {};
       if (job.status === 'queued' || job.status === 'in_progress') {
         // Background mode: poll progress until done.
@@ -305,6 +331,48 @@ export const SocialCalendar = ({ theme, posts, accounts, onReload }) => {
           </span>
           <span className="ml-auto text-[10px] text-gray-400">Drag a chip onto another day to reschedule</span>
         </div>
+
+        {/* Best-time-to-post strip — POS analytics → recommended hour per platform */}
+        {bestTimes.length > 0 && (
+          <div className="rounded-lg border border-dashed bg-gradient-to-r from-emerald-50/40 via-amber-50/40 to-rose-50/40 px-3 py-2" data-testid="best-times-strip">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="flex items-center gap-1 text-[10px] uppercase tracking-widest text-gray-500 font-semibold">
+                <TrendingUp size={11} /> Best time to post
+              </span>
+              {bestTimes.map(bt => {
+                const src = bt.source === 'pos_peak'
+                  ? { label: 'POS', tone: 'bg-emerald-100 text-emerald-700' }
+                  : bt.source === 'pos_peak_clamped'
+                  ? { label: 'POS±', tone: 'bg-amber-100 text-amber-700' }
+                  : { label: 'Default', tone: 'bg-gray-100 text-gray-500' };
+                return (
+                  <span
+                    key={bt.platform}
+                    className="inline-flex items-center gap-1 text-[10px] rounded-full px-2 py-0.5 border bg-white"
+                    style={{ borderLeft: `3px solid ${PLATFORM_COLORS[bt.platform] || '#888'}` }}
+                    title={`${bt.platformLabel} — recommended ${bt.recommendedTime} (sample ${bt.sampleSize}, source ${bt.source})`}
+                    data-testid={`best-time-${bt.platform}`}
+                  >
+                    <Clock size={10} style={{ color: PLATFORM_COLORS[bt.platform] || '#888' }} />
+                    <span className="font-semibold capitalize">{bt.platform.replace('_', ' ')}</span>
+                    <span className="font-mono">{bt.recommendedTime}</span>
+                    <span className={`px-1 rounded-sm font-bold ${src.tone}`}>{src.label}</span>
+                  </span>
+                );
+              })}
+              <label className="ml-auto flex items-center gap-1 text-[10px] text-gray-600 cursor-pointer" data-testid="use-best-times-toggle">
+                <input
+                  type="checkbox"
+                  className="accent-emerald-600"
+                  checked={useBestTimes}
+                  onChange={e => setUseBestTimes(e.target.checked)}
+                  data-testid="use-best-times-checkbox"
+                />
+                Use best times in AI plan &amp; drag-drop
+              </label>
+            </div>
+          </div>
+        )}
 
         {/* Day-of-week header */}
         <div className="grid grid-cols-7 gap-1 text-[10px] uppercase tracking-widest text-gray-400 px-0.5">

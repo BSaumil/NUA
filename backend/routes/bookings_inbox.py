@@ -10,7 +10,7 @@ each into a Reservation.
 Channels are stored as free-text strings so we can absorb new ones without a
 migration.
 """
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from typing import Optional, List
 from datetime import datetime, timezone, date as date_cls
 from pydantic import BaseModel
@@ -52,8 +52,14 @@ async def list_inbox(status: Optional[str] = None, channel: Optional[str] = None
     return rows
 
 @router.post("/bookings/inbox")
-async def ingest_booking(body: IngestBody):
-    """Accept a raw inbound message — run AI parse + suggested reply."""
+async def ingest_booking(body: IngestBody, response: Response):
+    """Accept a raw inbound message — run AI parse + suggested reply.
+
+    Sets `x-ai-parsed-fallback: true` on the response when the LLM
+    couldn't parse the message and we fell back to a templated response.
+    The persisted document also carries `aiParsedFallback` so the UI can
+    flag historic items even after a page reload.
+    """
     item = {
         "id": str(uuid.uuid4()),
         "channel": body.channel,
@@ -63,10 +69,14 @@ async def ingest_booking(body: IngestBody):
         "status": "new",
     }
 
-    parsed, summary, reply = await _ai_parse(body.rawMessage, body.channel)
+    parsed, summary, reply, fallback = await _ai_parse(body.rawMessage, body.channel)
     item["parsed"] = parsed
     item["aiSummary"] = summary
     item["suggestedReply"] = reply
+    item["aiParsedFallback"] = bool(fallback)
+
+    # Header so SPA fetch handlers can show "AI fell back" toasts immediately.
+    response.headers["x-ai-parsed-fallback"] = "true" if fallback else "false"
 
     await db.booking_inbox.insert_one(dict(item))
     item.pop("_id", None)
@@ -128,7 +138,9 @@ async def dismiss(item_id: str):
 
 # -- helpers ---------------------------------------------------------------
 async def _ai_parse(message: str, channel: str):
-    """Best-effort LLM parse. Falls back to a simple heuristic if no key."""
+    """Best-effort LLM parse. Returns (parsed, summary, reply, fallback)
+    where `fallback=True` means the LLM was unavailable or its output was
+    unusable and the caller is receiving a templated default."""
     fallback_parsed = {
         "date": None, "time": None, "partySize": None,
         "name": None, "phone": None, "notes": None,
@@ -140,7 +152,7 @@ async def _ai_parse(message: str, channel: str):
 
     api_key = os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        return fallback_parsed, fallback_summary, fallback_reply
+        return fallback_parsed, fallback_summary, fallback_reply, True
 
     try:
         from emergentintegrations.llm.chat import LlmChat, UserMessage
@@ -185,7 +197,7 @@ async def _ai_parse(message: str, channel: str):
         except Exception:
             # If the LLM returns a non-ISO string, leave it alone for manual fix
             pass
-        return parsed, data.get("summary") or fallback_summary, data.get("reply") or fallback_reply
+        return parsed, data.get("summary") or fallback_summary, data.get("reply") or fallback_reply, False
     except Exception as e:
         # Never fail the ingest just because the LLM stumbled
-        return fallback_parsed, f"{fallback_summary} (AI parse skipped: {type(e).__name__})", fallback_reply
+        return fallback_parsed, f"{fallback_summary} (AI parse skipped: {type(e).__name__})", fallback_reply, True
