@@ -203,12 +203,8 @@ async def get_decisions( limit: int = 100, _: dict = Depends(require_owner_or_ma
 
 
 @router.post("/agent/tick")
-async def agent_tick(request: Request):
+async def agent_tick(request: Request, user: dict = Depends(require_owner_or_manager)):
     """Run all autonomous rules once. Returns the list of decisions taken."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
     decisions = []
     # 1. Auto-segment + flag at-risk
     segs = await _segment_customers()
@@ -266,11 +262,8 @@ async def agent_tick(request: Request):
 # VOICE COMMAND ROUTER (natural language → action)
 # =============================================================================
 @router.post("/agent/voice-command")
-async def voice_command(data: dict, request: Request):
+async def voice_command(data: dict, request: Request, user: dict = Depends(get_user)):
     """Accepts text or audio (base64), classifies intent, executes."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-
     text = (data.get("text") or "").strip()
     audio_b64 = data.get("audioBase64")
     if audio_b64 and not text:

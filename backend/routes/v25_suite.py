@@ -444,12 +444,10 @@ async def substitute(data: dict, _: dict = Depends(get_user)):
 
 
 @router.post("/products/{product_id}/86")
-async def toggle_86(product_id: str, data: dict, request: Request):
+async def toggle_86(product_id: str, data: dict, request: Request, user: dict = Depends(get_user)):
     """Toggle 86 (out-of-stock flag) for a product. Sets stock=0 and active=False
     when 86'd; restores active=True (preserves stock as-is) when un-86'd. Returns
     one recommended substitute so the cashier can offer it on the spot."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
     if user["role"] not in ("owner", "manager", "kitchen"):
         raise HTTPException(status_code=403, detail="Owner/Manager/Kitchen only")
     flag = bool(data.get("eightySixed", True))
@@ -596,10 +594,7 @@ async def ash_plan(user: dict = Depends(get_user)):
 
 
 @router.post("/ash-pro/approve")
-async def ash_approve(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner": raise HTTPException(status_code=403, detail="Owner only")
+async def ash_approve(data: dict, request: Request, _: dict = Depends(require_owner)):
     plan_id = data.get("planId")
     approved_action_ids = data.get("actionIds", [])  # empty = approve all
     plan = await db.ash_plans.find_one({"id": plan_id}, {"_id": 0})
@@ -1003,9 +998,7 @@ async def universal_guest(customer_id: str, _: dict = Depends(get_user)):
 # TIER 4 — AI Concierge
 # ============================================================================
 @router.post("/concierge")
-async def concierge(data: dict, request: Request):
-    from routes.auth import get_current_user
-    await get_current_user(request)
+async def concierge(data: dict, _: dict = Depends(get_user)):
     msg = (data.get("message") or "").strip()
     if not msg: raise HTTPException(status_code=400, detail="message required")
     sys_msg = (
@@ -1134,10 +1127,8 @@ async def benchmark(user: dict = Depends(get_user)):
 # TIER 5 — Data Warehouse Export
 # ============================================================================
 @router.get("/warehouse/export")
-async def warehouse_export(collection: str = "transactions", limit: int = 1000, request: Request = None):
-    from routes.auth import get_current_user
-    user = await get_current_user(request) if request else None
-    if user and user["role"] != "owner": raise HTTPException(status_code=403, detail="Owner only")
+async def warehouse_export(collection: str = "transactions", limit: int = 1000,
+                           _: dict = Depends(require_owner)):
     allowed = {"transactions", "customers", "reservations", "products", "agent_decisions"}
     if collection not in allowed: raise HTTPException(status_code=400, detail=f"Allowed: {allowed}")
     rows = await db[collection].find({}, {"_id": 0}).to_list(limit)

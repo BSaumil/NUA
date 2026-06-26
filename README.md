@@ -1,5 +1,7 @@
 # Nua — Restaurant OS
 
+> **Updated 25 June 2026**
+>
 > A production-ready, AI-first restaurant operating system. POS, kitchen, reservations, inventory, accounting, loyalty, social-media marketing — all in one place. Built with React + FastAPI + MongoDB. Themed in NUA's signature orange / purple / pink palette and rebranded as **Nua - Restaurant OS** from iteration 37 onward.
 
 ---
@@ -183,13 +185,31 @@ Each block is one user-driven iteration. Bullets are the **user instruction** pl
   - `routes/social_media.py`: accounts (mock OAuth) for Instagram/Facebook/TikTok/X/Google Business, posts CRUD, publish stub, `POST /social/ai-generate` (Claude Sonnet 4.6).
   - `/social-media` page: composer (source toggle product/promotion/special, tone, format, platforms, image picker, schedule), drafts preview with editable captions and hashtag chips, posts history table.
 
-### Iteration 39 — Content Calendar + AI Weekly Plan + README (Feb 2026, current)
+### Iteration 39 — Content Calendar + AI Weekly Plan + README (Feb 2026)
 - **"Add a content calendar + AI weekly plan, keep Social Media features as is"** — `components/social/SocialCalendar.jsx`:
   - Month grid, colour-coded chips per platform, drag-to-reschedule via `PATCH /api/social/posts/{id}`.
   - **AI Weekly Plan** — `POST /api/social/ai-weekly-plan`: pulls top-7 selling products from the last 7 days, mixes with active promos and chef-special seeds, distributes one post per connected platform per day. Idempotent — re-running deletes prior `autoPlanRun=true` posts in the window before regenerating.
   - "Next 7 days" upcoming strip with inline publish / delete.
   - Composer / Calendar tab toggle at the top of `/social-media`.
 - **"Create a README from Day 1 till today"** — this file.
+
+### Iteration 40 — Background Worker + Calendar Edit/Reuse + Bespoke Auth Cleanup (25 Jun 2026, current)
+- **"Move ai_weekly_plan to a background task"** — `POST /social/ai-weekly-plan` now returns in **~64ms** (was 130s) with `{planId, status:'queued', expected, message}`. A FastAPI `BackgroundTasks` worker streams progress into `social_plan_jobs` so each LLM call is observed. New `GET /social/plan-jobs/{plan_id}` for polling: returns `{status: queued|in_progress|complete|failed, completed, expected, fallbacks}`. Calendar UI shows a live progress bar (`plan-progress-bar`) and refreshes chips as they're generated.
+- **"Schedule calendar post can be edited by the owner and reused when needed"** —
+  - **Edit dialog** on the Calendar: click any chip OR the new `Pencil` icon in the Next-7-Days strip → opens a form with caption, hashtags, schedule, image URL and status. `PATCH /api/social/posts/{id}` already supported it; UI wires through `data-testid=edit-post-dialog`.
+  - **Duplicate / Reuse** — new `POST /api/social/posts/{id}/duplicate` clones a previous post as a fresh draft, strips `autoPlan*` flags + `publishedAt`, regenerates id + timestamps, records `duplicatedFrom`. Optional body keys (`platform`, `caption`, `hashtags`, `imageUrl`, `scheduledFor`, `status`) let the owner tweak at duplicate time. New `Copy` icon on every upcoming row + an inline button inside the Edit dialog header.
+- **"Improve weekly-plan error wording to distinguish no-connected vs no-matching-platforms"** — `ai-weekly-plan` now returns a **structured `detail`** with `code: 'no_connected_accounts' | 'no_matching_platforms'`, plus `connected[]` and `requested[]`. The UI surfaces `.message` if present, falls back to the raw detail otherwise.
+- **"P2 ~8 legacy inline-auth endpoints"** — cleared (the last batch with multi-line signatures or post-auth `request` usage). Refactored:
+  - `accounting/bas` and `accounting/bas.csv` — request dropped from sig, gated by `Depends(require_owner_or_manager)`.
+  - `licensing/abn/approve/{req_id}` — request kept (reads `X-Support-Override` header) + `Depends(require_owner)`.
+  - `agent/tick` and `agent/voice-command` (loyalty_engine) — request kept (voice flow), auth via Depends.
+  - `agent/auto-publish-roster` and `agent/tick-extended` (phase_ef) — Depends-gated.
+  - `v25/products/{id}/86` — custom owner+manager+kitchen role check kept (after Depends auth).
+  - `v25/ash-pro/approve` — Depends(require_owner).
+  - `v25/concierge` — Depends(get_user).
+  - `v25/warehouse/export` — Depends(require_owner).
+  - Only `bookings_inbox.ack` retains inline auth — intentional graceful-degradation for webhook callers.
+- **README updated** (this file).
 
 ## Repository layout
 
@@ -313,6 +333,7 @@ Environment variables (all in `.env` files, never hard-coded):
 | 37   | n/a     | 9/10 → 10/10 post-fix  | Drag-select + Recently Edited + Nua rebrand                         |
 | 38   | 20/20   | ~88% (testid gaps only) | Social Media + Loyalty 10pt + Split + PromotionDialog               |
 | 39   | curl-verified | self-tested      | Content Calendar + AI Weekly Plan + README                          |
+| 40   | curl+pytest verified | self-tested | Background worker (~64ms enqueue) + Edit/Duplicate + bespoke auth   |
 
 ## Roadmap / Backlog
 
@@ -321,10 +342,10 @@ Environment variables (all in `.env` files, never hard-coded):
 - **Real Meta / TikTok / X OAuth** to lift the social-publish stub.
 
 ### P2
-- **~8 inline-auth endpoints** still on the legacy pattern (custom role mixes / signed-device-secret) — bespoke refactor required.
 - **Chargeback / dispute console** with evidence packs UI polish.
 - **Hardware health monitoring** alerts.
 - **`x-ai-parsed-fallback` response header** so the UI can warn when the LLM fell back.
+- **Touch-friendly drag-and-drop** for the calendar (HTML5 DnD doesn't work on tablets) → `@dnd-kit` migration.
 - Surface **`partialFailures`** on AI weekly-plan response so the UI can warn when some platforms used the template.
 
 ### Stretch

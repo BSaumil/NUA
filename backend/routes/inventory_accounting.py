@@ -321,8 +321,9 @@ def _quarter_range(year: int, quarter: str):
 
 
 @router.get("/accounting/bas")
-async def bas_report(request: Request, fy: Optional[int] = None, quarter: Optional[str] = None,
-                     monthStart: Optional[str] = None, monthEnd: Optional[str] = None):
+async def bas_report(fy: Optional[int] = None, quarter: Optional[str] = None,
+                     monthStart: Optional[str] = None, monthEnd: Optional[str] = None,
+                     _: dict = Depends(require_owner_or_manager)):
     """Australian GST/BAS report.
     Modes:
       - ?fy=2026&quarter=Q3   (Jan-Mar 2026)
@@ -330,10 +331,6 @@ async def bas_report(request: Request, fy: Optional[int] = None, quarter: Option
     Returns G1 sales, 1A GST collected, G11 purchases, 1B GST credits,
     net GST payable.
     """
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
     if monthStart and monthEnd:
         start = date.fromisoformat(monthStart)
         end = date.fromisoformat(monthEnd)
@@ -399,13 +396,10 @@ async def bas_report(request: Request, fy: Optional[int] = None, quarter: Option
 
 
 @router.get("/accounting/bas.csv")
-async def bas_csv(request: Request, fy: Optional[int] = None, quarter: Optional[str] = None):
+async def bas_csv(fy: Optional[int] = None, quarter: Optional[str] = None,
+                  user: dict = Depends(require_owner_or_manager)):
     """CSV export of the BAS report — slip into ATO submission."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
-    report = await bas_report(request, fy=fy, quarter=quarter)
+    report = await bas_report(fy=fy, quarter=quarter, _=user)
     from fastapi.responses import Response
     rows = [
         ["Period", report["period"]],

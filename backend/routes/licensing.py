@@ -325,13 +325,9 @@ async def request_abn_change(data: dict, user: dict = Depends(require_owner)):
 
 
 @router.post("/abn/approve/{req_id}")
-async def approve_abn_change(req_id: str, request: Request):
+async def approve_abn_change(req_id: str, request: Request, user: dict = Depends(require_owner)):
     """Per spec: 'do not allow to change ABN, once license is issued'.
     We retain the endpoint so support can override, but it is closed by default."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Owner only")
     # Hard-gated: requires SUPPORT_OVERRIDE_KEY env or operator action
     override = request.headers.get("X-Support-Override")
     if override != os.environ.get("SUPPORT_OVERRIDE_KEY", "nua-support-2026"):

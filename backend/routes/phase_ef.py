@@ -171,11 +171,7 @@ async def voice_extended(data: dict, user: dict = Depends(get_user)):
 # E4 — AUTO-PUBLISH ROSTER (within budget cap)
 # =============================================================================
 @router.post("/agent/auto-publish-roster")
-async def auto_publish_roster(data: dict, request: Request):
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
+async def auto_publish_roster(data: dict, request: Request, _: dict = Depends(require_owner_or_manager)):
     cfg = await db.agent_autonomy.find_one({"id": "default"}, {"_id": 0}) or DEFAULT_AUTONOMY
     if not cfg.get("autoPublishRoster", False):
         raise HTTPException(status_code=400, detail="Auto-publish roster disabled in autonomy config")
@@ -456,12 +452,8 @@ async def your_usual(customer_id: str, _: dict = Depends(get_user)):
 # Hook into Ash agent tick — add E+F autonomous rules
 # =============================================================================
 @router.post("/agent/tick-extended")
-async def tick_extended(request: Request):
+async def tick_extended(request: Request, _: dict = Depends(require_owner_or_manager)):
     """Runs Phase E + F autonomous decisions in addition to base tick."""
-    from routes.auth import get_current_user
-    user = await get_current_user(request)
-    if user["role"] not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Owner/Manager only")
     cfg = await db.agent_autonomy.find_one({"id": "default"}, {"_id": 0}) or DEFAULT_AUTONOMY
     out = {"decisions": []}
 

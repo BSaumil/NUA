@@ -1,7 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, Sparkles, RefreshCcw, Wand2, Trash2, Send, Calendar } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Sparkles, RefreshCcw, Wand2, Trash2, Send, Calendar, Pencil, Copy, X } from 'lucide-react';
 import { Button } from '../ui/button';
+import { Input } from '../ui/input';
 import { Card, CardContent } from '../ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 import { toast } from 'sonner';
 import { socialAPI } from '../../services/api';
 
@@ -41,8 +43,11 @@ const startOfMonthGrid = (anchor) => {
 export const SocialCalendar = ({ theme, posts, accounts, onReload }) => {
   const [anchor, setAnchor] = useState(new Date());
   const [planning, setPlanning] = useState(false);
+  const [planJob, setPlanJob] = useState(null);   // {planId, completed, expected, status}
   const [dragId, setDragId] = useState(null);
   const [hoverDay, setHoverDay] = useState(null);
+  const [editingPost, setEditingPost] = useState(null);
+  const [editForm, setEditForm] = useState({ caption: '', hashtags: '', scheduledFor: '', imageUrl: '', status: 'scheduled' });
 
   // Build a 6-week grid (42 cells) starting at the first Monday on/before
   // the 1st of the anchored month. This keeps the layout stable across
@@ -116,11 +121,58 @@ export const SocialCalendar = ({ theme, posts, accounts, onReload }) => {
     setPlanning(true);
     try {
       const r = await socialAPI.aiWeeklyPlan({ daysAhead: 7, save: true, tone: 'warm', postTime: '12:00' });
-      toast.success(`Saved ${r.data?.saved} posts across ${r.data?.platformsUsed?.length || 0} platforms`);
-      onReload && onReload();
+      const job = r.data || {};
+      if (job.status === 'queued' || job.status === 'in_progress') {
+        // Background mode: poll progress until done.
+        setPlanJob({ planId: job.planId, completed: 0, expected: job.expected, status: job.status });
+        toast.success(`Plan queued — ${job.expected} posts coming up…`);
+        const startedAt = Date.now();
+        const poll = async () => {
+          try {
+            const s = await socialAPI.getPlanJob(job.planId);
+            setPlanJob(s.data);
+            if (s.data?.status === 'complete') {
+              toast.success(`Done — ${s.data.completed} posts saved${s.data.fallbacks ? ` (${s.data.fallbacks} fallback)` : ''}`);
+              onReload && onReload();
+              setPlanJob(null);
+              setPlanning(false);
+              return;
+            }
+            if (s.data?.status === 'failed') {
+              toast.error(`Plan failed: ${s.data.error || 'unknown'}`);
+              onReload && onReload();
+              setPlanJob(null);
+              setPlanning(false);
+              return;
+            }
+            // Refresh the calendar mid-flight so chips appear as they're generated.
+            if ((s.data?.completed || 0) > 0) onReload && onReload();
+            if (Date.now() - startedAt > 180000) {  // 3min safety net
+              toast.warning('Plan still running — check back shortly.');
+              setPlanJob(null);
+              setPlanning(false);
+              return;
+            }
+            setTimeout(poll, 2500);
+          } catch {
+            setTimeout(poll, 3500);
+          }
+        };
+        setTimeout(poll, 2000);
+      } else {
+        // Legacy synchronous path (shouldn't fire post-iter40 but kept for safety).
+        toast.success(`Saved ${r.data?.saved} posts across ${r.data?.platformsUsed?.length || 0} platforms`);
+        onReload && onReload();
+        setPlanning(false);
+      }
     } catch (e) {
-      toast.error(e?.response?.data?.detail || 'AI plan failed');
-    } finally { setPlanning(false); }
+      const detail = e?.response?.data?.detail;
+      const msg = typeof detail === 'object' && detail !== null
+        ? (detail.message || JSON.stringify(detail))
+        : (detail || 'AI plan failed');
+      toast.error(msg);
+      setPlanning(false);
+    }
   };
 
   const handlePublish = async (id) => {
@@ -131,6 +183,50 @@ export const SocialCalendar = ({ theme, posts, accounts, onReload }) => {
     if (!window.confirm('Delete this post?')) return;
     try { await socialAPI.deletePost(id); toast.success('Deleted'); onReload && onReload(); }
     catch { toast.error('Failed'); }
+  };
+
+  // Edit existing post (owner reuse / tweak)
+  const openEdit = (post) => {
+    setEditingPost(post);
+    const sched = post.scheduledFor ? new Date(post.scheduledFor) : null;
+    const local = sched && !isNaN(sched)
+      ? new Date(sched.getTime() - sched.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+      : '';
+    setEditForm({
+      caption: post.caption || '',
+      hashtags: (post.hashtags || []).join(' '),
+      scheduledFor: local,
+      imageUrl: post.imageUrl || '',
+      status: post.status === 'published' ? 'published' : (post.status || 'scheduled'),
+    });
+  };
+  const saveEdit = async () => {
+    if (!editingPost) return;
+    const body = {
+      caption: editForm.caption,
+      hashtags: editForm.hashtags.split(/\s+/).filter(Boolean),
+      imageUrl: editForm.imageUrl || null,
+    };
+    if (editForm.scheduledFor) body.scheduledFor = new Date(editForm.scheduledFor).toISOString();
+    if (editForm.status && editingPost.status !== 'published') body.status = editForm.status;
+    try {
+      await socialAPI.updatePost(editingPost.id, body);
+      toast.success('Post updated');
+      setEditingPost(null);
+      onReload && onReload();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Update failed');
+    }
+  };
+  const duplicatePost = async (post) => {
+    if (!window.confirm(`Duplicate this post as a new draft? You can edit and reschedule the copy.`)) return;
+    try {
+      await socialAPI.duplicatePost(post.id, { status: 'draft' });
+      toast.success('Duplicated as draft');
+      onReload && onReload();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Duplicate failed');
+    }
   };
 
   // KPIs
@@ -173,6 +269,28 @@ export const SocialCalendar = ({ theme, posts, accounts, onReload }) => {
             </Button>
           </div>
         </div>
+
+        {/* AI Weekly Plan progress */}
+        {planJob && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 flex items-center gap-3" data-testid="plan-progress-bar">
+            <RefreshCcw size={14} className="animate-spin" style={{ color: theme.primary }} />
+            <div className="flex-1">
+              <div className="text-xs font-semibold text-amber-900">
+                AI Weekly Plan running — {planJob.completed || 0} / {planJob.expected || '?'} posts
+              </div>
+              <div className="h-1.5 bg-amber-200 rounded-full mt-1 overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all"
+                  style={{
+                    width: `${Math.min(100, ((planJob.completed || 0) / Math.max(1, planJob.expected || 1)) * 100)}%`,
+                    background: theme.primary,
+                  }}
+                />
+              </div>
+            </div>
+            <span className="text-[10px] uppercase text-amber-700 tracking-widest">{planJob.status}</span>
+          </div>
+        )}
 
         {/* KPI strip */}
         <div className="flex items-center gap-3 text-xs">
@@ -219,7 +337,8 @@ export const SocialCalendar = ({ theme, posts, accounts, onReload }) => {
                       key={p.id}
                       draggable={p.status !== 'published'}
                       onDragStart={(e) => handleDragStart(e, p)}
-                      className={`text-[10px] rounded px-1.5 py-0.5 truncate cursor-grab active:cursor-grabbing ${p.status === 'published' ? 'opacity-80' : ''}`}
+                      onClick={() => openEdit(p)}
+                      className={`text-[10px] rounded px-1.5 py-0.5 truncate cursor-grab active:cursor-grabbing hover:brightness-95 ${p.status === 'published' ? 'opacity-80' : ''}`}
                       style={{
                         background: `${PLATFORM_COLORS[p.platform] || '#888'}15`,
                         borderLeft: `3px solid ${PLATFORM_COLORS[p.platform] || '#888'}`,
@@ -276,6 +395,12 @@ export const SocialCalendar = ({ theme, posts, accounts, onReload }) => {
                     <span className="font-semibold w-20">{new Date(p.scheduledFor).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })}</span>
                     <span className="text-gray-500 w-20">{p.platform}</span>
                     <span className="flex-1 truncate">{p.caption}</span>
+                    <button onClick={() => openEdit(p)} className="text-gray-400 hover:text-blue-600" data-testid={`upcoming-edit-${p.id}`} title="Edit">
+                      <Pencil size={12} />
+                    </button>
+                    <button onClick={() => duplicatePost(p)} className="text-gray-400 hover:text-purple-600" data-testid={`upcoming-duplicate-${p.id}`} title="Duplicate / reuse">
+                      <Copy size={12} />
+                    </button>
                     <button onClick={() => handlePublish(p.id)} className="text-gray-400 hover:text-emerald-600" data-testid={`upcoming-publish-${p.id}`} title="Publish now">
                       <Send size={12} />
                     </button>
@@ -288,6 +413,78 @@ export const SocialCalendar = ({ theme, posts, accounts, onReload }) => {
             );
           })()}
         </div>
+
+        {/* Edit/Reuse dialog */}
+        <Dialog open={!!editingPost} onOpenChange={(o) => { if (!o) setEditingPost(null); }}>
+          <DialogContent className="max-w-md" data-testid="edit-post-dialog">
+            <DialogHeader>
+              <DialogTitle className="flex items-center justify-between">
+                <span>Edit Post</span>
+                {editingPost && (
+                  <button onClick={() => duplicatePost(editingPost)}
+                    className="text-xs text-purple-600 hover:underline flex items-center gap-1"
+                    data-testid="edit-dialog-duplicate">
+                    <Copy size={12} /> Duplicate as draft
+                  </button>
+                )}
+              </DialogTitle>
+            </DialogHeader>
+            {editingPost && (
+              <div className="space-y-3 py-2">
+                <div className="text-[10px] uppercase text-gray-500 tracking-widest">
+                  {editingPost.platform} · {editingPost.postType} · {editingPost.status}
+                </div>
+                <textarea
+                  className="w-full p-2 border rounded text-sm min-h-[100px]"
+                  value={editForm.caption}
+                  onChange={(e) => setEditForm({ ...editForm, caption: e.target.value })}
+                  placeholder="Caption..."
+                  data-testid="edit-caption"
+                />
+                <Input
+                  placeholder="Hashtags (space-separated, e.g. #foodie #nuva)"
+                  value={editForm.hashtags}
+                  onChange={(e) => setEditForm({ ...editForm, hashtags: e.target.value })}
+                  data-testid="edit-hashtags"
+                />
+                <Input
+                  type="datetime-local"
+                  value={editForm.scheduledFor}
+                  onChange={(e) => setEditForm({ ...editForm, scheduledFor: e.target.value })}
+                  data-testid="edit-scheduledfor"
+                />
+                <Input
+                  placeholder="Image URL (or paste a data URL)"
+                  value={editForm.imageUrl}
+                  onChange={(e) => setEditForm({ ...editForm, imageUrl: e.target.value })}
+                  data-testid="edit-imageurl"
+                />
+                {editingPost.status !== 'published' && (
+                  <select
+                    className="w-full p-2 border rounded text-sm"
+                    value={editForm.status}
+                    onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
+                    data-testid="edit-status"
+                  >
+                    <option value="draft">Draft</option>
+                    <option value="scheduled">Scheduled</option>
+                  </select>
+                )}
+                <div className="flex gap-2 pt-2">
+                  <Button variant="outline" onClick={() => setEditingPost(null)} className="flex-1" data-testid="edit-cancel">
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={saveEdit}
+                    className="flex-1 text-white"
+                    style={{ background: theme.primary }}
+                    data-testid="edit-save"
+                  >Save changes</Button>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </CardContent>
     </Card>
   );

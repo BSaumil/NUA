@@ -8,7 +8,7 @@ the OAuth boundary so the rest of the product (AI generation, scheduling,
 preview, image-library binding) can ship today. Marking a post "published"
 flags it locally — the platform call is logged but stubbed.
 """
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime, timezone, timedelta
@@ -142,6 +142,51 @@ async def create_post(body: SocialPostIn, user: dict = Depends(require_owner_or_
     await db.social_posts.insert_one(doc)
     doc.pop("_id", None)
     return doc
+
+
+@router.post("/social/posts/{post_id}/duplicate")
+async def duplicate_post(post_id: str, body: Optional[dict] = None, user: dict = Depends(require_owner_or_manager)):
+    """Owner-friendly: clone a previous post as a fresh draft (or scheduled
+    when `scheduledFor` is provided). Defaults: status='draft', strips
+    autoPlan flags, regenerates id + timestamps. Lets the owner reuse a
+    high-performing caption without re-running AI.
+    """
+    body = body or {}
+    src = await db.social_posts.find_one({"id": post_id}, {"_id": 0})
+    if not src:
+        raise HTTPException(404, "Post not found")
+    new_status = body.get("status", "draft")
+    if new_status not in ("draft", "scheduled"):
+        raise HTTPException(400, "duplicate status must be draft | scheduled")
+    if new_status == "scheduled" and not body.get("scheduledFor"):
+        raise HTTPException(400, "scheduledFor is required when status='scheduled'")
+    clone = {
+        **src,
+        "id": str(uuid.uuid4()),
+        "status": new_status,
+        "scheduledFor": body.get("scheduledFor") or src.get("scheduledFor"),
+        # Strip auto-plan / publish tracking — this is a fresh copy.
+        "autoPlan": False,
+        "autoPlanRun": False,
+        "autoPlanId": None,
+        "publishedAt": None,
+        "publishProvider": None,
+        "duplicatedFrom": post_id,
+        "createdBy": user.get("email"),
+        "createdAt": datetime.now(timezone.utc).isoformat(),
+    }
+    # Allow lightweight tweaks at duplicate time so the owner can adjust
+    # platform / caption / hashtags / image without a second call.
+    for key in ("platform", "postType", "caption", "hashtags", "imageUrl"):
+        if key in body and body[key] is not None:
+            clone[key] = body[key]
+    if clone.get("postType") not in ("post", "story", "reel"):
+        clone["postType"] = "post"
+    if clone.get("platform") not in SUPPORTED_PLATFORMS:
+        raise HTTPException(400, f"Platform must be one of {SUPPORTED_PLATFORMS}")
+    await db.social_posts.insert_one(clone)
+    clone.pop("_id", None)
+    return clone
 
 
 @router.patch("/social/posts/{post_id}")
@@ -334,7 +379,8 @@ class WeeklyPlanIn(BaseModel):
 
 
 @router.post("/social/ai-weekly-plan")
-async def ai_weekly_plan(body: WeeklyPlanIn, user: dict = Depends(require_owner_or_manager)):
+async def ai_weekly_plan(body: WeeklyPlanIn, background_tasks: BackgroundTasks,
+                         user: dict = Depends(require_owner_or_manager)):
     """Generate a 7-day cross-platform social plan from top-selling products
     + active promotions, distributed one post per day per platform.
 
@@ -347,6 +393,13 @@ async def ai_weekly_plan(body: WeeklyPlanIn, user: dict = Depends(require_owner_
     The endpoint is idempotent enough to re-run: any prior `auto_plan_*`
     scheduled-but-unpublished post in the target window is dismissed before
     new ones land, so the cashier never ends up with duplicate posts.
+
+    SCALING: when `save=true`, the actual N×P LLM calls are kicked off as
+    a FastAPI BackgroundTask so the HTTP response returns in ~30ms. The
+    UI polls `GET /social/plan-jobs/{planId}` for progress, or just refreshes
+    `GET /social/posts` once the toast fires. Preview mode (`save=false`)
+    still runs inline because the caller wants the generated drafts back
+    in the response body.
     """
     days = max(1, min(14, body.daysAhead or 7))
     tone = body.tone or "warm"
@@ -356,16 +409,38 @@ async def ai_weekly_plan(body: WeeklyPlanIn, user: dict = Depends(require_owner_
     except Exception:
         target_hour, target_min = 12, 0
 
-    # 1. Pick the platforms — default to all connected accounts.
+    # 1. Pick the platforms — default to all connected accounts. Be specific
+    # about WHY the request fails so the UI can give an actionable nudge.
+    connected_accounts = await db.social_accounts.find(
+        {"tokenStatus": {"$exists": True}}, {"_id": 0, "platform": 1},
+    ).to_list(50)
+    connected_keys = sorted({a["platform"] for a in connected_accounts})
+    if not connected_keys:
+        raise HTTPException(
+            400,
+            detail={
+                "code": "no_connected_accounts",
+                "message": "No connected social accounts — connect at least one first.",
+                "connected": [], "requested": body.platforms or [],
+            },
+        )
     if body.platforms:
-        platforms = [p for p in body.platforms if p in SUPPORTED_PLATFORMS]
+        requested = [p for p in body.platforms if p in SUPPORTED_PLATFORMS]
+        platforms = [p for p in requested if p in connected_keys]
+        if not platforms:
+            raise HTTPException(
+                400,
+                detail={
+                    "code": "no_matching_platforms",
+                    "message": (
+                        "None of the requested platforms are connected. "
+                        f"Connected: {connected_keys}. Requested: {requested or body.platforms}."
+                    ),
+                    "connected": connected_keys, "requested": requested or body.platforms,
+                },
+            )
     else:
-        accs = await db.social_accounts.find(
-            {"tokenStatus": {"$exists": True}}, {"_id": 0, "platform": 1},
-        ).to_list(50)
-        platforms = sorted({a["platform"] for a in accs})
-    if not platforms:
-        raise HTTPException(400, "No connected social accounts — connect at least one first")
+        platforms = connected_keys
 
     # 2. Compute top-selling products (last 7 days). Falls back gracefully
     # when there aren't enough transactions to mine.
@@ -408,7 +483,9 @@ async def ai_weekly_plan(body: WeeklyPlanIn, user: dict = Depends(require_owner_
             "scheduledFor": {"$gte": datetime.now(timezone.utc).isoformat(), "$lte": window_end},
         })
 
-    # 5. Walk N days × P platforms, alternating the source type.
+    # 5. Walk N days × P platforms, alternating the source type. The plan-day
+    # selection runs synchronously (it's cheap — just dict lookups), then the
+    # heavy LLM work is either inlined (preview) or queued (save).
     SPECIAL_SEEDS = [
         "Chef's Choice tonight — limited covers, intimate vibe.",
         "Weekend brunch is on — bring the crew.",
@@ -416,70 +493,170 @@ async def ai_weekly_plan(body: WeeklyPlanIn, user: dict = Depends(require_owner_
         "Hidden-menu Tuesday — DM us for the secret order.",
     ]
     plan_id = f"plan-{uuid.uuid4().hex[:8]}"
-    saved_posts = []
-    preview = []
     now = datetime.now(timezone.utc)
 
+    plan_days = []
     for d in range(days):
         day = now + timedelta(days=d + 1)
         scheduled_for = day.replace(hour=target_hour, minute=target_min, second=0, microsecond=0).isoformat()
         if d % 3 == 1 and promos:
             promo = promos[d % len(promos)]
-            source_type, source_id, subject_label, subject_detail, image_hint = (
-                "promotion", promo["id"], promo.get("name", "promo"),
-                f"{promo.get('discount', 0)}% off — schedule: {promo.get('schedule', 'ongoing')}",
-                None,
-            )
+            plan_days.append({
+                "scheduledFor": scheduled_for,
+                "sourceType": "promotion", "sourceId": promo["id"],
+                "subjectLabel": promo.get("name", "promo"),
+                "subjectDetail": f"{promo.get('discount', 0)}% off — schedule: {promo.get('schedule', 'ongoing')}",
+                "imageHint": None,
+            })
         elif d % 3 == 2:
             seed = SPECIAL_SEEDS[d % len(SPECIAL_SEEDS)]
-            source_type, source_id, subject_label, subject_detail, image_hint = (
-                "special", None, seed[:60], seed, None,
-            )
+            plan_days.append({
+                "scheduledFor": scheduled_for,
+                "sourceType": "special", "sourceId": None,
+                "subjectLabel": seed[:60], "subjectDetail": seed, "imageHint": None,
+            })
         else:
             prod = products_for_plan[d % len(products_for_plan)]
-            source_type, source_id = "product", prod["id"]
-            subject_label = prod.get("name", "our top dish")
-            subject_detail = (
-                f"Category: {prod.get('category', 'food')}, price ${prod.get('price', 0):.2f}. "
-                f"Description: {prod.get('description') or prod.get('seoDescription') or ''}"
-            )
-            image_hint = prod.get("image")
+            plan_days.append({
+                "scheduledFor": scheduled_for,
+                "sourceType": "product", "sourceId": prod["id"],
+                "subjectLabel": prod.get("name", "our top dish"),
+                "subjectDetail": (
+                    f"Category: {prod.get('category', 'food')}, price ${prod.get('price', 0):.2f}. "
+                    f"Description: {prod.get('description') or prod.get('seoDescription') or ''}"
+                ),
+                "imageHint": prod.get("image"),
+            })
 
+    total_posts = len(plan_days) * len(platforms)
+
+    if body.save:
+        # Persist a job doc so the UI can poll. Then defer the LLM work.
+        await db.social_plan_jobs.insert_one({
+            "planId": plan_id, "status": "queued", "expected": total_posts, "completed": 0,
+            "fallbacks": 0, "platformsUsed": platforms, "tone": tone,
+            "createdBy": user.get("email"),
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+        })
+        background_tasks.add_task(
+            _run_weekly_plan_job,
+            plan_id=plan_id, plan_days=plan_days, platforms=platforms,
+            tone=tone, created_by=user.get("email"),
+        )
+        return {
+            "planId": plan_id,
+            "status": "queued",
+            "expected": total_posts,
+            "platformsUsed": platforms,
+            "message": f"Generating {total_posts} posts in the background — refresh the calendar in ~{max(5, total_posts * 2)}s.",
+        }
+
+    # Preview path — run inline, return the generated drafts directly.
+    preview = []
+    for plan_day in plan_days:
         for platform in platforms:
             gen = await _generate_for_platform(
                 platform=platform, post_type="post", tone=tone,
-                subject_label=subject_label, subject_detail=subject_detail, locale="en-AU",
+                subject_label=plan_day["subjectLabel"],
+                subject_detail=plan_day["subjectDetail"],
+                locale="en-AU",
             )
-            doc = {
+            preview.append({
                 "id": str(uuid.uuid4()),
-                "platform": platform,
-                "postType": "post",
-                "caption": gen["caption"],
-                "hashtags": gen["hashtags"],
-                "imageAlt": gen.get("imageAlt"),
-                "imageUrl": image_hint,
-                "sourceType": source_type,
-                "sourceId": source_id,
-                "scheduledFor": scheduled_for,
-                "status": "scheduled" if body.save else "preview",
-                "autoPlan": True,
-                "autoPlanRun": body.save,
+                "platform": platform, "postType": "post",
+                "caption": gen["caption"], "hashtags": gen["hashtags"],
+                "imageAlt": gen.get("imageAlt"), "imageUrl": plan_day["imageHint"],
+                "sourceType": plan_day["sourceType"], "sourceId": plan_day["sourceId"],
+                "scheduledFor": plan_day["scheduledFor"],
+                "status": "preview", "autoPlan": True, "autoPlanRun": False,
                 "autoPlanId": plan_id,
                 "isFallback": bool(gen.get("isFallback")),
                 "createdBy": user.get("email"),
                 "createdAt": datetime.now(timezone.utc).isoformat(),
-            }
-            if body.save:
-                await db.social_posts.insert_one(doc)
-                doc.pop("_id", None)
-                saved_posts.append(doc)
-            else:
-                preview.append(doc)
+            })
 
     return {
         "planId": plan_id,
-        "saved": len(saved_posts),
-        "preview": preview if not body.save else [],
-        "posts": saved_posts if body.save else preview,
+        "saved": 0,
+        "preview": preview,
+        "posts": preview,
         "platformsUsed": platforms,
     }
+
+
+async def _run_weekly_plan_job(*, plan_id: str, plan_days: list, platforms: list,
+                                tone: str, created_by: Optional[str]):
+    """Background worker for `ai-weekly-plan`. Streams progress into
+    `social_plan_jobs` so the UI can render a progress bar without holding
+    the HTTP connection open. Idempotent against partial failures: each post
+    is inserted as it's produced; if the worker crashes mid-flight the
+    `status` flips to 'failed' but the partial inserts stay (they're valid
+    scheduled posts)."""
+    await db.social_plan_jobs.update_one(
+        {"planId": plan_id},
+        {"$set": {"status": "in_progress", "updatedAt": datetime.now(timezone.utc).isoformat()}},
+    )
+    completed = 0
+    fallbacks = 0
+    try:
+        for plan_day in plan_days:
+            for platform in platforms:
+                gen = await _generate_for_platform(
+                    platform=platform, post_type="post", tone=tone,
+                    subject_label=plan_day["subjectLabel"],
+                    subject_detail=plan_day["subjectDetail"],
+                    locale="en-AU",
+                )
+                if gen.get("isFallback"):
+                    fallbacks += 1
+                doc = {
+                    "id": str(uuid.uuid4()),
+                    "platform": platform, "postType": "post",
+                    "caption": gen["caption"], "hashtags": gen["hashtags"],
+                    "imageAlt": gen.get("imageAlt"), "imageUrl": plan_day["imageHint"],
+                    "sourceType": plan_day["sourceType"], "sourceId": plan_day["sourceId"],
+                    "scheduledFor": plan_day["scheduledFor"],
+                    "status": "scheduled", "autoPlan": True, "autoPlanRun": True,
+                    "autoPlanId": plan_id,
+                    "isFallback": bool(gen.get("isFallback")),
+                    "createdBy": created_by,
+                    "createdAt": datetime.now(timezone.utc).isoformat(),
+                }
+                await db.social_posts.insert_one(doc)
+                completed += 1
+                # Update job progress every couple of inserts to keep Mongo writes cheap.
+                if completed % 2 == 0 or completed == len(plan_days) * len(platforms):
+                    await db.social_plan_jobs.update_one(
+                        {"planId": plan_id},
+                        {"$set": {
+                            "completed": completed, "fallbacks": fallbacks,
+                            "updatedAt": datetime.now(timezone.utc).isoformat(),
+                        }},
+                    )
+        await db.social_plan_jobs.update_one(
+            {"planId": plan_id},
+            {"$set": {
+                "status": "complete", "completed": completed, "fallbacks": fallbacks,
+                "finishedAt": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+    except Exception as exc:
+        logger.exception("Weekly plan worker failed: %s", exc)
+        await db.social_plan_jobs.update_one(
+            {"planId": plan_id},
+            {"$set": {
+                "status": "failed", "completed": completed, "fallbacks": fallbacks,
+                "error": f"{type(exc).__name__}: {exc}",
+                "finishedAt": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+
+
+@router.get("/social/plan-jobs/{plan_id}")
+async def get_plan_job(plan_id: str, _: dict = Depends(get_user)):
+    """Poll progress for an in-flight or completed weekly plan."""
+    job = await db.social_plan_jobs.find_one({"planId": plan_id}, {"_id": 0})
+    if not job:
+        raise HTTPException(404, "Plan job not found")
+    return job
