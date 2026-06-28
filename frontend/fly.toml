@@ -1,0 +1,28 @@
+# Fly.io config for the Nua frontend (React SPA via nginx).
+# Rename `app = "..."` to be globally unique.
+# IMPORTANT: update [build.args].REACT_APP_BACKEND_URL to point at YOUR backend
+# Fly app's URL before the first deploy.
+# Run:  cd /app/frontend && flyctl launch --no-deploy && flyctl deploy
+
+app = "nua-frontend"
+primary_region = "syd"
+
+[build]
+  dockerfile = "Dockerfile"
+
+  [build.args]
+    # MUST match the backend's public URL — CRA bakes this into the bundle at build time.
+    REACT_APP_BACKEND_URL = "https://nua-backend.fly.dev"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256
