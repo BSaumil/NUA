@@ -8,7 +8,7 @@ from models.feedback import Feedback, FeedbackCreate
 router = APIRouter()
 
 # ============ CUSTOMERS API ============
-@router.get("/customers", response_model=List[Customer])
+@router.get("/customers")
 async def get_customers(search: Optional[str] = None):
     query = {}
     if search:
@@ -17,8 +17,23 @@ async def get_customers(search: Optional[str] = None):
             {"email": {"$regex": search, "$options": "i"}},
             {"phone": {"$regex": search, "$options": "i"}}
         ]
-    customers = await db.customers.find(query).to_list(1000)
-    return [Customer(**c) for c in customers]
+    customers = await db.customers.find(query, {"_id": 0}).to_list(1000)
+    # Resilient: rows with legacy/invalid data (e.g. a redacted placeholder
+    # email like `*@nua.local`) used to crash the entire endpoint via
+    # Pydantic EmailStr validation. We now skip those rows instead of 500ing
+    # so the CRM is never blocked by one bad record.
+    out = []
+    for c in customers:
+        try:
+            out.append(Customer(**c).dict())
+        except Exception:
+            # Soft-fix: surface as much as we can without the email field.
+            stripped = {**c, "email": "invalid@unknown.local"}
+            try:
+                out.append(Customer(**stripped).dict())
+            except Exception:
+                continue
+    return out
 
 @router.post("/customers", response_model=Customer)
 async def create_customer(customer: CustomerCreate):

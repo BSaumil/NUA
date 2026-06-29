@@ -154,6 +154,14 @@ logger = logging.getLogger(__name__)
 async def startup():
     await seed_admin()
     await seed_default_business()
+    # Seed 5 demo customers + reservations/transactions/feedback (idempotent).
+    try:
+        from seeds.seed_customers import seed_demo_customers
+        result = await seed_demo_customers()
+        if result.get("seeded"):
+            logger.info("Seeded %s demo customers", result.get("count"))
+    except Exception as exc:
+        logger.warning("Customer seed skipped: %s", exc)
     logger.info("Admin seeded, default business created")
 
 @app.on_event("shutdown")

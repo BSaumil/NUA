@@ -1,0 +1,33 @@
+{
+  "summary": "Iter 42 — CRM/Subscriptions bug-fix verification. Backend pytest 9/9 GREEN: GET /api/customers returns 200 with 13 customers (5 seeded + pre-existing) and zero @nua.local rows; all 5 seeded emails (olivia.bennett, marcus.tan, priya.sharma, james.odonnell, sofia.reyes @example.com) present; Olivia profile has >=2 reservations/transactions/feedback (actually 6+ each); PATCH /api/v25/subscriptions/members/{id} accepts valid status, rejects bad status with 400, rejects unknown planId with 404; DELETE soft-cancels with cancelledAt; manager DELETE → 403; v26 plan PATCH (priceMonthly/perks/name/trialDays/active/T&C) + DELETE still work. Frontend Playwright: /customers renders all 5 seeded guest cards (Olivia VIP/Platinum, Marcus Gold, Priya Silver, James O'Donnell Bronze, Sofia Reyes VIP/Gold-ish). /subscriptions renders KPI strip (kpi-plans, kpi-active, kpi-paused, kpi-mrr), Coffee Club plan card with edit/delete icons, members table with Edit buttons, New Plan dialog opens with all 7 fields (plan-name, plan-price-monthly, plan-price-annual, plan-perks, plan-trial-days, plan-active-toggle, plan-terms), Enrol Customer dialog opens with enrol-customer-select + enrol-plan-select + enrol-submit.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Subscriptions members table — Pause/Cancel inline actions", "issue": "Could not locate data-testid='pause-member' / 'cancel-member' in the rendered page DOM — only 'edit-member' is present on the members rows. Review request expects discrete Pause and Cancel buttons next to Edit. They may have been collapsed into the Edit dialog (status select), which would be acceptable, but the explicit pause/cancel testids are missing.", "selector": "[data-testid='pause-member'], [data-testid='cancel-member']", "priority": "LOW"},
+      {"component": "Subscriptions / New Plan button testid", "issue": "Expected data-testid='new-plan' per spec; actual is data-testid='new-plan-btn'. Same control, just a naming nit — opens the dialog correctly.", "selector": "[data-testid='new-plan']", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration42_crm_subs.py", "/app/test_reports/pytest/pytest_iteration42.xml"],
+  "action_items": [
+    "(Optional/clarify) Either expose discrete data-testid='pause-member-{id}' and data-testid='cancel-member-{id}' inline action buttons on each member row, OR confirm pause/cancel happen only via the Edit dialog status select (in which case the spec line 'Clicking Pause flips status' is misleading).",
+    "(Naming nit) Align 'new-plan-btn' → 'new-plan' if you want to match the spec verbatim — current button works."
+  ],
+  "critical_code_review_comments": [
+    "routes/customers.py:11-36 — Graceful EmailStr skip is good. The fallback that rewrites the email to 'invalid@unknown.local' could mask data hygiene issues; consider logging the row id so ops can clean up.",
+    "seeds/seed_customers.py — Per-email idempotency via find_one is correct and safe. The one-time delete_many({email:/@nua.local$/}) at startup will also delete any legitimate @nua.local entries forever — fine for this codebase since that's the redacted placeholder convention, but document it.",
+    "routes/v25_suite.py:831-866 — Member PATCH validates status + planId existence cleanly. DELETE is owner-only and soft-cancels with audit stamp. Good.",
+    "routes/v26_commerce.py:281-302 — Plan PATCH strips id/createdAt; back-fills barcode for legacy plans on first edit (nice touch).",
+    "frontend Subscriptions.jsx — Spec asks for inline Pause/Cancel buttons with status-coloured badges; current impl appears to consolidate into the Edit dialog. Verify with product owner.",
+    "Customer Edit dialog tier select (Bronze/Silver/Gold/Platinum) was not interactively re-verified this iteration; the page DOM confirms 'customer-dialog' data-testid wiring is intact via prior iterations."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration42_crm_subs.py", "/app/test_reports/pytest/pytest_iteration42.xml"],
+  "success_rate": {"backend": "100% (9/9 pytest)", "frontend": "~90% (Customers + Subs main flows render and dialogs open; only the inline pause/cancel testids could not be verified)"},
+  "test_credentials": "owner@nuva.com / NuvaOwner2026!, manager@nuva.com / Staff2026! (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Did NOT add new seed data — relied on the startup hook seed_demo_customers() which produces Olivia/Marcus/Priya/James/Sofia. Test creates and tears down TEST_iter42 subscription plans + a temporary enrolled member; member is soft-cancelled at end. No production rows mutated.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Login response uses key 'token' (not 'access_token'). All 5 demo customers are seeded by /app/backend/seeds/seed_customers.py invoked from server startup; the function is idempotent on email. Subscriptions page tests should target data-testid: kpi-plans, kpi-active, kpi-paused, kpi-mrr, new-plan-btn (NOT 'new-plan'), enrol-btn, enrol-dialog, enrol-customer-select, enrol-plan-select, enrol-submit, plan-dialog, plan-name, plan-price-monthly, plan-price-annual, plan-perks, plan-trial-days, plan-active-toggle, plan-terms, edit-plan-{id}, delete-plan-{id}, edit-member, member-dialog, member-plan-select, member-status-select. pause-member/cancel-member testids could not be located in the rendered DOM — may have been refactored into the Edit dialog. Backend pytest suite at /app/backend/tests/test_iteration42_crm_subs.py covers all 9 critical paths and runs in <2s.",
+  "rca_of_the_issue": "(1) Customers-page-empty bug: a legacy redacted row with email 'redacted@nua.local' broke Pydantic EmailStr on the response_model serialization path inside GET /api/customers, surfacing as a 500 that returned [] to the frontend → page looked empty. Fix landed: (a) removed response_model and wrapped each row in a try/except, falling back to a safe email if the row is otherwise valid; (b) startup hook deletes obviously-broken @nua.local rows; (c) 5 demo customers seeded so the screen has meaningful data. Verified via test_customers_list_200 + test_five_seeded_present. (2) Subscriptions-read-only bug: the v25 Subscriptions.jsx page never wired to the existing v26 plan PATCH/DELETE or to the new member PATCH/DELETE — fix is a full rewrite of the page; verified via Playwright that the plan dialog opens with all expected fields and the enrol dialog opens with the right selects + submit. Backend endpoints verified via pytest with owner/manager role checks."
+}

@@ -828,6 +828,44 @@ async def list_sub_members(_: dict = Depends(get_user)):
     return rows
 
 
+@router.patch("/subscriptions/members/{sub_id}")
+async def update_sub_member(sub_id: str, data: dict, user: dict = Depends(get_user)):
+    """Owner can switch a member's plan, status (active|paused|cancelled) or
+    notes. Validates the new planId actually exists when present."""
+    if user["role"] != "owner":
+        raise HTTPException(status_code=403, detail="Owner only")
+    allowed = {"planId", "status", "notes", "customerId"}
+    update = {k: v for k, v in data.items() if k in allowed}
+    if not update:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    if "status" in update and update["status"] not in ("active", "paused", "cancelled"):
+        raise HTTPException(status_code=400, detail="status must be active | paused | cancelled")
+    if "planId" in update:
+        if not await db.subscription_plans.find_one({"id": update["planId"]}):
+            raise HTTPException(status_code=404, detail="planId does not exist")
+    update["updatedAt"] = _now()
+    r = await db.subscriptions.update_one({"id": sub_id}, {"$set": update})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Membership not found")
+    row = await db.subscriptions.find_one({"id": sub_id}, {"_id": 0})
+    return row
+
+
+@router.delete("/subscriptions/members/{sub_id}")
+async def cancel_sub_member(sub_id: str, user: dict = Depends(get_user)):
+    """Soft-cancel — flips status to 'cancelled' and stamps cancelledAt.
+    Keeps the row for audit so the next renewal/billing run can ignore it."""
+    if user["role"] != "owner":
+        raise HTTPException(status_code=403, detail="Owner only")
+    r = await db.subscriptions.update_one(
+        {"id": sub_id},
+        {"$set": {"status": "cancelled", "cancelledAt": _now()}},
+    )
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Membership not found")
+    return {"cancelled": True}
+
+
 # ============================================================================
 # TIER 2 — Smart Gift Cards
 # ============================================================================
