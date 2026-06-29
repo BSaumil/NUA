@@ -1,0 +1,85 @@
+# Nua — local docker-compose stack.
+# Spins up the whole app on your laptop with one command:
+#
+#   docker compose up --build
+#
+# Then visit:
+#   • Frontend  → http://localhost:3000
+#   • Backend   → http://localhost:8001/api/social/platforms
+#   • Mongo UI  → http://localhost:8081  (mongo-express, optional)
+#
+# All three services share a private docker network — the SPA talks to the
+# backend by name (`backend:8001`) and the backend talks to mongo the same way.
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: nua-mongo
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "27017:27017"   # comment out if you don't need direct Compass access
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nua-backend
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      DB_NAME: nua_restaurant
+      JWT_SECRET: ${JWT_SECRET:-dev-only-not-for-production-please-rotate}
+      EMERGENT_LLM_KEY: ${EMERGENT_LLM_KEY:-}
+      FRONTEND_URL: http://localhost:3000
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8001/api/social/platforms"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # The browser hits the backend through the host's mapped port,
+        # NOT the docker network — so it must be a localhost URL.
+        REACT_APP_BACKEND_URL: http://localhost:8001
+    container_name: nua-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:8080"
+
+  # OPTIONAL — friendly UI to peek at the Mongo data while debugging.
+  # Disabled by default; enable with:  docker compose --profile tools up
+  mongo-express:
+    image: mongo-express:1.0
+    container_name: nua-mongo-ui
+    profiles: ["tools"]
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      ME_CONFIG_MONGODB_URL: mongodb://mongo:27017
+      ME_CONFIG_BASICAUTH: "false"
+    ports:
+      - "8081:8081"
+
+volumes:
+  mongo-data:
