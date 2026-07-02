@@ -1,6 +1,35 @@
 # NUA POS — PRD v26.0 (Enterprise Licensing & Entitlements)
 
 
+## v27.6 — Iteration 43 (2 Jul 2026): Ops · Marketing · Super · Items · Floor 5-in-1
+
+### Shipped
+- **Temperature Monitoring** (`/temperature`) — HACCP-friendly, hardware-agnostic. Owner registers each fridge / freezer / cool-room / display / hot-hold and pairs it with a sensor brand from a 13-brand catalog (SensorPush · Govee · Inkbird · ThermoPro · Monnit · Cooper-Atkins · HOBO · La Crosse · Ambient Weather · Wireless Sensor Tags · Sensaphone · Generic HTTP · Manual). Ingest paths: (1) `POST /api/temperature/ingest` — no-auth webhook, guarded by per-device `ingestSecret`, so any 3rd-party device or companion Bluetooth app can push readings; (2) `POST /api/temperature/readings` — manual entry for battery/device failures. Abnormal readings auto-create alerts (email best-effort + POS dock). Reports: `weekly | monthly | yearly | custom (start,end)` returning per-device min/max/avg/stdev/abnormal counts + raw chronological log; frontend has period pills + custom date pickers + CSV export. `POST /scan-missing` = twice-daily "have you logged?" nudge for devices with no reading in 12h.
+- **Social Media &amp; Promotions umbrella** (`/marketing`) — new page with 9 lazy-loaded tabs: Social Media · Promotions · Experiences · Club Members · Email Marketing · Loyalty · Vouchers · Gift Cards · Events. URL keeps `?tab=` in sync. Old routes (`/social-media`, `/discounts`, `/loyalty`, `/booking-experience`, `/clubmember`, `/email-marketing`) `<Navigate replace>` to the new hub with the right tab pre-selected — zero broken bookmarks.
+- **Superannuation** (`/super`, `routes/super.py`) — Fair Work Commission tiered rate (12% from 2025-07-01, 11.5% before, plus historic tiers). Weekly pay-run calculator (`POST /super/calc`) with per-employee OTE + SG, then `POST /super/weekly-runs` commits to the ledger. BAS pulls in via `GET /super/bas-line?quarterStart=&quarterEnd=` — returns totalSuper / totalPaid / totalOutstanding + `reportingDueBy` (quarter-end + 28 days per ATO). `GET /super/summary` gives 4 quarter buckets for a FY. Owner can override rate per run or mark commits paid.
+- **Items KPI strip** (`components/products/ItemsKpiStrip.jsx`) — 5 clickable tiles at the top of `/products`: Total / Low-stock / Out-of-stock / Active / Inactive/86. Each tile toggles a filter on the table below; second click clears. LowStock uses `stock > 0 && stock <= (lowStockThreshold ?? 5)`; OutOfStock uses `stock <= 0`.
+- **Floor Plan course-aware drawer** (`components/floor/TableInfoDrawer.jsx`) — plain-click a table (view mode) now opens a slide-in drawer with live course + dwell timer + party info + course-advance pills + Send-nudge card. Owner opens the "Configure" link → course-thresholds dialog with per-row colour picker, label, and max-minutes. Tables auto-colour by current course; when a table exceeds its course's `maxMinutes`, the SVG fill flips to `overdueColour` (default `#7F1D1D`). Legacy status-cycle preserved as `Shift+click`.
+
+### Backend surface
+- 3 new routers wired into `server.py`: `super`, `temperature`, `table_courses`.
+- 21 endpoints total added across these three modules — full CRUD + reports + settings + notifications.
+
+### Frontend
+- 4 new pages: `Marketing.jsx`, `Super.jsx`, `Temperature.jsx`, plus components `ItemsKpiStrip.jsx` + `TableInfoDrawer.jsx`.
+- 6 legacy routes redirected to the marketing hub.
+- BottomDock "More" menu reshuffled: new **Social Media &amp; Promotions** group replaces scattered marketing entries in the old Items/Customers/Enterprise groups; **Super** slots under Accounting; **Temp Monitoring** slots under Operations.
+
+### Iter 43 Tests
+- Backend: 21/21 pytest PASS (`/app/backend/tests/test_iteration43_batch.py`).
+- Frontend: ~95% — all critical flows (Products KPI toggling, Marketing hub 9-tab + URL sync + 6 legacy redirects, Super KPIs + calculator + commit, Temperature KPIs + device dialog + secret display + report periods + CSV export, FloorPlan drawer + course pills + send nudge + course-settings dialog) verified live. Two LOW cosmetic alias mismatches (`add-device` vs `add-device-btn`; `floor-table-{id}` vs `table-{id}`) — no functional impact.
+
+### Backlog (unchanged)
+- **P1** Real Meta / TikTok / X OAuth (needs client IDs/secrets).
+- **P1** SendGrid / Twilio production keys.
+- **P2** `@dnd-kit` migration for tablet-friendly drag on Social Calendar.
+- **P2** Hardware health monitoring surface.
+
+
 ## v27.4 — Iteration 41 (26 Jun 2026): Best-Time-to-Post Analytics · AI Fallback Header · Chargeback Console · For Sam
 
 ### What landed
