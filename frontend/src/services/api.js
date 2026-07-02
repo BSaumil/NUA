@@ -728,4 +728,42 @@ export const socialAPI = {
   listPlatforms: () => api.get('/social/platforms'),
 };
 
+// ── Superannuation (Fair Work compliant) ────────────────────────────────
+export const superAPI = {
+  rate: (payDate) => api.get('/super/rate', { params: payDate ? { payDate } : {} }),
+  calc: (body) => api.post('/super/calc', body),
+  commitWeeklyRun: (body) => api.post('/super/weekly-runs', body),
+  listWeeklyRuns: (params = {}) => api.get('/super/weekly-runs', { params }),
+  markPaid: (id, data) => api.patch(`/super/weekly-runs/${id}`, data),
+  basLine: (params) => api.get('/super/bas-line', { params }),
+  summary: (fy) => api.get('/super/summary', { params: fy ? { fy } : {} }),
+};
+
+// ── Temperature Monitoring ──────────────────────────────────────────────
+export const temperatureAPI = {
+  brands: () => api.get('/temperature/brands'),
+  listDevices: () => api.get('/temperature/devices'),
+  createDevice: (data) => api.post('/temperature/devices', data),
+  updateDevice: (id, data) => api.patch(`/temperature/devices/${id}`, data),
+  deleteDevice: (id) => api.delete(`/temperature/devices/${id}`),
+  rotateSecret: (id) => api.post(`/temperature/devices/${id}/rotate-secret`),
+  logReading: (data) => api.post('/temperature/readings', data),
+  listReadings: (params) => api.get('/temperature/readings', { params }),
+  listAlerts: (params) => api.get('/temperature/alerts', { params }),
+  ackAlert: (id) => api.post(`/temperature/alerts/${id}/acknowledge`),
+  report: (params) => api.get('/temperature/report', { params }),
+  scanMissing: () => api.post('/temperature/scan-missing'),
+};
+
+// ── Table Courses / Send-nudge ──────────────────────────────────────────
+export const tableCoursesAPI = {
+  getSettings: () => api.get('/table-courses/settings'),
+  updateSettings: (data) => api.put('/table-courses/settings', data),
+  listStates: () => api.get('/table-courses/states'),
+  upsertState: (data) => api.post('/table-courses/states', data),
+  send: (data) => api.post('/table-courses/send', data),
+  listNotifications: (params) => api.get('/table-courses/notifications', { params }),
+  markNotifRead: (id) => api.post(`/table-courses/notifications/${id}/read`),
+};
+
 export default api;

@@ -48,6 +48,9 @@ import BookingExperience from './pages/BookingExperience';
 import BookingAnalytics from './pages/BookingAnalytics';
 import Clubmember from './pages/Clubmember';
 import EmailMarketing from './pages/EmailMarketing';
+import Marketing from './pages/Marketing';
+import Super from './pages/Super';
+import Temperature from './pages/Temperature';
 import EndOfDay from './pages/EndOfDay';
 import TipManagement from './pages/TipManagement';
 import Categories from './pages/Categories';
@@ -130,13 +133,14 @@ function ProtectedRoutes() {
         <Route path="/reservations" element={<Reservations />} />
         <Route path="/bookings-inbox" element={<BookingsInbox />} />
         <Route path="/channel-menus" element={<ChannelMenus />} />
-        <Route path="/social-media" element={<SocialMedia />} />
+        <Route path="/social-media" element={<Navigate to="/marketing?tab=social" replace />} />
+        <Route path="/marketing" element={<Marketing />} />
         <Route path="/floor-plan" element={<FloorPlan />} />
         <Route path="/waitlist" element={<WaitlistPage />} />
         <Route path="/table-layout" element={<TableLayout />} />
         <Route path="/booking-settings" element={<BookingSettings />} />
-        <Route path="/booking-experience" element={<BookingExperience />} />
-        <Route path="/clubmember" element={<Clubmember />} />
+        <Route path="/booking-experience" element={<Navigate to="/marketing?tab=experiences" replace />} />
+        <Route path="/clubmember" element={<Navigate to="/marketing?tab=club" replace />} />
         <Route path="/booking-analytics" element={<BookingAnalytics />} />
         <Route path="/kitchen" element={<Kitchen />} />
         <Route path="/menu-engineering" element={<MenuEngineering />} />
@@ -144,24 +148,26 @@ function ProtectedRoutes() {
         <Route path="/products" element={<Products />} />
         <Route path="/categories" element={<Categories />} />
         <Route path="/modifiers" element={<Modifiers />} />
-        <Route path="/discounts" element={<Discounts />} />
+        <Route path="/discounts" element={<Navigate to="/marketing?tab=promotions" replace />} />
         <Route path="/comp-void" element={<CompVoid />} />
         <Route path="/payment-links" element={<PaymentLinks />} />
         <Route path="/customers" element={<Customers />} />
-        <Route path="/loyalty" element={<LoyaltyEvents />} />
+        <Route path="/loyalty" element={<Navigate to="/marketing?tab=loyalty" replace />} />
         <Route path="/inventory" element={<Inventory />} />
         <Route path="/inventory-accounting" element={<InventoryAccounting />} />
         <Route path="/forecasting" element={<Forecasting />} />
         <Route path="/automation" element={<AutomationEngine />} />
         <Route path="/accounting" element={<Accounting />} />
         <Route path="/bas-gst" element={<BASGST />} />
+        <Route path="/super" element={<Super />} />
+        <Route path="/temperature" element={<Temperature />} />
         <Route path="/integrations" element={<Integrations />} />
         <Route path="/staff" element={<StaffManagement />} />
         <Route path="/staff-roster" element={<StaffRoster />} />
         <Route path="/leaderboard" element={<StaffLeaderboard />} />
         <Route path="/quarterly-review" element={<QuarterlyReview />} />
         <Route path="/ai-pantry" element={<AIPantry />} />
-        <Route path="/email-marketing" element={<EmailMarketing />} />
+        <Route path="/email-marketing" element={<Navigate to="/marketing?tab=email" replace />} />
         <Route path="/end-of-day" element={<EndOfDay />} />
         <Route path="/tip-management" element={<TipManagement />} />
         <Route path="/settings" element={<Settings />} />

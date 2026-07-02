@@ -17,8 +17,9 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger
 } from '../components/ui/dropdown-menu';
 import { useTheme } from '../contexts/ThemeContext';
-import { floorPlansAPI } from '../services/api';
+import { floorPlansAPI, tableCoursesAPI } from '../services/api';
 import { toast } from 'sonner';
+import { TableInfoDrawer } from '../components/floor/TableInfoDrawer';
 
 const TABLE_STATUS_COLORS = {
   available: { fill: '#10B981', stroke: '#059669', label: 'Available' },
@@ -45,6 +46,29 @@ export default function FloorPlan() {
   const [newPlanDialog, setNewPlanDialog] = useState(false);
   const [newPlanName, setNewPlanName] = useState('');
   const [tableForm, setTableForm] = useState({ number: '', capacity: 4, shape: 'rectangle', section: 'main', minCovers: 1, maxCovers: 4 });
+
+  // Course-aware live states (from /table-courses/states)
+  const [courseStates, setCourseStates] = useState([]);
+  const [courseDefs, setCourseDefs] = useState([]);
+  const [overdueColour, setOverdueColour] = useState('#7F1D1D');
+  const [drawerTable, setDrawerTable] = useState(null);
+  const [courseSettingsOpen, setCourseSettingsOpen] = useState(false);
+  const [courseDraft, setCourseDraft] = useState([]);
+
+  const fetchCourses = useCallback(async () => {
+    try {
+      const r = await tableCoursesAPI.listStates();
+      setCourseStates(r.data.states || []);
+      setCourseDefs(r.data.courses || []);
+      setOverdueColour(r.data.overdueColour || '#7F1D1D');
+    } catch { /* non-fatal */ }
+  }, []);
+
+  useEffect(() => {
+    fetchCourses();
+    const id = setInterval(fetchCourses, 30_000);
+    return () => clearInterval(id);
+  }, [fetchCourses]);
 
   const fetchPlans = useCallback(async () => {
     try {
@@ -160,19 +184,25 @@ export default function FloorPlan() {
 
   const handleMouseUp = () => { setDragging(null); };
 
-  const handleTableStatusClick = (tableId) => {
+  const handleTableStatusClick = (tableId, evt) => {
     if (mode !== 'view') return;
     const t = tables.find(tb => tb.id === tableId);
     if (!t) return;
-    const order = ['available', 'reserved', 'occupied', 'cleaning'];
-    const idx = order.indexOf(t.status);
-    const next = order[(idx + 1) % order.length];
-    updateTable(tableId, { status: next });
-    // Save immediately in view mode
-    if (activePlanId) {
-      const updated = tables.map(tb => tb.id === tableId ? { ...tb, status: next } : tb);
-      floorPlansAPI.update(activePlanId, { tables: updated }).catch(() => {});
+    // Shift-click = cycle status directly (legacy shortcut). Regular click
+    // now opens the drawer so staff can see live state + Send.
+    if (evt && evt.shiftKey) {
+      const order = ['available', 'reserved', 'occupied', 'cleaning'];
+      const idx = order.indexOf(t.status);
+      const next = order[(idx + 1) % order.length];
+      updateTable(tableId, { status: next });
+      if (activePlanId) {
+        const updated = tables.map(tb => tb.id === tableId ? { ...tb, status: next } : tb);
+        floorPlansAPI.update(activePlanId, { tables: updated }).catch(() => {});
+      }
+      return;
     }
+    setDrawerTable(t);
+    setSelectedTable(tableId);
   };
 
   // Stats
@@ -184,12 +214,16 @@ export default function FloorPlan() {
     const isSelected = selectedTable === t.id;
     const sectionObj = sections.find(s => s.name === t.section);
     const sectionColor = sectionObj?.color || '#6B7280';
+    // Course-driven colour overrides status colour when a live state exists.
+    const liveState = courseStates.find(cs => cs.tableId === t.id);
+    const fillColor = liveState?.colour || sc.fill;
+    const strokeColor = isSelected ? theme.primary : (liveState ? liveState.colour : sc.stroke);
 
     return (
       <g key={t.id} data-testid={`floor-table-${t.id}`}
         style={{ cursor: mode === 'edit' ? 'grab' : 'pointer' }}
         onMouseDown={(e) => handleMouseDown(e, t.id)}
-        onClick={() => mode === 'view' ? handleTableStatusClick(t.id) : setSelectedTable(t.id)}
+        onClick={(e) => mode === 'view' ? handleTableStatusClick(t.id, e) : setSelectedTable(t.id)}
         onDoubleClick={() => mode === 'edit' && openTableEditor(t)}>
         {/* Shadow */}
         {t.shape === 'circle' ? (
@@ -203,12 +237,12 @@ export default function FloorPlan() {
         {t.shape === 'circle' ? (
           <ellipse cx={t.x + t.width / 2} cy={t.y + t.height / 2}
             rx={t.width / 2} ry={t.height / 2}
-            fill={sc.fill} stroke={isSelected ? theme.primary : sc.stroke}
+            fill={fillColor} stroke={strokeColor}
             strokeWidth={isSelected ? 3 : 1.5} opacity={0.9} />
         ) : (
           <rect x={t.x} y={t.y} width={t.width} height={t.height}
             rx={t.shape === 'square' ? 4 : 8}
-            fill={sc.fill} stroke={isSelected ? theme.primary : sc.stroke}
+            fill={fillColor} stroke={strokeColor}
             strokeWidth={isSelected ? 3 : 1.5} opacity={0.9} />
         )}
         {/* Table number */}
@@ -442,6 +476,51 @@ export default function FloorPlan() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setNewPlanDialog(false)}>Cancel</Button>
             <Button onClick={createPlan} style={{ background: theme.primary }} data-testid="create-plan-btn">Create</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Course-aware side drawer */}
+      <TableInfoDrawer
+        open={!!drawerTable}
+        onClose={() => setDrawerTable(null)}
+        table={drawerTable}
+        states={courseStates}
+        courses={courseDefs}
+        overdueColour={overdueColour}
+        onRefresh={fetchCourses}
+        onOpenCourseSettings={() => { setCourseDraft(courseDefs.map(c => ({ ...c }))); setCourseSettingsOpen(true); }}
+      />
+
+      {/* Course settings dialog */}
+      <Dialog open={courseSettingsOpen} onOpenChange={setCourseSettingsOpen}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto" data-testid="course-settings-dialog">
+          <DialogHeader>
+            <DialogTitle>Dining Course Thresholds</DialogTitle>
+          </DialogHeader>
+          <div className="text-xs text-gray-500 mb-2">
+            Set the maximum minutes a table should stay in each course. Colours are applied to the floor plan; tables that go over the threshold flash in the overdue colour.
+          </div>
+          <div className="space-y-2">
+            {courseDraft.map((c, idx) => (
+              <div key={c.key} className="flex items-center gap-2 border rounded p-2" data-testid={`course-row-${c.key}`}>
+                <input type="color" value={c.colour} onChange={e => setCourseDraft(d => d.map((x, i) => i === idx ? { ...x, colour: e.target.value } : x))} data-testid={`course-colour-${c.key}`} />
+                <Input value={c.label} onChange={e => setCourseDraft(d => d.map((x, i) => i === idx ? { ...x, label: e.target.value } : x))} className="flex-1" data-testid={`course-label-${c.key}`} />
+                <Input type="number" min="1" value={c.maxMinutes} onChange={e => setCourseDraft(d => d.map((x, i) => i === idx ? { ...x, maxMinutes: parseInt(e.target.value || '0', 10) } : x))} className="w-20" data-testid={`course-max-${c.key}`} />
+                <span className="text-[10px] text-gray-400">min</span>
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCourseSettingsOpen(false)}>Cancel</Button>
+            <Button onClick={async () => {
+              try {
+                await tableCoursesAPI.updateSettings({ courses: courseDraft, autoAdvance: false });
+                toast.success('Course thresholds saved');
+                setCourseSettingsOpen(false);
+                fetchCourses();
+              } catch { toast.error('Save failed'); }
+            }} style={{ background: theme.primary }} data-testid="save-course-settings">Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

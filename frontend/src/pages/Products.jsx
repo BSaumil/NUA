@@ -12,6 +12,7 @@ import { ProductTable } from '../components/products/ProductTable';
 import { BulkEditDialog } from '../components/products/BulkEditDialog';
 import { RecentlyEditedSidebar } from '../components/products/RecentlyEditedSidebar';
 import { PromotionDialog } from '../components/products/PromotionDialog';
+import { ItemsKpiStrip } from '../components/products/ItemsKpiStrip';
 import { toast } from 'sonner';
 
 const makeEmptyProduct = () => ({
@@ -188,6 +189,12 @@ const Products = () => {
       }
       if (filterStatus === 'active' && p.eightySixed) return false;
       if (filterStatus === '86' && !p.eightySixed) return false;
+      if (filterStatus === 'lowStock') {
+        const s = Number(p.stock ?? 0);
+        const threshold = Number(p.lowStockThreshold ?? 5);
+        if (!(s > 0 && s <= threshold)) return false;
+      }
+      if (filterStatus === 'outOfStock' && !(Number(p.stock ?? 0) <= 0)) return false;
       return true;
     });
     const dir = sortDir === 'asc' ? 1 : -1;
@@ -388,6 +395,12 @@ const Products = () => {
 
       {view === 'products' && (
         <>
+          <ItemsKpiStrip
+            theme={theme}
+            products={products}
+            filterStatus={filterStatus}
+            setFilterStatus={setFilterStatus}
+          />
           <ProductsToolbar
             theme={theme}
             searchTerm={searchTerm} setSearchTerm={setSearchTerm}
