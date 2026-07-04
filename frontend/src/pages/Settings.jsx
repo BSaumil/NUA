@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { Badge } from '../components/ui/badge';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
-import { locationsAPI, advancedAPI, staffMgmtAPI, enterpriseAPI, gamificationAPI } from '../services/api';
+import { locationsAPI, advancedAPI, staffMgmtAPI, enterpriseAPI, gamificationAPI, finalizeAPI } from '../services/api';
 import { toast } from 'sonner';
 import axios from 'axios';
 
@@ -24,7 +24,7 @@ const Settings = () => {
   const [locations, setLocations] = useState([]);
   const [showLocDialog, setShowLocDialog] = useState(false);
   const [editingLoc, setEditingLoc] = useState(null);
-  const [locForm, setLocForm] = useState({ name: '', address: '', phone: '' });
+  const [locForm, setLocForm] = useState({ name: '', address: '', phone: '', email: '', website: '', logoUrl: '', gmbPlaceId: '', hours: {} });
   // Staff
   const [staff, setStaff] = useState([]);
   const [showStaffDialog, setShowStaffDialog] = useState(false);
@@ -96,8 +96,8 @@ const Settings = () => {
   };
 
   // Location CRUD
-  const openAddLoc = () => { setEditingLoc(null); setLocForm({ name: '', address: '', phone: '' }); setShowLocDialog(true); };
-  const openEditLoc = (loc) => { setEditingLoc(loc); setLocForm({ name: loc.name, address: loc.address, phone: loc.phone }); setShowLocDialog(true); };
+  const openAddLoc = () => { setEditingLoc(null); setLocForm({ name: '', address: '', phone: '', email: '', website: '', logoUrl: '', gmbPlaceId: '', hours: {} }); setShowLocDialog(true); };
+  const openEditLoc = (loc) => { setEditingLoc(loc); setLocForm({ name: loc.name, address: loc.address, phone: loc.phone, email: loc.email || '', website: loc.website || '', logoUrl: loc.logoUrl || '', gmbPlaceId: loc.gmbPlaceId || '', hours: loc.hours || {} }); setShowLocDialog(true); };
   const saveLoc = async () => {
     try {
       if (editingLoc) { await locationsAPI.update(editingLoc.id, locForm); toast.success('Location updated'); }
@@ -370,14 +370,38 @@ const Settings = () => {
           </div>
           {locations.map(loc => (
             <Card key={loc.id} data-testid={`location-card-${loc.id}`}><CardContent className="p-6">
-              <div className="flex items-start justify-between">
-                <div>
-                  <h3 className="text-lg font-bold" style={{ color: theme.text }}>{loc.name}</h3>
-                  <p className="text-sm text-gray-600">{loc.address}</p>
-                  <p className="text-sm text-gray-600">{loc.phone}</p>
-                  <Badge className={`mt-2 ${loc.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{(loc.status || 'active').toUpperCase()}</Badge>
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start gap-3 flex-1 min-w-0">
+                  {loc.logoUrl && (
+                    <img src={loc.logoUrl} alt="" className="w-14 h-14 rounded-lg border object-contain bg-white flex-shrink-0" onError={(e) => { e.target.style.display = 'none'; }} data-testid={`loc-logo-${loc.id}`} />
+                  )}
+                  <div className="min-w-0">
+                    <h3 className="text-lg font-bold" style={{ color: theme.text }}>{loc.name}</h3>
+                    <p className="text-sm text-gray-600">{loc.address}</p>
+                    <p className="text-sm text-gray-600">{loc.phone}{loc.email ? ` · ${loc.email}` : ''}</p>
+                    {loc.website && (
+                      <a href={loc.website} target="_blank" rel="noreferrer" className="text-sm text-blue-600 hover:underline">{loc.website}</a>
+                    )}
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      <Badge className={`${loc.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{(loc.status || 'active').toUpperCase()}</Badge>
+                      {loc.gmbPlaceId && (
+                        <Badge className="bg-blue-100 text-blue-800" data-testid={`loc-gmb-badge-${loc.id}`}>
+                          GMB · {loc.gmbLastSyncAt ? `synced ${new Date(loc.gmbLastSyncAt).toLocaleDateString()}` : 'not synced'}
+                        </Badge>
+                      )}
+                      {loc.hours && Object.keys(loc.hours).length > 0 && (
+                        <Badge className="bg-gray-100 text-gray-700">Hours set</Badge>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-shrink-0">
+                  {loc.gmbPlaceId && (
+                    <Button variant="outline" size="sm" onClick={async () => {
+                      try { await finalizeAPI.gmbSync(loc.id); toast.success('GMB sync queued'); fetchLocations(); }
+                      catch (e) { toast.error(e?.response?.data?.detail || 'Sync failed'); }
+                    }} data-testid={`gmb-sync-${loc.id}`}>Sync GMB</Button>
+                  )}
                   <Button variant="outline" size="sm" onClick={() => openEditLoc(loc)} data-testid={`edit-loc-${loc.id}`}><Edit size={14} /></Button>
                   <Button variant="outline" size="sm" className="text-red-500" onClick={() => deleteLoc(loc.id)} data-testid={`delete-loc-${loc.id}`}><Trash2 size={14} /></Button>
                 </div>
@@ -536,12 +560,45 @@ const Settings = () => {
 
       {/* Location Dialog */}
       <Dialog open={showLocDialog} onOpenChange={setShowLocDialog}>
-        <DialogContent className="max-w-sm" data-testid="location-dialog">
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto" data-testid="location-dialog">
           <DialogHeader><DialogTitle>{editingLoc ? 'Edit Location' : 'Add Location'}</DialogTitle></DialogHeader>
           <div className="space-y-3 py-2">
-            <Input placeholder="Location name" value={locForm.name} onChange={e => setLocForm({ ...locForm, name: e.target.value })} data-testid="loc-name-input" />
+            <div className="grid grid-cols-2 gap-2">
+              <Input placeholder="Location name" value={locForm.name} onChange={e => setLocForm({ ...locForm, name: e.target.value })} data-testid="loc-name-input" />
+              <Input placeholder="Phone" value={locForm.phone} onChange={e => setLocForm({ ...locForm, phone: e.target.value })} data-testid="loc-phone-input" />
+            </div>
             <Input placeholder="Address" value={locForm.address} onChange={e => setLocForm({ ...locForm, address: e.target.value })} data-testid="loc-address-input" />
-            <Input placeholder="Phone" value={locForm.phone} onChange={e => setLocForm({ ...locForm, phone: e.target.value })} data-testid="loc-phone-input" />
+            <div className="grid grid-cols-2 gap-2">
+              <Input placeholder="Email" type="email" value={locForm.email} onChange={e => setLocForm({ ...locForm, email: e.target.value })} data-testid="loc-email-input" />
+              <Input placeholder="Website URL" value={locForm.website} onChange={e => setLocForm({ ...locForm, website: e.target.value })} data-testid="loc-website-input" />
+            </div>
+            <Input placeholder="Logo URL (https://…)" value={locForm.logoUrl} onChange={e => setLocForm({ ...locForm, logoUrl: e.target.value })} data-testid="loc-logo-input" />
+            {locForm.logoUrl && (
+              <img src={locForm.logoUrl} alt="" className="h-12 rounded border object-contain bg-white" onError={(e) => { e.target.style.display = 'none'; }} data-testid="loc-logo-preview" />
+            )}
+            <Input placeholder="Google My Business Place ID" value={locForm.gmbPlaceId} onChange={e => setLocForm({ ...locForm, gmbPlaceId: e.target.value })} data-testid="loc-gmb-input" />
+
+            <div className="border rounded-lg p-3 bg-gray-50/50">
+              <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Opening hours</p>
+              <div className="space-y-1.5">
+                {['mon','tue','wed','thu','fri','sat','sun'].map(d => {
+                  const h = (locForm.hours && locForm.hours[d]) || { open: '09:00', close: '22:00', closed: false };
+                  return (
+                    <div key={d} className="flex items-center gap-2 text-sm">
+                      <span className="w-10 uppercase text-xs font-medium text-gray-500">{d}</span>
+                      <Input type="time" value={h.open} onChange={e => setLocForm({ ...locForm, hours: { ...locForm.hours, [d]: { ...h, open: e.target.value } } })} className="w-24 h-8" data-testid={`loc-hours-${d}-open`} disabled={h.closed} />
+                      <span className="text-gray-400">–</span>
+                      <Input type="time" value={h.close} onChange={e => setLocForm({ ...locForm, hours: { ...locForm.hours, [d]: { ...h, close: e.target.value } } })} className="w-24 h-8" data-testid={`loc-hours-${d}-close`} disabled={h.closed} />
+                      <label className="flex items-center gap-1 text-xs text-gray-500 cursor-pointer">
+                        <input type="checkbox" checked={!!h.closed} onChange={e => setLocForm({ ...locForm, hours: { ...locForm.hours, [d]: { ...h, closed: e.target.checked } } })} data-testid={`loc-hours-${d}-closed`} />
+                        Closed
+                      </label>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
             <Button className="w-full" style={{ backgroundColor: theme.primary }} onClick={saveLoc} data-testid="save-loc-btn">{editingLoc ? 'Update' : 'Create'} Location</Button>
           </div>
         </DialogContent>

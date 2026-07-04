@@ -29,6 +29,7 @@ import PreShift from './pages/PreShift';
 import CommandCenter from './pages/CommandCenter';
 import MenuEngineering from './pages/MenuEngineering';
 import AutomationEngine from './pages/AutomationEngine';
+import AutomationTriggers from './pages/AutomationTriggers';
 import LoyaltyEvents from './pages/LoyaltyEvents';
 import Forecasting from './pages/Forecasting';
 import WhatIfSimulator from './pages/WhatIfSimulator';
@@ -157,6 +158,7 @@ function ProtectedRoutes() {
         <Route path="/inventory-accounting" element={<InventoryAccounting />} />
         <Route path="/forecasting" element={<Forecasting />} />
         <Route path="/automation" element={<AutomationEngine />} />
+        <Route path="/automation-triggers" element={<AutomationTriggers />} />
         <Route path="/accounting" element={<Accounting />} />
         <Route path="/bas-gst" element={<BASGST />} />
         <Route path="/super" element={<Super />} />

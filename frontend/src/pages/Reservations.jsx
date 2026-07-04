@@ -17,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { useTheme } from '../contexts/ThemeContext';
 import { reservationsAPI, floorPlansAPI, aiWave2API, reservationsAIAPI } from '../services/api';
 import { toast } from 'sonner';
+import BookingsInbox from './BookingsInbox';
 
 const TIME_SLOTS = [];
 for (let h = 9; h <= 22; h++) {
@@ -51,6 +52,7 @@ export default function Reservations() {
   const [editId, setEditId] = useState(null);
   const [form, setForm] = useState({ ...emptyForm });
   const [view, setView] = useState('list'); // list | calendar
+  const [mainTab, setMainTab] = useState('bookings'); // bookings | inbox
 
   const fetchData = useCallback(async () => {
     try {
@@ -178,6 +180,16 @@ export default function Reservations() {
 
   return (
     <div className="space-y-6" data-testid="reservations-page">
+      {/* Master Tabs: Bookings vs AI Inbox */}
+      <Tabs value={mainTab} onValueChange={setMainTab}>
+        <TabsList data-testid="reservations-main-tabs">
+          <TabsTrigger value="bookings" data-testid="tab-bookings">Bookings</TabsTrigger>
+          <TabsTrigger value="inbox" data-testid="tab-inbox">AI Inbox</TabsTrigger>
+        </TabsList>
+        <TabsContent value="inbox" className="mt-6">
+          <BookingsInbox />
+        </TabsContent>
+        <TabsContent value="bookings" className="mt-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -520,6 +532,8 @@ export default function Reservations() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

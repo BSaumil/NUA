@@ -16,10 +16,42 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # ============ LOCATIONS API ============
-@router.get("/locations", response_model=List[Location])
+@router.get("/locations")
 async def get_locations():
+    """Defensive read: legacy MongoDB docs may have malformed fields (e.g.
+    string-based `hours`/`timings`, missing required keys). Skip or coerce
+    invalid entries so a single bad row can never 500 the whole page."""
     locations = await db.locations.find().to_list(1000)
-    return [Location(**l) for l in locations]
+    valid = []
+    for loc in locations:
+        loc.pop("_id", None)
+        # Coerce legacy fields
+        hours = loc.get("hours")
+        if hours is not None and not isinstance(hours, dict):
+            loc["hours"] = None
+        timings = loc.get("timings")
+        if timings is not None:
+            # legacy alias for hours
+            if isinstance(timings, dict) and not loc.get("hours"):
+                loc["hours"] = timings
+            loc.pop("timings", None)
+        try:
+            valid.append(Location(**loc).dict())
+        except Exception as e:
+            logger.warning(f"Skipping malformed location {loc.get('id')}: {e}")
+            # Minimal safe fallback so UI still shows the location
+            try:
+                safe = {
+                    "id": loc.get("id", str(loc.get("_id", ""))),
+                    "name": loc.get("name", "Unnamed"),
+                    "address": loc.get("address", ""),
+                    "phone": loc.get("phone", ""),
+                    "status": loc.get("status", "active"),
+                }
+                valid.append(Location(**safe).dict())
+            except Exception:
+                continue
+    return valid
 
 @router.post("/locations", response_model=Location)
 async def create_location(location: LocationCreate):

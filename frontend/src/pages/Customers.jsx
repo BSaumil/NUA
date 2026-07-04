@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Search, Plus, Mail, Phone, Award, Star, Calendar, Clock,
   Tag, Heart, AlertCircle, ChevronRight, ArrowLeft, Shield,
-  UtensilsCrossed, MessageSquare, Edit2, X, DollarSign, Users
+  UtensilsCrossed, MessageSquare, Edit2, X, DollarSign, Users, Wallet
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -18,6 +18,7 @@ import {
 import { useTheme } from '../contexts/ThemeContext';
 import { customersAPI, feedbackAPI } from '../services/api';
 import { toast } from 'sonner';
+import GuestWalletDialog from '../components/customers/GuestWalletDialog';
 
 const TIER_CONFIG = {
   Platinum: { color: '#818CF8', bg: '#EEF2FF' },
@@ -47,6 +48,7 @@ const Customers = () => {
   const [editMode, setEditMode] = useState(false);
   const [form, setForm] = useState({ ...emptyCustomerForm });
   const [feedbackDialog, setFeedbackDialog] = useState(false);
+  const [walletDialog, setWalletDialog] = useState(false);
   const [feedbackForm, setFeedbackForm] = useState({ rating: 5, foodRating: 5, serviceRating: 5, ambienceRating: 5, comment: '' });
   const [tagFilter, setTagFilter] = useState('all');
 
@@ -168,6 +170,9 @@ const Customers = () => {
           </Button>
           <Button variant="outline" onClick={() => setFeedbackDialog(true)} data-testid="add-feedback-btn">
             <MessageSquare size={14} className="mr-1" /> Add Feedback
+          </Button>
+          <Button variant="outline" onClick={() => setWalletDialog(true)} data-testid="wallet-btn">
+            <Wallet size={14} className="mr-1" /> Wallet
           </Button>
         </div>
 
@@ -398,6 +403,9 @@ const Customers = () => {
 
         {/* Customer Edit Dialog (shared) */}
         {renderCustomerDialog()}
+
+        {/* Digital Wallet Dialog */}
+        <GuestWalletDialog open={walletDialog} onOpenChange={setWalletDialog} customer={profile} />
       </div>
     );
   }

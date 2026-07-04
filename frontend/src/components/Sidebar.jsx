@@ -69,7 +69,13 @@ const NAV_STRUCTURE = [
       { path: '/email-marketing', label: 'Email Marketing' },
     ],
   },
-  { path: '/automation', icon: Zap, label: 'Automation', access: ['owner', 'manager'] },
+  {
+    icon: Zap, label: 'Automation', access: ['owner', 'manager'],
+    children: [
+      { path: '/automation', label: 'Automation Engine' },
+      { path: '/automation-triggers', label: 'Custom Triggers' },
+    ],
+  },
   {
     icon: Calculator, label: 'Accounting', access: ['owner'],
     children: [
