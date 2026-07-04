@@ -1,6 +1,27 @@
 # NUA POS — PRD v26.0 (Enterprise Licensing & Entitlements)
 
 
+## v27.8 — Iteration 45 (4 Jul 2026): Finalization UI Batch · Locations Defensive · Digital Wallet · Automation Triggers
+
+### Shipped
+- **P0 Bug Fix — `GET /api/settings/locations` defensive read**: Wrapped Pydantic parsing in try/except per-row, coerces legacy `hours` (string → null) and legacy `timings` (dict → `hours`), and falls back to a minimal safe shape when a doc is unrecoverable. Verified end-to-end with two intentionally malformed docs injected into Mongo — endpoint still returned 200. Closes the recurring "Pydantic validation on lists" 500 class.
+- **Reservations ↔ AI Booking Inbox merge**: Reservations page (`/reservations`) now hosts two top-level tabs (`Bookings` / `AI Inbox`). AI Inbox tab embeds the existing `BookingsInbox` component. Zero behaviour regression for either page. `/bookings-inbox` route still works standalone.
+- **Guest Digital Wallet** (`components/customers/GuestWalletDialog.jsx`): New dialog opened from a customer profile via a `Wallet` button. Renders the signed QR token as `<QRCodeSVG>` on a gradient card, plus tier badge, points, store credit, barcode, and Copy/Download-pass buttons. Backed by `GET /api/customers/{id}/wallet` and `POST /api/customers/lookup-by-token` (both HMAC-signed with `JWT_SECRET`).
+- **Automation Triggers page** (`/automation-triggers`, `AutomationTriggers.jsx`): CRUD UI for the `automation_triggers` collection — Name, Event (8 preset events with descriptions), Conditions (JSON), Actions (typed list: send_email · send_sms · dock_notify · dispatch_task · apply_discount), Active toggle. "AI Suggest" dialog turns a plain-English prompt into a pre-filled template via `POST /api/automations/ai-suggest` (LLM: `openai/gpt-4o-mini`, template fallback when key missing). Sidebar Automation menu expanded to group "Automation Engine" + "Custom Triggers".
+- **Settings > Locations extended UI**: Add/Edit dialog now captures `email`, `website`, `logoUrl` (with live preview), `gmbPlaceId`, plus per-day opening hours (Mon–Sun, open/close/closed). Location cards show the logo, GMB badge with last-sync date, and a dedicated `Sync GMB` button that calls `POST /api/locations/{id}/gmb-sync`.
+
+### Iter 45 Tests
+- Backend: 13/13 pytest PASS (`/app/backend/tests/test_iteration45_finalize.py`) — defensive locations GET (with 2 malformed-doc injections), extended POST/PUT persistence, GMB sync 200/400, wallet shape + signed-token roundtrip, triggers CRUD + AI-suggest happy/empty-prompt cases.
+- Frontend: full flow verified — Reservations tabs, Customers → Wallet dialog (QR + copy/download), /automation-triggers create + AI-suggest, Settings Location dialog with all new test-ids (`loc-logo-input`, `loc-website-input`, `loc-email-input`, `loc-gmb-input`, `loc-hours-mon-open/close/closed`, `save-loc-btn`, `gmb-sync-{id}`).
+
+### Backlog (unchanged)
+- **P1** Real Meta / TikTok / X OAuth via `integration_playbook_expert_v2` (needs client IDs/secrets).
+- **P1** SendGrid / Twilio production keys.
+- **P2** Channel Menus — per-channel pause/resume + schedule toggle UI.
+- **P2** `@dnd-kit` migration for tablet drag on Social Calendar.
+- **P2** Hardware health monitoring surface.
+
+
 ## v27.6 — Iteration 43 (2 Jul 2026): Ops · Marketing · Super · Items · Floor 5-in-1
 
 ### Shipped
