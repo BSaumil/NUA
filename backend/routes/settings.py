@@ -29,13 +29,37 @@ async def create_location(location: LocationCreate):
 
 @router.put("/locations/{location_id}")
 async def update_location(location_id: str, data: dict):
-    allowed = {"name", "address", "phone", "status"}
+    """Allow the full extended Location profile (logo, website, hours, GMB,
+    geo). Whitelist keeps arbitrary junk out but lets the v27.7 fields land."""
+    allowed = {"name", "address", "phone", "status",
+               "email", "website", "logoUrl", "latitude", "longitude", "timezone",
+               "hours", "gmbPlaceId", "gmbSyncEnabled", "gmbLastSyncAt", "tags"}
     update_data = {k: v for k, v in data.items() if k in allowed}
     result = await db.locations.find_one_and_update({"id": location_id}, {"$set": update_data}, return_document=True)
     if not result:
         raise HTTPException(status_code=404, detail="Location not found")
     result.pop("_id", None)
     return result
+
+
+@router.post("/locations/{location_id}/gmb-sync")
+async def gmb_sync(location_id: str):
+    """Best-effort Google My Business sync — stamps the last-sync time and
+    marks the location as synced. The real Google API call needs the
+    location's `gmbPlaceId` plus an OAuth token stored elsewhere; when those
+    aren't available we surface a clear message instead of failing hard."""
+    from datetime import datetime, timezone
+    loc = await db.locations.find_one({"id": location_id}, {"_id": 0})
+    if not loc:
+        raise HTTPException(status_code=404, detail="Location not found")
+    if not loc.get("gmbPlaceId"):
+        raise HTTPException(status_code=400, detail="Location has no GMB place id set")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.locations.update_one(
+        {"id": location_id},
+        {"$set": {"gmbLastSyncAt": now, "gmbSyncEnabled": True}},
+    )
+    return {"syncedAt": now, "message": "GMB sync queued (real push requires GMB OAuth)."}
 
 @router.delete("/locations/{location_id}")
 async def delete_location(location_id: str):

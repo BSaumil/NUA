@@ -54,6 +54,12 @@ async def create_tab(data: dict, user: dict = Depends(get_user)):
         "name": data.get("name", f"Tab {datetime.now().strftime('%H:%M')}"),
         "cart": data.get("cart", []),
         "selectedCustomer": data.get("selectedCustomer"),
+        # NEW: bind a tab to a specific table so the floor plan can settle
+        # it later — the "Send to Table" flow from the POS lands here.
+        "tableId": data.get("tableId"),
+        "tableNumber": data.get("tableNumber"),
+        "serverId": data.get("serverId"),
+        "note": data.get("note"),
         "status": "open",
         "createdBy": user["id"],
         "createdByName": user["name"],

@@ -6,14 +6,16 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { useTheme } from '../contexts/ThemeContext';
-import { preShiftAPI } from '../services/api';
+import { preShiftAPI, finalizeAPI } from '../services/api';
 
 export default function PreShift() {
   const { theme } = useTheme();
   const [data, setData] = useState(null);
+  const [briefing, setBriefing] = useState(null);
 
   useEffect(() => {
     preShiftAPI.getToday().then(r => setData(r.data)).catch(console.error);
+    finalizeAPI.preShiftBriefing().then(r => setBriefing(r.data)).catch(() => {});
   }, []);
 
   if (!data) return <div className="flex items-center justify-center h-64 text-gray-400">Loading pre-shift data...</div>;
@@ -152,7 +154,7 @@ export default function PreShift() {
       <Card className="border-0 shadow-sm">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm flex items-center gap-2">
-            <Utensils size={16} style={{ color: theme.primary }} /> Today's Service Timeline
+            <Utensils size={16} style={{ color: theme.primary }} /> Today&apos;s Service Timeline
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -192,6 +194,70 @@ export default function PreShift() {
           </div>
         </CardContent>
       </Card>
+
+      {/* v27.7 Briefing: OOS · Specials · Roster · Upsells */}
+      {briefing && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3" data-testid="preshift-briefing">
+          <Card data-testid="briefing-oos">
+            <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2 text-rose-600">
+              <AlertTriangle size={14} /> Out of stock ({briefing.outOfStock?.length || 0})
+            </CardTitle></CardHeader>
+            <CardContent className="text-xs space-y-1 max-h-48 overflow-y-auto">
+              {(briefing.outOfStock || []).length === 0 ? <div className="text-gray-400 italic">Nothing 86&apos;d — kitchen is happy.</div> :
+                (briefing.outOfStock || []).map(p => (
+                  <div key={p.id} className="flex justify-between border-b pb-1">
+                    <span>{p.name}</span>
+                    <span className="text-gray-500">{p.category}</span>
+                  </div>
+                ))}
+            </CardContent>
+          </Card>
+
+          <Card data-testid="briefing-specials">
+            <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2 text-amber-600">
+              <Star size={14} /> Today&apos;s specials ({(briefing.specials?.length || 0) + (briefing.activePromotions?.length || 0)})
+            </CardTitle></CardHeader>
+            <CardContent className="text-xs space-y-1 max-h-48 overflow-y-auto">
+              {(briefing.specials || []).map(s => (
+                <div key={s.id} className="border-b pb-1"><strong>{s.name}</strong> <span className="text-gray-500">${(s.price || 0).toFixed(2)}</span></div>
+              ))}
+              {(briefing.activePromotions || []).map(p => (
+                <div key={p.id} className="border-b pb-1 text-emerald-700">🎉 {p.name} · {p.discount}% off</div>
+              ))}
+              {briefing.specials?.length === 0 && briefing.activePromotions?.length === 0 && <div className="text-gray-400 italic">No specials today.</div>}
+            </CardContent>
+          </Card>
+
+          <Card data-testid="briefing-shift">
+            <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2 text-blue-600">
+              <Users size={14} /> On shift ({briefing.onShiftCount || 0})
+            </CardTitle></CardHeader>
+            <CardContent className="text-xs space-y-1 max-h-48 overflow-y-auto">
+              {(briefing.onShift || []).length === 0 ? <div className="text-gray-400 italic">No roster loaded for today.</div> :
+                (briefing.onShift || []).map((s, i) => (
+                  <div key={i} className="flex justify-between border-b pb-1">
+                    <span>{s.staffName || s.name || s.staffId}</span>
+                    <span className="text-gray-500">{s.role || s.shift || ''}</span>
+                  </div>
+                ))}
+            </CardContent>
+          </Card>
+
+          <Card data-testid="briefing-upsells">
+            <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2 text-emerald-600">
+              <TrendingUp size={14} /> Push these tonight
+            </CardTitle></CardHeader>
+            <CardContent className="text-xs space-y-1 max-h-48 overflow-y-auto">
+              {(briefing.upsells || []).slice(0, 8).map(p => (
+                <div key={p.id} className="flex justify-between border-b pb-1">
+                  <span>{p.name}</span>
+                  <span className="text-emerald-700">{p.marginPct}% · ${(p.price || 0).toFixed(0)}</span>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

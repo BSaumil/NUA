@@ -61,7 +61,19 @@ const Inventory = () => {
 
       {lowStockProducts.length > 0 && (
         <Card className="border-orange-300 bg-orange-50"><CardContent className="p-4">
-          <div className="flex items-center gap-2 mb-1"><AlertTriangle size={20} className="text-orange-600" /><h3 className="font-semibold text-orange-900">Low Stock Alert</h3></div>
+          <div className="flex items-center gap-2 mb-1">
+            <AlertTriangle size={20} className="text-orange-600" />
+            <h3 className="font-semibold text-orange-900">Low Stock Alert</h3>
+            <a
+              href={`${process.env.REACT_APP_BACKEND_URL}/api/inventory/low-stock/pdf`}
+              target="_blank"
+              rel="noreferrer"
+              className="ml-auto text-xs text-blue-600 underline hover:no-underline"
+              data-testid="low-stock-pdf-btn"
+            >
+              Download PDF for owner
+            </a>
+          </div>
           <p className="text-sm text-orange-700">{lowStockProducts.map(p => p.name).join(', ')} — consider reordering.</p>
         </CardContent></Card>
       )}

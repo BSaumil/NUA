@@ -766,4 +766,26 @@ export const tableCoursesAPI = {
   markNotifRead: (id) => api.post(`/table-courses/notifications/${id}/read`),
 };
 
+// ── Finalize batch (v27.7): pre-shift, day rules, marketing analytics,
+// channel controls, digital wallet, PDF exports, automation triggers ─────
+export const finalizeAPI = {
+  preShiftBriefing: () => api.get('/preshift/briefing'),
+  getDayRules: () => api.get('/bookings/day-rules'),
+  updateDayRule: (weekday, data) => api.put(`/bookings/day-rules/${weekday}`, data),
+  promoQR: (params) => api.get('/marketing/promo-qr', { params }),
+  marketingAnalytics: (days = 30) => api.get('/marketing/analytics', { params: { days } }),
+  channelStates: () => api.get('/channels/state'),
+  updateChannelState: (data) => api.post('/channels/state', data),
+  guestWallet: (customerId) => api.get(`/customers/${customerId}/wallet`),
+  lookupByToken: (token) => api.post('/customers/lookup-by-token', { token }),
+  lowStockPdfUrl: () => `${process.env.REACT_APP_BACKEND_URL}/api/inventory/low-stock/pdf`,
+  aiPantryPdfUrl: () => `${process.env.REACT_APP_BACKEND_URL}/api/ai-pantry/order-sheet/pdf`,
+  listTriggers: () => api.get('/automations/triggers'),
+  createTrigger: (data) => api.post('/automations/triggers', data),
+  updateTrigger: (id, data) => api.patch(`/automations/triggers/${id}`, data),
+  deleteTrigger: (id) => api.delete(`/automations/triggers/${id}`),
+  aiSuggestAutomation: (prompt) => api.post('/automations/ai-suggest', { prompt }),
+  gmbSync: (locationId) => api.post(`/locations/${locationId}/gmb-sync`),
+};
+
 export default api;

@@ -62,7 +62,19 @@ const Settings = () => {
     enterpriseAPI.getPrinters().then(r => setPrinters(r.data)).catch(() => {});
     enterpriseAPI.getScanners().then(r => setScanners(r.data)).catch(() => {});
     enterpriseAPI.getReportConfig().then(r => { if (r.data) setReportConfig(r.data); }).catch(() => {});
-    gamificationAPI.getPrintRouting().then(r => { if (r.data) setPrintRouting(r.data); }).catch(() => {});
+    gamificationAPI.getPrintRouting().then(r => {
+      if (!r?.data) return;
+      const cfg = { ...r.data };
+      // Defensive: legacy dict-shaped routes → array so the Settings pane
+      // never crashes with "routes.map is not a function".
+      if (cfg.routes && !Array.isArray(cfg.routes)) {
+        cfg.routes = Object.entries(cfg.routes).map(([category, printer]) => ({
+          category: String(category), printer: String(printer), priority: 2,
+        }));
+      }
+      cfg.routes = Array.isArray(cfg.routes) ? cfg.routes : [];
+      setPrintRouting(cfg);
+    }).catch(() => setPrintRouting({ enabled: true, routes: [], defaultPrinter: '', defaultPriority: 2 }));
     axios.get(`${API}/api/auth/roles`, { headers: authHeader() }).then(r => setCustomRoles(r.data)).catch(() => {});
     // Load business hours from business settings
     axios.get(`${API}/api/business/settings`, { headers: authHeader() }).then(r => {

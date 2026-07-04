@@ -12,7 +12,7 @@ import {
 } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { usePOS } from '../contexts/POSContext';
-import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API, v26API } from '../services/api';
+import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API, v26API, floorPlansAPI } from '../services/api';
 import { useToast } from '../hooks/use-toast';
 import { useAuth } from '../contexts/AuthContext';
 import VoiceOrderButton from '../components/VoiceOrderButton';
@@ -63,6 +63,11 @@ const POSTerminal = () => {
   // v15: Tabs (Hold/Recall), Loyalty preview, BNPL, Multi-lang
   const [showTabsDialog, setShowTabsDialog] = useState(false);
   const [openTabs, setOpenTabs] = useState([]);
+  // Send-to-table flow: opens a floor picker so the server can attach the
+  // current cart to a specific table as an open tab (defers payment).
+  const [sendToTableOpen, setSendToTableOpen] = useState(false);
+  const [floorTables, setFloorTables] = useState([]);
+  const [sendingToTable, setSendingToTable] = useState(false);
   const [labels, setLabels] = useState({});
   // v17: Points-and-Pay
   const [pointsBalance, setPointsBalance] = useState(null);
@@ -990,12 +995,28 @@ const POSTerminal = () => {
           </CardContent></Card>
         )}
 
-        {/* Payment Button */}
+        {/* Send-to-Table + Payment buttons */}
         {!showPayment && cart.length > 0 && (
-          <Button className="w-full h-14 text-lg font-semibold" style={{ backgroundColor: theme.primary }}
-            onClick={() => setShowPayment(true)} data-testid="pos-proceed-payment">
-            Proceed to Payment
-          </Button>
+          <div className="flex gap-2" data-testid="pos-checkout-actions">
+            <Button
+              variant="outline"
+              className="flex-1 h-14 text-base font-semibold"
+              onClick={async () => {
+                try {
+                  const r = await floorPlansAPI.getAll();
+                  const active = (r.data || []).find(p => p.active) || (r.data || [])[0];
+                  setFloorTables(active?.tables || []);
+                } catch { setFloorTables([]); }
+                setSendToTableOpen(true);
+              }}
+              data-testid="pos-send-to-table">
+              Send to Table
+            </Button>
+            <Button className="flex-1 h-14 text-base font-semibold" style={{ backgroundColor: theme.primary }}
+              onClick={() => setShowPayment(true)} data-testid="pos-proceed-payment">
+              Proceed to Payment
+            </Button>
+          </div>
         )}
 
         {/* Payment Methods Panel */}
@@ -1127,6 +1148,63 @@ const POSTerminal = () => {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Send-to-Table dialog */}
+      <Dialog open={sendToTableOpen} onOpenChange={setSendToTableOpen}>
+        <DialogContent className="max-w-2xl" data-testid="send-to-table-dialog">
+          <DialogHeader>
+            <DialogTitle>Send order to a table</DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-gray-500 mb-2">Pick a table — the current cart becomes an open tab on that table so floor staff can settle it later.</p>
+          <div className="grid grid-cols-3 md:grid-cols-5 gap-2 max-h-[55vh] overflow-y-auto">
+            {floorTables.length === 0 && (
+              <div className="col-span-full text-center text-gray-400 py-6 text-sm" data-testid="send-no-tables">
+                No floor plan configured. Set one up in Reservations → Floor Plan.
+              </div>
+            )}
+            {floorTables.map(t => (
+              <button
+                key={t.id}
+                disabled={sendingToTable}
+                onClick={async () => {
+                  setSendingToTable(true);
+                  try {
+                    const name = selectedCustomer?.name || walkInName || `Table ${t.number}`;
+                    await v15API.createTab({
+                      name: `Table ${t.number} — ${name}`,
+                      cart, selectedCustomer,
+                      tableId: t.id,
+                      tableNumber: t.number,
+                    });
+                    toast({ title: `Sent to Table ${t.number}`, description: 'Ready for later payment.' });
+                    // Fire kitchen prints so food fires immediately.
+                    try {
+                      await gamificationAPI.sendToPrinters({
+                        items: cart.map(i => ({ productName: i.name, category: i.category, quantity: i.quantity })),
+                        orderId: `TABLE-${t.number}`, tableNumber: t.number,
+                      });
+                    } catch (err) { /* printer optional */ }
+                    setSendToTableOpen(false);
+                    clearCart();
+                  } catch (e) {
+                    toast({ title: 'Send failed', description: e?.response?.data?.detail, variant: 'destructive' });
+                  } finally { setSendingToTable(false); }
+                }}
+                className="rounded-lg border-2 p-3 hover:border-current transition-all disabled:opacity-50 disabled:cursor-not-allowed text-left"
+                style={{ borderColor: t.status === 'available' ? '#10b981' : '#f59e0b' }}
+                data-testid={`send-table-${t.id}`}
+              >
+                <div className="font-bold text-lg" style={{ color: theme.text }}>#{t.number}</div>
+                <div className="text-[10px] text-gray-500 uppercase tracking-wide">{t.section || 'main'}</div>
+                <div className="text-[10px] text-gray-400 mt-0.5">seats {t.capacity || t.maxCovers || 2}</div>
+                <div className="text-[10px] mt-1 capitalize" style={{ color: t.status === 'available' ? '#10b981' : '#f59e0b' }}>
+                  {t.status || 'available'}
+                </div>
+              </button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Open Tabs (Hold / Recall) */}
       <Dialog open={showTabsDialog} onOpenChange={setShowTabsDialog}>

@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 44 finalization batch — backend + frontend testing complete. 22/22 pytest cases green across all iter-44 endpoints. Frontend P0 fixes verified end-to-end: Print Routing renders in /settings?tab=print-routing without crash, /print-routing redirects correctly, POS cart shows ZERO images (SwipeableCartItem image removed), Send-to-Table button + dialog list 12 tables, clicking a table POSTs to /api/pos/tabs (tableId + tableNumber persist verified via backend test) and clears cart. All P1 selectors present on their respective pages (briefing-oos/specials/shift/upsells, low-stock-pdf-btn, pantry-pdf-btn). Found & flagged one real backend bug in /api/locations while testing extended PUT — see backend_issues.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "PUT /api/locations/{id} + GET /api/locations", "issue": "PUT accepts any shape for `hours` (raw dict) but GET returns `List[Location]` with strict Pydantic model where `hours: Dict[str, Dict]`. Writing `hours={'mon': '9-5'}` (string value) succeeds on PUT, then GET /api/locations returns 500 for ALL rows until DB is cleaned. Fix: validate/coerce `hours` on PUT to match schema, or make GET tolerant (drop invalid `hours`). Repro: PUT any location with `{'hours': {'mon': 'anything-not-dict'}}` → then GET /api/locations → 500. Cleaned up DB during test.", "priority": "HIGH"}
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global", "issues": ["Login flow redirects to /pos, not /dashboard (existing behaviour — not new to iter 44)"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration44_finalize.py",
+    "/app/test_reports/pytest/iter44_results.xml"
+  ],
+  "action_items": [
+    "Validate `hours` shape on PUT /api/locations/{id} — either use a Pydantic model instead of raw dict, or coerce string values to {open, close} on GET so a bad write doesn't break the whole locations list. Repro'd + cleaned during this run."
+  ],
+  "critical_code_review_comments": [
+    "finalize.py PDF generator is a nicely self-contained ~50-line assembler — no reportlab dependency. Verified: returns valid %PDF-1.4 bodies, correct Content-Type, and Content-Disposition.",
+    "finalize.py `_sign_qr` uses JWT_SECRET (fallback 'dev-secret') + HMAC-SHA256[:16] — good enough for scan-tracking but keep an eye on JWT_SECRET presence in prod (falls back silently).",
+    "settings.py `update_location` whitelist is correct BUT accepts arbitrary shape for `hours` — see backend_issues.critical. Same class of issue could affect `tags` (List[str] not enforced on PUT).",
+    "gamification.py print-routing GET auto-migrates legacy dict `routes` → array; POST validates + coerces. Confirmed both paths.",
+    "v15_features.py POS tabs now persists tableId/tableNumber/serverId — verified via GET after POST.",
+    "finalize.py automation ai-suggest fallback template is well-formed even without EMERGENT_LLM_KEY — safe."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration44_finalize.py"
+  ],
+  "success_rate": {"backend": "100% (22/22 pytest)", "frontend": "100% of iter-44 selectors verified (cart 0 imgs, send-to-table dialog with 12 tables + cart-clear-on-send, briefing 4 cards, PDF btns, print-routing redirect + no crash)"},
+  "test_credentials": "owner@nuva.com / NuvaOwner2026! — worked",
+  "seed_data_creation": "TEST_ prefixed booking day-rule (weekday=3), channel state (TEST_ubereats), automation trigger (deleted), pos tab (deleted). Also cleared stale bad `hours` field on locations during bug repro cleanup.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter 44 shipped /app/backend/routes/finalize.py (large router) + extended settings.py locations + v15 pos tabs. All 22 backend endpoints verified in /app/backend/tests/test_iteration44_finalize.py — reusable regression file. Front-end P0s (Print Routing render, cart no-image, Send-to-Table button+dialog+flow) all confirmed via Playwright on live preview URL. One real bug found: GET /api/locations 500s if hours has any non-dict value written via PUT — high-priority validation gap. Location POST uses LocationCreate which requires 'phone' — my test fixture handled the fallback correctly.",
+  "rca of the issue": "GET /api/locations pipes raw docs through `Location(**l)`. If any document has `hours` with non-dict value (which PUT does not validate — it just $sets whatever caller sends), pydantic raises ValidationError → 500 for the entire list. Mitigation: (a) add a Pydantic sub-model for hours in the PUT handler, (b) OR wrap Location(**l) in try/except and skip/repair bad rows on read."
+}

@@ -15,8 +15,21 @@ export default function PrintRouting() {
   const [newRoute, setNewRoute] = useState({ category: '', printer: '', priority: 2 });
 
   useEffect(() => {
-    gamificationAPI.getPrintRouting().then(r => setConfig(r.data)).catch(() => {});
-    gamificationAPI.getPrintQueue().then(r => setQueue(r.data)).catch(() => {});
+    gamificationAPI.getPrintRouting()
+      .then(r => {
+        const cfg = r.data || {};
+        // Defensive: if the backend somehow returns a legacy dict-shaped
+        // `routes`, coerce here so `config.routes.map(...)` never crashes.
+        if (cfg.routes && !Array.isArray(cfg.routes)) {
+          cfg.routes = Object.entries(cfg.routes).map(([category, printer]) => ({
+            category: String(category), printer: String(printer), priority: 2,
+          }));
+        }
+        cfg.routes = Array.isArray(cfg.routes) ? cfg.routes : [];
+        setConfig(cfg);
+      })
+      .catch(() => setConfig({ enabled: true, routes: [], defaultPrinter: '', defaultPriority: 2 }));
+    gamificationAPI.getPrintQueue().then(r => setQueue(Array.isArray(r.data) ? r.data : [])).catch(() => {});
   }, []);
 
   const saveConfig = async () => {

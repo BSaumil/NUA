@@ -113,11 +113,22 @@ export default function AIPantry() {
           <h1 className="text-3xl font-bold" style={{ color: theme.text }}>AI Smart Pantry</h1>
           <p className="text-gray-500 mt-1">AI-powered weekly ordering with minimum wastage</p>
         </div>
-        <Button onClick={generateList} disabled={loading} style={{ backgroundColor: theme.primary }}
-          data-testid="generate-pantry-btn">
-          {loading ? <><RefreshCw size={18} className="mr-2 animate-spin" /> Analyzing...</> :
-            <><Brain size={18} className="mr-2" /> Generate Weekly List</>}
-        </Button>
+        <div className="flex gap-2">
+          <a
+            href={`${process.env.REACT_APP_BACKEND_URL}/api/ai-pantry/order-sheet/pdf`}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center px-3 py-2 rounded border text-sm hover:bg-gray-50"
+            data-testid="pantry-pdf-btn"
+          >
+            📄 Order sheet PDF
+          </a>
+          <Button onClick={generateList} disabled={loading} style={{ backgroundColor: theme.primary }}
+            data-testid="generate-pantry-btn">
+            {loading ? <><RefreshCw size={18} className="mr-2 animate-spin" /> Analyzing...</> :
+              <><Brain size={18} className="mr-2" /> Generate Weekly List</>}
+          </Button>
+        </div>
       </div>
 
       {/* Tabs */}

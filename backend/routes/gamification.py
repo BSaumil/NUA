@@ -172,8 +172,10 @@ For each item, suggest ONE replacement with: name, suggested price, estimated fo
 # ============ CATEGORY-WISE PRINT ROUTING ============
 @router.get("/print-routing/config")
 async def get_print_routing():
-    s = await db.settings.find_one({"key": "print_routing"}, {"_id": 0})
-    return s.get("value", {}) if s else {
+    """Returns the current print-routing config. Auto-heals legacy shapes
+    (e.g. an old dict-shaped `routes` field from a pre-v27 save) so the SPA
+    can always call `config.routes.map(...)` without crashing."""
+    defaults = {
         "enabled": True,
         "routes": [
             {"category": "Beverages", "printer": "Bar Printer", "priority": 1},
@@ -188,11 +190,55 @@ async def get_print_routing():
         "defaultPrinter": "Kitchen Printer",
         "defaultPriority": 2,
     }
+    s = await db.settings.find_one({"key": "print_routing"}, {"_id": 0})
+    if not s or not s.get("value"):
+        return defaults
+
+    cfg = s["value"] if isinstance(s.get("value"), dict) else {}
+    # Coerce legacy `routes` shapes into a list.
+    routes = cfg.get("routes")
+    if isinstance(routes, dict):
+        # Old shape: {"kitchen": "Kitchen Printer", ...}. Convert to the new
+        # array-of-route-objects, preserving category → printer intent.
+        cfg["routes"] = [
+            {"category": cat.title(), "printer": prn, "priority": 2}
+            for cat, prn in routes.items() if isinstance(prn, str)
+        ]
+    elif routes is None or not isinstance(routes, list):
+        cfg["routes"] = defaults["routes"]
+    cfg.setdefault("enabled", True)
+    cfg.setdefault("defaultPrinter", defaults["defaultPrinter"])
+    cfg.setdefault("defaultPriority", defaults["defaultPriority"])
+    return cfg
+
 
 @router.post("/print-routing/config")
 async def save_print_routing(data: dict, _: dict = Depends(require_owner_or_manager)):
-    await db.settings.update_one({"key": "print_routing"}, {"$set": {"key": "print_routing", "value": data}}, upsert=True)
-    return {"message": "Print routing saved"}
+    """Persist print-routing config. Validates `routes` is an array of
+    `{category, printer, priority}` objects — rejects legacy dict shapes so
+    the SPA never crashes on a subsequent read."""
+    from fastapi import HTTPException
+    routes = data.get("routes", [])
+    if not isinstance(routes, list):
+        raise HTTPException(400, "`routes` must be an array of {category, printer, priority}")
+    clean = []
+    for r in routes:
+        if not isinstance(r, dict) or not r.get("category") or not r.get("printer"):
+            continue
+        try:
+            pr = int(r.get("priority", 2))
+        except Exception:
+            pr = 2
+        clean.append({"category": r["category"], "printer": r["printer"], "priority": pr})
+    payload = {
+        "enabled": bool(data.get("enabled", True)),
+        "routes": clean,
+        "defaultPrinter": data.get("defaultPrinter") or "Kitchen Printer",
+        "defaultPriority": int(data.get("defaultPriority") or 2),
+    }
+    await db.settings.update_one({"key": "print_routing"},
+                                  {"$set": {"key": "print_routing", "value": payload}}, upsert=True)
+    return {"message": "Print routing saved", "config": payload}
 
 @router.post("/print-routing/send")
 async def send_to_printers(data: dict, _: dict = Depends(get_user)):

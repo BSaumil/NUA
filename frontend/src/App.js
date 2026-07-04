@@ -171,6 +171,7 @@ function ProtectedRoutes() {
         <Route path="/end-of-day" element={<EndOfDay />} />
         <Route path="/tip-management" element={<TipManagement />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/print-routing" element={<Navigate to="/settings?tab=print-routing" replace />} />
         <Route path="/security" element={<SecurityCompliance />} />
         <Route path="/audit-log" element={<AuditLog />} />
         <Route path="/anomalies" element={<InventoryAnomalies />} />

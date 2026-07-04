@@ -64,8 +64,6 @@ export default function SwipeableCartItem({ item, onUpdateQty, onRemove, onRepea
       >
         <CardContent className="p-3">
           <div className="flex items-center gap-3">
-            <img src={item.image || 'https://placehold.co/56x56/e5e7eb/9ca3af?text=NUA'} alt={item.name}
-              className="w-14 h-14 object-cover rounded-md flex-shrink-0" draggable={false} />
             <div className="flex-1 min-w-0">
               <p className="font-semibold text-sm truncate">{item.name}</p>
               <p className="text-xs text-gray-500">${item.price.toFixed(2)} each</p>
