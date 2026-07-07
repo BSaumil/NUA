@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 46 fully green — 9/9 backend pytest cases pass (mongo_safe regressions, Apple .pkpass, Google Wallet JWT link, marketing analytics, channels state pause/resume/schedule + RBAC) and all 5 frontend user flows verified end-to-end on the preview URL. GET /api/locations and GET /api/customers still return 200 after the safe_find_list / safe_parse_list refactor. The Apple .pkpass endpoint returns a valid zip with pass.json + manifest.json + icon.png, content-type application/vnd.apple.pkpass, and X-Pkpass-Signed=false (no Apple certs configured in preview env, as expected). Google Wallet endpoint returns {url, jwt, signed:false, classId, objectId} with the correct pay.google.com/gp/v/save/ prefix. Marketing analytics returns all required keys (totalScans=2, totalBookings=28, bookingsBySource with 4+ sources, scansByType). Channel state POST enforces owner/manager (cashier gets 403). Frontend: /reservations shows the 'BOOKING SOURCES · LAST 30 DAYS' strip with all 4 source cards (in-app 36% / ai_phone_agent 18% / ai_concierge 14% / ai-inbox/phone 14%) and 28 bookings / 92 covers / 2 QR scans in the summary line. Customer Wallet dialog now has all 4 buttons — Copy token, Text pass, 'Add to Apple Wallet' (wallet-apple-pkpass), 'Save to Google Wallet' (wallet-google) — and clicking the Google button opens pay.google.com/gp/v/save/... in a new tab. /channel-menus renders the ChannelPauseControl above the action bar with a Live badge + Pause + Schedule buttons for the active 'website' channel; clicking Pause opens the dialog (testid channel-pause-dialog-website), submitting pauses successfully, and the paused state PERSISTS across full page reload. Social Media Calendar chips still open the edit dialog on click AND drag-to-reschedule via dnd-kit works on desktop (mouse) — dragged cal-post from 2026-06-29 → 2026-07-04, drag-overlay testid mounted during drag, 'Rescheduled to 7/4/2026 10:00 AM' toast appeared.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "ChannelPauseControl dialog", "issues": ["Accessibility: DialogContent missing `Description` or `aria-describedby` — Radix warning in console (non-blocking, cosmetic a11y hint)"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration46_finalize.py",
+    "/app/test_reports/pytest/iter46_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "utils/mongo_safe.py is a well-designed shared defensive helper — per-doc try/except + optional coerce/fallback hooks + auto _id stripping. Cleanly replaces the bespoke defenders in routes/settings.py and routes/customers.py. Recommend adopting it in the other 15+ Mongo list endpoints (bookings, transactions, products, ...) in a future refactor pass.",
+    "utils/wallet_passes.py cleanly falls back to unsigned pass when Apple certs missing — good ops path (drop 3 PEMs in secrets, redeploy). Includes minimum-viable icon.png fallback. Google Wallet builder gracefully degrades to HS256 preview JWT when service account key missing (avoids alg=none which would be a footgun). All signing keys are env-driven — no hardcoded secrets.",
+    "routes/finalize.py apple_wallet_pass + google_wallet_link correctly delegate to utils/wallet_passes builders and always resolve wallet context (name, tier, points, storeCredit, signed qrToken) from Mongo. 404 raised properly if customer missing.",
+    "ChannelPauseControl.jsx is self-contained + reloads state after every mutation → persists across page reload as verified. RBAC is enforced backend-side (verified cashier gets 403).",
+    "SocialCalendar dnd-kit migration: PointerSensor + TouchSensor + DragOverlay + drag-overlay testid all wired correctly. Chip click-to-edit is preserved (dnd-kit handles activation constraint > pointer distance threshold before triggering drag, so simple clicks still dispatch onClick).",
+    "MINOR a11y: multiple DialogContent instances trigger Radix `Missing Description or aria-describedby` warnings in console (visible in ChannelPauseControl and elsewhere). Non-blocking but should be addressed for screen-reader UX — add DialogDescription elements or aria-describedby attributes."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration46_finalize.py"
+  ],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "100% (5/5 flows: reservations booking-source-strip, customers wallet dialog + Apple + Google buttons, channel-menus pause dialog + persist across reload, social calendar chip click + drag reschedule)"},
+  "test_credentials": "owner@nuva.com / NuvaOwner2026! — worked. cashier@nuva.com / Staff2026! — worked (used for RBAC 403 test).",
+  "seed_data_creation": "TEST_iter46_channel — channel state doc left in 'active' state after pause/schedule/resume roundtrip. No orphan data. Social calendar has one post rescheduled from 2026-06-29 to 2026-07-04 as a side-effect of drag test — not cleaned up (test purpose was to prove drag-reschedule works).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter 46 shipped: (1) utils/mongo_safe.py generic defensive list parser adopted by settings.py + customers.py — regression-verified. (2) utils/wallet_passes.py implements real Apple .pkpass zip + Google Wallet save-to-phone JWT with cert-optional graceful degradation. (3) BookingSourceStrip renders on /reservations pulling /api/marketing/analytics. (4) GuestWalletDialog gained 2 new buttons (wallet-apple-pkpass, wallet-google). (5) ChannelPauseControl embedded above /channel-menus action bar with per-channel pause/resume/schedule persisted in db.channel_states. (6) SocialCalendar migrated from HTML5 DnD to @dnd-kit — desktop drag still works (verified 2026-06-29 → 2026-07-04). Backend regression file at /app/backend/tests/test_iteration46_finalize.py (9 cases). Only observation is non-blocking a11y console warnings about missing DialogDescription/aria-describedby on multiple Radix Dialogs.",
+  "rca of the issue": "N/A — no bugs found in iter 46."
+}

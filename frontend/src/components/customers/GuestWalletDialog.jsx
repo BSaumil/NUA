@@ -5,7 +5,7 @@ import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { finalizeAPI } from '../../services/api';
 import { toast } from 'sonner';
-import { Wallet, Download, Copy, Loader2 } from 'lucide-react';
+import { Wallet, Download, Copy, Loader2, Smartphone, ExternalLink } from 'lucide-react';
 
 /**
  * Guest Digital Wallet — QR + barcode for POS scan-to-add and Apple/Google
@@ -42,6 +42,42 @@ export default function GuestWalletDialog({ open, onOpenChange, customer }) {
     a.download = `nua-wallet-${wallet.barcode}.txt`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const downloadPkpass = () => {
+    if (!customer?.id) return;
+    // Direct navigation — pkpass triggers native "Add to Apple Wallet" on iOS.
+    const token = localStorage.getItem('token') || localStorage.getItem('access_token') || '';
+    const base = finalizeAPI.guestWalletApplePkpassUrl(customer.id);
+    // Serve via fetch → blob so we can attach the auth header.
+    fetch(base, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const signed = r.headers.get('X-Pkpass-Signed') === 'true';
+        return r.blob().then(b => ({ b, signed }));
+      })
+      .then(({ b, signed }) => {
+        const url = URL.createObjectURL(b);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `nua-${customer.id}.pkpass`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast.success(signed ? 'Apple Wallet pass downloaded' : 'Pass downloaded (unsigned — configure certs to enable iOS)');
+      })
+      .catch(() => toast.error('Failed to download Apple Wallet pass'));
+  };
+
+  const openGoogleWallet = async () => {
+    if (!customer?.id) return;
+    try {
+      const r = await finalizeAPI.guestWalletGoogle(customer.id);
+      if (!r.data?.url) throw new Error('no url');
+      if (!r.data.signed) {
+        toast.warning('Preview mode — configure Google service account to enable Save-to-phone');
+      }
+      window.open(r.data.url, '_blank', 'noopener,noreferrer');
+    } catch { toast.error('Failed to build Google Wallet link'); }
   };
 
   return (
@@ -90,11 +126,29 @@ export default function GuestWalletDialog({ open, onOpenChange, customer }) {
                 <Copy size={14} className="mr-1.5" /> Copy token
               </Button>
               <Button variant="outline" onClick={downloadPass} className="flex-1" data-testid="wallet-download">
-                <Download size={14} className="mr-1.5" /> Download pass
+                <Download size={14} className="mr-1.5" /> Text pass
+              </Button>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                onClick={downloadPkpass}
+                className="flex-1 text-white"
+                style={{ background: '#111827' }}
+                data-testid="wallet-apple-pkpass"
+              >
+                <Smartphone size={14} className="mr-1.5" /> Add to Apple Wallet
+              </Button>
+              <Button
+                onClick={openGoogleWallet}
+                className="flex-1 text-white"
+                style={{ background: '#4285F4' }}
+                data-testid="wallet-google"
+              >
+                <ExternalLink size={14} className="mr-1.5" /> Save to Google Wallet
               </Button>
             </div>
             <p className="text-[11px] text-gray-500 text-center leading-relaxed">
-              Scan this QR at POS to add the customer, redeem points or apply store credit.
+              Scan the QR at POS to add the customer, redeem points or apply store credit.
               The token is HMAC-signed and expires after long-term rotation.
             </p>
           </div>

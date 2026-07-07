@@ -303,6 +303,52 @@ async def lookup_by_token(body: dict, _: dict = Depends(get_user)):
     return c
 
 
+# ─── Native Apple Wallet + Google Wallet passes ─────────────────────────
+async def _resolve_wallet_context(customer_id: str) -> dict:
+    c = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+    if not c:
+        raise HTTPException(404, "Customer not found")
+    payload = {"cid": customer_id, "tier": c.get("membershipTier", "Bronze"),
+                "issued": int(datetime.now(timezone.utc).timestamp())}
+    token = _sign_qr(payload)
+    return {
+        "customer_id": customer_id,
+        "name": c.get("name", "Guest"),
+        "tier": c.get("membershipTier", "Bronze"),
+        "points": int(c.get("points", 0)),
+        "store_credit": float(c.get("storeCredit", 0.0)),
+        "barcode": customer_id.upper().replace("-", "")[:20],
+        "qr_token": token,
+    }
+
+
+@router.get("/customers/{customer_id}/wallet/apple.pkpass")
+async def apple_wallet_pass(customer_id: str, _: dict = Depends(get_user)):
+    """Return a real `.pkpass` archive. Signed if Pass Type ID certs are
+    configured in env, otherwise unsigned (still valid structure)."""
+    from utils.wallet_passes import build_pkpass
+    ctx = await _resolve_wallet_context(customer_id)
+    blob, meta = build_pkpass(**ctx)
+    filename = f"nua-{customer_id}.pkpass"
+    return Response(
+        content=blob,
+        media_type="application/vnd.apple.pkpass",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Pkpass-Signed": "true" if meta["signed"] else "false",
+        },
+    )
+
+
+@router.get("/customers/{customer_id}/wallet/google")
+async def google_wallet_link(customer_id: str, _: dict = Depends(get_user)):
+    """Return a Google Wallet "save to phone" link + JWT. `signed=false`
+    when the service-account key isn't configured yet."""
+    from utils.wallet_passes import build_google_wallet_link
+    ctx = await _resolve_wallet_context(customer_id)
+    return build_google_wallet_link(**ctx)
+
+
 # ═════════════════════════════════════════════════════════════════════════
 # PDF exports — low-stock, AI Pantry
 # ═════════════════════════════════════════════════════════════════════════

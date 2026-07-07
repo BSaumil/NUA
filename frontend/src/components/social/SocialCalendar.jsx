@@ -6,6 +6,10 @@ import { Card, CardContent } from '../ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 import { toast } from 'sonner';
 import { socialAPI } from '../../services/api';
+import {
+  DndContext, PointerSensor, TouchSensor, useSensor, useSensors,
+  useDraggable, useDroppable, DragOverlay,
+} from '@dnd-kit/core';
 
 /**
  * Month-grid content calendar for /social-media.
@@ -40,16 +44,72 @@ const startOfMonthGrid = (anchor) => {
   return new Date(first.getFullYear(), first.getMonth(), 1 - offset);
 };
 
+// ── Draggable chip (touch-friendly via @dnd-kit) ─────────────────────
+const DraggablePostChip = ({ post, onClick }) => {
+  const disabled = post.status === 'published';
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: `post-${post.id}`,
+    data: { postId: post.id, platform: post.platform, status: post.status },
+    disabled,
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      {...(disabled ? {} : listeners)}
+      {...(disabled ? {} : attributes)}
+      onClick={onClick}
+      className={`text-[10px] rounded px-1.5 py-0.5 truncate cursor-grab active:cursor-grabbing hover:brightness-95 ${post.status === 'published' ? 'opacity-80' : ''} ${isDragging ? 'opacity-40' : ''}`}
+      style={{
+        background: `${PLATFORM_COLORS[post.platform] || '#888'}15`,
+        borderLeft: `3px solid ${PLATFORM_COLORS[post.platform] || '#888'}`,
+        color: PLATFORM_COLORS[post.platform] || '#444',
+        touchAction: 'none',
+      }}
+      title={post.caption}
+      data-testid={`cal-post-${post.id}`}
+    >
+      <span className="font-semibold mr-1">
+        {post.status === 'published' ? '✓' : post.status === 'scheduled' ? '◷' : '✎'}
+      </span>
+      <span className="font-medium">{(post.platform || '').slice(0, 2).toUpperCase()}</span>
+      <span className="ml-1 opacity-80">{(post.caption || '').slice(0, 16)}</span>
+    </div>
+  );
+};
+
+// ── Droppable day cell ────────────────────────────────────────────────
+const DroppableDay = ({ day, inMonth, isToday, children }) => {
+  const { setNodeRef, isOver } = useDroppable({
+    id: `day-${day.toISOString().slice(0, 10)}`,
+    data: { day: day.toISOString() },
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      className={`min-h-[88px] p-1.5 rounded border text-xs transition-colors ${inMonth ? 'bg-white' : 'bg-gray-50/60 opacity-60'} ${isToday ? 'ring-2 ring-orange-300' : ''} ${isOver ? 'bg-amber-50 ring-2 ring-amber-300' : ''}`}
+      data-testid={`cal-cell-${day.toISOString().slice(0, 10)}`}
+    >
+      {children}
+    </div>
+  );
+};
+
 export const SocialCalendar = ({ theme, posts, accounts, onReload }) => {
   const [anchor, setAnchor] = useState(new Date());
   const [planning, setPlanning] = useState(false);
   const [planJob, setPlanJob] = useState(null);   // {planId, completed, expected, status}
-  const [dragId, setDragId] = useState(null);
-  const [hoverDay, setHoverDay] = useState(null);
+  const [activeDragPost, setActiveDragPost] = useState(null);
   const [editingPost, setEditingPost] = useState(null);
   const [editForm, setEditForm] = useState({ caption: '', hashtags: '', scheduledFor: '', imageUrl: '', status: 'scheduled' });
   const [bestTimes, setBestTimes] = useState([]);     // [{platform, recommendedHour, recommendedTime, sampleSize, source, band}]
   const [useBestTimes, setUseBestTimes] = useState(true);
+
+  // Sensors: mouse + touch. `activationConstraint` prevents the pointer
+  // from grabbing a chip when the user just wants to click/tap.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 6 } }),
+  );
 
   // Pull POS peak-hour analytics once on mount so the chip strip + AI
   // weekly plan can both lean on the same numbers.
@@ -97,36 +157,17 @@ export const SocialCalendar = ({ theme, posts, accounts, onReload }) => {
   const monthLabel = anchor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
   const today = new Date();
 
-  // -------- Drag-to-reschedule --------
-  const handleDragStart = (e, post) => {
-    if (post.status === 'published') return;   // can't reschedule history
-    setDragId(post.id);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', post.id);
-  };
-  const handleDragOver = (e, day) => {
-    e.preventDefault();
-    setHoverDay(day.toDateString());
-  };
-  const handleDrop = async (e, day) => {
-    e.preventDefault();
-    setHoverDay(null);
-    const id = e.dataTransfer.getData('text/plain') || dragId;
-    if (!id) return;
-    const post = (posts || []).find((p) => p.id === id);
-    if (!post) return;
+  // -------- Drag-to-reschedule (touch-friendly via @dnd-kit) --------
+  const rescheduleTo = async (post, day) => {
     const old = post.scheduledFor ? new Date(post.scheduledFor) : new Date();
     const next = new Date(day);
-    // If "Use best times" is on AND we have a recommendation for this
-    // platform, snap to it; otherwise preserve the original HH:MM so the
-    // user's intent isn't quietly overridden.
     if (useBestTimes && bestHourByPlatform[post.platform] !== undefined) {
       next.setHours(bestHourByPlatform[post.platform], 0, 0, 0);
     } else {
       next.setHours(old.getHours() || 12, old.getMinutes() || 0, 0, 0);
     }
     try {
-      await socialAPI.updatePost(id, {
+      await socialAPI.updatePost(post.id, {
         scheduledFor: next.toISOString(),
         status: post.status === 'draft' ? 'scheduled' : post.status,
       });
@@ -134,9 +175,23 @@ export const SocialCalendar = ({ theme, posts, accounts, onReload }) => {
       onReload && onReload();
     } catch {
       toast.error('Reschedule failed');
-    } finally {
-      setDragId(null);
     }
+  };
+
+  const onDragStart = (event) => {
+    const p = (posts || []).find(x => `post-${x.id}` === event.active.id);
+    if (p) setActiveDragPost(p);
+  };
+  const onDragEnd = (event) => {
+    setActiveDragPost(null);
+    const { active, over } = event;
+    if (!over) return;
+    const postId = active.data?.current?.postId;
+    const dayIso = over.data?.current?.day;
+    if (!postId || !dayIso) return;
+    const post = (posts || []).find(p => p.id === postId);
+    if (!post) return;
+    rescheduleTo(post, new Date(dayIso));
   };
 
   const handleWeeklyPlan = async () => {
@@ -380,56 +435,47 @@ export const SocialCalendar = ({ theme, posts, accounts, onReload }) => {
         </div>
 
         {/* 6×7 month grid */}
-        <div className="grid grid-cols-7 gap-1" data-testid="calendar-grid">
-          {gridDays.map((day, idx) => {
-            const inMonth = day.getMonth() === anchor.getMonth();
-            const isToday = sameDay(day, today);
-            const key = `${day.getFullYear()}-${day.getMonth()}-${day.getDate()}`;
-            const dayPosts = postsByDay.get(key) || [];
-            const isHover = hoverDay === day.toDateString();
-            return (
+        <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
+          <div className="grid grid-cols-7 gap-1" data-testid="calendar-grid">
+            {gridDays.map((day, idx) => {
+              const inMonth = day.getMonth() === anchor.getMonth();
+              const isToday = sameDay(day, today);
+              const key = `${day.getFullYear()}-${day.getMonth()}-${day.getDate()}`;
+              const dayPosts = postsByDay.get(key) || [];
+              return (
+                <DroppableDay key={idx} day={day} inMonth={inMonth} isToday={isToday}>
+                  <div className={`text-[10px] font-semibold ${isToday ? 'text-orange-600' : 'text-gray-500'} mb-1`}>
+                    {day.getDate()}
+                  </div>
+                  <div className="space-y-1">
+                    {dayPosts.slice(0, 4).map((p) => (
+                      <DraggablePostChip key={p.id} post={p} onClick={() => openEdit(p)} />
+                    ))}
+                    {dayPosts.length > 4 && (
+                      <div className="text-[9px] text-gray-400">+{dayPosts.length - 4} more</div>
+                    )}
+                  </div>
+                </DroppableDay>
+              );
+            })}
+          </div>
+          <DragOverlay dropAnimation={null}>
+            {activeDragPost ? (
               <div
-                key={idx}
-                onDragOver={(e) => handleDragOver(e, day)}
-                onDragLeave={() => setHoverDay(null)}
-                onDrop={(e) => handleDrop(e, day)}
-                className={`min-h-[88px] p-1.5 rounded border text-xs transition-colors ${inMonth ? 'bg-white' : 'bg-gray-50/60 opacity-60'} ${isToday ? 'ring-2 ring-orange-300' : ''} ${isHover ? 'bg-amber-50' : ''}`}
-                data-testid={`cal-cell-${day.toISOString().slice(0, 10)}`}
+                className="text-[10px] rounded px-1.5 py-0.5 shadow-lg"
+                style={{
+                  background: `${PLATFORM_COLORS[activeDragPost.platform] || '#888'}30`,
+                  borderLeft: `3px solid ${PLATFORM_COLORS[activeDragPost.platform] || '#888'}`,
+                  color: PLATFORM_COLORS[activeDragPost.platform] || '#444',
+                }}
+                data-testid="drag-overlay"
               >
-                <div className={`text-[10px] font-semibold ${isToday ? 'text-orange-600' : 'text-gray-500'} mb-1`}>
-                  {day.getDate()}
-                </div>
-                <div className="space-y-1">
-                  {dayPosts.slice(0, 4).map((p) => (
-                    <div
-                      key={p.id}
-                      draggable={p.status !== 'published'}
-                      onDragStart={(e) => handleDragStart(e, p)}
-                      onClick={() => openEdit(p)}
-                      className={`text-[10px] rounded px-1.5 py-0.5 truncate cursor-grab active:cursor-grabbing hover:brightness-95 ${p.status === 'published' ? 'opacity-80' : ''}`}
-                      style={{
-                        background: `${PLATFORM_COLORS[p.platform] || '#888'}15`,
-                        borderLeft: `3px solid ${PLATFORM_COLORS[p.platform] || '#888'}`,
-                        color: PLATFORM_COLORS[p.platform] || '#444',
-                      }}
-                      title={p.caption}
-                      data-testid={`cal-post-${p.id}`}
-                    >
-                      <span className="font-semibold mr-1">
-                        {p.status === 'published' ? '✓' : p.status === 'scheduled' ? '◷' : '✎'}
-                      </span>
-                      <span className="font-medium">{(p.platform || '').slice(0, 2).toUpperCase()}</span>
-                      <span className="ml-1 opacity-80">{(p.caption || '').slice(0, 16)}</span>
-                    </div>
-                  ))}
-                  {dayPosts.length > 4 && (
-                    <div className="text-[9px] text-gray-400">+{dayPosts.length - 4} more</div>
-                  )}
-                </div>
+                <span className="font-medium">{(activeDragPost.platform || '').slice(0, 2).toUpperCase()}</span>
+                <span className="ml-1 opacity-80">{(activeDragPost.caption || '').slice(0, 16)}</span>
               </div>
-            );
-          })}
-        </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
 
         {/* Upcoming next 7 days */}
         <div className="mt-2 border-t pt-3" data-testid="upcoming-strip">

@@ -18,6 +18,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { reservationsAPI, floorPlansAPI, aiWave2API, reservationsAIAPI } from '../services/api';
 import { toast } from 'sonner';
 import BookingsInbox from './BookingsInbox';
+import BookingSourceStrip from '../components/reservations/BookingSourceStrip';
 
 const TIME_SLOTS = [];
 for (let h = 9; h <= 22; h++) {
@@ -239,6 +240,9 @@ export default function Reservations() {
           </Card>
         ))}
       </div>
+
+      {/* Source attribution — 30d rollup from marketing scans + bookings */}
+      <BookingSourceStrip theme={theme} />
 
       {/* Controls */}
       <div className="flex items-center gap-3 flex-wrap">

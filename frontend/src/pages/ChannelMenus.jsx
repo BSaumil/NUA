@@ -6,6 +6,7 @@ import { Badge } from '../components/ui/badge';
 import { useToast } from '../hooks/use-toast';
 import { useTheme } from '../contexts/ThemeContext';
 import { channelMenusAPI } from '../services/api';
+import ChannelPauseControl from '../components/channel/ChannelPauseControl';
 import {
   Globe, Bike, Truck, Smartphone, QrCode, Phone, ChefHat,
   TrendingDown, Flame, Save, Search, Sparkles
@@ -121,6 +122,9 @@ export default function ChannelMenus() {
           );
         })}
       </div>
+
+      {/* Per-channel pause / resume / schedule for the active channel */}
+      <ChannelPauseControl channel={active} theme={theme} />
 
       {/* Action bar */}
       <Card><CardContent className="p-4 space-y-3" data-testid="channel-action-bar">

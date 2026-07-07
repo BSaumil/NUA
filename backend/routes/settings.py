@@ -10,48 +10,48 @@ from models.eftpos import EFTPOSConfig, EFTPOSConfigCreate, EFTPOSTransaction, E
 from models.integration import Integration, IntegrationCreate, IntegrationUpdate, SyncRequest
 from models.employee import EmployeeSchedule, EmployeeScheduleCreate, TimeOffRequest, AgeVerification
 from models.staff import StaffCommission, StaffShift
+from utils.mongo_safe import safe_find_list
 import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # ============ LOCATIONS API ============
+def _coerce_location(loc: dict) -> dict:
+    """Legacy migration: `timings` → `hours`; scrub string-typed hours."""
+    hours = loc.get("hours")
+    if hours is not None and not isinstance(hours, dict):
+        loc["hours"] = None
+    timings = loc.get("timings")
+    if timings is not None:
+        if isinstance(timings, dict) and not loc.get("hours"):
+            loc["hours"] = timings
+        loc.pop("timings", None)
+    return loc
+
+
+def _location_fallback(loc: dict, _err: Exception):
+    """Minimal safe shape so a corrupted doc still surfaces in the UI."""
+    try:
+        return Location(
+            id=loc.get("id", ""),
+            name=loc.get("name", "Unnamed"),
+            address=loc.get("address", ""),
+            phone=loc.get("phone", ""),
+            status=loc.get("status", "active"),
+        )
+    except Exception:
+        return None
+
+
 @router.get("/locations")
 async def get_locations():
-    """Defensive read: legacy MongoDB docs may have malformed fields (e.g.
-    string-based `hours`/`timings`, missing required keys). Skip or coerce
-    invalid entries so a single bad row can never 500 the whole page."""
-    locations = await db.locations.find().to_list(1000)
-    valid = []
-    for loc in locations:
-        loc.pop("_id", None)
-        # Coerce legacy fields
-        hours = loc.get("hours")
-        if hours is not None and not isinstance(hours, dict):
-            loc["hours"] = None
-        timings = loc.get("timings")
-        if timings is not None:
-            # legacy alias for hours
-            if isinstance(timings, dict) and not loc.get("hours"):
-                loc["hours"] = timings
-            loc.pop("timings", None)
-        try:
-            valid.append(Location(**loc).dict())
-        except Exception as e:
-            logger.warning(f"Skipping malformed location {loc.get('id')}: {e}")
-            # Minimal safe fallback so UI still shows the location
-            try:
-                safe = {
-                    "id": loc.get("id", str(loc.get("_id", ""))),
-                    "name": loc.get("name", "Unnamed"),
-                    "address": loc.get("address", ""),
-                    "phone": loc.get("phone", ""),
-                    "status": loc.get("status", "active"),
-                }
-                valid.append(Location(**safe).dict())
-            except Exception:
-                continue
-    return valid
+    """Defensive read via `safe_find_list` — legacy docs never 500."""
+    return await safe_find_list(
+        db.locations, Location, {},
+        limit=1000, coerce=_coerce_location, fallback=_location_fallback,
+        where="locations",
+    )
 
 @router.post("/locations", response_model=Location)
 async def create_location(location: LocationCreate):
