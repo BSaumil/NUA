@@ -1,6 +1,23 @@
 # NUA POS — PRD v26.0 (Enterprise Licensing & Entitlements)
 
 
+## v27.9 — Iteration 46 (7 Jul 2026): Refactor · Source Attribution · Real Wallet Passes · @dnd-kit · Channel Pause
+
+### Shipped
+- **Refactor — `utils/mongo_safe.py`**: New `safe_parse_list()` + `safe_find_list()` helpers that centralise "parse-list-with-per-row-fallback" logic. `routes/settings.py` (locations) and `routes/customers.py` (customers) migrated. No more bespoke try/except sprinkles for legacy-doc handling — same behaviour, one place to change.
+- **Booking source attribution on Reservations**: New `components/reservations/BookingSourceStrip.jsx` renders the top 4 booking sources of the last 30 days (bookings, covers, %-share, coloured bar) with a summary line (`X bookings · Y covers · Z QR scans · $R est.`). Pulls `GET /api/marketing/analytics?days=30` and self-hides if empty. Slots into `Reservations.jsx` directly under the today KPI row.
+- **Real Apple Wallet `.pkpass` + Google Wallet save-link**:
+  - `utils/wallet_passes.py` builds a fully-structured `.pkpass` zip (pass.json + manifest.json + signature + icon.png/@2x/logo.png). Signature is a DETACHED CMS/PKCS7 over `manifest.json` using the `PASS_TYPE_CERT_PEM` / `PASS_TYPE_KEY_PEM` / `APPLE_WWDR_CERT_PEM` env certs. When those aren't set (preview env), it emits an unsigned but structurally valid pass and stamps the response header `X-Pkpass-Signed: false` so ops can see the state.
+  - Google Wallet endpoint constructs a signed JWT `payload.loyaltyObjects[0]` with class id + object id + QR barcode + tier text module. Signs with `GOOGLE_WALLET_SERVICE_ACCOUNT_KEY` (RS256) when configured; otherwise returns an HS256 preview JWT and `signed:false` for QA.
+  - New endpoints: `GET /api/customers/{id}/wallet/apple.pkpass` (streams pkpass) and `GET /api/customers/{id}/wallet/google` (returns `{url, jwt, signed, classId, objectId}`). `GuestWalletDialog` now shows dedicated "Add to Apple Wallet" and "Save to Google Wallet" buttons alongside the copy/text-pass ones.
+- **`@dnd-kit` migration for Social Calendar**: Replaced HTML5 `draggable/onDragStart/onDrop` with `DndContext` + `PointerSensor` (`distance: 6`) + `TouchSensor` (`delay: 180ms`, `tolerance: 6`) + `DragOverlay`. New `DraggablePostChip` and `DroppableDay` sub-components keep the rescheduling logic identical while unlocking full touch/tablet drag support. Chip click still opens the edit dialog (activation constraint prevents accidental drags on tap).
+- **Channel Menus per-channel Pause / Resume / Schedule**: New `components/channel/ChannelPauseControl.jsx` slot above the Channel Menus action bar. Shows a Live/Paused badge and Pause / Schedule buttons; Schedule mode collects `pausedUntil` (datetime-local) + reason. Wires to `GET/POST /api/channels/state` with owner/manager RBAC.
+
+### Iter 46 Tests
+- Backend: 9/9 pytest PASS — mongo_safe regressions on locations + customers, Apple pkpass zip structure + headers, Google Wallet JWT link, marketing analytics shape, channels state pause/resume/schedule + RBAC 403 for cashier.
+- Frontend: all 5 flows verified end-to-end — Reservations source strip (28/92/2), Wallet dialog with 4 buttons + pkpass download + Google Wallet tab, Channel Menus pause/schedule dialog, Social Calendar mounts + still edits chips.
+
+
 ## v27.8 — Iteration 45 (4 Jul 2026): Finalization UI Batch · Locations Defensive · Digital Wallet · Automation Triggers
 
 ### Shipped
