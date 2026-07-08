@@ -21,8 +21,13 @@ const makeEmptyProduct = () => ({
   seoDescription: '', description: '', modifierIds: [],
 });
 const makeEmptyPromo = () => ({
-  name: '', type: 'category', discount: '', schedule: '', active: true,
-  category: '', products: [], startDate: '', endDate: '',
+  name: '', type: 'category',
+  pricingMode: 'percentage',
+  discount: '', bundlePrice: '',
+  minQuantity: null, maxQuantity: null, stackable: false,
+  schedule: '', active: true,
+  category: '', categories: [], products: [],
+  startDate: '', endDate: '',
   activeDays: [], startTime: '', endTime: '',
 });
 const emptyBulkPatch = () => ({
@@ -155,15 +160,28 @@ const Products = () => {
   const openEditPromo = (p) => {
     setEditingPromo(p);
     setPromoForm({
-      name: p.name, type: p.type, discount: p.discount, schedule: p.schedule,
-      active: p.active, category: p.category || '', products: p.products || [],
+      name: p.name, type: p.type,
+      pricingMode: p.pricingMode || 'percentage',
+      discount: p.discount ?? '', bundlePrice: p.bundlePrice ?? '',
+      minQuantity: p.minQuantity ?? null, maxQuantity: p.maxQuantity ?? null,
+      stackable: !!p.stackable,
+      schedule: p.schedule,
+      active: p.active,
+      category: p.category || '',
+      categories: p.categories || (p.category ? [p.category] : []),
+      products: p.products || [],
       startDate: p.startDate || '', endDate: p.endDate || '',
       activeDays: p.activeDays || [], startTime: p.startTime || '', endTime: p.endTime || '',
     });
     setShowPromoDialog(true);
   };
   const savePromo = async () => {
-    const data = { ...promoForm, discount: parseFloat(promoForm.discount) };
+    const data = {
+      ...promoForm,
+      discount: parseFloat(promoForm.discount) || 0,
+      bundlePrice: promoForm.bundlePrice === '' || promoForm.bundlePrice == null
+        ? null : parseFloat(promoForm.bundlePrice),
+    };
     try {
       if (editingPromo) { await promotionsAPI.update(editingPromo.id, data); toast.success('Promotion updated'); }
       else { await promotionsAPI.create(data); toast.success('Promotion created'); }
@@ -458,31 +476,80 @@ const Products = () => {
 
       {view === 'promotions' && (
         <div className="space-y-4">
-          {promotions.map(promo => (
-            <Card key={promo.id} data-testid={`promo-card-${promo.id}`}>
-              <CardContent className="p-6">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-3">
-                      <h3 className="text-xl font-bold" style={{ color: theme.text }}>{promo.name}</h3>
-                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${promo.active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                        {promo.active ? 'Active' : 'Inactive'}
-                      </span>
+          {promotions.map(promo => {
+            const isFixed = promo.pricingMode === 'fixed_price';
+            const cats = promo.categories || (promo.category ? [promo.category] : []);
+            const itemCount = (promo.products || []).length;
+            return (
+              <Card key={promo.id} data-testid={`promo-card-${promo.id}`}>
+                <CardContent className="p-6">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-3 flex-wrap">
+                        <h3 className="text-xl font-bold" style={{ color: theme.text }}>{promo.name}</h3>
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${promo.active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                          {promo.active ? 'Active' : 'Inactive'}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-100 text-gray-600 capitalize">
+                          {promo.type}
+                        </span>
+                        {promo.stackable && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-700">
+                            Stackable
+                          </span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-4 gap-4 text-sm">
+                        <div>
+                          <p className="text-gray-500 text-xs">Pricing</p>
+                          {isFixed ? (
+                            <p className="font-bold text-lg" style={{ color: theme.accent }} data-testid={`promo-price-${promo.id}`}>
+                              ${(promo.bundlePrice || 0).toFixed(2)}
+                              {promo.minQuantity && <span className="text-xs font-normal text-gray-500 ml-1">for {promo.minQuantity}+</span>}
+                            </p>
+                          ) : (
+                            <p className="font-bold text-lg" style={{ color: theme.accent }} data-testid={`promo-price-${promo.id}`}>
+                              {promo.discount}% OFF
+                            </p>
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-gray-500 text-xs">Categories</p>
+                          <p className="font-medium truncate" title={cats.join(', ')}>
+                            {cats.length === 0 ? '—' : cats.length === 1 ? cats[0] : `${cats.length} categories`}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500 text-xs">Items</p>
+                          <p className="font-medium">{itemCount > 0 ? `${itemCount} item${itemCount === 1 ? '' : 's'}` : '—'}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500 text-xs">Schedule</p>
+                          <p className="font-medium truncate" title={promo.schedule}>{promo.schedule || 'Always'}</p>
+                        </div>
+                      </div>
+                      {(promo.startDate || promo.endDate || (promo.activeDays || []).length > 0) && (
+                        <div className="mt-2 text-xs text-gray-500 flex items-center gap-3 flex-wrap">
+                          {promo.startDate && <span>From {promo.startDate}</span>}
+                          {promo.endDate && <span>→ {promo.endDate}</span>}
+                          {(promo.activeDays || []).length > 0 && (
+                            <span>{promo.activeDays.map(d => d.slice(0, 3)).join(' · ')}</span>
+                          )}
+                          {(promo.startTime || promo.endTime) && (
+                            <span>{promo.startTime || '00:00'}–{promo.endTime || '23:59'}</span>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <div className="grid grid-cols-3 gap-4 text-sm">
-                      <div><p className="text-gray-500">Type</p><p className="font-medium capitalize">{promo.type}</p></div>
-                      <div><p className="text-gray-500">Discount</p><p className="font-medium" style={{ color: theme.accent }}>{promo.discount}%</p></div>
-                      <div><p className="text-gray-500">Schedule</p><p className="font-medium">{promo.schedule}</p></div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={() => openEditPromo(promo)} data-testid={`edit-promo-${promo.id}`}><Edit size={14} /></Button>
+                      <Button variant="outline" size="sm" className="text-red-500" onClick={() => deletePromo(promo.id)} data-testid={`delete-promo-${promo.id}`}><Trash2 size={14} /></Button>
                     </div>
                   </div>
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={() => openEditPromo(promo)} data-testid={`edit-promo-${promo.id}`}><Edit size={14} /></Button>
-                    <Button variant="outline" size="sm" className="text-red-500" onClick={() => deletePromo(promo.id)} data-testid={`delete-promo-${promo.id}`}><Trash2 size={14} /></Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            );
+          })}
           {promotions.length === 0 && (
             <Card className="border-dashed"><CardContent className="p-12 text-center"><Tag size={40} className="mx-auto mb-3 text-gray-300" /><p className="text-gray-500">No promotions yet</p></CardContent></Card>
           )}
@@ -584,6 +651,8 @@ const Products = () => {
         promoForm={promoForm}
         setPromoForm={setPromoForm}
         onSave={savePromo}
+        categories={categories}
+        products={products}
       />
 
       {/* Image Library — for the single-product dialog */}

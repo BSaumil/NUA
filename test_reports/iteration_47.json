@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 47 fully green — 8/8 backend pytest cases pass on the promotion enhancement stack, and all 5 frontend UI flows for the rebuilt PromotionDialog verified end-to-end on the preview URL. Backend: POST /api/promotions echoes the full new shape (pricingMode, bundlePrice, categories, minQuantity/maxQuantity, stackable, products); PUT accepts partial updates for all new fields and they persist across GET; GET /api/promotions returns all rows including the new fields with no 500 on legacy rows (safe_parse_list). /api/v26/cart/apply-promos returns pricingMode='fixed_price', bundlePrice, originalTotal, discount = originalTotal-bundlePrice and savingsPct for fixed-price bundles; percentage promos still return pricingMode='percentage' and percentage discount (no regression); categories OR products filter correctly OR-matches — a promo with categories:['TESTMainsCat47'] fired when only one cart line had that category; minQuantity gate correctly blocks the promo when the matching cart has fewer than minQuantity items. Frontend: /products → Promotions tab → Create Promotion opens the rebuilt dialog (data-testid promo-dialog) with all three type selectors (promo-type-category/bundle/mixed) and both pricing selectors (promo-mode-percentage/fixed). Clicking Fixed Bundle Price reveals promo-bundle-price-input, promo-min-qty, promo-max-qty and hides promo-discount-input. With bundlePrice=25 and 3 items totalling $28.74 selected, the emerald promo-bundle-preview shows '$28.74 $25.00 Save $3.74 · 13% off'. Type='mixed' shows BOTH the categories chip strip AND the individual items list simultaneously. Saved promo card renders '$25.00 for 3+' for the fixed-price bundle and '20% OFF' for the percentage promo (data-testid promo-price-{id}).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "PromotionDialog", "issues": ["Radix DialogContent still missing DialogDescription/aria-describedby — same non-blocking a11y warning reported in iter 46 for other dialogs. No functional impact."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration47_promotions.py",
+    "/app/test_reports/pytest/iter47_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "models/promotion.py cleanly extends the Promotion + PromotionCreate models with pricingMode, bundlePrice, categories, minQuantity, maxQuantity, stackable — sensible defaults ('percentage', None) preserve back-compat, and safe_parse_list wraps every GET row through the Pydantic model so legacy rows automatically get the new fields materialised in the response.",
+    "routes/transactions.py: PUT /promotions/{id} uses an explicit `allowed` whitelist that now includes every new field (pricingMode, bundlePrice, categories, minQuantity, maxQuantity, stackable). Correctly pops _id from the return object. Good defensive pattern.",
+    "routes/v26_commerce.py apply_promos_to_cart branches cleanly on pricingMode. Fixed-price computation uses max(0, rel_subtotal - bundle_price) so it never returns a negative discount. Category+product OR match logic is symmetric and correctly falls back to whole-cart when no filters are set. minQuantity gate implemented as a hard skip. bug-worthy edge: `if p.get('minQuantity') and qty_total < int(p['minQuantity'])` — a minQuantity of 0 is falsy and will bypass the gate, which is the desired behaviour (0 = no gate). Correct.",
+    "PromotionDialog.jsx rebuild is well-scoped (~317 lines). Multi-select category chips + item checkbox list + bundle preview useMemo are all self-contained. useState for itemSearch is local to the dialog. All interactive elements carry data-testid attributes per the iteration testids doc.",
+    "Products.jsx makeEmptyPromo, openEditPromo, savePromo correctly carry new fields including a null-vs-empty-string guard on bundlePrice (`promoForm.bundlePrice === '' || promoForm.bundlePrice == null ? null : parseFloat(...)`) — this prevents NaN on save. Card display switches on isFixed = pricingMode === 'fixed_price' and renders the correct badge shape.",
+    "MINOR: Products.jsx is now 691 lines — approaching the 700-line guideline threshold. Consider extracting the promotion card render (~lines 470-555) into a small PromotionCard component alongside PromotionDialog for maintainability in future iterations."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration47_promotions.py"
+  ],
+  "success_rate": {"backend": "100% (8/8)", "frontend": "100% (5/5 flows: dialog opens with all selectors, fixed mode shows bundle/min/max + hides %, live emerald preview renders correctly, mixed shows cats+items simultaneously, card badges render '$25.00 for 3+' vs '20% OFF')"},
+  "test_credentials": "owner@nuva.com / NuvaOwner2026! — worked.",
+  "seed_data_creation": "During the pytest run, ~6 TEST_iter47_* promotions are created and torn down via a module-scoped fixture teardown → no orphans. During the frontend flow the 'TEST_iter47 UI Bundle' (fixed_price) and 'TEST_iter47 UI Pct' (percentage) promos were created and deleted at the end via the delete-promo-{id} button, verified via toast + row disappearance. Note: an existing pre-seeded 'Family Feast' bundle promotion (fixed-price $25.00 for 3+) is present in DB as reference — untouched.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter 47 shipped promotion enhancements: (1) Promotion model extended with pricingMode ('percentage'|'fixed_price'), bundlePrice ($), categories (List[str]), minQuantity/maxQuantity (int), stackable (bool). (2) POST/PUT /api/promotions accept + persist all new fields; GET returns them via safe_parse_list wrap. (3) POST /api/v26/cart/apply-promos supports fixed-price bundles (returns pricingMode='fixed_price', bundlePrice, originalTotal, discount, savingsPct, appliedTo, label) AND percentage promos (returns pricingMode='percentage', percentage, discount) with categories-OR-products filter and minQuantity gate. (4) PromotionDialog.jsx rebuilt as a 317-line component with type selector (category|bundle|mixed), pricing selector (percentage|fixed_price), multi-select category chips, item search+checkbox list, min/max qty inputs, live emerald bundle preview, stackable toggle, and active toggle. (5) Products.jsx card display switches on isFixed. Backend regression file at /app/backend/tests/test_iteration47_promotions.py (8 cases). Testids used: promo-dialog, promo-name-input, promo-type-{category|bundle|mixed}, promo-mode-{percentage|fixed}, promo-discount-input, promo-bundle-price-input, promo-min-qty, promo-max-qty, promo-bundle-preview, promo-categories, promo-cat-{slug}, promo-item-search, promo-items-list, promo-item-{id}, promo-stackable-toggle, promo-active-toggle, promo-price-{id}, save-promo-btn, edit-promo-{id}, delete-promo-{id}. Only observation is the same non-blocking Radix a11y warning about missing DialogDescription that was already flagged in iter 46 — unchanged.",
+  "rca of the issue": "N/A — no bugs found in iter 47."
+}

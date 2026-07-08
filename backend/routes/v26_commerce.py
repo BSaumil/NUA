@@ -235,7 +235,11 @@ def _promotion_active_now(promo: dict) -> bool:
 @router.post("/cart/apply-promos")
 async def apply_promos_to_cart(data: dict, _: dict = Depends(get_user)):
     """Given a cart, return every promotion that auto-fires *right now* plus the
-    computed discount. The POS shows them as "auto-applied" chips with × to remove."""
+    computed discount. Supports:
+      • pricingMode="percentage" — subtotal × discount%
+      • pricingMode="fixed_price" — bundle-total override with min/max qty check
+      • matching by categories[] AND/OR products[]
+    """
     cart = data.get("cart") or []
     if not cart:
         return {"applied": [], "totalDiscount": 0}
@@ -244,25 +248,70 @@ async def apply_promos_to_cart(data: dict, _: dict = Depends(get_user)):
     applied = []
     total = 0.0
     for p in promos:
-        if not _promotion_active_now(p): continue
-        relevant = cart
-        if p.get("type") == "bundle" and p.get("products"):
-            ids = {i.get("productId") or i.get("id") for i in cart}
-            if not set(p["products"]).issubset(ids): continue
-            relevant = [i for i in cart if (i.get("productId") or i.get("id")) in p["products"]]
-        elif p.get("type") == "category" and p.get("category"):
-            relevant = [i for i in cart if i.get("category") == p["category"]]
-            if not relevant: continue
+        if not _promotion_active_now(p):
+            continue
+
+        # Determine which cart lines this promo applies to.
+        cats = list(p.get("categories") or [])
+        if p.get("category") and p["category"] not in cats:
+            cats.append(p["category"])
+        prod_ids = set(p.get("products") or [])
+
+        if cats or prod_ids:
+            relevant = [
+                i for i in cart
+                if ((i.get("productId") or i.get("id")) in prod_ids)
+                or (i.get("category") in cats)
+            ]
+        else:
+            # No filters → apply to whole cart (owner explicitly wants a
+            # blanket promo, e.g. "10% off everything today").
+            relevant = list(cart)
+
+        if not relevant:
+            continue
+
+        # Quantity gate for bundle deals.
+        qty_total = sum(int(i.get("quantity", 1)) for i in relevant)
+        if p.get("minQuantity") and qty_total < int(p["minQuantity"]):
+            continue
+
         rel_subtotal = sum(float(i.get("price", 0)) * int(i.get("quantity", 1)) for i in relevant)
-        disc = round(rel_subtotal * (float(p.get("discount", 0)) / 100), 2)
-        if disc <= 0: continue
-        applied.append({
-            "promotionId": p["id"], "name": p["name"],
-            "discount": disc, "percentage": p["discount"],
-            "appliedTo": [i.get("productId") or i.get("id") for i in relevant],
-            "label": f"{p['name']} — {p['discount']}% off",
-        })
-        total += disc
+        if rel_subtotal <= 0:
+            continue
+
+        pricing_mode = p.get("pricingMode", "percentage")
+        if pricing_mode == "fixed_price" and p.get("bundlePrice") is not None:
+            bundle_price = float(p["bundlePrice"])
+            disc = round(max(0.0, rel_subtotal - bundle_price), 2)
+            if disc <= 0:
+                continue
+            pct = round((1 - bundle_price / rel_subtotal) * 100, 1) if rel_subtotal else 0
+            label = f"{p['name']} — ${bundle_price:.2f} bundle (save ${disc:.2f})"
+            applied.append({
+                "promotionId": p["id"], "name": p["name"],
+                "discount": disc,
+                "pricingMode": "fixed_price",
+                "bundlePrice": bundle_price,
+                "originalTotal": round(rel_subtotal, 2),
+                "savingsPct": pct,
+                "appliedTo": [i.get("productId") or i.get("id") for i in relevant],
+                "label": label,
+            })
+        else:
+            pct = float(p.get("discount", 0) or 0)
+            disc = round(rel_subtotal * (pct / 100.0), 2)
+            if disc <= 0:
+                continue
+            applied.append({
+                "promotionId": p["id"], "name": p["name"],
+                "discount": disc,
+                "pricingMode": "percentage",
+                "percentage": pct,
+                "appliedTo": [i.get("productId") or i.get("id") for i in relevant],
+                "label": f"{p['name']} — {pct}% off",
+            })
+        total += applied[-1]["discount"]
     return {"applied": applied, "totalDiscount": round(total, 2)}
 
 

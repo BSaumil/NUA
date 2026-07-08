@@ -11,15 +11,17 @@ import uuid
 router = APIRouter()
 
 # ============ PROMOTIONS API ============
-@router.get("/promotions", response_model=List[Promotion])
+@router.get("/promotions")
 async def get_promotions():
-    promotions = await db.promotions.find().to_list(1000)
-    return [Promotion(**p) for p in promotions]
+    from utils.mongo_safe import safe_parse_list
+    promotions = await db.promotions.find({}, {"_id": 0}).to_list(1000)
+    return safe_parse_list(promotions, Promotion, where="promotions")
 
-@router.get("/promotions/active", response_model=List[Promotion])
+@router.get("/promotions/active")
 async def get_active_promotions():
-    promotions = await db.promotions.find({"active": True}).to_list(1000)
-    return [Promotion(**p) for p in promotions]
+    from utils.mongo_safe import safe_parse_list
+    promotions = await db.promotions.find({"active": True}, {"_id": 0}).to_list(1000)
+    return safe_parse_list(promotions, Promotion, where="promotions")
 
 @router.post("/promotions", response_model=Promotion)
 async def create_promotion(promotion: PromotionCreate):
@@ -29,7 +31,12 @@ async def create_promotion(promotion: PromotionCreate):
 
 @router.put("/promotions/{promo_id}")
 async def update_promotion(promo_id: str, data: dict):
-    allowed = {"name", "type", "discount", "active", "schedule", "products", "category", "originalPrice", "discountedPrice"}
+    allowed = {"name", "type", "discount", "active", "schedule",
+               "products", "category", "categories",
+               "pricingMode", "bundlePrice",
+               "originalPrice", "discountedPrice",
+               "minQuantity", "maxQuantity", "stackable",
+               "startDate", "endDate", "activeDays", "startTime", "endTime"}
     update_data = {k: v for k, v in data.items() if k in allowed}
     result = await db.promotions.find_one_and_update({"id": promo_id}, {"$set": update_data}, return_document=True)
     if not result:
