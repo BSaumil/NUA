@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { useTheme } from '../contexts/ThemeContext';
 import { basGstAPI } from '../services/api';
 import { useToast } from '../hooks/use-toast';
+import BasWorksheetPanel from '../components/bas/BasWorksheetPanel';
 
 const BASGST = () => {
   const { theme } = useTheme();
@@ -80,6 +81,10 @@ const BASGST = () => {
           </Button>
         </div>
       </div>
+
+      {/* ATO Worksheet — G1-G20 / W1-W5 / T1 for the current quarter */}
+      <BasWorksheetPanel theme={theme} />
+
 
       {/* API Configuration Panel */}
       {showApiConfig && (

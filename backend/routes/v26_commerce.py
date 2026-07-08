@@ -818,3 +818,106 @@ async def cfd_enriched(request: Request, terminalId: Optional[str] = None):
         "pointsMissed": points_missed,
         "updatedAt": _iso(_now()),
     }
+
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# AI Bundle Discovery — market-basket analysis on the last N days of orders
+# ═════════════════════════════════════════════════════════════════════════
+@router.get("/promotions/bundle-suggestions")
+async def bundle_suggestions(days: int = 30, min_support: int = 5, top: int = 8,
+                              _: dict = Depends(get_user)):
+    """Scan recent transactions, find item combos that appear together most
+    often, and propose bundle prices at the intersection of "guests already
+    do this" and "we still make margin".
+
+    Method (classic Apriori-lite for 2-3 item baskets):
+      1. Pull last `days` days of committed transactions.
+      2. For each order build the set of unique product IDs.
+      3. Count pair + triple co-occurrences with `min_support` cutoff.
+      4. Propose a bundle price ~15% below average à-la-carte, floored to
+         COGS × 1.5 so margin never falls below ~33%.
+    """
+    since = (_now() - timedelta(days=days)).isoformat()
+    txs = await db.transactions.find(
+        {"createdAt": {"$gte": since}, "status": {"$in": ["completed", "paid", "closed"]}},
+        {"_id": 0, "items": 1, "total": 1},
+    ).to_list(20000)
+
+    prods = await db.products.find({}, {"_id": 0}).to_list(5000)
+    by_id = {p.get("id"): p for p in prods}
+
+    def _margin_floor(pids):
+        cogs = 0.0
+        for pid in pids:
+            p = by_id.get(pid) or {}
+            unit_price = float(p.get("price") or 0)
+            cost = float(p.get("cost") or 0) or unit_price * 0.35
+            cogs += cost
+        return cogs
+
+    pair_counts, triple_counts = {}, {}
+    pair_revenue, triple_revenue = {}, {}
+    order_count = 0
+    for t in txs:
+        items = t.get("items") or []
+        pids = sorted({(i.get("productId") or i.get("id")) for i in items if (i.get("productId") or i.get("id"))})
+        if len(pids) < 2:
+            continue
+        order_count += 1
+        line_total = {}
+        for i in items:
+            pid = i.get("productId") or i.get("id")
+            if pid:
+                line_total[pid] = line_total.get(pid, 0) + float(i.get("price", 0)) * int(i.get("quantity", 1))
+        n = len(pids)
+        for a in range(n):
+            for b in range(a + 1, n):
+                key = (pids[a], pids[b])
+                pair_counts[key] = pair_counts.get(key, 0) + 1
+                pair_revenue[key] = pair_revenue.get(key, 0) + line_total.get(pids[a], 0) + line_total.get(pids[b], 0)
+                for c in range(b + 1, n):
+                    tkey = (pids[a], pids[b], pids[c])
+                    triple_counts[tkey] = triple_counts.get(tkey, 0) + 1
+                    triple_revenue[tkey] = triple_revenue.get(tkey, 0) + line_total.get(pids[a], 0) + line_total.get(pids[b], 0) + line_total.get(pids[c], 0)
+
+    def _score(pids, count, revenue):
+        avg_alacarte = revenue / count if count else 0.0
+        cogs = _margin_floor(list(pids))
+        proposed = round(avg_alacarte * 0.85, 2)
+        margin_floor = round(cogs * 1.5, 2)
+        proposed = max(proposed, margin_floor)
+        savings = round(avg_alacarte - proposed, 2)
+        savings_pct = round((savings / avg_alacarte) * 100, 1) if avg_alacarte else 0.0
+        support = round((count / order_count) * 100, 1) if order_count else 0.0
+        names, cats = [], set()
+        for pid in pids:
+            p = by_id.get(pid) or {}
+            names.append(p.get("name", pid))
+            if p.get("category"):
+                cats.add(p["category"])
+        return {
+            "productIds": list(pids),
+            "productNames": names,
+            "categories": sorted(cats),
+            "coOccurrenceCount": count,
+            "supportPct": support,
+            "avgAlaCarte": round(avg_alacarte, 2),
+            "proposedBundlePrice": proposed,
+            "estimatedSavings": savings,
+            "savingsPct": savings_pct,
+            "marginFloor": margin_floor,
+            "confidence": "high" if support >= 15 else ("medium" if support >= 8 else "low"),
+        }
+
+    pair_suggestions = [_score(k, v, pair_revenue.get(k, 0)) for k, v in pair_counts.items() if v >= min_support]
+    triple_suggestions = [_score(k, v, triple_revenue.get(k, 0)) for k, v in triple_counts.items() if v >= max(min_support, 3)]
+    pair_suggestions.sort(key=lambda x: (x["coOccurrenceCount"], x["avgAlaCarte"]), reverse=True)
+    triple_suggestions.sort(key=lambda x: (x["coOccurrenceCount"], x["avgAlaCarte"]), reverse=True)
+    return {
+        "windowDays": days,
+        "ordersAnalysed": order_count,
+        "pairs": pair_suggestions[:top],
+        "triples": triple_suggestions[:top],
+        "method": "market_basket_apriori_lite",
+    }

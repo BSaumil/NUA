@@ -51,6 +51,7 @@ import Clubmember from './pages/Clubmember';
 import EmailMarketing from './pages/EmailMarketing';
 import Marketing from './pages/Marketing';
 import Super from './pages/Super';
+import Payroll from './pages/Payroll';
 import Temperature from './pages/Temperature';
 import EndOfDay from './pages/EndOfDay';
 import TipManagement from './pages/TipManagement';
@@ -162,6 +163,7 @@ function ProtectedRoutes() {
         <Route path="/accounting" element={<Accounting />} />
         <Route path="/bas-gst" element={<BASGST />} />
         <Route path="/super" element={<Super />} />
+        <Route path="/payroll" element={<Payroll />} />
         <Route path="/temperature" element={<Temperature />} />
         <Route path="/integrations" element={<Integrations />} />
         <Route path="/staff" element={<StaffManagement />} />

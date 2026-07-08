@@ -788,6 +788,25 @@ export const finalizeAPI = {
   deleteTrigger: (id) => api.delete(`/automations/triggers/${id}`),
   aiSuggestAutomation: (prompt) => api.post('/automations/ai-suggest', { prompt }),
   gmbSync: (locationId) => api.post(`/locations/${locationId}/gmb-sync`),
+
+  // Payroll (Australian compliance)
+  payrunCalculate: (data) => api.post('/payroll/payrun/calculate', data),
+  payrunCommit: (data) => api.post('/payroll/payrun/commit', data),
+  payrollRegister: (days = 90) => api.get(`/payroll/register?days=${days}`),
+  payrollYtd: (staffId) => api.get(`/payroll/ytd/${staffId}`),
+  payslipPdfUrl: (runId, staffId) => `${process.env.REACT_APP_BACKEND_URL}/api/payroll/payslip/${runId}/${staffId}/pdf`,
+  stpBuild: (data) => api.post('/payroll/stp/build', data),
+  rosterCompliance: (daysAhead = 14) => api.get(`/payroll/roster-compliance?days_ahead=${daysAhead}`),
+
+  // Wallet credentials
+  walletCredentialsStatus: () => api.get('/settings/wallet-credentials'),
+  walletCredentialsSave: (data) => api.post('/settings/wallet-credentials', data),
+
+  // AI Bundle Discovery (market-basket)
+  bundleSuggestions: (days = 30) => api.get(`/v26/promotions/bundle-suggestions?days=${days}`),
+
+  // BAS worksheet (G1-G20, W1-W5, T1)
+  basWorksheet: (start, end) => api.get(`/bas-gst/worksheet?period_start=${start}&period_end=${end}`),
 };
 
 export default api;

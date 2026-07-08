@@ -81,6 +81,8 @@ const NAV_STRUCTURE = [
     children: [
       { path: '/accounting', label: 'Transactions' },
       { path: '/bas-gst', label: 'BAS/GST' },
+      { path: '/payroll', label: 'Payroll' },
+      { path: '/super', label: 'Super' },
       { path: '/end-of-day', label: 'End of Day' },
       { path: '/integrations', label: 'Integrations' },
     ],

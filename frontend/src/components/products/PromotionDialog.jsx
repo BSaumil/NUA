@@ -3,7 +3,9 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
-import { Search, Percent, DollarSign, Package, Tag } from 'lucide-react';
+import { Search, Percent, DollarSign, Package, Tag, Sparkles, TrendingUp } from 'lucide-react';
+import { finalizeAPI } from '../../services/api';
+import { toast } from 'sonner';
 
 /**
  * Create / edit a promotion.
@@ -25,6 +27,36 @@ export const PromotionDialog = ({
   products = [],
 }) => {
   const [itemSearch, setItemSearch] = useState('');
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiSuggestions, setAiSuggestions] = useState(null);
+
+  const runAiDiscovery = async () => {
+    setAiBusy(true);
+    try {
+      const r = await finalizeAPI.bundleSuggestions(30);
+      setAiSuggestions(r.data);
+      if ((r.data.pairs?.length || 0) + (r.data.triples?.length || 0) === 0) {
+        toast.info('No repeat basket patterns yet — need more transactions.');
+      }
+    } catch (e) { toast.error(e?.response?.data?.detail || 'AI discovery failed'); }
+    finally { setAiBusy(false); }
+  };
+
+  const applySuggestion = (s) => {
+    setPromoForm({
+      ...promoForm,
+      name: promoForm.name || `${s.productNames.slice(0, 2).join(' + ')}${s.productIds.length > 2 ? ' + more' : ''} Bundle`,
+      type: 'bundle',
+      pricingMode: 'fixed_price',
+      bundlePrice: s.proposedBundlePrice,
+      minQuantity: s.productIds.length,
+      products: s.productIds,
+      categories: s.categories && s.categories.length ? s.categories : (promoForm.categories || []),
+    });
+    setAiPanelOpen(false);
+    toast.success(`Applied · ${s.productIds.length}-item bundle @ $${s.proposedBundlePrice.toFixed(2)}`);
+  };
 
   const selectedCategories = promoForm.categories || (promoForm.category ? [promoForm.category] : []);
   const selectedProducts = promoForm.products || [];
@@ -75,6 +107,62 @@ export const PromotionDialog = ({
           <DialogTitle>{editingPromo ? 'Edit Promotion' : 'Create Promotion'}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
+          {!editingPromo && (
+            <div className="rounded-lg border-2 border-dashed border-purple-200 bg-purple-50/40 p-3" data-testid="ai-discovery-block">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Sparkles size={14} className="text-purple-600" />
+                  <p className="text-sm font-semibold text-purple-800">AI Bundle Discovery</p>
+                  <Badge className="bg-purple-100 text-purple-700 border-0 text-[10px]">Market-basket</Badge>
+                </div>
+                <Button size="sm" variant="outline" onClick={() => { setAiPanelOpen(!aiPanelOpen); if (!aiSuggestions) runAiDiscovery(); }}
+                  data-testid="ai-discover-btn">
+                  {aiPanelOpen ? 'Hide' : 'Show'} suggestions
+                </Button>
+              </div>
+              <p className="text-[11px] text-purple-700 mt-1">
+                Scans your last 30 days of orders to find combos guests already buy together and proposes a bundle price with a 33% margin floor.
+              </p>
+              {aiPanelOpen && (
+                <div className="mt-3 space-y-2 max-h-64 overflow-y-auto" data-testid="ai-suggestions-panel">
+                  {aiBusy && <p className="text-xs text-gray-500">Analysing baskets…</p>}
+                  {!aiBusy && aiSuggestions && (
+                    <>
+                      <p className="text-[10px] uppercase tracking-widest text-purple-700 font-semibold">
+                        {aiSuggestions.ordersAnalysed} orders scanned · {aiSuggestions.pairs.length + aiSuggestions.triples.length} candidates
+                      </p>
+                      {[...(aiSuggestions.triples || []), ...(aiSuggestions.pairs || [])].slice(0, 6).map((s, i) => (
+                        <button key={i} type="button" onClick={() => applySuggestion(s)}
+                          className="w-full text-left bg-white rounded-lg border border-purple-100 p-2.5 hover:border-purple-400 transition-colors"
+                          data-testid={`ai-suggestion-${i}`}>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold truncate">{s.productNames.join(' + ')}</p>
+                              <div className="flex items-center gap-2 text-[10px] text-gray-500 mt-0.5">
+                                <span className="flex items-center gap-1"><TrendingUp size={9} /> {s.coOccurrenceCount}× ordered · {s.supportPct}% support</span>
+                                <Badge className={`border-0 text-[9px] ${s.confidence === 'high' ? 'bg-emerald-100 text-emerald-700' : s.confidence === 'medium' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
+                                  {s.confidence}
+                                </Badge>
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="text-xs text-gray-400 line-through">${s.avgAlaCarte.toFixed(2)}</p>
+                              <p className="text-sm font-bold text-emerald-700">${s.proposedBundlePrice.toFixed(2)}</p>
+                              <p className="text-[10px] text-emerald-600">−{s.savingsPct}%</p>
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                      {(aiSuggestions.pairs.length + aiSuggestions.triples.length) === 0 && (
+                        <p className="text-xs text-gray-500 italic">No repeat combos yet in the last 30 days.</p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           <Input
             placeholder="Promotion name (e.g. 'Family Feast', 'Happy Hour')"
             value={promoForm.name}

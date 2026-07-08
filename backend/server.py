@@ -49,6 +49,7 @@ from routes.super import router as super_router
 from routes.temperature import router as temperature_router
 from routes.table_courses import router as table_courses_router
 from routes.finalize import router as finalize_router
+from routes.payroll import router as payroll_router, _apply_persisted_wallet_credentials
 from middleware.license_middleware import LicenseEnforcementMiddleware
 
 app = FastAPI()
@@ -95,6 +96,7 @@ api_router.include_router(super_router)
 api_router.include_router(temperature_router)
 api_router.include_router(table_courses_router)
 api_router.include_router(finalize_router)
+api_router.include_router(payroll_router)
 api_router.include_router(multi_tenant_router)
 
 @api_router.get("/")
@@ -171,6 +173,11 @@ async def startup():
     except Exception as exc:
         logger.warning("Customer seed skipped: %s", exc)
     logger.info("Admin seeded, default business created")
+    # Preload persisted wallet credentials into process env
+    try:
+        await _apply_persisted_wallet_credentials()
+    except Exception as exc:
+        logger.warning("Wallet credentials preload skipped: %s", exc)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

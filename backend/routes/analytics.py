@@ -90,6 +90,119 @@ async def submit_bas_report(report_id: str, use_api: bool = False):
         )
         return {"message": "BAS marked as ready to lodge", "atoPortalUrl": "https://www.ato.gov.au/business-portal"}
 
+
+@router.get("/bas-gst/worksheet")
+async def bas_worksheet(period_start: str, period_end: str):
+    """Return a fully-labelled BAS worksheet (G1–G20, 1A/1B, W1/W2, T1) for
+    the requested period. Numbers are computed from POS transactions,
+    expenses and committed pay runs in the same window.
+
+    Reference: ATO NAT 4189 (Instructions for Business Activity Statement).
+    """
+    tx = await db.transactions.find({
+        "createdAt": {"$gte": period_start, "$lte": period_end + "T23:59:59Z"},
+    }, {"_id": 0}).to_list(50000)
+    exp = await db.expenses.find({
+        "date": {"$gte": period_start, "$lte": period_end + "T23:59:59Z"},
+    }, {"_id": 0}).to_list(50000)
+    runs = await db.payruns.find({
+        "payDate": {"$gte": period_start, "$lte": period_end},
+    }, {"_id": 0}).to_list(500)
+
+    # GST supplies (G1) — include GST-inclusive.
+    g1_total_sales = round(sum(t.get("total", 0) for t in tx), 2)
+    # G3 — GST-free sales (items with gstFree=True on the line).
+    g3_gst_free = round(sum(
+        sum(li.get("price", 0) * li.get("quantity", 1) for li in (t.get("items") or []) if li.get("gstFree"))
+        for t in tx
+    ), 2)
+    # G2 — export sales (delivery channel = export/international) — usually zero for a restaurant.
+    g2_exports = 0.0
+    # G4 — input-taxed sales (rare — e.g. a rental component). Zero by default.
+    g4_input_taxed = 0.0
+    g5_subtotal = round(g2_exports + g3_gst_free + g4_input_taxed, 2)
+    g6_taxable_supplies = round(g1_total_sales - g5_subtotal, 2)
+    g7_adjustments = 0.0
+    g8_total = round(g6_taxable_supplies + g7_adjustments, 2)
+    g9_gst_on_sales = round(sum(t.get("gst", 0) for t in tx), 2)  # 1A
+
+    # Acquisitions
+    g10_capital = round(sum(e.get("amount", 0) for e in exp if e.get("isCapital")), 2)
+    g11_non_capital = round(sum(e.get("amount", 0) for e in exp if not e.get("isCapital")), 2)
+    g12_subtotal = round(g10_capital + g11_non_capital, 2)
+    g13_input_taxed = 0.0
+    g14_private = round(sum(e.get("privatePortion", 0) for e in exp), 2)
+    g15_estimate_gst_free = round(sum(e.get("amount", 0) for e in exp if e.get("gstFree")), 2)
+    g16_subtotal = round(g13_input_taxed + g14_private + g15_estimate_gst_free, 2)
+    g17_creditable = round(g12_subtotal - g16_subtotal, 2)
+    g18_adjustments = 0.0
+    g19_total = round(g17_creditable + g18_adjustments, 2)
+    g20_gst_on_purchases = round(sum(e.get("gstAmount", 0) for e in exp), 2)  # 1B
+
+    net_gst = round(g9_gst_on_sales - g20_gst_on_purchases, 2)  # positive → owe ATO
+
+    # PAYG withholding (W-labels) & PAYG instalment (T1)
+    w1_gross_wages = round(sum(r.get("totals", {}).get("grossPay", 0) for r in runs), 2)
+    w2_payg_withheld = round(sum(r.get("totals", {}).get("payg", 0) for r in runs), 2)
+    w3_no_abn_withholding = 0.0
+    w4_other_withholding = 0.0
+    w5_total_withheld = round(w2_payg_withheld + w3_no_abn_withholding + w4_other_withholding, 2)
+
+    # T1 — PAYG income tax instalment. Rough ATO method: base rate = 12.5%
+    # of assessable GST-exclusive turnover. Owner can override.
+    turnover_ex_gst = round(g8_total - g9_gst_on_sales, 2)
+    t1_instalment = round(turnover_ex_gst * 0.125, 2)
+
+    total_owing = round(net_gst + w5_total_withheld + t1_instalment, 2)
+    return {
+        "period": {"start": period_start, "end": period_end},
+        "sales": {
+            "G1_totalSales": g1_total_sales,
+            "G2_exports": g2_exports,
+            "G3_gstFreeSales": g3_gst_free,
+            "G4_inputTaxedSales": g4_input_taxed,
+            "G5_subtotal": g5_subtotal,
+            "G6_taxableSupplies": g6_taxable_supplies,
+            "G7_adjustments": g7_adjustments,
+            "G8_total": g8_total,
+            "G9_gstOnSales_1A": g9_gst_on_sales,
+        },
+        "acquisitions": {
+            "G10_capital": g10_capital,
+            "G11_nonCapital": g11_non_capital,
+            "G12_subtotal": g12_subtotal,
+            "G13_inputTaxed": g13_input_taxed,
+            "G14_private": g14_private,
+            "G15_estimateGstFree": g15_estimate_gst_free,
+            "G16_subtotal": g16_subtotal,
+            "G17_creditable": g17_creditable,
+            "G18_adjustments": g18_adjustments,
+            "G19_total": g19_total,
+            "G20_gstOnPurchases_1B": g20_gst_on_purchases,
+        },
+        "netGST": net_gst,
+        "withholding": {
+            "W1_totalWages": w1_gross_wages,
+            "W2_paygWithheld": w2_payg_withheld,
+            "W3_noAbnWithholding": w3_no_abn_withholding,
+            "W4_otherWithholding": w4_other_withholding,
+            "W5_totalWithheld": w5_total_withheld,
+        },
+        "instalment": {
+            "T1_paygInstalment": t1_instalment,
+            "T7_varianceReason": None,
+        },
+        "summary": {
+            "grossSales": g1_total_sales,
+            "gstToPay": max(net_gst, 0.0),
+            "gstToClaim": max(-net_gst, 0.0),
+            "paygWithheld": w5_total_withheld,
+            "paygInstalment": t1_instalment,
+            "totalOwing": max(total_owing, 0.0),
+            "refundDue": max(-total_owing, 0.0),
+        },
+    }
+
 # ============ EXPENSES API ============
 @router.get("/expenses", response_model=List[Expense])
 async def get_expenses(start_date: Optional[str] = None, end_date: Optional[str] = None, category: Optional[str] = None):

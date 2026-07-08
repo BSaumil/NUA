@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Palette, MapPin, Users as UsersIcon, Building, GraduationCap, Plus, Edit, Trash2, Save, Receipt, Shield, Monitor, Zap, Printer, Globe, Clock } from 'lucide-react';
+import { Palette, MapPin, Users as UsersIcon, Building, GraduationCap, Plus, Edit, Trash2, Save, Receipt, Shield, Monitor, Zap, Printer, Globe, Clock, KeyRound } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -8,6 +8,7 @@ import { Badge } from '../components/ui/badge';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { locationsAPI, advancedAPI, staffMgmtAPI, enterpriseAPI, gamificationAPI, finalizeAPI } from '../services/api';
+import WalletCredentialsPanel from '../components/settings/WalletCredentialsPanel';
 import { toast } from 'sonner';
 import axios from 'axios';
 
@@ -155,6 +156,7 @@ const Settings = () => {
     { id: 'locations', label: 'Locations', icon: MapPin },
     { id: 'users', label: 'Staff', icon: UsersIcon },
     { id: 'business', label: 'Business', icon: Building },
+    { id: 'wallet', label: 'Wallet Passes', icon: KeyRound },
   ];
 
   return (
@@ -521,6 +523,11 @@ const Settings = () => {
           }} data-testid="save-pr-btn"><Save size={16} className="mr-1" /> Save Print Routing</Button>
         </CardContent></Card>
       )}
+
+      {activeTab === 'wallet' && (
+        <WalletCredentialsPanel theme={theme} />
+      )}
+
 
       {activeTab === 'business' && (
         <div className="space-y-4">
