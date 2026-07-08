@@ -1,6 +1,32 @@
 # NUA POS — PRD v26.0 (Enterprise Licensing & Entitlements)
 
 
+## v28.0 — Iteration 47 (8 Jul 2026): Bundle & Category Multi-Select Promotions
+
+### Shipped
+- **Backend `Promotion` model extended** with:
+  - `pricingMode` — `"percentage"` (existing behaviour) OR `"fixed_price"` (whole bundle = one $).
+  - `bundlePrice` — the fixed $ price of the bundle when `pricingMode="fixed_price"`.
+  - `categories` — array of categories (owner can now pick multiple) alongside the legacy singular `category`.
+  - `minQuantity` / `maxQuantity` — bundle quantity gates (e.g. "any 3+ Mains = $25").
+  - `stackable` — allow the promo to stack with other running promos.
+  - `type` accepts `bundle` | `category` | `mixed` (mixed = categories AND explicit items).
+- **`POST /api/v26/cart/apply-promos` rewritten** to honour:
+  - Categories OR products filter (either matches → line is eligible).
+  - Min-quantity gate — promo silently skips when the matching cart has too few items.
+  - Fixed bundle price recalc — line-relevant `originalTotal – bundlePrice = discount`; returned with `pricingMode`, `bundlePrice`, `originalTotal`, `savingsPct` so the POS surfaces "$25 bundle · save $5 (17% off)" chips.
+  - Percentage promos unchanged — full backwards compat.
+- **`PromotionDialog` rebuilt** with a fluent 3-step selector:
+  1. **Type** — Category / Bundle / Mixed as visual buttons with icon+descriptor.
+  2. **Pricing** — Percentage OFF vs Fixed Bundle Price toggle; fixed mode reveals `$` price + min/max qty inputs.
+  3. **Applicability** — multi-select category chips + searchable product checkbox list (based on type). Live preview card shows `$original → $bundle · Save $X · Y% off` in emerald when the maths lands.
+- **Promotion card display** on `/products` now shows: pricing badge (`$25.00 for 3+` OR `X% OFF`), category count, item count, stackable badge, schedule window.
+
+### Iter 47 Tests
+- Backend: 8/8 pytest PASS — POST/PUT/GET shape, fixed-price cart calc, percentage no-regression, categories-OR-products filter, minQuantity gate.
+- Frontend: 5/5 flows verified — Create dialog opens with all selectors; Fixed mode reveals bundle-price + qty inputs; Mixed type shows both category chips + item list; preview appears when maths favours the bundle; card displays correct badge.
+
+
 ## v27.9 — Iteration 46 (7 Jul 2026): Refactor · Source Attribution · Real Wallet Passes · @dnd-kit · Channel Pause
 
 ### Shipped
