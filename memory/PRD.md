@@ -1,6 +1,38 @@
 # NUA POS — PRD v26.0 (Enterprise Licensing & Entitlements)
 
 
+## v28.1 — Iteration 48 (8 Jul 2026): Australian Payroll Compliance · BAS Worksheet · Wallet Creds UI · AI Bundle Discovery
+
+### Shipped
+- **`utils/au_payroll.py`** — self-contained Australian compliance engine:
+  - **PAYG withholding** — ATO Schedule 1 (Nov 2023) coefficient formula for weekly Scale 1/2/3, fortnight/monthly scaling per Sch 1 §7, HELP/STSL 8% loading above threshold.
+  - **Super Guarantee** — tiered by pay date (10.5→11.0→11.5→12.0%), computed on OTE only (excludes overtime), capped at quarterly max contribution base, due-by = quarter-end + 28d per SGAA.
+  - **Modern Award penalty matrix** — casual +25%, Sat +25%, Sun +50%, PH +150%, night after 10pm +10%, OT ×1.5 first 2h then ×2.
+  - **NES leave accrual** — 152h annual + 76h personal + LSL per year; zero for casuals.
+  - **STP2 pay-event JSON** — full shape (employer/period/employees/totals) ready for SBR2 submitters.
+  - **Roster compliance checker** — flags AWARD_MAX_DAILY, MEAL_BREAK_MISSING, REST_BREAK_MISSING, MIN_SHIFT_LENGTH.
+- **`routes/payroll.py`** — 8 endpoints:
+  - `POST /payroll/payrun/calculate` — timecards → award-aware rows + totals + compliance meta.
+  - `POST /payroll/payrun/commit` — persists + auto-builds STP2 event (`stpStatus:'ready_to_submit'`).
+  - `GET /payroll/register?days=90` — pay run history + KPIs.
+  - `GET /payroll/ytd/{staffId}` — YTD gross/PAYG/super/net/hours.
+  - `GET /payroll/payslip/{runId}/{staffId}/pdf` — Fair Work Reg 3.46-compliant payslip PDF.
+  - `POST /payroll/stp/build` — STP2 event body for any run (SBR2-ready).
+  - `GET /payroll/roster-compliance` — Fair Work + Award violations for upcoming shifts.
+  - `GET/POST /settings/wallet-credentials` — owner-only env plumbing; DB-persisted; loaded at startup.
+- **`analytics.py::GET /bas-gst/worksheet`** — full ATO **NAT 4189** worksheet (G1–G20, W1–W5, T1) with summary (`gstToPay/gstToClaim/paygWithheld/paygInstalment/totalOwing/refundDue`). Reconciles POS transactions + expenses + committed pay runs into the exact labels the BAS form requires.
+- **`v26_commerce.py::GET /promotions/bundle-suggestions`** — AI Bundle Discovery via Apriori-lite market-basket analysis. Scans last N days, counts 2/3-item combos with `min_support`, proposes a bundle price 15% below average à-la-carte, floored to `COGS × 1.5` (guarantees ~33% margin). Returns support%, confidence (high/med/low), estimated savings.
+- **Frontend `Payroll.jsx`** — 3 tabs (Pay Run / Register / Roster Compliance), KPI cards, compliance badges (`ATO Sch 1 (Nov 2023)`, `SG 12%`, `Super due 2026-10-28`), row table with leave accrual per period, register listing, compliance flag chips per shift.
+- **Frontend `BasWorksheetPanel`** — sits at the top of `/bas-gst`. Renders all G/W/T labels in three columns with a dedicated Summary card, date-range picker, CSV export.
+- **Frontend `WalletCredentialsPanel`** — new Settings > Wallet Passes tab. Owner pastes Apple Pass Type ID + Team ID + 3 PEMs + Google Issuer ID + Class ID + service-account JSON. Shows "Production ready" / "Preview mode" per provider. Secrets never re-displayed.
+- **Frontend AI Bundle Discovery** — new block inside `PromotionDialog` (create mode). One click calls the market-basket endpoint and lists the top 6 combos (triples first) with the à-la-carte-vs-proposed price and support/confidence. Clicking a suggestion auto-fills the form (fixed_price + bundlePrice + products + minQuantity).
+
+### Iter 48 Tests
+- Backend: 14/14 pytest PASS — payrun calc + commit (empty & populated), register/YTD, roster compliance, BAS worksheet shape, wallet-credentials round-trip + no-secret-leak, bundle-suggestions shape, seeded transaction case.
+- Frontend: all 4 new surfaces render + wire to backend correctly (screenshots verify Payroll compliance badges, BAS G1..G20 rows, Wallet tab presence, AI discovery block inside promo dialog).
+- Regression: Iter 47 promotion percentage & fixed-price flows unchanged.
+
+
 ## v28.0 — Iteration 47 (8 Jul 2026): Bundle & Category Multi-Select Promotions
 
 ### Shipped
