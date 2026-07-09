@@ -290,7 +290,10 @@ async def list_bills(status: Optional[str] = None, supplier_id: Optional[str] = 
 
 @router.post("/bills")
 async def create_bill(body: dict, user: dict = Depends(require_owner_or_manager)):
-    bill = Bill(**body).dict()
+    try:
+        bill = Bill(**body).dict()
+    except Exception as e:
+        raise HTTPException(422, f"Invalid bill payload: {e}")
     # attempt auto-post
     try:
         je = await svc.auto_post_bill(bill)
@@ -366,7 +369,10 @@ async def list_invoices(status: Optional[str] = None, customer_id: Optional[str]
 
 @router.post("/invoices")
 async def create_invoice(body: dict, user: dict = Depends(require_owner_or_manager)):
-    inv = Invoice(**body).dict()
+    try:
+        inv = Invoice(**body).dict()
+    except Exception as e:
+        raise HTTPException(422, f"Invalid invoice payload: {e}")
     try:
         je = await svc.auto_post_invoice(inv)
         if je: inv["journalEntryId"] = je["id"]
