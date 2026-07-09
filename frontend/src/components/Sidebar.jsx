@@ -65,6 +65,7 @@ const NAV_STRUCTURE = [
     icon: Users, label: 'Customers', access: ['owner', 'manager', 'cashier'],
     children: [
       { path: '/customers', label: 'Customer List' },
+      { path: '/vouchers', label: 'Vouchers' },
       { path: '/loyalty', label: 'Loyalty & Events' },
       { path: '/email-marketing', label: 'Email Marketing' },
     ],

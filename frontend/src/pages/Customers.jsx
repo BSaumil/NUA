@@ -19,6 +19,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { customersAPI, feedbackAPI } from '../services/api';
 import { toast } from 'sonner';
 import GuestWalletDialog from '../components/customers/GuestWalletDialog';
+import CustomerWalletPanel from '../components/customers/CustomerWalletPanel';
 
 const TIER_CONFIG = {
   Platinum: { color: '#818CF8', bg: '#EEF2FF' },
@@ -403,6 +404,9 @@ const Customers = () => {
 
         {/* Customer Edit Dialog (shared) */}
         {renderCustomerDialog()}
+
+        {/* Unified Wallet + Journey + Loyalty + AI Recs */}
+        <CustomerWalletPanel customer={profile} theme={theme} onRefresh={() => fetchAll?.()} />
 
         {/* Digital Wallet Dialog */}
         <GuestWalletDialog open={walletDialog} onOpenChange={setWalletDialog} customer={profile} />

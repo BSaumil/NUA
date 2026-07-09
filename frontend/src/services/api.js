@@ -807,6 +807,43 @@ export const finalizeAPI = {
 
   // BAS worksheet (G1-G20, W1-W5, T1)
   basWorksheet: (start, end) => api.get(`/bas-gst/worksheet?period_start=${start}&period_end=${end}`),
+
+  // ── v29 · Customer Commerce Platform ─────────────────────────
+  // Universal Voucher Engine
+  issueVoucher: (data) => api.post('/vouchers', data),
+  bulkVoucher: (data) => api.post('/vouchers/bulk', data),
+  listVouchers: (params = {}) => api.get('/vouchers', { params }),
+  getVoucher: (id) => api.get(`/vouchers/${id}`),
+  lookupVoucher: (code) => api.get(`/vouchers/lookup/${encodeURIComponent(code)}`),
+  validateVoucher: (data) => api.post('/vouchers/validate', data),
+  redeemVoucher: (data) => api.post('/vouchers/redeem', data),
+  revokeVoucher: (id, reason) => api.post(`/vouchers/${id}/revoke`, { reason }),
+
+  // Unified Wallet
+  walletGet: (customerId) => api.get(`/wallet/${customerId}`),
+  walletCredit: (customerId, data) => api.post(`/wallet/${customerId}/credit`, { customerId, ...data }),
+  walletDebit: (customerId, data) => api.post(`/wallet/${customerId}/debit`, { customerId, ...data }),
+  walletTimeline: (customerId) => api.get(`/wallet/${customerId}/timeline`),
+
+  // Flexible Refunds
+  createRefund: (data) => api.post('/refunds/flexible', data),
+
+  // AI Promotion Builder
+  aiPromotionGoal: (goal) => api.post('/ai/promotion-goal', { goal }),
+
+  // Promotion Analytics
+  promoAnalytics: (days = 30) => api.get(`/promo-analytics/summary?days=${days}`),
+
+  // Loyalty 2.0
+  loyaltyStatus: (customerId) => api.get(`/loyalty/status/${customerId}`),
+  loyaltyAward: (data) => api.post('/loyalty/award', data),
+
+  // AI Personalisation
+  personalisation: (customerId) => api.get(`/personalisation/${customerId}`),
+
+  // Gift Card 2.0
+  scheduleGift: (data) => api.post('/gift-cards/schedule', data),
+  reloadGift: (voucherId, amount) => api.post(`/gift-cards/${voucherId}/reload`, { amount }),
 };
 
 export default api;

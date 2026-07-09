@@ -52,6 +52,7 @@ import EmailMarketing from './pages/EmailMarketing';
 import Marketing from './pages/Marketing';
 import Super from './pages/Super';
 import Payroll from './pages/Payroll';
+import Vouchers from './pages/Vouchers';
 import Temperature from './pages/Temperature';
 import EndOfDay from './pages/EndOfDay';
 import TipManagement from './pages/TipManagement';
@@ -164,6 +165,7 @@ function ProtectedRoutes() {
         <Route path="/bas-gst" element={<BASGST />} />
         <Route path="/super" element={<Super />} />
         <Route path="/payroll" element={<Payroll />} />
+        <Route path="/vouchers" element={<Vouchers />} />
         <Route path="/temperature" element={<Temperature />} />
         <Route path="/integrations" element={<Integrations />} />
         <Route path="/staff" element={<StaffManagement />} />

@@ -10,6 +10,7 @@ import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { transactionsAPI, refundsAPI, accountingAPI } from '../services/api';
+import RefundDialog from '../components/payments/RefundDialog';
 import { toast } from 'sonner';
 
 const Accounting = () => {
@@ -197,26 +198,13 @@ const Accounting = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Refund Dialog */}
-      <Dialog open={showRefund} onOpenChange={setShowRefund}>
-        <DialogContent className="max-w-sm" data-testid="refund-dialog">
-          <DialogHeader><DialogTitle>Issue Refund</DialogTitle></DialogHeader>
-          {selectedTxn && (
-            <div className="space-y-3 py-2">
-              <p className="text-sm text-gray-500">Transaction: <span className="font-mono">{selectedTxn.id}</span></p>
-              <p className="text-sm text-gray-500">Original total: <span className="font-bold">${(selectedTxn.total || 0).toFixed(2)}</span></p>
-              <Input type="number" step="0.01" placeholder="Refund amount" value={refundForm.amount} onChange={e => setRefundForm({ ...refundForm, amount: e.target.value })} data-testid="refund-amount" />
-              <Input placeholder="Reason for refund" value={refundForm.reason} onChange={e => setRefundForm({ ...refundForm, reason: e.target.value })} data-testid="refund-reason" />
-              <select className="w-full p-2 border rounded-md text-sm" value={refundForm.refundMethod} onChange={e => setRefundForm({ ...refundForm, refundMethod: e.target.value })} data-testid="refund-method">
-                <option value="original_payment">Original Payment Method</option>
-                <option value="store_credit">Store Credit</option>
-                <option value="cash">Cash</option>
-              </select>
-              <Button className="w-full bg-red-600 hover:bg-red-700 text-white" onClick={handleRefund} data-testid="confirm-refund-btn">Process Refund</Button>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* Refund Dialog — flexible split (card/store credit/points/voucher) */}
+      <RefundDialog
+        open={showRefund}
+        onClose={() => setShowRefund(false)}
+        transaction={selectedTxn}
+        onDone={() => fetchData()}
+      />
 
       {/* Receipt Dialog */}
       <Dialog open={showReceipt} onOpenChange={setShowReceipt}>
