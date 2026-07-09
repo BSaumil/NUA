@@ -54,8 +54,8 @@ export default function HQDashboard() {
             <TrendingUp size={40} className="text-emerald-600 opacity-30" />
           </div>
           <div className="space-y-2">
-            {rollup.locations.map(l => (
-              <div key={l.location} className="flex justify-between items-center p-2 border rounded" data-testid={`loc-${l.location}`}>
+            {rollup.locations.map((l, idx) => (
+              <div key={l.location} className="flex justify-between items-center p-2 border rounded" data-testid={`loc-${idx}`}>
                 <div>
                   <p className="font-medium">{l.location}</p>
                   <p className="text-xs text-slate-500">{l.covers} covers · GST {FMT(l.gst)}</p>
@@ -72,7 +72,7 @@ export default function HQDashboard() {
         <div className="flex items-center gap-2 mb-4"><Trophy className="text-amber-500" /> <h3 className="font-semibold">Location Leaderboard (30-day revenue)</h3></div>
         <div className="space-y-2">
           {leaderboard.map(l => (
-            <div key={l.rank} className="flex justify-between items-center p-2 border rounded">
+            <div key={l.rank} className="flex justify-between items-center p-2 border rounded" data-testid={`leader-${l.rank}`}>
               <div className="flex items-center gap-3">
                 <Badge className={l.rank === 1 ? 'bg-amber-500' : l.rank === 2 ? 'bg-slate-300' : l.rank === 3 ? 'bg-orange-400' : 'bg-slate-200'}>#{l.rank}</Badge>
                 <span className="font-medium">{l.location}</span>

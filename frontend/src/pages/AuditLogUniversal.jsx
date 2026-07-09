@@ -46,10 +46,10 @@ export default function AuditLog() {
 
       {summary && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <SmallStat label="Total Events" value={summary.total} icon={History} />
-          <SmallStat label="Entity Types" value={summary.byEntity.length} icon={Shield} />
-          <SmallStat label="Actors" value={summary.byActor.length} icon={User} />
-          <SmallStat label="Most active" value={summary.byActor[0]?._id || '—'} icon={Clock} small />
+          <SmallStat label="Total Events" value={summary.total} icon={History} testid="kpi-total-events" />
+          <SmallStat label="Entity Types" value={summary.byEntity.length} icon={Shield} testid="kpi-entity-types" />
+          <SmallStat label="Actors" value={summary.byActor.length} icon={User} testid="kpi-actors" />
+          <SmallStat label="Most active" value={summary.byActor[0]?._id || '—'} icon={Clock} small testid="kpi-most-active" />
         </div>
       )}
 
@@ -116,8 +116,8 @@ export default function AuditLog() {
   );
 }
 
-const SmallStat = ({ label, value, icon: Icon, small }) => (
-  <Card><CardContent className="p-4 flex justify-between items-center">
+const SmallStat = ({ label, value, icon: Icon, small, testid }) => (
+  <Card><CardContent className="p-4 flex justify-between items-center" data-testid={testid}>
     <div>
       <p className="text-xs uppercase tracking-wider text-slate-500">{label}</p>
       <p className={`font-bold mt-1 ${small ? 'text-sm' : 'text-2xl'}`}>{value}</p>
