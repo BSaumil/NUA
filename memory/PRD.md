@@ -1,6 +1,38 @@
 # NUA POS — PRD v26.0 (Enterprise Licensing & Entitlements)
 
 
+## v29.0 — Iteration 49-50 (9 Jul 2026): Customer Commerce Platform · Universal Voucher Engine · Unified Wallet · AI Personalisation
+
+### Shipped
+**Models**
+- `models/voucher.py` — Universal Voucher schema. Fields: HMAC-signed `qrPayload`, human-readable `code` (NUA-XXXX-XXXX), `sourceType` (promotion|refund|gift_card|referral|birthday|anniversary|staff|corporate|event|manual), `valueType` (amount|percentage|free_item), `usageType` (one_time|multi_use|unlimited), `partialRedeemable` with `residualValue` tracking, comprehensive `rules` (weekdays, times, min_spend, eligible/exclude items/categories, locations, channels, first_visit_only, club_only, happy_hour_only), full `redemptions[]` audit trail (staff/terminal/txn/location/timestamp).
+- `models/wallet_ledger.py` — signed ledger entries per customer per bucket (points, store_credit, gift_card, voucher, cashback, referral). Every movement snapshots `balanceAfter`. Balance = sum of `sign*amount` per bucket.
+
+**Backend `routes/commerce_v29.py`** (registered) — 22 endpoints:
+- **Vouchers**: POST /vouchers, POST /vouchers/bulk, GET /vouchers, GET /vouchers/{id}, GET /vouchers/lookup/{code}, POST /vouchers/validate, POST /vouchers/redeem (with 409 duplicate guard + partial residual), POST /vouchers/{id}/revoke.
+- **Wallet**: GET /wallet/{cid}, POST /wallet/{cid}/credit, POST /wallet/{cid}/debit (with balance guard), GET /wallet/{cid}/timeline (merged bookings + orders + refunds + ledger + vouchers + reviews, DESC, with LTV + totalOrders).
+- **Refunds**: POST /refunds/flexible with split modes (card | store_credit | points | voucher) — each split writes correct ledger entries and auto-issues refund vouchers.
+- **AI Promotion Builder**: POST /ai/promotion-goal — LLM-first (openai/gpt-4o-mini via Emergent Universal Key) with heuristic fallback library, returns name + voucherTemplate + rules + smsCopy + emailBody + estimatedROI.
+- **Analytics**: GET /promo-analytics/summary (issued, redeemed, redemptionRate, faceValue, revenueGenerated, bySource breakdown).
+- **Loyalty 2.0**: GET /loyalty/status/{cid} — tier (Bronze→Silver→Gold→Platinum→VIP), nextTier + progress, totalVisits, totalSpend, weekly streak, 6 milestones with progress bars, auto-award to `db.loyalty_awards`, badges list. POST /loyalty/award.
+- **AI Personalisation**: GET /personalisation/{cid} — favourite items, typical hour/weekday, days since last visit, avg check → personalised recommendations (winback/favourite/high_value/time_based) each with a ready-to-issue offer payload.
+- **Gift Card 2.0**: POST /gift-cards/schedule (deferred delivery), POST /gift-cards/{id}/reload (top-up existing balance).
+
+**Frontend**
+- `pages/Vouchers.jsx` (route `/vouchers`) — 5-KPI analytics strip, filterable table (status/source/search), Issue dialog with all rule toggles + bulk count, Detail dialog with the signed QR + full audit trail, AI Promotion Builder tab (goal → complete campaign → "Turn into voucher" auto-fills the form).
+- `components/customers/CustomerWalletPanel.jsx` — embedded in customer profile: 6 balance buckets + tier + streak + loyalty progress + milestones + tabs (Vouchers / Journey / AI Recs). One-click voucher issue from any recommendation.
+- `components/payments/RefundDialog.jsx` — flexible refund UI with add-split buttons per mode, live totals, per-mode extras (points-per-dollar, voucher label + expiry). Wired into `pages/Accounting.jsx`.
+- API service methods for all 22 endpoints in `services/api.js`.
+
+**Regression fixes in Iter 50**
+- `GET /api/transactions` and `GET /api/gift-cards` — safe_parse_list + `_id:0` projection (were 500ing due to leaked ObjectId).
+- Voucher redeem: dupe transactionId check moved BEFORE rules → returns proper 409, not 400 "max reached". Partial vouchers now decrement residual freely until 0 (not blocked by max_redemptions=1).
+
+### Tests
+- Iter 49: 22/25 backend PASS · 3 bugs found · frontend surfaces verified.
+- Iter 50 retest: **35/35 backend PASS · all 3 bugs verified fixed · zero regressions**. Full v29 suite green.
+
+
 ## v28.1 — Iteration 48 (8 Jul 2026): Australian Payroll Compliance · BAS Worksheet · Wallet Creds UI · AI Bundle Discovery
 
 ### Shipped
