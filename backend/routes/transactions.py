@@ -69,8 +69,9 @@ async def get_transactions(
             "$gte": datetime.fromisoformat(start_date),
             "$lte": datetime.fromisoformat(end_date)
         }
-    transactions = await db.transactions.find(query).sort("timestamp", -1).to_list(1000)
-    return [Transaction(**t) for t in transactions]
+    transactions = await db.transactions.find(query, {"_id": 0}).sort("timestamp", -1).to_list(1000)
+    from utils.mongo_safe import safe_parse_list
+    return safe_parse_list(transactions, Transaction, where="transactions")
 
 @router.post("/transactions", response_model=Transaction)
 async def create_transaction(transaction: TransactionCreate):
@@ -173,10 +174,11 @@ async def get_hourly_transactions():
     return [{"hour": h, "total": round(t, 2)} for h, t in sorted(hourly.items())]
 
 # ============ GIFT CARDS API ============
-@router.get("/gift-cards", response_model=List[GiftCard])
+@router.get("/gift-cards")
 async def get_gift_cards():
-    cards = await db.gift_cards.find().to_list(1000)
-    return [GiftCard(**c) for c in cards]
+    from utils.mongo_safe import safe_parse_list
+    cards = await db.gift_cards.find({}, {"_id": 0}).to_list(1000)
+    return safe_parse_list(cards, GiftCard, where="gift_cards")
 
 @router.post("/gift-cards", response_model=GiftCard)
 async def create_gift_card(card: GiftCardCreate):

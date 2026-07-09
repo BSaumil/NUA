@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 50 RETEST of 3 iter49 fixes — ALL 3 BUGS VERIFIED FIXED. (1) Partial voucher redemption chain $30 → $10, $12, $8 all succeed; residuals 20 → 8 → 0; statuses partial → partial → redeemed; redemptionCount 1 → 2 → 3. (2) Duplicate transactionId on partially-redeemed voucher returns HTTP 409 ('Voucher already applied to this transaction') — no longer 400 'max reached'. (3) GET /api/transactions returns 200 with 42 rows and _id stripped. GET /api/gift-cards returns 200 with clean list. FRONTEND fully unblocked: /accounting page renders accounting-page, transactions-table with 42 txn-row-* rows, 42 refund-txn-* buttons; opening RefundDialog reveals all 4 add-split buttons (card, store_credit, points, voucher), refund-reason and refund-submit. 35/35 backend tests pass (11 new iter50 regression + 24 iter49 full suite re-run). No regressions on wallet, timeline, loyalty, personalisation, promo-analytics, ai/promotion-goal, refunds/flexible, gift-cards/schedule+reload, voucher bulk/lookup/validate/revoke.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration50_regression.py",
+    "/app/backend/tests/test_iteration49_commerce_v29.py",
+    "/app/test_reports/pytest/iter50_results.xml",
+    "/app/test_reports/pytest/iter49_retest_results.xml"
+  ],
+  "action_items": [
+    "NONE — all iter49 fixes verified. Optionally address the pre-existing cosmetic notes from iter49 that were not in scope for this retest: (a) CustomerWalletPanel 'undefined%' template artefact; (b) wallet-streak testid not rendered when streakWeeks=0; (c) loyalty/status filter transactions.status IN ('completed','paid','closed') under-counts Sarah Johnson (89 visits per customer stat vs 3 counted by loyalty). These are LOW priority.",
+    "Minor accessibility warning during RefundDialog open: 'Missing Description or aria-describedby for {DialogContent}' — non-blocking, cosmetic only."
+  ],
+  "critical_code_review_comments": [
+    "routes/commerce_v29.py::redeem_voucher — dup-tx guard is now correctly placed BEFORE _validate_voucher_rules (line 294) and the partial-redeem exception at line 302 skips the max-redemptions check when partialRedeemable && residualValue>0. Fix is clean and minimal.",
+    "routes/transactions.py::get_transactions — now uses find(query, {'_id':0}) and safe_parse_list; matches the treatment of /promotions and /gift-cards. Good.",
+    "routes/transactions.py::get_gift_cards — now uses safe_parse_list to tolerate legacy docs missing balance/initialValue. Good.",
+    "commerce_v29.py is still 1006 lines — no change since iter49. Recommend splitting into commerce/voucher.py, wallet.py, refund.py, loyalty.py, personalisation.py, gift_cards.py. Not urgent.",
+    "commerce_v29.py::promo_analytics still does an N+1 tx.find per redemption. Recommend batching with $in query. Not urgent."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration50_regression.py"
+  ],
+  "success_rate": {
+    "backend": "100% (35/35) — 11/11 iter50 targeted regression + 24/24 iter49 full re-run",
+    "frontend": "100% for the newly-unblocked flow — Accounting page loads 42 transactions, RefundDialog opens with all 4 split modes and required inputs. Not re-tested: end-to-end refund submit against /api/refunds/flexible from the browser (backend tests already cover this)."
+  },
+  "test_credentials": "owner@nuva.com / NuvaOwner2026! — worked.",
+  "seed_data_creation": "Retest run created ~5 more test vouchers (label prefix TEST_iter50_partial_chain, one 'TEST_iter50 partial voucher' from re-running iter49). Cleanup: db.vouchers.deleteMany({label: /TEST_iter/i}); db.wallet_ledger.deleteMany({note: /TEST_iter/i}); db.refunds.deleteMany({reason: /TEST_iter/i}).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All 3 iter49 bugs are confirmed fixed at commerce_v29.py (dup guard order + partial-redeem exception) and transactions.py (safe_parse_list + _id:0 for both /transactions and /gift-cards). Iter50 targeted test file: /app/backend/tests/test_iteration50_regression.py (11 tests, all pass). Iter49 full-suite file: /app/backend/tests/test_iteration49_commerce_v29.py (24 tests, all pass). Frontend verified: Accounting page (/accounting) reachable with owner login, 42 transactions load, per-row Refund button (data-testid='refund-txn-{id}') opens RefundDialog (data-testid='refund-dialog') with add-split-{card|store_credit|points|voucher}, refund-reason, refund-submit. Outstanding cosmetic issues from iter49 NOT in scope for this retest: CustomerWalletPanel 'undefined%' + wallet-streak-0 missing testid + loyalty/status status-filter mismatch — still open but LOW priority.",
+  "rca of the issue": "N/A — no bugs found in this iteration."
+}

@@ -288,13 +288,21 @@ async def validate_voucher(body: VoucherValidateRequest, _: dict = Depends(get_u
 @router.post("/vouchers/redeem")
 async def redeem_voucher(body: VoucherRedeemRequest, user: dict = Depends(get_user)):
     v = await _resolve_voucher(body.code, body.token)
-    reason = _validate_voucher_rules(v, cart=body.cart, location_id=body.locationId)
-    if reason:
-        raise HTTPException(400, reason)
 
-    # Duplicate redemption guard — same transactionId + voucher must not stack.
+    # Duplicate redemption guard must run BEFORE rule/quota checks so that
+    # accidental double-clicks return a clear 409 rather than "max reached".
     if body.transactionId and any(r.get("transactionId") == body.transactionId for r in v.get("redemptions", [])):
         raise HTTPException(409, "Voucher already applied to this transaction")
+
+    reason = _validate_voucher_rules(v, cart=body.cart, location_id=body.locationId)
+    if reason:
+        # Partial-redeemable exception: a one_time voucher with residual > 0
+        # should still accept additional partial applications until residual
+        # hits zero. Only skip if the failure is specifically "max reached".
+        if v.get("partialRedeemable") and float(v.get("residualValue", 0)) > 0 and "max redemptions" in reason.lower():
+            pass   # allow — partial redemptions decrement residual, not the counter
+        else:
+            raise HTTPException(400, reason)
 
     # Determine amount actually applied
     requested = float(body.amount)
@@ -326,11 +334,11 @@ async def redeem_voucher(body: VoucherRedeemRequest, user: dict = Depends(get_us
     new_residual = v.get("residualValue", 0.0)
     new_status = v["status"]
     if v.get("partialRedeemable"):
-        new_residual = round(max(0.0, float(v.get("residualValue", v["value"])) - applied), 2)
-        if new_residual <= 0 and (not v.get("maxRedemptions") or new_count >= v["maxRedemptions"]):
-            new_status = "redeemed"
-        else:
-            new_status = "partial"
+        # Partial vouchers use residual value as the true "remaining budget"
+        # — max_redemptions is treated as informational, not a hard cap.
+        prev_residual = float(v.get("residualValue") if v.get("residualValue") is not None else v["value"])
+        new_residual = round(max(0.0, prev_residual - applied), 2)
+        new_status = "redeemed" if new_residual <= 0 else "partial"
     else:
         if not v.get("maxRedemptions") or new_count >= v["maxRedemptions"]:
             new_status = "redeemed"
