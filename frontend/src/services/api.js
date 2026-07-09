@@ -69,6 +69,52 @@ export const accountingAPI = {
   getPandL: () => api.get('/accounting/p-and-l'),
 };
 
+// Enterprise Finance & Accounting (double-entry)
+export const financeAPI = {
+  // Chart of Accounts
+  listAccounts: () => api.get('/accounting/accounts'),
+  createAccount: (data) => api.post('/accounting/accounts', data),
+  updateAccount: (code, data) => api.put(`/accounting/accounts/${code}`, data),
+  deleteAccount: (code) => api.delete(`/accounting/accounts/${code}`),
+  seedCoA: () => api.post('/accounting/seed'),
+  // Journals
+  listJournals: (params) => api.get('/accounting/journals', { params }),
+  getJournal: (id) => api.get(`/accounting/journals/${id}`),
+  createJournal: (data) => api.post('/accounting/journals', data),
+  reverseJournal: (id, data) => api.post(`/accounting/journals/${id}/reverse`, data),
+  // Reports
+  trialBalance: (params) => api.get('/accounting/reports/trial-balance', { params }),
+  profitLoss: (params) => api.get('/accounting/reports/profit-loss', { params }),
+  balanceSheet: (params) => api.get('/accounting/reports/balance-sheet', { params }),
+  cashFlow: (params) => api.get('/accounting/reports/cash-flow', { params }),
+  generalLedger: (code, params) => api.get(`/accounting/reports/general-ledger/${code}`, { params }),
+  budgetVsActual: (params) => api.get('/accounting/reports/budget-vs-actual', { params }),
+  // AP
+  listBills: (params) => api.get('/accounting/bills', { params }),
+  createBill: (data) => api.post('/accounting/bills', data),
+  payBill: (id, data) => api.post(`/accounting/bills/${id}/pay`, data),
+  deleteBill: (id) => api.delete(`/accounting/bills/${id}`),
+  // AR
+  listInvoices: (params) => api.get('/accounting/invoices', { params }),
+  createInvoice: (data) => api.post('/accounting/invoices', data),
+  receiveInvoice: (id, data) => api.post(`/accounting/invoices/${id}/receive`, data),
+  deleteInvoice: (id) => api.delete(`/accounting/invoices/${id}`),
+  // Deposits
+  listDeposits: (params) => api.get('/accounting/deposits', { params }),
+  createDeposit: (data) => api.post('/accounting/deposits', data),
+  applyDeposit: (id, data) => api.post(`/accounting/deposits/${id}/apply`, data),
+  // Bank rec
+  bankStatement: (code, params) => api.get(`/accounting/bank/statement/${code}`, { params }),
+  importBank: (data) => api.post('/accounting/bank/import', data),
+  matchBank: (lineId, jid) => api.post(`/accounting/bank/${lineId}/match/${jid}`),
+  ignoreBank: (lineId) => api.post(`/accounting/bank/${lineId}/ignore`),
+  // Budgets
+  listBudgets: () => api.get('/accounting/budgets'),
+  createBudget: (data) => api.post('/accounting/budgets', data),
+  // KPIs
+  kpis: () => api.get('/accounting/kpis'),
+};
+
 // BAS/GST API
 export const basGstAPI = {
   getReports: () => api.get('/bas-gst/reports'),

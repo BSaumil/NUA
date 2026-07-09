@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 51 — GREEN across the two new enterprise systems. Backend: 22/22 pytest cases pass covering (a) Chart of Accounts with 39 idempotent seeded accounts, (b) balanced/unbalanced journal validation, (c) all 4 core reports (Trial Balance balanced, P&L, Balance Sheet balanced=true, Cash Flow with opening/net/closing), (d) General Ledger for 1000 Cash, (e) POS auto-post creates pos_sale journal AND increases P&L revenue, (f) Refund auto-posts a refund journal, (g) Bill AP full cycle (create with journalEntryId → pay → status=paid + payment journalEntryId), (h) Invoice AR full cycle (create → AR outstanding increases via KPIs → receive → AR decreases), (i) Bank rec import is idempotent by externalId, statement returns suggestedMatches, (j) KPIs returns revenue/gross/net/AR/AP, (k) Rules catalog exposes exactly 24 events + 12 actions + 11 operators, (l) Rules CRUD + toggle + simulator returns wouldFire=true/false, (m) Rules /emit runs matching rules and returns ruleFirings with outcomes[dock_notify.notificationId], (n) AI Rule Builder POST /api/rules/ai-build returns aiGenerated=true spec with triggerEvent + conditions + actions from GPT-5.2, (o) stats + history endpoints. Frontend: /finance renders finance-ledger-page with all 7 tabs (overview/reports/ap/ar/bank/journals/coa), 6 KPI cards ($1,318 revenue / $10,220 cash / $1,100 AR / $0 AP), all 4 reports (pnl-content, bs-content, tb-content, cf-content) render, and end-to-end journal posting works (open dialog → select accounts 1000 & 4000 → set debit 10 credit 10 → journal-post-btn enables when balanced → posts and dialog closes). /automation-triggers renders automation-brain-page with 3 tabs, AI Builder returns a valid rule spec ('High-spend visit VIP upgrade', pos.sale.completed, 2 clauses total/customerId, 2 actions dock_notify+upgrade_vip_tier) and populates the editor, manual save also works.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/accounting/bills, POST /api/accounting/invoices", "issue": "Missing required Pydantic fields (customerId/issueDate on Invoice, supplierId/issueDate on Bill) return HTTP 500 with pydantic_core.ValidationError instead of 422. Route calls Bill(**body).dict() outside try/except. Cosmetic only — POST still works with proper payload. Recommend wrapping model instantiation in try/except ValueError/ValidationError → HTTPException(422)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "AI Builder & Journal dialogs", "issues": ["Console: 'Missing Description or aria-describedby for {DialogContent}' — accessibility warning, non-blocking, same pattern as noted in iter50."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration51_finance_rules.py",
+    "/app/test_reports/pytest/iter51_results.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: Wrap Bill(**body) and Invoice(**body) in create_bill/create_invoice (accounting.py lines 293, 369) with try/except pydantic.ValidationError → 422, so incomplete payloads don't 500.",
+    "OPTIONAL: Add DialogDescription (or aria-describedby=undefined suppression) to journal-new-dialog, ai-build dialog, and other DialogContent instances to silence Radix a11y warning."
+  ],
+  "critical_code_review_comments": [
+    "routes/accounting.py::create_bill / create_invoice call Bill/Invoice(**body).dict() without catching ValidationError — a missing required field surfaces as HTTP 500 (see backend.err.log). Route wraps auto_post in try/except but not the model instantiation.",
+    "routes/rules_engine.py::emit returns 'ruleFirings' but simulate returns 'wouldFire' + 'actionsPreview'; naming is inconsistent (firings/ruleFirings/actionsPreview). The main-agent spec/testing note says 'firings' but code actually emits ruleFirings — worth aligning docs and any client-side consumers.",
+    "routes/rules_engine.py::ai_build catches broad Exception and falls back to a keyword-guess template. This is fine for resilience, but should also log the raw AI response when JSON parse fails so we can diagnose bad LLM output.",
+    "FinanceLedger.jsx is 800+ lines mixing 7 tabs — consider splitting into pages/finance/{Overview,Reports,AP,AR,BankRec,Journals,COA}.jsx modules for maintainability."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration51_finance_rules.py"
+  ],
+  "success_rate": {
+    "backend": "100% (22/22)",
+    "frontend": "100% for the newly-added Finance + Automation Brain flows tested (page load, 7 finance tabs, 4 reports, journal e2e post, AI Builder LLM round-trip, rule save)."
+  },
+  "test_credentials": "owner@nuva.com / NuvaOwner2026! — worked.",
+  "seed_data_creation": "Test run created: (a) ~3 pos_sale journals from TEST_iter51 transactions, (b) 1 refund + refund journal, (c) 1 TEST_iter51 bill + payment (paid), (d) 1 TEST_iter51 invoice (received), (e) 1 bank statement line externalId=TEST-iter51-*, (f) 1 rule via UI 'VIP upgrade on big spend'. Cleanup: db.journal_entries.deleteMany({memo: /TEST_iter51/}); db.bills.deleteMany({supplierName: /TEST_iter51/}); db.ar_invoices.deleteMany({customerName: /TEST_iter51/}); db.bank_statement_lines.deleteMany({description: /TEST_iter51/}); db.rules.deleteMany({name: /TEST_iter51|VIP upgrade on big spend/}).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter51 tests live at /app/backend/tests/test_iteration51_finance_rules.py (22 tests, all pass). Auth: owner@nuva.com / NuvaOwner2026! → POST /api/auth/login → access_token bearer. All Finance endpoints under /api/accounting/*, all Rules Engine endpoints under /api/rules/*. Route ordering is correct: /rules/catalog + /rules/stats defined before /rules/{rid} so no shadowing. Notable: emit response uses key 'ruleFirings' (not 'firings' as reviewer note suggested). Bill/Invoice pydantic models require supplierId/customerId + issueDate (NOT 'date') — see test payloads for the exact shape. Frontend selectors verified working: finance-ledger-page, fin-tab-{overview,reports,ap,ar,bank,journals,coa}, kpi-*, {pnl,bs,tb,cf}-content, journal-new-btn, journal-line-{0,1}-account/debit/credit, journal-post-btn (enables only when debits==credits), automation-brain-page, tab-{rules,history,catalog}, ai-build-btn, ai-generate-btn, rule-name, rule-event, save-rule-btn. Screenshots saved at /tmp/finance_overview.png and /tmp/automation_ai.png.",
+  "rca of the issue": "N/A — no bugs found in this iteration."
+}

@@ -104,6 +104,7 @@ const ALL_FEATURES = [
     { path: '/customers', label: 'Customer List', icon: Users, access: ['owner', 'manager', 'cashier'] },
   ]},
   { group: 'Accounting', items: [
+    { path: '/finance', label: 'Finance Suite', icon: Receipt, access: ['owner'] },
     { path: '/accounting', label: 'Transactions', icon: Receipt, access: ['owner'] },
     { path: '/super', label: 'Superannuation', icon: Shield, access: ['owner'] },
     { path: '/bas-gst', label: 'BAS/GST', icon: FileText, access: ['owner'] },

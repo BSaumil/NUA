@@ -35,6 +35,13 @@ async def create_customer(customer: CustomerCreate):
     customer_dict = customer.dict()
     customer_obj = Customer(**customer_dict)
     await db.customers.insert_one(customer_obj.dict())
+    # Rules engine emit
+    try:
+        from services.rules_engine import safe_emit
+        cd = customer_obj.dict()
+        safe_emit("customer.created", {"id": cd.get("id"), "name": cd.get("name"), "email": cd.get("email")})
+    except Exception:
+        pass
     return customer_obj
 
 @router.put("/customers/{customer_id}", response_model=Customer)

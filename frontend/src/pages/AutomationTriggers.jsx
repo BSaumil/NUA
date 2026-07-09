@@ -1,314 +1,523 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { Textarea } from '../components/ui/textarea';
 import { Switch } from '../components/ui/switch';
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
-} from '../components/ui/dialog';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '../components/ui/select';
-import { useTheme } from '../contexts/ThemeContext';
-import { finalizeAPI } from '../services/api';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { toast } from 'sonner';
-import { Zap, Plus, Trash2, Sparkles, Play, Pause, AlertTriangle } from 'lucide-react';
+import { Zap, Plus, Trash2, Sparkles, Play, Pause, Brain, History, GitBranch, ChevronRight, Cpu, Activity, ArrowRight } from 'lucide-react';
+import axios from 'axios';
 
-const EVENT_META = {
-  low_stock: { label: 'Low stock', color: '#f59e0b', desc: 'Any product falls under threshold' },
-  temperature_abnormal: { label: 'Temperature abnormal', color: '#ef4444', desc: 'Fridge/freezer temp out of range' },
-  booking_created: { label: 'New booking', color: '#3b82f6', desc: 'A reservation is created' },
-  staff_late: { label: 'Staff late', color: '#a855f7', desc: 'A rostered staff member is late' },
-  customer_birthday: { label: 'Customer birthday', color: '#ec4899', desc: 'Loyalty guest birthday today' },
-  dish_86: { label: 'Dish 86’d', color: '#f97316', desc: 'A menu item is 86’d' },
-  high_wait_time: { label: 'High wait time', color: '#eab308', desc: 'Kitchen wait exceeds threshold' },
-  no_show: { label: 'No-show', color: '#64748b', desc: 'A booking is marked no-show' },
+/* Tiny API wrapper — kept local to avoid polluting services/api.js */
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const headers = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
+const rulesAPI = {
+  list: () => axios.get(`${API}/rules`, { headers: headers() }),
+  create: (b) => axios.post(`${API}/rules`, b, { headers: headers() }),
+  update: (id, b) => axios.patch(`${API}/rules/${id}`, b, { headers: headers() }),
+  toggle: (id) => axios.post(`${API}/rules/${id}/toggle`, {}, { headers: headers() }),
+  remove: (id) => axios.delete(`${API}/rules/${id}`, { headers: headers() }),
+  catalog: () => axios.get(`${API}/rules/catalog`, { headers: headers() }),
+  stats: () => axios.get(`${API}/rules/stats`, { headers: headers() }),
+  ai: (prompt) => axios.post(`${API}/rules/ai-build`, { prompt }, { headers: headers() }),
+  simulate: (b) => axios.post(`${API}/rules/simulate`, b, { headers: headers() }),
+  emit: (b) => axios.post(`${API}/rules/emit`, b, { headers: headers() }),
+  executions: (params) => axios.get(`${API}/rules/history/executions`, { headers: headers(), params }),
 };
 
-const ACTION_TYPES = [
-  { value: 'send_email', label: 'Send email' },
-  { value: 'send_sms', label: 'Send SMS' },
-  { value: 'dock_notify', label: 'Dock notification' },
-  { value: 'dispatch_task', label: 'Dispatch task' },
-  { value: 'apply_discount', label: 'Apply discount' },
-];
+const emptyRule = {
+  name: '', description: '', triggerEvent: 'inventory.low_stock',
+  conditions: { mode: 'all', clauses: [] },
+  actions: [{ type: 'dock_notify', params: { message: '' } }],
+  active: true, priority: 0,
+};
 
-const emptyForm = {
-  name: '', event: 'low_stock', conditions: {}, actions: [{ type: 'dock_notify', params: {} }],
-  active: true, aiGenerated: false, aiPrompt: '',
+const MODULE_COLORS = {
+  pos: '#f97316', commerce: '#a855f7', inventory: '#22c55e', crm: '#ec4899',
+  bookings: '#3b82f6', labour: '#eab308', kitchen: '#ef4444', finance: '#0ea5e9',
 };
 
 export default function AutomationTriggers() {
-  const { theme } = useTheme();
-  const [rows, setRows] = useState([]);
+  const [tab, setTab] = useState('rules');
+  const [rules, setRules] = useState([]);
+  const [catalog, setCatalog] = useState({ events: [], actions: [], operators: [] });
+  const [stats, setStats] = useState(null);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [aiDialogOpen, setAiDialogOpen] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
-  const [form, setForm] = useState(emptyForm);
-  const [conditionsJson, setConditionsJson] = useState('{}');
+  const [form, setForm] = useState(emptyRule);
+  const [editId, setEditId] = useState(null);
+  const [executions, setExecutions] = useState([]);
+  const [simDialog, setSimDialog] = useState(null); // rule being simulated
+  const [simPayload, setSimPayload] = useState('{}');
+  const [simResult, setSimResult] = useState(null);
 
-  const load = async () => {
-    try { const r = await finalizeAPI.listTriggers(); setRows(r.data || []); }
-    catch { toast.error('Failed to load triggers'); }
+  const loadAll = useCallback(async () => {
+    try {
+      const [r, c, s] = await Promise.all([rulesAPI.list(), rulesAPI.catalog(), rulesAPI.stats()]);
+      setRules(r.data); setCatalog(c.data); setStats(s.data);
+    } catch { toast.error('Could not load rules'); }
+  }, []);
+  useEffect(() => { loadAll(); }, [loadAll]);
+
+  const loadExecutions = async () => {
+    try { setExecutions((await rulesAPI.executions({ limit: 50 })).data); }
+    catch { toast.error('Could not load history'); }
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { if (tab === 'history') loadExecutions(); }, [tab]);
 
-  const openNew = () => {
-    setForm(emptyForm);
-    setConditionsJson('{}');
-    setDialogOpen(true);
+  const openNew = () => { setForm(emptyRule); setEditId(null); setDialogOpen(true); };
+  const openEdit = (r) => {
+    setForm({
+      name: r.name, description: r.description || '', triggerEvent: r.triggerEvent,
+      conditions: r.conditions || { mode: 'all', clauses: [] },
+      actions: r.actions || [], active: r.active !== false, priority: r.priority || 0,
+      aiGenerated: r.aiGenerated, aiPrompt: r.aiPrompt,
+    });
+    setEditId(r.id); setDialogOpen(true);
   };
 
   const save = async () => {
-    if (!form.name.trim()) return toast.error('Name is required');
-    let conds = {};
-    try { conds = conditionsJson ? JSON.parse(conditionsJson) : {}; }
-    catch { return toast.error('Conditions must be valid JSON'); }
+    if (!form.name.trim()) return toast.error('Name required');
     try {
-      await finalizeAPI.createTrigger({ ...form, conditions: conds });
-      toast.success('Automation created');
-      setDialogOpen(false);
-      load();
-    } catch (e) { toast.error(e?.response?.data?.detail || 'Failed'); }
+      if (editId) await rulesAPI.update(editId, form);
+      else await rulesAPI.create(form);
+      toast.success(editId ? 'Rule updated' : 'Rule created');
+      setDialogOpen(false); loadAll();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed'); }
   };
 
-  const toggleActive = async (t) => {
-    try {
-      await finalizeAPI.updateTrigger(t.id, { active: !t.active });
-      load();
-    } catch { toast.error('Failed'); }
+  const toggle = async (r) => {
+    try { await rulesAPI.toggle(r.id); loadAll(); }
+    catch { toast.error('Failed'); }
   };
 
-  const remove = async (t) => {
-    if (!window.confirm(`Delete "${t.name}"?`)) return;
-    try { await finalizeAPI.deleteTrigger(t.id); toast.success('Deleted'); load(); }
-    catch (e) { toast.error(e?.response?.data?.detail || 'Failed'); }
+  const remove = async (r) => {
+    if (!window.confirm(`Delete "${r.name}"?`)) return;
+    try { await rulesAPI.remove(r.id); toast.success('Deleted'); loadAll(); }
+    catch (e) { toast.error(e.response?.data?.detail || 'Failed'); }
   };
 
   const aiSuggest = async () => {
     if (!aiPrompt.trim()) return toast.error('Describe the automation');
     setAiBusy(true);
     try {
-      const r = await finalizeAPI.aiSuggestAutomation(aiPrompt);
+      const r = await rulesAPI.ai(aiPrompt);
       setForm({
         name: r.data.name || 'AI Automation',
-        event: r.data.event || 'low_stock',
-        conditions: r.data.conditions || {},
+        description: r.data.description || aiPrompt,
+        triggerEvent: r.data.triggerEvent || 'inventory.low_stock',
+        conditions: r.data.conditions || { mode: 'all', clauses: [] },
         actions: r.data.actions?.length ? r.data.actions : [{ type: 'dock_notify', params: {} }],
-        active: true, aiGenerated: true, aiPrompt,
+        priority: r.data.priority || 0, active: true,
+        aiGenerated: true, aiPrompt,
       });
-      setConditionsJson(JSON.stringify(r.data.conditions || {}, null, 2));
-      setAiDialogOpen(false);
-      setDialogOpen(true);
-    } catch (e) { toast.error(e?.response?.data?.detail || 'AI suggestion failed'); }
+      setAiOpen(false); setEditId(null); setDialogOpen(true);
+    } catch (e) { toast.error(e.response?.data?.detail || 'AI failed'); }
     finally { setAiBusy(false); }
   };
 
+  const runSimulate = async () => {
+    let payload = {};
+    try { payload = JSON.parse(simPayload || '{}'); }
+    catch { return toast.error('Payload must be valid JSON'); }
+    try {
+      const r = await rulesAPI.simulate({ ruleId: simDialog.id, payload });
+      setSimResult(r.data);
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed'); }
+  };
+
+  const eventMeta = (t) => catalog.events.find(e => e.type === t) || { module: 'unknown', label: t };
+  const actionMeta = (t) => catalog.actions.find(a => a.type === t) || { label: t };
+
   const addAction = () => setForm(f => ({ ...f, actions: [...f.actions, { type: 'dock_notify', params: {} }] }));
-  const updateAction = (i, patch) => setForm(f => ({ ...f, actions: f.actions.map((a, idx) => idx === i ? { ...a, ...patch } : a) }));
+  const updateAction = (i, patch) => setForm(f => ({
+    ...f, actions: f.actions.map((a, idx) => idx === i ? { ...a, ...patch } : a),
+  }));
   const removeAction = (i) => setForm(f => ({ ...f, actions: f.actions.filter((_, idx) => idx !== i) }));
 
+  const addClause = () => setForm(f => ({
+    ...f, conditions: { ...f.conditions, clauses: [...(f.conditions?.clauses || []), { path: '', op: 'eq', value: '' }] },
+  }));
+  const updateClause = (i, patch) => setForm(f => ({
+    ...f, conditions: {
+      ...f.conditions,
+      clauses: (f.conditions?.clauses || []).map((c, idx) => idx === i ? { ...c, ...patch } : c),
+    },
+  }));
+  const removeClause = (i) => setForm(f => ({
+    ...f, conditions: {
+      ...f.conditions,
+      clauses: (f.conditions?.clauses || []).filter((_, idx) => idx !== i),
+    },
+  }));
+
   return (
-    <div className="space-y-6" data-testid="automations-page">
+    <div className="space-y-6" data-testid="automation-brain-page">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2" style={{ color: theme.text }}>
-            <Zap style={{ color: theme.primary }} /> Automation Engine
+          <h1 className="text-3xl font-bold flex items-center gap-2">
+            <Brain className="text-indigo-500" /> Automation Brain
           </h1>
-          <p className="text-sm text-gray-500 mt-1">Create custom triggers that fire on events — with AI-suggested templates.</p>
+          <p className="text-sm text-slate-500 mt-1">Cross-module rules engine — one place to automate inventory, CRM, labour, bookings, kitchen &amp; finance.</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setAiDialogOpen(true)} data-testid="ai-suggest-btn">
-            <Sparkles size={14} className="mr-1.5" /> AI Suggest
+          <Button variant="outline" onClick={() => setAiOpen(true)} data-testid="ai-build-btn">
+            <Sparkles size={14} className="mr-1.5" /> AI Builder
           </Button>
-          <Button onClick={openNew} style={{ background: theme.primary }} className="text-white" data-testid="new-trigger-btn">
-            <Plus size={14} className="mr-1.5" /> New Automation
-          </Button>
+          <Button onClick={openNew} data-testid="new-rule-btn"><Plus size={14} className="mr-1.5" /> New Rule</Button>
         </div>
       </div>
 
-      {rows.length === 0 ? (
-        <Card className="border-dashed">
-          <CardContent className="p-12 text-center">
-            <Zap size={40} className="mx-auto mb-3 text-gray-300" />
-            <p className="text-gray-500 mb-4">No automations yet. Create your first trigger.</p>
-            <Button onClick={openNew} style={{ background: theme.primary }} className="text-white" data-testid="empty-new-trigger-btn">
-              <Plus size={14} className="mr-1.5" /> New Automation
-            </Button>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4" data-testid="triggers-grid">
-          {rows.map(t => {
-            const meta = EVENT_META[t.event] || { label: t.event, color: '#64748b', desc: '' };
-            return (
-              <Card key={t.id} className="border-0 shadow-sm" data-testid={`trigger-card-${t.id}`}>
-                <CardContent className="p-5 space-y-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="font-bold text-lg truncate" style={{ color: theme.text }}>{t.name}</h3>
-                        {t.aiGenerated && (
-                          <Badge className="bg-purple-100 text-purple-700 text-[10px]" data-testid={`ai-badge-${t.id}`}>
-                            <Sparkles size={10} className="mr-1" /> AI
-                          </Badge>
-                        )}
-                      </div>
-                      <Badge className="text-xs mt-1" style={{ background: `${meta.color}15`, color: meta.color, border: `1px solid ${meta.color}40` }}>
-                        {meta.label}
-                      </Badge>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Switch checked={!!t.active} onCheckedChange={() => toggleActive(t)} data-testid={`toggle-${t.id}`} />
-                      <Button variant="ghost" size="sm" onClick={() => remove(t)} className="text-red-500" data-testid={`delete-${t.id}`}>
-                        <Trash2 size={14} />
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="text-xs text-gray-500">{meta.desc}</div>
-
-                  {t.conditions && Object.keys(t.conditions).length > 0 && (
-                    <div className="text-xs bg-gray-50 rounded p-2 border" data-testid={`conditions-${t.id}`}>
-                      <p className="text-gray-400 uppercase tracking-widest text-[10px] mb-1">Conditions</p>
-                      <pre className="whitespace-pre-wrap font-mono text-[11px]">{JSON.stringify(t.conditions, null, 2)}</pre>
-                    </div>
-                  )}
-
-                  <div className="space-y-1">
-                    <p className="text-gray-400 uppercase tracking-widest text-[10px]">Actions ({(t.actions || []).length})</p>
-                    {(t.actions || []).map((a, i) => (
-                      <div key={i} className="text-xs flex items-center gap-1.5 bg-blue-50 rounded px-2 py-1 border border-blue-100">
-                        <Play size={10} className="text-blue-500" />
-                        <span className="font-medium">{a.type}</span>
-                        {a.params && Object.keys(a.params).length > 0 && (
-                          <span className="text-gray-500 truncate">— {JSON.stringify(a.params)}</span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="flex items-center gap-1 text-[10px] text-gray-400">
-                    {t.active ? <Play size={10} /> : <Pause size={10} />}
-                    <span>{t.active ? 'Active' : 'Paused'}</span>
-                    {t.updatedAt && <span>· updated {new Date(t.updatedAt).toLocaleDateString()}</span>}
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
+      {stats && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatCard label="Active Rules" value={stats.activeRules} sub={`of ${stats.totalRules}`} icon={GitBranch} color="text-emerald-600" />
+          <StatCard label="Events Fired" value={stats.totalEvents} icon={Activity} color="text-blue-600" />
+          <StatCard label="Rule Executions" value={stats.totalExecutions} icon={Cpu} color="text-purple-600" />
+          <StatCard label="Modules Covered" value={Object.keys(stats.byModule).length} sub={Object.keys(stats.byModule).join(', ') || '—'} icon={Zap} color="text-amber-600" />
         </div>
       )}
 
-      {/* Create/Edit Dialog */}
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList>
+          <TabsTrigger value="rules" data-testid="tab-rules"><GitBranch size={14} className="mr-1" /> Rules</TabsTrigger>
+          <TabsTrigger value="history" data-testid="tab-history"><History size={14} className="mr-1" /> History</TabsTrigger>
+          <TabsTrigger value="catalog" data-testid="tab-catalog"><Cpu size={14} className="mr-1" /> Events &amp; Actions</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="rules">
+          {rules.length === 0 ? (
+            <Card className="border-dashed"><CardContent className="p-12 text-center">
+              <Brain size={40} className="mx-auto mb-3 text-slate-300" />
+              <p className="text-slate-500 mb-4">No rules yet. Try the AI Builder or create one manually.</p>
+              <Button onClick={openNew} data-testid="empty-new-rule"><Plus size={14} className="mr-1" /> New Rule</Button>
+            </CardContent></Card>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {rules.map(r => {
+                const em = eventMeta(r.triggerEvent);
+                const color = MODULE_COLORS[em.module] || '#64748b';
+                return (
+                  <Card key={r.id} className="border-0 shadow-sm" data-testid={`rule-card-${r.id}`}>
+                    <CardContent className="p-5 space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="font-bold text-lg truncate">{r.name}</h3>
+                            {r.aiGenerated && <Badge className="bg-purple-100 text-purple-700 text-[10px]"><Sparkles size={10} className="mr-1" /> AI</Badge>}
+                            {r.priority > 0 && <Badge variant="outline" className="text-[10px]">P{r.priority}</Badge>}
+                          </div>
+                          <Badge className="text-xs mt-1" style={{ background: `${color}15`, color, border: `1px solid ${color}40` }}>
+                            {em.module} · {em.label}
+                          </Badge>
+                          {r.description && <p className="text-xs text-slate-500 mt-2 line-clamp-2">{r.description}</p>}
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Switch checked={!!r.active} onCheckedChange={() => toggle(r)} data-testid={`toggle-${r.id}`} />
+                        </div>
+                      </div>
+
+                      {(r.conditions?.clauses?.length > 0) && (
+                        <div className="text-xs bg-slate-50 rounded p-2 border">
+                          <p className="text-slate-400 uppercase tracking-widest text-[10px] mb-1">
+                            IF {r.conditions.mode?.toUpperCase() || 'ALL'}
+                          </p>
+                          {r.conditions.clauses.map((c, i) => (
+                            <div key={i} className="font-mono text-[11px]">
+                              <span className="text-slate-700">{c.path}</span>
+                              <span className="text-indigo-600 mx-1">{c.op}</span>
+                              <span className="text-emerald-600">{JSON.stringify(c.value)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="space-y-1">
+                        <p className="text-slate-400 uppercase tracking-widest text-[10px]">THEN ({(r.actions || []).length})</p>
+                        {(r.actions || []).map((a, i) => (
+                          <div key={i} className="text-xs flex items-center gap-1.5 bg-indigo-50 rounded px-2 py-1 border border-indigo-100">
+                            <ArrowRight size={10} className="text-indigo-500" />
+                            <span className="font-medium">{actionMeta(a.type).label}</span>
+                            {a.params && Object.keys(a.params).length > 0 && (
+                              <span className="text-slate-500 truncate text-[10px]">— {JSON.stringify(a.params)}</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex items-center justify-between pt-2 border-t">
+                        <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                          {r.active ? <Play size={10} className="text-emerald-500" /> : <Pause size={10} />}
+                          <span>{r.active ? 'Active' : 'Paused'}</span>
+                          {r.triggerCount > 0 && <span>· fired {r.triggerCount}×</span>}
+                          {r.lastTriggeredAt && <span>· last {new Date(r.lastTriggeredAt).toLocaleDateString()}</span>}
+                        </div>
+                        <div className="flex gap-1">
+                          <Button size="sm" variant="ghost" onClick={() => { setSimDialog(r); setSimResult(null); setSimPayload('{}'); }} data-testid={`simulate-${r.id}`}>Simulate</Button>
+                          <Button size="sm" variant="ghost" onClick={() => openEdit(r)} data-testid={`edit-${r.id}`}>Edit</Button>
+                          <Button size="sm" variant="ghost" className="text-rose-500" onClick={() => remove(r)} data-testid={`delete-${r.id}`}>
+                            <Trash2 size={14} />
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="history">
+          <Card><CardContent className="p-0" data-testid="history-content">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50"><tr>
+                <th className="text-left p-2 pl-4 text-xs text-slate-500">Time</th>
+                <th className="text-left p-2 text-xs text-slate-500">Event</th>
+                <th className="text-left p-2 text-xs text-slate-500">Rules fired</th>
+                <th className="text-left p-2 pr-4 text-xs text-slate-500">Outcomes</th>
+              </tr></thead>
+              <tbody>
+                {executions.map(e => (
+                  <tr key={e.id} className="border-t align-top">
+                    <td className="p-2 pl-4 text-xs">{new Date(e.ts).toLocaleString()}</td>
+                    <td className="p-2"><Badge variant="outline">{e.eventType}</Badge></td>
+                    <td className="p-2">
+                      {e.firings.map((f, i) => (
+                        <div key={i} className="text-xs">
+                          {f.matched ? '✓' : '·'} {f.name}
+                        </div>
+                      ))}
+                    </td>
+                    <td className="p-2 pr-4 text-xs text-slate-500">
+                      {e.firings.filter(f => f.matched).flatMap(f => f.outcomes || []).map((o, i) => (
+                        <div key={i}>
+                          <Badge className="text-[10px] mr-1" variant="secondary">{o.type}</Badge>
+                          {o.error ? <span className="text-rose-500">✕ {o.error}</span> : <span>✓</span>}
+                        </div>
+                      ))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {executions.length === 0 && <p className="text-center text-slate-400 py-8">No executions yet</p>}
+          </CardContent></Card>
+        </TabsContent>
+
+        <TabsContent value="catalog">
+          <div className="grid md:grid-cols-2 gap-4">
+            <Card><CardContent className="p-4">
+              <h3 className="font-semibold mb-3">Event Catalog · {catalog.events.length}</h3>
+              <div className="space-y-2 max-h-[500px] overflow-y-auto">
+                {catalog.events.map(ev => {
+                  const c = MODULE_COLORS[ev.module] || '#64748b';
+                  return (
+                    <div key={ev.type} className="text-xs p-2 rounded border" style={{ background: `${c}08`, borderColor: `${c}30` }}>
+                      <div className="flex justify-between items-center">
+                        <span className="font-mono text-[11px]">{ev.type}</span>
+                        <Badge className="text-[10px]" style={{ background: c, color: 'white' }}>{ev.module}</Badge>
+                      </div>
+                      <p className="text-slate-600 mt-1">{ev.label}</p>
+                      {ev.fields && <p className="text-[10px] text-slate-400 mt-0.5 font-mono">payload: {ev.fields.join(', ')}</p>}
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent></Card>
+            <Card><CardContent className="p-4">
+              <h3 className="font-semibold mb-3">Action Library · {catalog.actions.length}</h3>
+              <div className="space-y-2 max-h-[500px] overflow-y-auto">
+                {catalog.actions.map(a => (
+                  <div key={a.type} className="text-xs p-2 rounded border bg-slate-50">
+                    <div className="flex justify-between items-center">
+                      <span className="font-mono text-[11px]">{a.type}</span>
+                      <Badge variant="outline" className="text-[10px]">{(a.params || []).length} params</Badge>
+                    </div>
+                    <p className="text-slate-600 mt-1">{a.label}</p>
+                    {a.params?.length > 0 && (
+                      <p className="text-[10px] text-slate-400 mt-0.5 font-mono">params: {a.params.join(', ')}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </CardContent></Card>
+          </div>
+        </TabsContent>
+      </Tabs>
+
+      {/* AI Builder Dialog */}
+      <Dialog open={aiOpen} onOpenChange={setAiOpen}>
+        <DialogContent className="max-w-lg" data-testid="ai-builder-dialog">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Sparkles size={16} /> Describe your automation in plain English</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-2">
+            <Textarea rows={4} value={aiPrompt} onChange={e => setAiPrompt(e.target.value)}
+              placeholder='e.g. "When a customer spends over $500, upgrade to Platinum and email them a thank-you voucher"'
+              data-testid="ai-prompt-input" />
+            <p className="text-xs text-slate-500">Powered by GPT-5.2 · You&apos;ll review the generated rule before saving.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAiOpen(false)}>Cancel</Button>
+            <Button onClick={aiSuggest} disabled={aiBusy} data-testid="ai-generate-btn">
+              {aiBusy ? 'Thinking…' : 'Generate Rule'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rule Editor Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto" data-testid="trigger-dialog">
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto" data-testid="rule-editor-dialog">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Zap size={16} /> {form.aiGenerated ? 'AI-generated Automation' : 'New Automation'}
+              {form.aiGenerated ? <><Sparkles size={16} /> AI-Generated Rule</> : <><Zap size={16} /> {editId ? 'Edit Rule' : 'New Rule'}</>}
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-3 py-2">
+          <div className="space-y-4 py-2">
             {form.aiGenerated && form.aiPrompt && (
               <div className="text-xs bg-purple-50 border border-purple-100 rounded p-2 flex items-start gap-1.5">
                 <Sparkles size={12} className="text-purple-500 shrink-0 mt-0.5" />
-                <span className="text-purple-800">AI prompt: &ldquo;{form.aiPrompt}&rdquo;</span>
+                <span className="text-purple-800">AI prompt: “{form.aiPrompt}”</span>
               </div>
             )}
-            <Input placeholder="Automation name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} data-testid="trigger-name" />
+            <Input placeholder="Rule name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} data-testid="rule-name" />
+            <Input placeholder="Description (optional)" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
 
-            <div>
-              <label className="text-xs font-medium text-gray-500 mb-1 block">When this happens…</label>
-              <Select value={form.event} onValueChange={v => setForm({ ...form, event: v })}>
-                <SelectTrigger data-testid="trigger-event"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {Object.entries(EVENT_META).map(([k, v]) => (
-                    <SelectItem key={k} value={k}>{v.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-[11px] text-gray-500 mt-1">{EVENT_META[form.event]?.desc}</p>
-            </div>
-
-            <div>
-              <label className="text-xs font-medium text-gray-500 mb-1 block">Conditions (JSON — optional)</label>
-              <Textarea rows={3} value={conditionsJson} onChange={e => setConditionsJson(e.target.value)}
-                placeholder='e.g. {"threshold": 5, "category": "Wine"}' className="font-mono text-xs" data-testid="trigger-conditions" />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-slate-500 mb-1 block">WHEN</label>
+                <Select value={form.triggerEvent} onValueChange={v => setForm({ ...form, triggerEvent: v })}>
+                  <SelectTrigger data-testid="rule-event"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {catalog.events.map(ev => (
+                      <SelectItem key={ev.type} value={ev.type}>{ev.module} · {ev.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-500 mb-1 block">Priority</label>
+                <Input type="number" value={form.priority} onChange={e => setForm({ ...form, priority: parseInt(e.target.value) || 0 })} />
+              </div>
             </div>
 
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="text-xs font-medium text-gray-500">Actions</label>
-                <Button size="sm" variant="ghost" onClick={addAction} data-testid="add-action-btn"><Plus size={12} /> Add action</Button>
+                <label className="text-xs font-medium text-slate-500">IF conditions</label>
+                <div className="flex gap-1 items-center">
+                  <Select value={form.conditions?.mode || 'all'} onValueChange={v => setForm({ ...form, conditions: { ...form.conditions, mode: v } })}>
+                    <SelectTrigger className="w-24 h-7 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectItem value="all">ALL</SelectItem><SelectItem value="any">ANY</SelectItem></SelectContent>
+                  </Select>
+                  <Button size="sm" variant="ghost" onClick={addClause} data-testid="add-clause-btn"><Plus size={12} /> Clause</Button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {(form.conditions?.clauses || []).map((c, i) => (
+                  <div key={i} className="grid grid-cols-[1fr_100px_1fr_auto] gap-2 items-center">
+                    <Input placeholder="payload path" value={c.path || ''} onChange={e => updateClause(i, { path: e.target.value })} className="font-mono text-xs" data-testid={`clause-${i}-path`} />
+                    <Select value={c.op || 'eq'} onValueChange={v => updateClause(i, { op: v })}>
+                      <SelectTrigger data-testid={`clause-${i}-op`}><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {catalog.operators.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <Input placeholder="value" value={typeof c.value === 'string' ? c.value : JSON.stringify(c.value ?? '')}
+                      onChange={e => {
+                        let v = e.target.value;
+                        try { v = JSON.parse(v); } catch { /* keep as string */ }
+                        updateClause(i, { value: v });
+                      }}
+                      className="text-xs" data-testid={`clause-${i}-value`} />
+                    <Button size="sm" variant="ghost" className="text-rose-500" onClick={() => removeClause(i)}><Trash2 size={12} /></Button>
+                  </div>
+                ))}
+                {(form.conditions?.clauses || []).length === 0 && (
+                  <p className="text-xs text-slate-400 pl-2">No conditions — rule fires on every event.</p>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-medium text-slate-500">THEN actions</label>
+                <Button size="sm" variant="ghost" onClick={addAction} data-testid="add-action-btn"><Plus size={12} /> Action</Button>
               </div>
               <div className="space-y-2">
                 {form.actions.map((a, i) => (
-                  <div key={i} className="border rounded p-2 space-y-2 bg-gray-50/60" data-testid={`action-row-${i}`}>
-                    <div className="flex items-center gap-2">
+                  <div key={i} className="border rounded p-2 bg-slate-50/60" data-testid={`action-row-${i}`}>
+                    <div className="flex items-center gap-2 mb-2">
                       <Select value={a.type} onValueChange={v => updateAction(i, { type: v })}>
-                        <SelectTrigger className="flex-1" data-testid={`action-type-${i}`}><SelectValue /></SelectTrigger>
+                        <SelectTrigger className="flex-1" data-testid={`action-${i}-type`}><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          {ACTION_TYPES.map(x => <SelectItem key={x.value} value={x.value}>{x.label}</SelectItem>)}
+                          {catalog.actions.map(x => <SelectItem key={x.type} value={x.type}>{x.label}</SelectItem>)}
                         </SelectContent>
                       </Select>
-                      <Button size="sm" variant="ghost" onClick={() => removeAction(i)} className="text-red-500" data-testid={`remove-action-${i}`}>
-                        <Trash2 size={12} />
-                      </Button>
+                      <Button size="sm" variant="ghost" className="text-rose-500" onClick={() => removeAction(i)}><Trash2 size={12} /></Button>
                     </div>
-                    <Input placeholder='Params JSON e.g. {"template": "low_stock"}'
-                      value={JSON.stringify(a.params || {})}
+                    <Textarea rows={2} placeholder='Params JSON — e.g. {"tier":"Gold"}'
+                      value={JSON.stringify(a.params || {}, null, 0)}
                       onChange={e => {
                         try { updateAction(i, { params: JSON.parse(e.target.value || '{}') }); }
                         catch { /* ignore mid-typing */ }
-                      }}
-                      className="font-mono text-xs" data-testid={`action-params-${i}`} />
+                      }} className="font-mono text-xs" data-testid={`action-${i}-params`} />
+                    <p className="text-[10px] text-slate-400 mt-1">Available params: {(actionMeta(a.type).params || []).join(', ') || '—'}</p>
                   </div>
                 ))}
               </div>
             </div>
 
             <div className="flex items-center gap-2">
-              <Switch checked={form.active} onCheckedChange={v => setForm({ ...form, active: v })} data-testid="trigger-active" />
-              <span className="text-sm text-gray-600">Active on save</span>
+              <Switch checked={form.active} onCheckedChange={v => setForm({ ...form, active: v })} data-testid="rule-active" />
+              <span className="text-sm text-slate-600">Active on save</span>
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={save} style={{ background: theme.primary }} className="text-white" data-testid="save-trigger-btn">
-              Create automation
-            </Button>
+            <Button onClick={save} data-testid="save-rule-btn">{editId ? 'Update Rule' : 'Create Rule'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* AI Suggest Dialog */}
-      <Dialog open={aiDialogOpen} onOpenChange={setAiDialogOpen}>
-        <DialogContent className="max-w-md" data-testid="ai-suggest-dialog">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Sparkles size={16} /> Describe your automation
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-            <Textarea rows={4} value={aiPrompt} onChange={e => setAiPrompt(e.target.value)}
-              placeholder='e.g. "When any wine goes under 3 bottles, alert the manager and email the supplier"'
-              data-testid="ai-prompt" />
-            <p className="text-[11px] text-gray-500 flex items-start gap-1">
-              <AlertTriangle size={11} className="shrink-0 mt-0.5" />
-              AI produces a template you can review/edit before saving.
-            </p>
+      {/* Simulator Dialog */}
+      <Dialog open={!!simDialog} onOpenChange={o => !o && setSimDialog(null)}>
+        <DialogContent data-testid="simulator-dialog">
+          <DialogHeader><DialogTitle>Simulate · {simDialog?.name}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <p className="text-xs text-slate-500">Provide a JSON payload for event <Badge variant="outline">{simDialog?.triggerEvent}</Badge></p>
+            <Textarea rows={5} value={simPayload} onChange={e => setSimPayload(e.target.value)} className="font-mono text-xs" data-testid="sim-payload" />
+            <Button onClick={runSimulate} className="w-full" data-testid="sim-run">Run Simulation</Button>
+            {simResult && (
+              <div className="text-xs border rounded p-3 bg-slate-50">
+                <p className="mb-2 font-semibold">Would fire: {simResult.wouldFire ? '✅ YES' : '❌ NO'}</p>
+                {simResult.conditionResult?.details?.map((d, i) => (
+                  <div key={i} className="font-mono text-[11px]">
+                    {d.passed ? '✓' : '✗'} <span className="text-slate-700">{d.path}</span> {d.op} {JSON.stringify(d.expected)} (actual: {JSON.stringify(d.actual)})
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setAiDialogOpen(false)}>Cancel</Button>
-            <Button onClick={aiSuggest} disabled={aiBusy} style={{ background: theme.primary }} className="text-white" data-testid="ai-generate-btn">
-              {aiBusy ? 'Thinking…' : 'Generate'}
-            </Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
   );
 }
+
+const StatCard = ({ label, value, sub, icon: Icon, color }) => (
+  <Card><CardContent className="p-4">
+    <div className="flex items-center justify-between">
+      <div>
+        <p className="text-xs uppercase tracking-wider text-slate-500">{label}</p>
+        <p className={`text-2xl font-bold mt-1 ${color}`}>{value}</p>
+        {sub && <p className="text-[10px] text-slate-500 mt-0.5">{sub}</p>}
+      </div>
+      <Icon size={32} className={`opacity-30 ${color}`} />
+    </div>
+  </CardContent></Card>
+);

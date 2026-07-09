@@ -74,12 +74,13 @@ const NAV_STRUCTURE = [
     icon: Zap, label: 'Automation', access: ['owner', 'manager'],
     children: [
       { path: '/automation', label: 'Automation Engine' },
-      { path: '/automation-triggers', label: 'Custom Triggers' },
+      { path: '/automation-triggers', label: 'Automation Brain' },
     ],
   },
   {
     icon: Calculator, label: 'Accounting', access: ['owner'],
     children: [
+      { path: '/finance', label: 'Finance Suite' },
       { path: '/accounting', label: 'Transactions' },
       { path: '/bas-gst', label: 'BAS/GST' },
       { path: '/payroll', label: 'Payroll' },

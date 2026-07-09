@@ -53,6 +53,7 @@ import Marketing from './pages/Marketing';
 import Super from './pages/Super';
 import Payroll from './pages/Payroll';
 import Vouchers from './pages/Vouchers';
+import FinanceLedger from './pages/FinanceLedger';
 import Temperature from './pages/Temperature';
 import EndOfDay from './pages/EndOfDay';
 import TipManagement from './pages/TipManagement';
@@ -162,6 +163,7 @@ function ProtectedRoutes() {
         <Route path="/automation" element={<AutomationEngine />} />
         <Route path="/automation-triggers" element={<AutomationTriggers />} />
         <Route path="/accounting" element={<Accounting />} />
+        <Route path="/finance" element={<FinanceLedger />} />
         <Route path="/bas-gst" element={<BASGST />} />
         <Route path="/super" element={<Super />} />
         <Route path="/payroll" element={<Payroll />} />

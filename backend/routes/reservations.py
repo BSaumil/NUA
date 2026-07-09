@@ -43,6 +43,17 @@ async def create_reservation(reservation: ReservationCreate):
             {"id": reservation.customerId},
             {"$inc": {"visits": 0}, "$push": {"reservationIds": res_obj.id}}
         )
+    # Rules engine emit
+    try:
+        from services.rules_engine import safe_emit
+        rd = res_obj.dict()
+        safe_emit("booking.created", {
+            "id": rd.get("id"), "partySize": rd.get("partySize"),
+            "time": (rd.get("dateTime") or rd.get("time") or ""),
+            "customerId": rd.get("customerId"),
+        })
+    except Exception:
+        pass
     return res_obj
 
 @router.put("/reservations/{reservation_id}", response_model=Reservation)

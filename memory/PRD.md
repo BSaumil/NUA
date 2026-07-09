@@ -1,4 +1,57 @@
-# NUA POS — PRD v26.0 (Enterprise Licensing & Entitlements)
+# NUA POS — PRD v30.0 (Enterprise Finance & Cross-Module Automation Brain)
+
+
+## v30.0 — Iteration 51 (9 Feb 2026): Enterprise Double-Entry Accounting · Cross-Module Rules Engine
+
+### Shipped
+**Enterprise Finance & Accounting (double-entry)**
+- `services/accounting_service.py` — full ledger engine:
+  - Idempotent seed of hospitality Chart of Accounts (39 accounts: assets 1xxx, liabilities 2xxx, equity 3xxx, revenue 4xxx, COGS 5xxx, expenses 6xxx). GST/PAYG/Super/Gift-Card/Voucher liability accounts pre-wired.
+  - `post_entry(...)` — validates `sum(debits) == sum(credits)`, blocks debit+credit on same line, auto-numbers `JE-000001`, enriches account names, and is idempotent by `sourceType + sourceRef` so hooks are safe to re-fire.
+  - `reverse_entry(...)` — creates an opposite balancing journal, links `reversedBy`.
+  - Reports as read-only aggregations over `journal_lines`: `trial_balance`, `profit_and_loss`, `balance_sheet`, `cash_flow` (direct method), `general_ledger(code)`.
+  - Auto-post hooks: `auto_post_pos_sale`, `auto_post_refund`, `auto_post_gift_card_sale`, `auto_post_voucher_redeem`, `auto_post_bill`, `auto_post_bill_payment`, `auto_post_invoice`, `auto_post_invoice_receipt`, `auto_post_payroll_run`, `auto_post_customer_deposit`, `auto_post_deposit_applied`.
+- `models/accounting.py` — `Account`, `JournalEntry`, `JournalLine`, `Bill`, `Invoice`, `CustomerDeposit`, `Budget`, `BudgetLine`, `BankStatementLine`.
+- `routes/accounting.py` — 30+ endpoints under `/api/accounting/*`: accounts CRUD, journals CRUD + reverse, bills (AP) CRUD + pay, invoices (AR) CRUD + receive, deposits, bank rec (statement, import, match, ignore, auto-suggest 3-day window), budgets, KPIs, and 5 reports (trial-balance, profit-loss, balance-sheet, cash-flow, general-ledger, budget-vs-actual).
+- COA seeds automatically on backend startup.
+- POS sale, refund, and gift-card sale flows auto-post to the ledger. Manual journals + full history + reversal all available.
+- Frontend `pages/FinanceLedger.jsx` (`/finance`) — 7-tab workspace:
+  1. **Overview** — 6 live KPI cards (Revenue FYTD, Gross/Net Profit + margin %, Cash on Hand, AR/AP outstanding).
+  2. **Reports** — P&L, Balance Sheet, Trial Balance, Cash Flow with date range picker.
+  3. **Bills (AP)** — create + pay with double-entry posting.
+  4. **Invoices (AR)** — create + receive with double-entry posting.
+  5. **Bank Rec** — import statement lines + auto-suggested journal matches within a 3-day window.
+  6. **Journals** — manual entries with live balance-check, reversal button, source-type badges.
+  7. **Chart of Accounts** — grouped by type, add/delete non-system accounts.
+- Sidebar link "Finance Suite" under Accounting; BottomDock too.
+
+**Cross-Module Rules Engine ("Automation Brain")**
+- `services/rules_engine.py` — event bus + condition evaluator + action library:
+  - **24 events** across POS, Commerce, Inventory, CRM, Bookings, Labour, Kitchen, Finance (`EVENT_CATALOG`).
+  - **12 actions**: `dock_notify`, `send_email`, `send_sms`, `create_purchase_order`, `upgrade_vip_tier`, `apply_customer_credit`, `issue_voucher`, `dispatch_task`, `post_journal`, `mark_dish_86`, `apply_discount`, `webhook`.
+  - Condition DSL: `{path, op, value}` clauses combined via `mode: all|any`. Ops: eq, ne, gt, gte, lt, lte, in, not_in, contains, starts_with, exists.
+  - `emit_event(...)` matches active rules by `triggerEvent`, evaluates conditions, executes actions in priority order, records the whole run in `db.rule_executions`.
+  - `safe_emit(...)` fire-and-forget helper used by producers.
+- `routes/rules_engine.py` under `/api/rules/*` — CRUD, toggle, catalog, stats, `/emit`, `/simulate`, execution history, event history, and `/ai-build` (GPT-5.2 via Emergent LLM Key returns a valid rule spec from a plain-English prompt).
+- Cross-module producers hooked: POS transactions emit `pos.sale.completed` + `inventory.low_stock|stockout`; refunds emit `pos.refund.issued`; customer creation emits `customer.created`; reservations emit `booking.created`.
+- Frontend `pages/AutomationTriggers.jsx` completely rebuilt to talk to the new engine — 3 tabs (Rules · History · Events & Actions), 4 KPI cards, AI Builder dialog, full clause editor with dropdown operators, per-action params JSON editor, and a Simulator that dry-runs a payload against a rule.
+
+**Data models used**
+- Backend collections: `accounts`, `journal_entries`, `bills`, `bill_payments`, `ar_invoices`, `ar_receipts`, `customer_deposits`, `budgets`, `bank_statement_lines`, `rules`, `rule_events`, `rule_executions`, `notifications`, `tasks`, `purchase_orders`.
+
+### Verification (backend curl)
+- COA seed idempotent (39 accounts, 0 duplicates on re-seed).
+- Manual journal posts + trial-balance balanced.
+- Unbalanced journal returns 400.
+- POS transaction auto-posts to bank/sales/GST; P&L, BS, Cash Flow all reflect the sale correctly.
+- Bill create + pay produces two balanced journals; Invoice + receipt likewise.
+- Rules engine: created rule, simulated with payload, emitted event → both actions fired (dock_notify + upgrade_vip_tier), stats and history reflect the firing.
+- AI Builder with GPT-5.2 returned a fully populated rule spec (event, conditions, actions) for a plain-English restock prompt.
+
+### Test credentials
+- `owner@nuva.com` / `NuvaOwner2026!`
+
+---
 
 
 ## v29.0 — Iteration 49-50 (9 Jul 2026): Customer Commerce Platform · Universal Voucher Engine · Unified Wallet · AI Personalisation

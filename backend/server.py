@@ -51,6 +51,8 @@ from routes.table_courses import router as table_courses_router
 from routes.finalize import router as finalize_router
 from routes.payroll import router as payroll_router, _apply_persisted_wallet_credentials
 from routes.commerce_v29 import router as commerce_v29_router
+from routes.accounting import router as accounting_router
+from routes.rules_engine import router as rules_engine_router
 from middleware.license_middleware import LicenseEnforcementMiddleware
 
 app = FastAPI()
@@ -99,6 +101,8 @@ api_router.include_router(table_courses_router)
 api_router.include_router(finalize_router)
 api_router.include_router(payroll_router)
 api_router.include_router(commerce_v29_router)
+api_router.include_router(accounting_router)
+api_router.include_router(rules_engine_router)
 api_router.include_router(multi_tenant_router)
 
 @api_router.get("/")
@@ -180,6 +184,14 @@ async def startup():
         await _apply_persisted_wallet_credentials()
     except Exception as exc:
         logger.warning("Wallet credentials preload skipped: %s", exc)
+    # Seed Enterprise Chart of Accounts (idempotent)
+    try:
+        from services.accounting_service import seed_chart_of_accounts
+        r = await seed_chart_of_accounts()
+        if r.get("seeded"):
+            logger.info("Chart of Accounts seeded: %s new accounts", r["seeded"])
+    except Exception as exc:
+        logger.warning("COA seed skipped: %s", exc)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

@@ -124,6 +124,28 @@ async def create_transaction(transaction: TransactionCreate):
     await db.transactions.insert_one(txn_dict)
     txn_dict.pop("_id", None)
 
+    # Auto-post to double-entry ledger
+    try:
+        from services.accounting_service import auto_post_pos_sale
+        # coerce timestamp to iso
+        auto_txn = {**txn_dict, "timestamp": txn_dict["timestamp"].isoformat() if hasattr(txn_dict["timestamp"], "isoformat") else txn_dict["timestamp"]}
+        await auto_post_pos_sale(auto_txn)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"POS ledger auto-post skipped: {e}")
+
+    # Fire rules-engine event: pos.sale.completed
+    try:
+        from services.rules_engine import safe_emit
+        safe_emit("pos.sale.completed", {
+            "id": txn_dict["id"], "total": txn_dict["total"],
+            "customerId": txn_dict.get("customerId"),
+            "items": [i.get("productId") for i in items_list],
+            "paymentMethod": txn_dict["paymentMethod"],
+        }, entity_id=txn_dict["id"])
+    except Exception:
+        pass
+
     # Update stock + deduct recipe ingredients via the central helper.
     from routes.inventory_accounting import deduct_recipe_stock
     for item in transaction.items:
@@ -133,6 +155,19 @@ async def create_transaction(transaction: TransactionCreate):
         )
         try: await deduct_recipe_stock(item.productId, item.quantity)
         except Exception: pass
+        # Emit inventory events for rules engine
+        try:
+            p = await db.products.find_one({"id": item.productId}, {"_id": 0})
+            if p:
+                from services.rules_engine import safe_emit
+                stock = p.get("stock", 0)
+                threshold = p.get("lowStockThreshold", 5)
+                if stock <= 0:
+                    safe_emit("inventory.stockout", {"productId": p["id"], "productName": p.get("name"), "stock": stock})
+                elif stock <= threshold:
+                    safe_emit("inventory.low_stock", {"productId": p["id"], "productName": p.get("name"), "stock": stock, "threshold": threshold})
+        except Exception:
+            pass
 
     # Update customer stats
     if transaction.customerId:
@@ -187,6 +222,18 @@ async def create_gift_card(card: GiftCardCreate):
     card_dict["balance"] = card.amount
     card_obj = GiftCard(**card_dict)
     await db.gift_cards.insert_one(card_obj.dict())
+    # Auto-post gift card sale to ledger (Bank DR / Gift Card Liability CR)
+    try:
+        from services.accounting_service import auto_post_gift_card_sale
+        _d = card_obj.dict()
+        await auto_post_gift_card_sale({
+            "id": _d.get("id"),
+            "amount": _d.get("initialValue") or _d.get("balance") or 0,
+            "issuedAt": datetime.utcnow().isoformat(),
+        })
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Gift card ledger auto-post skipped: {e}")
     return card_obj
 
 @router.post("/gift-cards/{code}/redeem")
@@ -216,6 +263,24 @@ async def create_refund(refund: RefundCreate):
         raise HTTPException(status_code=404, detail="Original transaction not found")
     refund_obj = Refund(**refund.dict())
     await db.refunds.insert_one(refund_obj.dict())
+    # Auto-post refund reversal to ledger
+    try:
+        from services.accounting_service import auto_post_refund
+        await auto_post_refund({**refund_obj.dict(), "timestamp": datetime.utcnow().isoformat()})
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Refund ledger auto-post skipped: {e}")
+    # Fire rules-engine event: pos.refund.issued
+    try:
+        from services.rules_engine import safe_emit
+        safe_emit("pos.refund.issued", {
+            "id": refund_obj.id if hasattr(refund_obj, "id") else refund_obj.dict().get("id"),
+            "amount": refund_obj.amount,
+            "reason": refund_obj.reason,
+            "customerId": refund_obj.customerId,
+        })
+    except Exception:
+        pass
     if refund.refundMethod == "store_credit" and refund.customerId:
         await db.customers.update_one(
             {"id": refund.customerId},
