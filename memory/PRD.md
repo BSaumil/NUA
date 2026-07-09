@@ -1,4 +1,68 @@
-# NUA POS — PRD v30.0 (Enterprise Finance & Cross-Module Automation Brain)
+# NUA POS — PRD v31.0 (Hospitality OS · Ash Autonomous Layer · Universal Audit)
+
+
+## v31.0 — Iteration 52 (9 Feb 2026): Product-Vision Refactor — AI-powered Hospitality Operating System
+
+### Foundation shipped (Phase 1)
+- **`/app/MISSION.md`** — product vision, principles, universal entity model, Ash's 16 responsibilities, approval-queue policy, franchise topology.
+- **`models/base_entity.py`** — `BaseEntity` / `LocationEntity` mixin with `id, businessId, locationId, createdBy, createdAt, updatedBy, updatedAt, deletedAt, deletedBy, device, ip, version`.
+- **`middleware/actor_context.py`** — Starlette middleware puts actor (email/role from JWT), device (UA), IP (X-Forwarded-For aware), businessId (X-Tenant-Id), locationId (X-Location-Id) into a `ContextVar` for the request lifetime.
+- **`services/audit_service.py`** — universal `audit_events` log (who/when/device/ip/before/after/severity/tags).
+- **`services/entity_service.py`** — `stamped_insert`, `stamped_update` (auto-snapshots into `entity_versions`), `soft_delete`, `hard_delete` (GDPR purge), `get_history`, `restore_version`.
+- **`routes/audit.py`** — `/api/audit/events`, `/api/audit/history/{type}/{id}`, `/api/audit/restore/{type}/{id}/{version}`, `/api/audit/purge/{type}/{id}`, `/api/audit/summary`.
+
+### Entity retrofit (Phase 2)
+- Customer create/update, Product create/update/delete now go through `stamped_insert`/`stamped_update`/`soft_delete`. Legacy docs are stamped on next update.
+- POS transaction create emits an audit event (`transaction:created` with full snapshot).
+- Manual journal creation emits an audit event.
+
+### Approval Queue (Phase 3)
+- **`services/approval_service.py`** — policy engine:
+  - `AI_APPROVAL_MODE=thresholds|strict|off` (default `thresholds`)
+  - `AI_APPROVE_PO_ABOVE=500`, `AI_APPROVE_REFUND_ABOVE=100`, `AI_APPROVE_TIER_DOWNGRADES=1`
+  - `enqueue_or_execute(...)` — the ONE call-site every automated action goes through. Enqueues an approval if policy demands it; executes immediately otherwise.
+- **`routes/approvals.py`** — `/api/approvals` (list, filter by status), `/api/approvals/{id}` (get), `/api/approvals/{id}/approve` (owner/manager — runs the action), `/api/approvals/{id}/reject` (with reason), `/api/approvals/pending/count`, `/api/approvals/config/policy`.
+- **Rules Engine hooked** — every rule action now flows through `enqueue_or_execute`. Verified curl: a `create_purchase_order` action with estimatedCost $1250 correctly enqueued instead of executing. After approval, the action ran and produced a purchase order.
+
+### Franchise / HQ Roll-up (Phase 4)
+- **`routes/hq.py`** — `/api/hq/brands`, `/api/hq/locations`, `/api/hq/kpi-roll-up?days=`, `/api/hq/leaderboard`.
+- Frontend `pages/HQDashboard.jsx` (`/hq`) — network-wide revenue card + per-location breakdown + 30-day leaderboard with medals.
+
+### Ash — the Autonomous Operating Layer (Phase 5)
+- **`services/ash_intelligence.py`** — **16 stateless generators**:
+  1. `predict_staffing_shortage` (roster vs bookings)
+  2. `detect_theft_signals` (voids by cashier)
+  3. `detect_fraud_signals` (refund velocity)
+  4. `recommend_pricing` (margin < 30% → suggested price for 35%)
+  5. `suggest_promotions` (slow-movers)
+  6. `predict_food_waste` (ingredient expiry vs pull rate)
+  7. `detect_labour_anomalies` (wages ÷ revenue > 35%)
+  8. `detect_menu_underperformance` (< 20% of median unit sales)
+  9. `forecast_weather_impact` (cover swing heuristic)
+  10. `forecast_public_holiday_demand` (AU holiday lookup)
+  11. `recommend_purchasing` (par-level reorder)
+  12. `recommend_roster_changes` (bookings vs shifts)
+  13. `predict_staff_burnout` (>80h in 14 days)
+  14. `predict_customer_churn` (days-since-visit vs tier)
+  15. `recommend_menu_engineering` (Star/Puzzle/Plow-Horse/Dog quadrants)
+  16. `generate_weekly_summary` — **the one LLM call** (GPT-5.2 via Emergent Universal Key) narrates the week's KPIs; falls back to a deterministic template if the key is missing.
+- **`routes/ash.py`** — `/api/ash/insights`, `/api/ash/insights/summary`, `/api/ash/capabilities`, `POST /api/ash/run`, `POST /api/ash/summary/weekly`, `POST /api/ash/insights/{id}/dismiss`.
+- Frontend `pages/AshDashboard.jsx` (`/ash`) — KPI header, category tabs, insight cards with dismiss + recommendedActions, capability strip. Screenshot verified.
+
+### Frontend also shipped
+- `/approvals` — pending queue + policy banner + approve/reject dialogs.
+- `/audit` — full mutation log with actor/entity/action filters and before/after diff drawer.
+- Sidebar updated with 4 new links: Ash Intelligence · HQ Roll-up · Approvals · Audit Log.
+
+### Verification (curl smoke-tests)
+- `POST /api/ash/run` → 3 promotion insights generated (slow-mover heuristic on real DB products).
+- `POST /api/rules` create rule with `create_purchase_order` param `estimatedCost=1250` → `POST /api/rules/emit` returned `outcome.result.status = pending_approval`.
+- `POST /api/approvals/{id}/approve` executed the action → `purchaseOrderId` returned.
+- `GET /api/audit/summary` reports actors/entities/actions correctly (owner@nuva.com most active).
+- `GET /api/hq/leaderboard` returns location rankings.
+- `GET /api/hq/kpi-roll-up?days=30` returns $966 network revenue over 10 covers.
+
+---
 
 
 ## v30.0 — Iteration 51 (9 Feb 2026): Enterprise Double-Entry Accounting · Cross-Module Rules Engine

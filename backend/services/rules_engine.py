@@ -381,9 +381,17 @@ async def emit_event(event_type: str, payload: Optional[Dict[str, Any]] = None,
                 if delay > 0:
                     asyncio.create_task(_delayed_action(delay, fn_meta["fn"], rule, event, params))
                     outcomes.append({"type": atype, "scheduled_in": delay})
-                else:
-                    out = await fn_meta["fn"](rule, event, params)
-                    outcomes.append({"type": atype, "result": out})
+                    continue
+                # Approval gate — enqueue or execute based on policy
+                from services.approval_service import enqueue_or_execute
+                gate = await enqueue_or_execute(
+                    action_type=atype, params=params,
+                    execute_fn=lambda p, _r=rule, _e=event, _fn=fn_meta["fn"]: _fn(_r, _e, p),
+                    source="rules_engine", source_ref=rule["id"],
+                    context={"eventType": event["type"], "ruleName": rule["name"]},
+                    requested_by=f"rule:{rule['name']}",
+                )
+                outcomes.append({"type": atype, "result": gate})
             except Exception as e:
                 outcomes.append({"type": atype, "error": str(e)})
         firings.append({"ruleId": rule["id"], "name": rule["name"], "matched": True,

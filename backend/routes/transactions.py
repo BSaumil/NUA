@@ -123,6 +123,14 @@ async def create_transaction(transaction: TransactionCreate):
 
     await db.transactions.insert_one(txn_dict)
     txn_dict.pop("_id", None)
+    # Audit trail — POS transactions are ledger-grade, always logged
+    try:
+        from services.audit_service import log_event
+        await log_event(entity_type="transaction", entity_id=txn_dict["id"],
+                        action="created", after=txn_dict,
+                        memo=f"POS sale {txn_dict['paymentMethod']} ${txn_dict['total']}")
+    except Exception:
+        pass
 
     # Auto-post to double-entry ledger
     try:

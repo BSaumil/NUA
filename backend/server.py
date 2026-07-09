@@ -53,7 +53,12 @@ from routes.payroll import router as payroll_router, _apply_persisted_wallet_cre
 from routes.commerce_v29 import router as commerce_v29_router
 from routes.accounting import router as accounting_router
 from routes.rules_engine import router as rules_engine_router
+from routes.audit import router as audit_router
+from routes.approvals import router as approvals_router
+from routes.ash import router as ash_router
+from routes.hq import router as hq_router
 from middleware.license_middleware import LicenseEnforcementMiddleware
+from middleware.actor_context import ActorContextMiddleware
 
 app = FastAPI()
 
@@ -103,6 +108,10 @@ api_router.include_router(payroll_router)
 api_router.include_router(commerce_v29_router)
 api_router.include_router(accounting_router)
 api_router.include_router(rules_engine_router)
+api_router.include_router(audit_router)
+api_router.include_router(approvals_router)
+api_router.include_router(ash_router)
+api_router.include_router(hq_router)
 api_router.include_router(multi_tenant_router)
 
 @api_router.get("/")
@@ -151,6 +160,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(LicenseEnforcementMiddleware)
+app.add_middleware(ActorContextMiddleware)
 
 frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 app.add_middleware(

@@ -159,7 +159,7 @@ async def get_journal(jid: str, _: dict = Depends(get_user)):
 @router.post("/journals")
 async def create_journal(body: dict, user: dict = Depends(require_owner_or_manager)):
     try:
-        return await svc.post_entry(
+        je = await svc.post_entry(
             body.get("lines") or [],
             entry_date=body.get("date"),
             memo=body.get("memo"),
@@ -167,6 +167,14 @@ async def create_journal(body: dict, user: dict = Depends(require_owner_or_manag
             source_type="manual",
             created_by=user.get("email"),
         )
+        # Audit
+        try:
+            from services.audit_service import log_event
+            await log_event(entity_type="journal_entry", entity_id=je.get("id"),
+                            action="created", after=je, memo=f"Manual journal {je.get('journalNumber')}")
+        except Exception:
+            pass
+        return je
     except ValueError as e:
         raise HTTPException(400, str(e))
 

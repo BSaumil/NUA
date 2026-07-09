@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 52 — FOUNDATIONAL refactor is GREEN. Backend: 16/16 pytest cases pass covering (a) Ash 16 capabilities exactly, POST /ash/run generates + upserts into ash_insights, GET /ash/insights returns rows, POST /ash/summary/weekly returns a summary insight with body + data.revenue/covers, GET /ash/insights/summary returns {total, high, warning, byCategory:{...}}, POST /ash/insights/{id}/dismiss removes from default list; (b) Approval Queue — GET /approvals/config/policy exposes mode+poAbove+refundAbove+tierDowngradesAlwaysApprove, POST /rules/emit routes a create_purchase_order rule with estimatedCost=999 through enqueue_or_execute → outcome.result.status='pending_approval' + approvalId (NOT executed); POST /approvals/{id}/approve returns outcome.purchaseOrderId + status=approved and shows up in GET /approvals?status=approved; small-PO ($100) rule executes immediately with purchaseOrderId (no approval); POST /approvals/{id}/reject sets status=rejected with resolvedBy and does not execute; (c) Universal Audit — GET /audit/events returns id/entityType/entityId/action/actor/ts fields, transaction:created event fires after POST /transactions, GET /audit/summary returns byAction/byEntity/byActor/total, customer create → audit event actor=owner@nuva.com, PUT /customers/{id} snapshots previous version into entity_versions and GET /audit/history/customer/{id} returns {versions:[...], audit:[...]}, DELETE /products/{id} sets deletedAt and default GET /products excludes it; (d) HQ — GET /hq/kpi-roll-up?days=30 returns totalRevenue+locations, GET /hq/leaderboard returns ranked location list. Frontend: /ash renders AshDashboard (KPI cards Active Insights=2 / High Severity=0 / Warnings=0 / Categories Watched=16, Run Ash Now button triggers generation and shows insight cards with Dismiss action, 16-tile capability strip visible with all 16 labels including 'Auto-write weekly business summary'), /approvals renders Approval Queue with policy banner ('Thresholds mode · Approve PO > $500 · Approve refunds > $100 · Tier downgrades always approved'), filter tabs pending/approved/rejected/all, 16 approve + 16 reject buttons on pending items, reject-dialog + reject-reason + reject-submit all present, /audit renders Universal Audit Log with 4 KPI stat cards (Total Events=38 / Entity Types=4 / Actors=1 / Most Active=owner@nuva.com), entity/action/actor filter inputs + Apply button, table with 38 rows showing time/actor/action badges/entity/memo/device+IP; /hq renders HQ — Franchise Command with Last 7d/30d/90d range buttons (90d showed $2,047.65 network revenue), per-location revenue card, medals leaderboard (#1 orange badge), and Brand Groups list (NUVA Restaurant + 3 TEST_Branch_36 cafes).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/audit — Universal Audit Log", "issues": ["The 4 KPI stat cards visually render (Total Events/Entity Types/Actors/Most Active) but the elements do NOT carry data-testid=\"kpi-*\" — spec asked for '4 KPI cards' with test ids. Cosmetic testability gap; page works fully."]},
+      {"screen": "/hq — HQ Franchise Command", "issues": ["Per-location breakdown rows and leaderboard rows render visually with names/revenue, but do NOT carry data-testid=\"loc-*\" — spec asked for `loc-*` selectors. Cosmetic testability gap; range buttons range-7/30/90 all work and switch KPIs."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration52_foundational.py",
+    "/app/test_reports/pytest/iter52_results.xml"
+  ],
+  "action_items": [
+    "OPTIONAL testability polish: Add data-testid=\"kpi-total-events\" / kpi-entity-types / kpi-actors / kpi-most-active to the 4 stat cards in AuditLogUniversal.jsx.",
+    "OPTIONAL testability polish: Add data-testid={`loc-${idx}`} to per-location rows and leaderboard rows in HQDashboard.jsx so playwright can iterate them."
+  ],
+  "critical_code_review_comments": [
+    "services/rules_engine.py::emit_event — every action now goes through enqueue_or_execute even for benign actions (dock_notify, send_email, apply_credit). That's intentional but note requires_approval currently only returns True for create_purchase_order/refund/upgrade_vip_tier(downgrade)/apply_discount>25%/post_journal>2000. Consider explicitly white-listing non-risky actions so a future policy tweak doesn't accidentally queue every notification.",
+    "services/ash_intelligence.py::run_all_insights (line ~447-458) marks stale insights (not touched this run) as resolved. This is correct on periodic re-runs but means a manual dismiss done between two runs cannot be un-resolved by the next run — resolvedAt gets overwritten. Not a bug per current UX but worth documenting.",
+    "routes/audit.py::history endpoint accepts `collection` as query param via /restore + /purge but the /history/{type}/{id} route silently ignores any collection= arg — it always reads from db.entity_versions. Frontend still passes it and it works; consider dropping the param from the spec/docs to avoid confusion.",
+    "routes/ash.py::run passes include_summary as a boolean but the fifteen deterministic generators run every time — the weekly summary is behind include_summary. The Ash UI 'Run Ash Now' hits /ash/run without include_summary, so weekly must be triggered separately via /ash/summary/weekly (as designed). This is intentional but non-obvious; consider a docstring note in the endpoint.",
+    "services/approval_service.py::_env_float — casts AI_APPROVE_TIER_DOWNGRADES via _env_float then int() — a value of '0' or '1' works; anything else silently falls back to default. Fine, just brittle."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration52_foundational.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (16/16 pytest cases)",
+    "frontend": "100% for the 4 new pages tested (/ash, /approvals, /audit, /hq) — every requested selector + flow verified except two cosmetic testid gaps noted under design_issues."
+  },
+  "test_credentials": "owner@nuva.com / NuvaOwner2026! — worked.",
+  "seed_data_creation": "Test run created: (a) ash_insights via /ash/run (upserted, self-managing), (b) TEST_iter52 rules ×4 in db.rules (small PO $100, big PO $999, reject PO $1200, ×2), (c) 8 approvals in db.approvals — 1 approved + 3 pending + 1 rejected (multiplied by repeated test runs), (d) 1 TEST_iter52 transaction TXN-2026, (e) 1 TEST_iter52 customer + 1 update snapshot in entity_versions, (f) 1 TEST_iter52 product (soft-deleted). Cleanup suggestion: db.rules.deleteMany({name:/TEST_iter52/}); db.approvals.deleteMany({'context.ruleName':/TEST_iter52/}); db.transactions.deleteMany({'items.name':/TEST_iter52/}); db.customers.deleteMany({name:/TEST_iter52/}); db.products.deleteMany({name:/TEST_iter52/}); db.entity_versions.deleteMany({'snapshot.name':/TEST_iter52/}); db.audit_events.deleteMany({memo:/TEST_iter52/}).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter52 tests live at /app/backend/tests/test_iteration52_foundational.py (16 tests, 100% pass, ~10s runtime). Auth: owner@nuva.com / NuvaOwner2026! → POST /api/auth/login → access_token bearer. Key endpoints — Ash: /api/ash/{capabilities,insights,insights/summary,run,summary/weekly,insights/{id}/dismiss}; Approvals: /api/approvals + /api/approvals/config/policy + /api/approvals/{id}/{approve,reject}; Audit: /api/audit/{events,summary,history/{type}/{id},restore/{type}/{id}/{ver},purge/{type}/{id}}; HQ: /api/hq/{brands,locations,kpi-roll-up,leaderboard}. Approval-gated actions live in services/approval_service.requires_approval — currently PO>$500, refund>$100, tier downgrade, discount>25%, journal>$2000. The rules engine runs every action through enqueue_or_execute (services/rules_engine.py line ~386-393); benign actions (dock_notify etc) are NOT gated because requires_approval defaults to False for unknown types. Frontend selectors verified: ash-dashboard, ash-run-btn, ash-summary-btn, dismiss-*, approvals-page, filter-{pending,approved,rejected,all}, approve-*, reject-*, reject-dialog, reject-reason, reject-submit, audit-log-page, filter-{entity,action,actor,apply}, hq-dashboard, range-{7,30,90}. GAPS: audit KPI cards + hq location rows lack data-testid — visible but not selectable. Screenshots at /tmp/ash_dashboard.png, /tmp/approvals.png, /tmp/audit.png, /tmp/hq.png.",
+  "rca of the issue": "N/A — no bugs found in this iteration."
+}

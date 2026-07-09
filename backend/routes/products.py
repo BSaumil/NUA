@@ -13,8 +13,10 @@ router = APIRouter()
 
 # ============ PRODUCTS API ============
 @router.get("/products", response_model=List[Product])
-async def get_products(category: Optional[str] = None, search: Optional[str] = None):
+async def get_products(category: Optional[str] = None, search: Optional[str] = None, include_deleted: bool = False):
     query = {}
+    if not include_deleted:
+        query["$or"] = [{"deletedAt": None}, {"deletedAt": {"$exists": False}}]
     if category:
         query["category"] = category
     if search:
@@ -24,31 +26,29 @@ async def get_products(category: Optional[str] = None, search: Optional[str] = N
 
 @router.post("/products", response_model=Product)
 async def create_product(product: ProductCreate):
+    from services.entity_service import stamped_insert
     product_dict = product.dict()
     now_iso = datetime.now(timezone.utc).isoformat()
     product_obj = Product(**product_dict, createdAt=now_iso, updatedAt=now_iso)
-    await db.products.insert_one(product_obj.dict())
-    return product_obj
+    doc = await stamped_insert("products", product_obj.dict(), entity_type="product")
+    return Product(**doc)
 
 @router.put("/products/{product_id}", response_model=Product)
 async def update_product(product_id: str, product_update: ProductUpdate):
+    from services.entity_service import stamped_update
     update_data = {k: v for k, v in product_update.dict().items() if v is not None}
-    update_data["updatedAt"] = datetime.now(timezone.utc).isoformat()
-    result = await db.products.find_one_and_update(
-        {"id": product_id},
-        {"$set": update_data},
-        return_document=True
-    )
+    result = await stamped_update("products", product_id, update_data, entity_type="product")
     if not result:
         raise HTTPException(status_code=404, detail="Product not found")
     return Product(**result)
 
 @router.delete("/products/{product_id}")
 async def delete_product(product_id: str):
-    result = await db.products.delete_one({"id": product_id})
-    if result.deleted_count == 0:
+    from services.entity_service import soft_delete
+    result = await soft_delete("products", product_id, entity_type="product")
+    if not result:
         raise HTTPException(status_code=404, detail="Product not found")
-    return {"message": "Product deleted"}
+    return {"message": "Product soft-deleted", "id": product_id}
 
 @router.post("/products/{product_id}/adjust-stock")
 async def adjust_stock(product_id: str, data: dict):

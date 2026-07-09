@@ -32,26 +32,23 @@ async def get_customers(search: Optional[str] = None):
 
 @router.post("/customers", response_model=Customer)
 async def create_customer(customer: CustomerCreate):
+    from services.entity_service import stamped_insert
     customer_dict = customer.dict()
     customer_obj = Customer(**customer_dict)
-    await db.customers.insert_one(customer_obj.dict())
+    doc = await stamped_insert("customers", customer_obj.dict(), entity_type="customer")
     # Rules engine emit
     try:
         from services.rules_engine import safe_emit
-        cd = customer_obj.dict()
-        safe_emit("customer.created", {"id": cd.get("id"), "name": cd.get("name"), "email": cd.get("email")})
+        safe_emit("customer.created", {"id": doc.get("id"), "name": doc.get("name"), "email": doc.get("email")})
     except Exception:
         pass
-    return customer_obj
+    return doc
 
 @router.put("/customers/{customer_id}", response_model=Customer)
 async def update_customer(customer_id: str, customer_update: CustomerUpdate):
+    from services.entity_service import stamped_update
     update_data = {k: v for k, v in customer_update.dict().items() if v is not None}
-    result = await db.customers.find_one_and_update(
-        {"id": customer_id},
-        {"$set": update_data},
-        return_document=True
-    )
+    result = await stamped_update("customers", customer_id, update_data, entity_type="customer")
     if not result:
         raise HTTPException(status_code=404, detail="Customer not found")
     return Customer(**result)
