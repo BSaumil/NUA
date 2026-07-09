@@ -46,13 +46,13 @@ async def _send_digest_notification(subject: str, body: str) -> None:
         logger.info(f"[ash] daily digest (mocked): {subject} — {body[:200]}…  ({e})")
 
 
-async def _maybe_send_daily_digest() -> None:
+async def _maybe_send_daily_digest(*, force: bool = False) -> None:
     now = datetime.now(timezone.utc)
-    if now.hour < _digest_hour():
+    if not force and now.hour < _digest_hour():
         return
     today_key = now.date().isoformat()
     existing = await db.ash_digests.find_one({"date": today_key}, {"_id": 0})
-    if existing:
+    if existing and not force:
         return
     weekly = await ash_intelligence.generate_weekly_summary()
     if not weekly:
@@ -128,9 +128,9 @@ async def digest_status() -> dict:
 
 
 async def force_digest_now() -> dict:
-    """Manual trigger — regenerates + sends today's digest even if already sent."""
+    """Manual trigger — regenerates + sends today's digest even if already sent or before digest hour."""
     today_key = datetime.now(timezone.utc).date().isoformat()
     await db.ash_digests.delete_one({"date": today_key})
-    await _maybe_send_daily_digest()
+    await _maybe_send_daily_digest(force=True)
     latest = await db.ash_digests.find_one({"date": today_key}, {"_id": 0})
     return latest or {"sent": False, "reason": "generator returned no summary"}

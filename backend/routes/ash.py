@@ -1,12 +1,14 @@
 """
 Ash — the autonomous operating layer endpoints.
 """
+import logging
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 from database import db
 from deps import get_user, require_owner_or_manager
 from services import ash_intelligence
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ash")
 
 

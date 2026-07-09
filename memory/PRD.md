@@ -1,4 +1,41 @@
-# NUA POS — PRD v31.0 (Hospitality OS · Ash Autonomous Layer · Universal Audit)
+# NUA POS — PRD v32.0 (Ash Scheduler · Ash Chat · Modular Finance)
+
+
+## v32.0 — Iteration 53 (10 Feb 2026): Ash goes always-on + conversational; Finance page modularised
+
+### Shipped
+**Ash Scheduler** — `services/ash_scheduler.py`
+- Boots on backend startup as an asyncio background task.
+- Runs `run_all_insights()` every `ASH_HOURLY_SECONDS` (default 3600s).
+- Once per day at `ASH_DAILY_DIGEST_HOUR` (default 8 UTC), generates the weekly summary via GPT-5.2 + pulls top open high/warning insights, then dispatches through `utils.notifications.send_email` (log-only fallback if SendGrid isn't wired).
+- Persists a per-day record in `db.ash_digests` so re-runs are idempotent.
+- Endpoints: `GET /api/ash/scheduler/status`, `POST /api/ash/scheduler/digest-now` (owner/manager — force regenerate even before digest hour).
+- Cleanly cancels on shutdown.
+
+**Ash Chat** — `routes/ash.py::/chat`
+- Conversational surface grounded on the last 30 audit events + 20 open insights + pending-approval count.
+- POST `/api/ash/chat` with `{ message, sessionId?, context? }` → returns `{ sessionId, reply, context }`.
+- GPT-5.2 (Emergent Universal Key) authors the response; deterministic fallback surfaces the top open insight if the LLM is unreachable — endpoint always returns a non-empty reply.
+- `GET /api/ash/chat/history/{sessionId}` returns the full session in ascending order.
+- Session logs stored in `db.ash_chat_log`.
+- Frontend `components/AshChat.jsx` — floating FAB (bottom-right) with pulse indicator; expandable 96×540 panel with gradient header, minimize/close, 5 seeded suggestion prompts, "Ash is thinking…" indicator, context badges (audit/insights/approvals), persistent session in localStorage keyed per user email, "Reset conversation" link.
+- Mounted globally inside `StaffLayout` — available on every authenticated page.
+
+**Finance Ledger split** — `pages/finance/*`
+- `pages/FinanceLedger.jsx` is now a slim 45-line router.
+- 7 modular components extracted: `Overview`, `Reports`, `AccountsPayable`, `AccountsReceivable`, `BankRec`, `Journals`, `ChartOfAccounts`.
+- Shared helpers `pages/finance/helpers.js` (FMT, today, fyStart).
+- All `data-testid`s preserved for regression safety.
+
+### Verification (Iteration 53)
+- Backend: 9/9 pytest cases pass (`/app/backend/tests/test_iteration53_scheduler_chat.py`).
+- Frontend: 100% — FAB present on `/finance`, `/ash`, `/approvals`; chat send flow shows user bubble → thinking indicator → Ash bubble with context badges; persistence across page navigation confirmed; minimise/expand/close all clean.
+- Two testing-agent code-review nits fixed post-report: `logging` import added to `routes/ash.py`; `_maybe_send_daily_digest(force=True)` bypass added for manual triggers; AshChat localStorage now scoped per user email.
+
+### Test credentials
+- `owner@nuva.com` / `NuvaOwner2026!`
+
+---
 
 
 ## v31.0 — Iteration 52 (9 Feb 2026): Product-Vision Refactor — AI-powered Hospitality Operating System

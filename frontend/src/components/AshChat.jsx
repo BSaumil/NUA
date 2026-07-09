@@ -8,7 +8,15 @@ import { Badge } from './ui/badge';
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
 
-const SESSION_KEY = 'nua-ash-chat-session';
+const SESSION_KEY_BASE = 'nua-ash-chat-session';
+const userScope = () => {
+  try {
+    const u = JSON.parse(localStorage.getItem('nuva_user') || '{}');
+    return u.email || 'anon';
+  } catch { return 'anon'; }
+};
+const SESSION_KEY = () => `${SESSION_KEY_BASE}::${userScope()}`;
+const MSGS_KEY = () => `${SESSION_KEY_BASE}::${userScope()}::msgs`;
 
 const SUGGESTIONS = [
   'What happened yesterday?',
@@ -21,14 +29,14 @@ const SUGGESTIONS = [
 export default function AshChat() {
   const [open, setOpen] = useState(false);
   const [minimized, setMinimized] = useState(false);
-  const [msgs, setMsgs] = useState(() => JSON.parse(localStorage.getItem(SESSION_KEY + '-msgs') || '[]'));
+  const [msgs, setMsgs] = useState(() => JSON.parse(localStorage.getItem(MSGS_KEY()) || '[]'));
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
-  const [sessionId, setSessionId] = useState(() => localStorage.getItem(SESSION_KEY) || '');
+  const [sessionId, setSessionId] = useState(() => localStorage.getItem(SESSION_KEY()) || '');
   const scrollRef = useRef(null);
 
   useEffect(() => {
-    localStorage.setItem(SESSION_KEY + '-msgs', JSON.stringify(msgs.slice(-40)));
+    localStorage.setItem(MSGS_KEY(), JSON.stringify(msgs.slice(-40)));
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [msgs]);
 
@@ -42,7 +50,7 @@ export default function AshChat() {
       const r = await axios.post(`${API}/ash/chat`, { message: trimmed, sessionId }, { headers: H() });
       if (!sessionId) {
         setSessionId(r.data.sessionId);
-        localStorage.setItem(SESSION_KEY, r.data.sessionId);
+        localStorage.setItem(SESSION_KEY(), r.data.sessionId);
       }
       setMsgs(m => [...m, { role: 'ash', text: r.data.reply, context: r.data.context, ts: Date.now() }]);
     } catch (e) {
@@ -55,8 +63,8 @@ export default function AshChat() {
   const clearSession = () => {
     setMsgs([]);
     setSessionId('');
-    localStorage.removeItem(SESSION_KEY);
-    localStorage.removeItem(SESSION_KEY + '-msgs');
+    localStorage.removeItem(SESSION_KEY());
+    localStorage.removeItem(MSGS_KEY());
   };
 
   // FAB when closed
@@ -109,7 +117,7 @@ export default function AshChat() {
             {msgs.length === 0 && (
               <div className="text-center py-6">
                 <Sparkles className="mx-auto mb-2 text-indigo-400" size={28} />
-                <p className="text-sm text-slate-600 mb-1">Hi — I'm Ash.</p>
+                <p className="text-sm text-slate-600 mb-1">Hi &mdash; I&apos;m Ash.</p>
                 <p className="text-xs text-slate-500 mb-4">Ask me about the last 30 audit events, open insights, pending approvals, or what to do next.</p>
                 <div className="space-y-2 text-left">
                   {SUGGESTIONS.map((s, i) => (
