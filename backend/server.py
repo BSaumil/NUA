@@ -202,7 +202,18 @@ async def startup():
             logger.info("Chart of Accounts seeded: %s new accounts", r["seeded"])
     except Exception as exc:
         logger.warning("COA seed skipped: %s", exc)
+    # Start Ash background scheduler
+    try:
+        from services.ash_scheduler import start_scheduler
+        start_scheduler()
+    except Exception as exc:
+        logger.warning("Ash scheduler failed to start: %s", exc)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
+    try:
+        from services.ash_scheduler import stop_scheduler
+        stop_scheduler()
+    except Exception:
+        pass
     client.close()

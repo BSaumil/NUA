@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 53 — Ash Scheduler + Ash Chat + Finance split are GREEN. Backend: 9/9 pytest cases pass — (a) Scheduler: GET /api/ash/scheduler/status returns { enabled:true, hourlyIntervalSeconds:3600, digestHourUtc:8, lastDigest, serverTimeUtc }; POST /api/ash/scheduler/digest-now regenerates today's digest (owner) with summary.body populated; idempotent (called twice → both 200); lastDigest updates after force call; (b) Chat: POST /api/ash/chat returns { sessionId (echoed as ash-chat-<uuid>), reply (LLM-grounded, non-empty), context: { auditRows:30, openInsights:2, pendingApprovals:16 } }; supplying sessionId in follow-up keeps same session; empty/whitespace message → 400; GET /api/ash/chat/history/{sid} returns rows ordered ascending by ts with message+reply; 'What should I do next?' query returned grounded reply mentioning top open insight ('Slow mover: Soft Drink — stock 290 → create_promotion'). Frontend: /finance renders all 7 tabs (fin-tab-overview/reports/ap/ar/bank/journals/coa) — clicking each surfaces the correct pane (Overview shows kpi-* cards $1,328.18 revenue / $1,128.18 gross profit / $1,078.18 net profit / $10,241 cash / $1,100 AR / $50 AP; Reports pnl-content; ap-page; ar-page; bank-rec-page; journals-page; coa-page with system Assets/Liabilities/etc.). AshChat FAB present on /finance, /ash, /approvals — clicking opens gradient-header panel with all 5 suggestion buttons + input + send + minimize + close + messages testids. Sending 'What should I do next?' shows user bubble immediately, 'Ash is thinking…' indicator, then Ash bubble with context badges 'audit 30 · insights 2 · 16 approvals' (amber for approvals). Suggestion click ('What happened yesterday?') sent a real message and Ash replied with specific audit events (transaction ids, approval:f5edd387 approved & executed, approval:144b1a08 rejected). Persistence: message sent on /finance survived navigation to /ash and remained visible on re-open. Minimize collapsed panel to 56px, re-expand to 540px. Close hides panel and re-shows FAB.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration53_scheduler_chat.py",
+    "/app/test_reports/pytest/iter53_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "routes/ash.py::chat — the system prompt embeds Python-repr'd lists of dicts into the string via f-string ({[{...} for e in ...]}). This works because Python renders repr, but produces prompt content that includes single quotes / None literals unfamiliar to the model. Consider json.dumps(...) for cleaner grounding.",
+    "routes/ash.py::chat — logger is referenced (line 172) but the module does not import logging. If EMERGENT_LLM_KEY is missing/errors, the except branch will itself raise NameError. Recommend: `import logging; logger = logging.getLogger(__name__)` at top of file. (During testing the LLM worked so this path was not exercised.)",
+    "services/ash_scheduler.py::_maybe_send_daily_digest — silently returns when now.hour < digest_hour_utc; force_digest_now() delete+regenerates, so the hour guard on the immediate re-invoke inside force_digest_now can cause 'sent:false' before 08:00 UTC. Consider passing a `force=True` bypass into _maybe_send_daily_digest to make manual triggers always run regardless of hour.",
+    "components/AshChat.jsx — SESSION_KEY is a single global string; if multiple owners/managers share a browser, they will see each other's chat history. Consider keying by user email/id from localStorage.",
+    "pages/FinanceLedger.jsx — 45-line router works cleanly; children pages (Overview/Reports/AP/AR/Bank/Journals/COA) are all under /finance/*. All 7 tab panes rendered correctly with the correct data-testid roots."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration53_scheduler_chat.py (new — 9 tests, ~34s runtime)"
+  ],
+  "success_rate": {
+    "backend": "100% (9/9 pytest cases)",
+    "frontend": "100% — every requested selector + flow verified (7 tabs, FAB across 3 pages, chat send flow with thinking indicator + ash bubble + context badges, suggestion click, minimize/expand/close, cross-page persistence)"
+  },
+  "test_credentials": "owner@nuva.com / NuvaOwner2026! — worked.",
+  "seed_data_creation": "Test run inserted several rows into db.ash_chat_log (one per chat message) and refreshed db.ash_digests for today's date. Cleanup: db.ash_chat_log.deleteMany({}); db.ash_digests.deleteMany({date:'<today>'}).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter53 tests at /app/backend/tests/test_iteration53_scheduler_chat.py — 9 tests / ~34s runtime / 100% pass. Key endpoints: GET /api/ash/scheduler/status, POST /api/ash/scheduler/digest-now, POST /api/ash/chat {message,sessionId?}, GET /api/ash/chat/history/{sessionId}. Chat sessionId format: 'ash-chat-<uuid>'. Chat context always returns { auditRows, openInsights, pendingApprovals } — even in LLM fallback path. AshChat component: SESSION_KEY='nua-ash-chat-session' in localStorage (plus -msgs suffix for message array). Frontend testids all verified: ash-chat-fab, ash-chat-panel, ash-chat-input, ash-chat-send, ash-chat-minimize, ash-chat-close, ash-chat-messages, ash-chat-reset, ash-suggest-0..4, msg-user-{i}, msg-ash-{i}, fin-tab-{overview,reports,ap,ar,bank,journals,coa}, kpi-* on Overview, pnl-content on Reports, ap-page/ar-page/bank-rec-page/journals-page/coa-page. NOTE: routes/ash.py references `logger` without importing logging — LLM-fallback path could throw NameError if hit; during testing the LLM succeeded so the path was not exercised.",
+  "rca of the issue": "N/A — no bugs found in this iteration. All 3 iteration-53 asks (scheduler + chat + finance split) are working end-to-end."
+}

@@ -58,6 +58,7 @@ import AshDashboard from './pages/AshDashboard';
 import Approvals from './pages/Approvals';
 import AuditLogUniversal from './pages/AuditLogUniversal';
 import HQDashboard from './pages/HQDashboard';
+import AshChat from './components/AshChat';
 import Temperature from './pages/Temperature';
 import EndOfDay from './pages/EndOfDay';
 import TipManagement from './pages/TipManagement';
@@ -119,6 +120,7 @@ function StaffLayout({ children }) {
       <AskNuaButton onClick={() => setAskOpen(true)} />
       <AskNuaPanel open={askOpen} onClose={() => setAskOpen(false)} />
       <BottomDock />
+      <AshChat />
     </div>
   );
 }
