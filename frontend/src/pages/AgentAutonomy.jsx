@@ -28,8 +28,8 @@ export default function AgentAutonomy() {
     <div className="space-y-6" data-testid="autonomy-page">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2" style={{ color: theme.text }}><Bot size={22} /> Ash Autonomy Controls</h1>
-          <p className="text-sm text-gray-500">Owner-only switches for what Ash can do on its own.</p>
+          <h1 className="text-2xl font-bold flex items-center gap-2" style={{ color: theme.text }}><Bot size={22} /> NUA Autonomy Controls</h1>
+          <p className="text-sm text-gray-500">Owner-only switches for what NUA can do on its own.</p>
         </div>
         <Button variant="outline" onClick={tickExt} data-testid="ext-tick-btn">Run Extended Tick</Button>
       </div>

@@ -40,7 +40,7 @@ export default function NuaPro() {
           <h1 className="text-3xl font-bold flex items-center gap-2" style={{ color: theme.text }}>
             <Brain className="text-violet-600" /> NUA Pro · AI General Manager
           </h1>
-          <p className="text-sm text-gray-500 mt-1">One-click execution of Ash's daily plan</p>
+          <p className="text-sm text-gray-500 mt-1">One-click execution of NUA's daily plan</p>
         </div>
         <Button onClick={fetchPlan} variant="outline" data-testid="ash-refresh"><RefreshCw size={14} className="mr-1.5" /> New Plan</Button>
       </div>

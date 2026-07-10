@@ -55,7 +55,7 @@ export default function AshMemory() {
   };
 
   const deleteMemory = async (id) => {
-    if (!window.confirm('Ask Ash to forget this? This cannot be undone.')) return;
+    if (!window.confirm('Ask NUA to forget this? This cannot be undone.')) return;
     try {
       await axios.delete(`${API}/ash/memory/${id}`, { headers: H() });
       setMemories(ms => ms.filter(m => m.id !== id));
@@ -76,9 +76,9 @@ export default function AshMemory() {
       <div className="flex justify-between items-center flex-wrap gap-3">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-2">
-            <BookMarked className="text-indigo-600" /> Ash Memory
+            <BookMarked className="text-indigo-600" /> NUA Memory
           </h1>
-          <p className="text-sm text-slate-500 mt-1">Long-term facts, preferences and patterns Ash uses to ground every conversation.</p>
+          <p className="text-sm text-slate-500 mt-1">Long-term facts, preferences and patterns NUA uses to ground every conversation.</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={load} disabled={refreshing} data-testid="mem-refresh-btn">
@@ -86,10 +86,10 @@ export default function AshMemory() {
           </Button>
           <Dialog open={addOpen} onOpenChange={setAddOpen}>
             <DialogTrigger asChild>
-              <Button data-testid="add-memory-btn"><Plus size={14} className="mr-1" /> Teach Ash</Button>
+              <Button data-testid="add-memory-btn"><Plus size={14} className="mr-1" /> Teach NUA</Button>
             </DialogTrigger>
             <DialogContent>
-              <DialogHeader><DialogTitle>Teach Ash a new fact</DialogTitle></DialogHeader>
+              <DialogHeader><DialogTitle>Teach NUA a new fact</DialogTitle></DialogHeader>
               <div className="space-y-3">
                 <div>
                   <label className="text-xs text-slate-500">Statement</label>
@@ -170,7 +170,7 @@ export default function AshMemory() {
         {filtered.length === 0 && (
           <Card className="md:col-span-2"><CardContent className="p-12 text-center text-sm text-slate-500">
             <BookMarked className="mx-auto mb-2 opacity-40" size={28} />
-            No memories yet. Teach Ash something, or wait for it to observe patterns.
+            No memories yet. Teach NUA something, or wait for it to observe patterns.
           </CardContent></Card>
         )}
         {filtered.map(m => (

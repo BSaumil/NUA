@@ -20,14 +20,16 @@ const MSGS_KEY = () => `${SESSION_KEY_BASE}::${userScope()}::msgs`;
 const PERSONA_KEY = () => `${SESSION_KEY_BASE}::${userScope()}::persona`;
 
 const PERSONA_ICON = {
-  executive: Crown, finance: Calculator, ops: Package, hr: Users, marketing: Megaphone, guest: Heart,
+  executive: Sparkles, finance: Calculator, ops: Package, hr: Users, marketing: Megaphone, guest: Heart,
 };
 
 const SUGGESTIONS_BY_PERSONA = {
   executive: [
-    'What should I do next?',
+    'What should I focus on today?',
     'Give me today\u2019s briefing',
     'What did we ship yesterday?',
+    'How much did we make this week?',
+    'Any approvals waiting on me?',
   ],
   finance: [
     'How did revenue trend this week?',
@@ -77,7 +79,7 @@ export default function AshChat() {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [msgs]);
 
-  const currentPersona = personas.find(p => p.id === persona) || { id: 'executive', label: 'Ash Executive', color: '#4f46e5', tagline: '', modules: [] };
+  const currentPersona = personas.find(p => p.id === persona) || { id: 'executive', label: 'Ask NUA', color: '#4f46e5', tagline: '', modules: [] };
   const CurIcon = PERSONA_ICON[currentPersona.id] || Brain;
 
   const switchPersona = (pid) => {
@@ -111,7 +113,7 @@ export default function AshChat() {
         ts: Date.now(),
       }]);
     } catch (e) {
-      setMsgs(m => [...m, { role: 'ash', text: 'Ash is unreachable right now. Try again in a moment.', ts: Date.now() }]);
+      setMsgs(m => [...m, { role: 'ash', text: 'NUA is unreachable right now. Try again in a moment.', ts: Date.now() }]);
     } finally {
       setBusy(false);
     }
@@ -134,7 +136,7 @@ export default function AshChat() {
         className="fixed bottom-5 right-5 z-50 h-14 w-14 rounded-full text-white shadow-xl flex items-center justify-center transition-all hover:scale-105"
         style={{ background: currentPersona.color }}
         data-testid="ash-chat-fab"
-        aria-label="Ask Ash"
+        aria-label="Ask NUA"
       >
         <CurIcon size={26} />
         <span className="absolute -top-1 -right-1 h-3 w-3 bg-emerald-400 rounded-full ring-2 ring-white animate-pulse" />

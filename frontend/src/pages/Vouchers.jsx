@@ -309,7 +309,7 @@ export default function Vouchers() {
                 <Badge className="bg-purple-100 text-purple-700 border-0 text-[10px]">Goal → Campaign</Badge>
               </div>
               <p className="text-xs text-purple-700">
-                Type a business goal — Ash will compose the offer, voucher, SMS + email copy, and target rules.
+                Type a business goal — NUA will compose the offer, voucher, SMS + email copy, and target rules.
               </p>
               <div className="flex gap-2">
                 <Input value={aiGoal} onChange={e => setAiGoal(e.target.value)}

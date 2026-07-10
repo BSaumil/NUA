@@ -15,7 +15,7 @@ export default function VoiceCommandCatalog({ open, onClose }) {
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto" data-testid="voice-catalog">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${theme.primary}15`, color: theme.primary }}><Mic size={20} /></div>
-          <div><h2 className="font-bold">Voice Commands</h2><p className="text-xs text-gray-500">Hold the mic and say any of these. Ash will route to the right action.</p></div>
+          <div><h2 className="font-bold">Voice Commands</h2><p className="text-xs text-gray-500">Hold the mic and say any of these. NUA will route to the right action.</p></div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {Object.entries(catalog).map(([section, commands]) => (

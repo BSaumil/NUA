@@ -15,9 +15,9 @@ const RISK_BG = { low: 'bg-emerald-500', medium: 'bg-amber-500', high: 'bg-rose-
 const RISK_ORDER = { low: 0, medium: 1, high: 2, critical: 3 };
 
 const PERMISSION_DESCRIPTION = {
-  auto: 'Ash runs this tool immediately without asking.',
-  approval: 'Ash queues this tool in /approvals for you to confirm.',
-  disabled: 'Ash cannot use this tool at all.',
+  auto: 'NUA runs this tool immediately without asking.',
+  approval: 'NUA queues this tool in /approvals for you to confirm.',
+  disabled: 'NUA cannot use this tool at all.',
 };
 
 const PERMISSION_ICON = { auto: Zap, approval: Eye, disabled: Lock };
@@ -95,9 +95,9 @@ export default function AshPermissions() {
       <div className="flex justify-between items-center flex-wrap gap-3">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-2">
-            <ShieldCheck className="text-indigo-600" /> Ash Permissions
+            <ShieldCheck className="text-indigo-600" /> NUA Permissions
           </h1>
-          <p className="text-sm text-slate-500 mt-1">Owner controls for every capability Ash can invoke. Approval gates route to the Approval Queue.</p>
+          <p className="text-sm text-slate-500 mt-1">Owner controls for every capability NUA can invoke. Approval gates route to the Approval Queue.</p>
         </div>
         <Button variant="outline" onClick={load} disabled={refreshing} data-testid="perms-refresh-btn">
           <RefreshCw size={14} className={`mr-1.5 ${refreshing ? 'animate-spin' : ''}`} /> Refresh

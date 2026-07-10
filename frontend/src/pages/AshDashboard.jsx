@@ -47,7 +47,7 @@ export default function AshDashboard() {
         axios.get(`${API}/ash/capabilities`, { headers: H() }),
       ]);
       setInsights(i.data); setSummary(s.data); setCaps(c.data.capabilities || []);
-    } catch { toast.error('Failed to load Ash insights'); }
+    } catch { toast.error('Failed to load NUA insights'); }
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -55,9 +55,9 @@ export default function AshDashboard() {
     setRunning(true);
     try {
       const r = await axios.post(`${API}/ash/run?include_summary=${includeSummary}`, {}, { headers: H() });
-      toast.success(`Ash generated ${r.data.generated} insight(s) across ${Object.keys(r.data.perCategory).length} categories`);
+      toast.success(`NUA generated ${r.data.generated} insight(s) across ${Object.keys(r.data.perCategory).length} categories`);
       load();
-    } catch (e) { toast.error(e.response?.data?.detail || 'Ash run failed'); }
+    } catch (e) { toast.error(e.response?.data?.detail || 'NUA run failed'); }
     finally { setRunning(false); }
   };
 
@@ -76,7 +76,7 @@ export default function AshDashboard() {
       <div className="flex justify-between items-start flex-wrap gap-3">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-2">
-            <Brain className="text-indigo-500" /> Ash — Autonomous Operating Layer
+            <Brain className="text-indigo-500" /> NUA — Autonomous Operating Layer
           </h1>
           <p className="text-sm text-slate-500 mt-1">16 always-on jobs continuously scanning inventory, staff, customers, kitchen, weather &amp; finance.</p>
         </div>
@@ -85,7 +85,7 @@ export default function AshDashboard() {
             <FileText size={14} className="mr-1.5" /> Weekly Summary
           </Button>
           <Button onClick={() => run(false)} disabled={running} data-testid="ash-run-btn">
-            <Play size={14} className="mr-1.5" /> {running ? 'Scanning…' : 'Run Ash Now'}
+            <Play size={14} className="mr-1.5" /> {running ? 'Scanning…' : 'Run NUA Now'}
           </Button>
         </div>
       </div>
@@ -113,8 +113,8 @@ export default function AshDashboard() {
           {filtered.length === 0 ? (
             <Card className="border-dashed"><CardContent className="p-10 text-center">
               <Brain size={40} className="mx-auto mb-3 text-slate-300" />
-              <p className="text-slate-500 mb-4">No active insights. Ash is watching — click "Run Ash Now" to scan.</p>
-              <Button onClick={() => run(false)} disabled={running} data-testid="empty-run-ash"><Play size={14} className="mr-1" /> Run Ash</Button>
+              <p className="text-slate-500 mb-4">No active insights. NUA is watching — click "Run NUA Now" to scan.</p>
+              <Button onClick={() => run(false)} disabled={running} data-testid="empty-run-ash"><Play size={14} className="mr-1" /> Run NUA</Button>
             </CardContent></Card>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -159,7 +159,7 @@ export default function AshDashboard() {
       </Tabs>
 
       <Card><CardContent className="p-5">
-        <h3 className="text-sm font-semibold mb-3">What Ash watches for</h3>
+        <h3 className="text-sm font-semibold mb-3">What NUA watches for</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           {caps.map(c => {
             const meta = CAT_META[c.key] || { icon: Brain, color: '#64748b' };

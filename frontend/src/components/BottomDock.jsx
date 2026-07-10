@@ -152,7 +152,7 @@ const ALL_FEATURES = [
   ]},
   { group: 'Analytics & AI', items: [
     { path: '/agent', label: 'NUA AI Agent', icon: Brain, access: ['owner', 'manager'] },
-    { path: '/agent-autonomy', label: 'Ash Autonomy', icon: Zap, access: ['owner'] },
+    { path: '/agent-autonomy', label: 'NUA Autonomy', icon: Zap, access: ['owner'] },
     { path: '/phone-agent', label: 'AI Phone Agent', icon: Sparkles, access: ['owner', 'manager'] },
     { path: '/ab-tests', label: 'Menu A/B Tests', icon: FlaskConical, access: ['owner', 'manager'] },
     { path: '/purchase-orders', label: 'Purchase Orders', icon: Package, access: ['owner', 'manager'] },

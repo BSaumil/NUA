@@ -104,12 +104,9 @@ import { VoucherManager, EventsManager, StaffAvailability, GiftCardSale, Marketi
 import OnlineOrders from './pages/OnlineOrders';
 import OrderOnline from './pages/OrderOnline';
 import TrackOrder from './pages/TrackOrder';
-import AskNuaPanel, { AskNuaButton } from './components/AskNua';
-import { useState as useGlobalState } from 'react';
 import { useTheme } from './contexts/ThemeContext';
 
 function StaffLayout({ children }) {
-  const [askOpen, setAskOpen] = useGlobalState(false);
   const { darkMode } = useTheme();
   return (
     <div
@@ -122,8 +119,6 @@ function StaffLayout({ children }) {
       <LicenseBanner />
       <LicenseLockScreen />
       <div className="px-6 py-6 max-w-screen-2xl mx-auto">{children}</div>
-      <AskNuaButton onClick={() => setAskOpen(true)} />
-      <AskNuaPanel open={askOpen} onClose={() => setAskOpen(false)} />
       <BottomDock />
       <AshChat />
     </div>

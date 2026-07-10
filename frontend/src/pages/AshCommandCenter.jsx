@@ -72,7 +72,7 @@ export default function AshCommandCenter() {
       <div className="flex justify-between items-center flex-wrap gap-3">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-2">
-            <Brain className="text-indigo-600" /> Ash Command Center
+            <Brain className="text-indigo-600" /> NUA Command Center
           </h1>
           <p className="text-sm text-slate-500 mt-1">Hospitality AI Operating Agent — Observe · Analyse · Recommend · Execute · Learn</p>
         </div>
@@ -213,7 +213,7 @@ export default function AshCommandCenter() {
         <TabsContent value="tools">
           <Card><CardContent className="p-0" data-testid="tools-table">
             <p className="p-4 text-xs text-slate-500">
-              <b>Auto</b> executes immediately. <b>Approval</b> enqueues to /approvals. <b>Disabled</b> blocks Ash from using it.
+              <b>Auto</b> executes immediately. <b>Approval</b> enqueues to /approvals. <b>Disabled</b> blocks NUA from using it.
             </p>
             <table className="w-full text-sm">
               <thead className="bg-slate-50"><tr>

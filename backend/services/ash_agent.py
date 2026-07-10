@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 MAX_TURNS = 4                                    # cap tool-calls per user message
 
 
-AGENT_SYSTEM = """You are Ash, NUA's Hospitality AI Operating Agent.
+AGENT_SYSTEM = """You are NUA, the autonomous Hospitality AI Operating Agent behind this business.
 
 You have five modes: Observe → Analyse → Recommend → Execute → Learn.
 Every decision you make MUST include:

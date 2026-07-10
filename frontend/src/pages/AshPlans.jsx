@@ -137,9 +137,9 @@ export default function AshPlans() {
       <div className="flex justify-between items-center flex-wrap gap-3">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-2">
-            <Target className="text-indigo-600" /> Ash Plans
+            <Target className="text-indigo-600" /> NUA Planner
           </h1>
-          <p className="text-sm text-slate-500 mt-1">Multi-step plans Ash proposes — you approve the plan or individual steps.</p>
+          <p className="text-sm text-slate-500 mt-1">Multi-step plans NUA proposes — you approve the plan or individual steps.</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={load} disabled={refreshing} data-testid="plans-refresh-btn">
@@ -147,11 +147,11 @@ export default function AshPlans() {
           </Button>
           <Dialog open={genOpen} onOpenChange={setGenOpen}>
             <DialogTrigger asChild>
-              <Button data-testid="new-plan-btn"><Sparkles size={14} className="mr-1" /> Ask Ash to plan</Button>
+              <Button data-testid="new-plan-btn"><Sparkles size={14} className="mr-1" /> Ask NUA to plan</Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Ask Ash to build a plan</DialogTitle>
+                <DialogTitle>Ask NUA to build a plan</DialogTitle>
               </DialogHeader>
               <div className="space-y-3">
                 <div>
@@ -195,7 +195,7 @@ export default function AshPlans() {
           {plans.length === 0 && (
             <Card><CardContent className="p-8 text-center text-sm text-slate-500">
               <ListChecks className="mx-auto mb-2 opacity-50" size={28} />
-              No plans yet. Ask Ash to propose one.
+              No plans yet. Ask NUA to propose one.
             </CardContent></Card>
           )}
           {plans.map(p => (

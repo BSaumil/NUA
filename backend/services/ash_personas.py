@@ -33,17 +33,17 @@ class Persona:
 PERSONAS: Dict[str, Persona] = {
     "executive": Persona(
         id="executive",
-        label="Ash Executive",
-        tagline="Chief of Staff — coordinates every other Ash and owns the daily briefing.",
+        label="Ask NUA",
+        tagline="Your on-call NUA — ask anything, get grounded answers, execute across every module.",
         modules=["Ash", "Finance", "Inventory", "Customers", "Reservations", "Marketing", "Staff"],
-        tone="composed, strategic, terse",
+        tone="warm, composed, terse",
         focus="Overall health, cross-module trade-offs, what needs the owner's attention TODAY.",
-        icon="crown",
+        icon="sparkles",
         color="#4f46e5",
     ),
     "finance": Persona(
         id="finance",
-        label="Ash Finance",
+        label="NUA Finance",
         tagline="CFO — margins, cash flow, approvals over $500, tax posture.",
         modules=["Finance", "Ash"],
         tone="precise, numeric, sceptical",
@@ -53,7 +53,7 @@ PERSONAS: Dict[str, Persona] = {
     ),
     "ops": Persona(
         id="ops",
-        label="Ash Ops",
+        label="NUA Ops",
         tagline="Head of Operations — inventory, kitchen, purchasing, waste.",
         modules=["Inventory", "Ash"],
         tone="hands-on, direct, safety-first",
@@ -63,7 +63,7 @@ PERSONAS: Dict[str, Persona] = {
     ),
     "hr": Persona(
         id="hr",
-        label="Ash HR",
+        label="NUA HR",
         tagline="Head of People — rosters, burnout, tasks, training gaps.",
         modules=["Staff", "Ash"],
         tone="empathetic, coaching",
@@ -73,7 +73,7 @@ PERSONAS: Dict[str, Persona] = {
     ),
     "marketing": Persona(
         id="marketing",
-        label="Ash Marketing",
+        label="NUA Marketing",
         tagline="CMO — promotions, campaigns, churn recovery, birthday cadence.",
         modules=["Marketing", "Customers", "Ash"],
         tone="creative, growth-minded",
@@ -83,7 +83,7 @@ PERSONAS: Dict[str, Persona] = {
     ),
     "guest": Persona(
         id="guest",
-        label="Ash Guest",
+        label="NUA Guest",
         tagline="Head of Guest Experience — reservations, VIPs, loyalty tier moves.",
         modules=["Customers", "Reservations", "Ash"],
         tone="warm, hospitality-first",
@@ -128,13 +128,13 @@ def filter_tools(all_tools: List[Dict[str, Any]], persona_id: Optional[str]) -> 
 def system_prompt(persona_id: Optional[str], base_prompt: str) -> str:
     """Wrap the shared Ash system prompt with the persona's voice + focus."""
     p = get_persona(persona_id)
-    header = f"""You are **{p.label}** — a specialised Ash persona.
+    header = f"""You are **{p.label}** — a specialised NUA persona.
 
   Tone: {p.tone}
   Domain focus: {p.focus}
   You have tools only for modules: {', '.join(p.modules)}.
 
   If the owner asks something outside your remit, say so briefly and suggest
-  which persona to switch to (executive / finance / ops / hr / marketing / guest).
+  which persona to switch to (Ask NUA / NUA Finance / NUA Ops / NUA HR / NUA Marketing / NUA Guest).
 """
     return header + "\n\n" + base_prompt

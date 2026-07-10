@@ -38,7 +38,7 @@ export default function AgentDashboard() {
     setLoading(true);
     try {
       const r = await agentAPI.tick();
-      toast.success(`Ash made ${r.data?.decisionsCount || 0} new decisions`);
+      toast.success(`NUA made ${r.data?.decisionsCount || 0} new decisions`);
       refresh();
     } catch { toast.error('Agent tick failed'); }
     setLoading(false);
@@ -49,7 +49,7 @@ export default function AgentDashboard() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2" style={{ color: theme.text }}>
-            <Bot size={22} /> Ash — Autonomous AI Agent
+            <Bot size={22} /> NUA — Autonomous AI Agent
           </h1>
           <p className="text-sm text-gray-500">Observes your business, decides what needs attention, takes action. Voice commands work everywhere via the mic.</p>
         </div>
@@ -105,7 +105,7 @@ export default function AgentDashboard() {
             {decisions.length === 0 && (
               <div className="py-16 text-center text-gray-400">
                 <Bot size={40} className="mx-auto mb-3 opacity-30" />
-                <p>Ash hasn't run yet. Click "Run Cycle" to start.</p>
+                <p>NUA hasn't run yet. Click "Run Cycle" to start.</p>
               </div>
             )}
           </div>
