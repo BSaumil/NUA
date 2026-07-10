@@ -15,6 +15,7 @@ const NAV_STRUCTURE = [
   { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', access: ['owner', 'manager'] },
   { path: '/pre-shift', icon: Sunrise, label: 'Pre-Shift', access: ['owner', 'manager', 'kitchen'] },
   { path: '/command-center', icon: Brain, label: 'Command Center', access: ['owner', 'manager'] },
+  { path: '/ash-hq', icon: Brain, label: 'Ash Command Center', access: ['owner', 'manager'] },
   { path: '/ash', icon: Brain, label: 'Ash Intelligence', access: ['owner', 'manager'] },
   { path: '/hq', icon: Store, label: 'HQ Roll-up', access: ['owner'] },
   { path: '/approvals', icon: ShieldCheck, label: 'Approvals', access: ['owner', 'manager'] },

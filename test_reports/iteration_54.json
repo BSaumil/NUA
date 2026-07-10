@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 54 — Ash v3.0 GREEN. Backend: 16/16 pytest cases pass (~25s). (a) GET /api/ash/tools returns exactly 23 tools; every tool has {name, module, risk, defaultPermission, effectivePermission, parameters, rollbackAvailable, expectedImpact}; permission matrix verified — 8 low-risk tools default to 'auto' (fetch_open_insights, fetch_kpis, lookup_customer, lookup_product, run_ash_scan, dismiss_insight, add_customer_note, create_staff_task) and high-risk writes default to 'approval' (create_purchase_order, adjust_menu_price, add_wallet_credit, approve_pending_approval). (b) GET /api/ash/health-score returns overall=83.1, tier='healthy', all 10 subscores present with score+weight (revenue=40, profit=100, labour=100, foodCost=100, csat=70, inventory=95, cashFlow=72.4, compliance=100, equipment=80, aiConfidence=77.5). (c) GET /api/ash/briefing returns date + non-empty narrative (GPT-5.2 output — 5-sentence 'Good morning' briefing citing revenue/bookings/approvals) + data object with all 9 required fields. POST /api/ash/briefing/regenerate re-generates fresh narrative. (d) PUT /api/ash/tools/{name}/permission — invalid enum → 400, unknown tool → 404, valid update → 200 and persists to db.ash_tool_config. (e) POST /api/ash/tools/fetch_open_insights/execute (auto) → status='executed' with outcome.insights array. POST /api/ash/tools/create_purchase_order/execute with {productId:'3', quantity:20, estimatedCost:1200} → status='pending_approval' + approvalId + risk='high'. (f) Disabled flow: PUT dismiss_insight → disabled, then POST execute → status='blocked', then reset to auto. (g) POST /api/ash/agent {message:'What are my top open insights?'} returns sessionId, non-empty reply, trace with >=1 turn, reasoning object. Multi-turn: same sessionId echoed on second message. GET /api/ash/agent/trace/{sid} returns ordered rows. Empty message → 400. Frontend /ash-hq: ash-command-center container renders; health-gauge SVG shows 83.1 HEALTHY (green stroke); all 10 sub-* cards render (sub-revenue…sub-aiConfidence); alerts-panel shows 2 promotion insights with severity badges; priorities-panel shows recommendedActions chips; approvals-summary shows 4+ pending 'create purchase order' entries + 'Open Approval Queue' cc-approvals-btn; cc-tab-briefing → briefing-card with full narrative + 4 data tiles (forecast/bookings/rostered/pending); cc-tab-tools → tools-table with all 23 tool-row-* entries and perm-* Selects. Permission change flow: opened perm-fetch_kpis (Auto), selected Disabled, PUT API called (verified via network + persistence), reloaded page → still Disabled, reset via API. AshChat FAB (ash-chat-fab) opens panel; sending 'What are my top insights?' via /api/ash/agent returned enumerated insights with insightIds + reasoning collapse ('Why · confidence 78%') revealing problem/evidence/alternatives/risk/impact/rollback fields.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/ash/agent", "issue": "For a plain 'top insights' query the agent often answers from grounding context WITHOUT explicitly calling fetch_open_insights, so toolResults comes back empty and no badge is shown. This is prompt-engineering rather than a bug — the model uses live context correctly. If you WANT the badge always visible for read tools, tighten the system prompt to require an explicit fetch_open_insights call before answering."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration54_ash_v3.py",
+    "/app/test_reports/pytest/iter54_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "services/ash_tools.py — TOOLS registry uses defaultPermission='approval' for approve_pending_approval / reject_pending_approval; execute_tool re-enqueues those into the approval queue itself, which creates a meta-approval when Ash tries to approve. Consider marking these two tools as auto-only-when-caller-is-owner rather than default approval, else 'approve X' can loop enqueueing new approvals to approve approvals.",
+    "services/ash_agent.py — MAX_TURNS=4 with per-turn LLM call means worst case ~4 GPT-5.2 round-trips (each ~2-4s). If a message triggers all 4 turns the endpoint could exceed 20s. Consider surfacing a 'still working' indicator or SSE stream for the agent.",
+    "services/ash_agent.py::_extract_json — the balanced-brace parser correctly handles nested JSON, but if GPT emits a stray leading '{' inside prose (e.g., 'the config is {stale}: ...'), the parser will greedily consume up to the first balanced }. Consider requiring the JSON block to start at position 0 after code-fence stripping.",
+    "services/ash_briefing.py::_collect_briefing_data — uses `db.reservations.count_documents({'dateTime':{'$regex':f'^{today}'}})` inside an if-guard that ALSO calls count_documents({}). Two roundtrips where a single .find_one({}) could suffice. Minor perf.",
+    "services/health_score.py — Every sub-scorer runs sequentially in compute_health; they are all independent async DB reads. Wrap SUBSCORES iteration in asyncio.gather() for ~4-6x speedup on the /health-score endpoint (currently ~1s cold).",
+    "routes/ash.py — /agent has no rate limit and no per-user token budget guard. A malicious client can spam and burn EMERGENT_LLM_KEY spend. Consider rate-limiting via existing rate_limit dep.",
+    "pages/AshCommandCenter.jsx — All 5 requests (health, insights, briefing, approvals, tools) fire on mount with Promise.all — good. But there's no error surface per-panel; the whole page shows a single toast on any failure. Consider per-card error states.",
+    "components/AshChat.jsx — reasoning.alternatives handles Array or string via .join, but if the LLM emits an object (e.g., {alt1:'...'}) it will render '[object Object]'. Add a JSON.stringify fallback for non-array/string values."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration54_ash_v3.py (new — 16 tests / ~25s runtime)"
+  ],
+  "success_rate": {
+    "backend": "100% (16/16 pytest cases)",
+    "frontend": "100% — every requested selector verified (ash-command-center, health-gauge, all 10 sub-*, alerts-panel, priorities-panel, approvals-summary, cc-refresh-btn, cc-tab-briefing, cc-tab-tools, briefing-card, regen-briefing-btn, tools-table, 23 tool-row-*, perm-* Selects, ash-chat-fab, ash-chat-panel, ash-chat-input, ash-chat-send). Permission change flow persists across reload."
+  },
+  "test_credentials": "owner@nuva.com / NuvaOwner2026! — worked.",
+  "seed_data_creation": "Test run inserted: 1 pending approval into db.approvals (from create_purchase_order execute test with productId=3,qty=20,est=1200); refreshed today's row in db.ash_briefings; wrote to db.ash_tool_config for dismiss_insight (set disabled→auto) and fetch_kpis (via UI test — reset to auto via API). Cleanup optional; test-created approval remains pending. Filter: db.approvals.find({params:{estimatedCost:1200}}).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter54 tests at /app/backend/tests/test_iteration54_ash_v3.py — 16 tests / ~25s / 100% pass. Key endpoints: GET /api/ash/tools (23 items), GET /api/ash/health-score (10 subscores), GET /api/ash/briefing + POST /api/ash/briefing/regenerate, PUT /api/ash/tools/{name}/permission ('auto'|'approval'|'disabled' or 400; unknown tool 404), POST /api/ash/tools/{name}/execute {args:{}}, POST /api/ash/agent {message,sessionId?}, GET /api/ash/agent/trace/{sid}. Frontend page: /ash-hq — testids all verified. AshChat still uses SESSION_KEY_BASE='nua-ash-chat-session' but now scoped by userScope() (u.email) — good fix vs iter53 review comment. AshChat now hits /api/ash/agent (not /chat) and renders toolResults badges + reasoning <details>. Note: for read-only queries the agent may respond from grounding context WITHOUT calling a tool, so toolResults may be empty even though the answer references insight data — this is expected LLM behaviour.",
+  "rca of the issue": "N/A — no bugs found. Ash v3.0 tool registry, permission matrix, agent, health score, and briefing all working end-to-end."
+}

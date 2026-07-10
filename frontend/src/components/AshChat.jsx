@@ -47,12 +47,18 @@ export default function AshChat() {
     setMsgs(m => [...m, { role: 'user', text: trimmed, ts: Date.now() }]);
     setInput('');
     try {
-      const r = await axios.post(`${API}/ash/chat`, { message: trimmed, sessionId }, { headers: H() });
+      const r = await axios.post(`${API}/ash/agent`, { message: trimmed, sessionId }, { headers: H() });
       if (!sessionId) {
         setSessionId(r.data.sessionId);
         localStorage.setItem(SESSION_KEY(), r.data.sessionId);
       }
-      setMsgs(m => [...m, { role: 'ash', text: r.data.reply, context: r.data.context, ts: Date.now() }]);
+      setMsgs(m => [...m, {
+        role: 'ash',
+        text: r.data.reply,
+        reasoning: r.data.reasoning,
+        toolResults: r.data.toolResults,
+        ts: Date.now(),
+      }]);
     } catch (e) {
       setMsgs(m => [...m, { role: 'ash', text: '⚠️ Ash is unreachable right now. Try again in a moment.', ts: Date.now() }]);
     } finally {
@@ -135,12 +141,33 @@ export default function AshChat() {
                   m.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-white border shadow-sm'
                 }`} data-testid={`msg-${m.role}-${i}`}>
                   <p className="whitespace-pre-wrap">{m.text}</p>
-                  {m.context && (
-                    <div className="mt-2 pt-2 border-t border-slate-100 flex gap-1 flex-wrap">
-                      <Badge variant="secondary" className="text-[9px]">audit {m.context.auditRows}</Badge>
-                      <Badge variant="secondary" className="text-[9px]">insights {m.context.openInsights}</Badge>
-                      {m.context.pendingApprovals > 0 && <Badge className="text-[9px] bg-amber-500">{m.context.pendingApprovals} approvals</Badge>}
+                  {(m.toolResults && m.toolResults.length > 0) && (
+                    <div className="mt-2 pt-2 border-t border-slate-100 space-y-1">
+                      {m.toolResults.map((t, ix) => (
+                        <div key={ix} className="text-[10px] flex items-center gap-1">
+                          <Badge className={
+                            t.status === 'executed' ? 'bg-emerald-500' :
+                            t.status === 'pending_approval' ? 'bg-amber-500' :
+                            t.status === 'blocked' ? 'bg-rose-500' : 'bg-slate-500'
+                          }>{t.status.replace('_', ' ')}</Badge>
+                          <span className="font-mono text-slate-600">{t.tool}</span>
+                          {t.approvalId && <span className="text-slate-400">→ approval {t.approvalId.slice(0, 6)}</span>}
+                        </div>
+                      ))}
                     </div>
+                  )}
+                  {m.reasoning && (
+                    <details className="mt-2 pt-2 border-t border-slate-100 text-[10px] cursor-pointer text-slate-500">
+                      <summary className="font-medium">Why · confidence {Math.round((m.reasoning.confidence || 0) * 100)}%</summary>
+                      <div className="mt-1 space-y-1 whitespace-pre-wrap">
+                        {m.reasoning.problem && <p><b>Problem:</b> {m.reasoning.problem}</p>}
+                        {m.reasoning.evidence && <p><b>Evidence:</b> {m.reasoning.evidence}</p>}
+                        {m.reasoning.alternatives && <p><b>Alternatives:</b> {Array.isArray(m.reasoning.alternatives) ? m.reasoning.alternatives.join(', ') : m.reasoning.alternatives}</p>}
+                        {m.reasoning.risk && <p><b>Risk:</b> {m.reasoning.risk}</p>}
+                        {m.reasoning.expectedImpact && <p><b>Impact:</b> {m.reasoning.expectedImpact}</p>}
+                        {m.reasoning.rollback && <p><b>Rollback:</b> {m.reasoning.rollback}</p>}
+                      </div>
+                    </details>
                   )}
                 </div>
               </div>

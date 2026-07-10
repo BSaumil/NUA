@@ -204,3 +204,99 @@ OPEN INSIGHTS:
 async def chat_history(session_id: str, limit: int = 40, _: dict = Depends(get_user)):
     rows = await db.ash_chat_log.find({"sessionId": session_id}, {"_id": 0}).sort("ts", 1).limit(limit).to_list(limit)
     return rows
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Ash v3.0 — Tool-calling Agent, Health Score, Daily Briefing, Permissions
+# ═════════════════════════════════════════════════════════════════════════
+from services import ash_tools, ash_agent, health_score, ash_briefing
+
+
+@router.post("/agent")
+async def agent(body: dict, user: dict = Depends(get_user)):
+    """The Ash v3 tool-calling agent. Accepts { message, sessionId? } and may
+    invoke up to 4 tool-calls before returning a final reply.
+    """
+    message = (body.get("message") or "").strip()
+    if not message:
+        raise HTTPException(400, "message is required")
+    session_id = body.get("sessionId") or f"ash-agent-{_uuid.uuid4()}"
+
+    result = await ash_agent.run_agent_turn(message, session_id=session_id, actor=user.get("email") or "ash-agent")
+
+    doc = {
+        "id": str(_uuid.uuid4()),
+        "sessionId": session_id,
+        "actor": user.get("email"),
+        "message": message,
+        "reply": result["reply"],
+        "reasoning": result.get("reasoning"),
+        "toolResults": result.get("toolResults"),
+        "trace": result.get("trace"),
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        await db.ash_agent_log.insert_one(dict(doc))
+    except Exception:
+        pass
+    return {"sessionId": session_id, **result}
+
+
+@router.get("/tools")
+async def tool_catalog(_: dict = Depends(get_user)):
+    """Enumerate available agent tools with current effective permissions."""
+    catalog = ash_tools.catalog()
+    overrides = {c["toolName"]: c for c in await db.ash_tool_config.find({}, {"_id": 0}).to_list(200)}
+    for t in catalog:
+        t["effectivePermission"] = (overrides.get(t["name"]) or {}).get("permission") or t["defaultPermission"]
+    return catalog
+
+
+@router.post("/tools/{tool_name}/execute")
+async def execute_tool(tool_name: str, body: dict, user: dict = Depends(require_owner_or_manager)):
+    """Manual tool invocation with permission enforcement."""
+    return await ash_tools.execute_tool(tool_name, body.get("args") or {}, actor=user.get("email"))
+
+
+@router.put("/tools/{tool_name}/permission")
+async def set_tool_permission(tool_name: str, body: dict, _: dict = Depends(require_owner_or_manager)):
+    """Owner sets per-tool permission — 'auto' | 'approval' | 'disabled'."""
+    perm = (body.get("permission") or "").lower()
+    if perm not in ("auto", "approval", "disabled"):
+        raise HTTPException(400, "permission must be auto|approval|disabled")
+    if tool_name not in ash_tools.TOOLS:
+        raise HTTPException(404, "Unknown tool")
+    await db.ash_tool_config.update_one(
+        {"toolName": tool_name},
+        {"$set": {"toolName": tool_name, "permission": perm,
+                    "updatedAt": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    return {"toolName": tool_name, "permission": perm}
+
+
+@router.get("/health-score")
+async def get_health_score(_: dict = Depends(get_user)):
+    return await health_score.compute_health()
+
+
+@router.get("/briefing")
+async def get_briefing(force: bool = False, _: dict = Depends(get_user)):
+    """Return today's briefing — cached in db.ash_briefings, regenerate if force=true."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    if not force:
+        existing = await db.ash_briefings.find_one({"date": today}, {"_id": 0})
+        if existing:
+            return existing
+    return await ash_briefing.generate_briefing()
+
+
+@router.post("/briefing/regenerate")
+async def regenerate_briefing(_: dict = Depends(require_owner_or_manager)):
+    return await ash_briefing.generate_briefing()
+
+
+@router.get("/agent/trace/{session_id}")
+async def get_agent_trace(session_id: str, limit: int = 50, _: dict = Depends(get_user)):
+    rows = await db.ash_agent_traces.find({"sessionId": session_id}, {"_id": 0}).sort("ts", 1).limit(limit).to_list(limit)
+    return rows

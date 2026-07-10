@@ -55,6 +55,7 @@ import Payroll from './pages/Payroll';
 import Vouchers from './pages/Vouchers';
 import FinanceLedger from './pages/FinanceLedger';
 import AshDashboard from './pages/AshDashboard';
+import AshCommandCenter from './pages/AshCommandCenter';
 import Approvals from './pages/Approvals';
 import AuditLogUniversal from './pages/AuditLogUniversal';
 import HQDashboard from './pages/HQDashboard';
@@ -171,6 +172,7 @@ function ProtectedRoutes() {
         <Route path="/accounting" element={<Accounting />} />
         <Route path="/finance" element={<FinanceLedger />} />
         <Route path="/ash" element={<AshDashboard />} />
+        <Route path="/ash-hq" element={<AshCommandCenter />} />
         <Route path="/approvals" element={<Approvals />} />
         <Route path="/audit" element={<AuditLogUniversal />} />
         <Route path="/hq" element={<HQDashboard />} />
