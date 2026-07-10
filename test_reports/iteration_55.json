@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 55 — Ash v3 Phases 4-19 (Personas, Planner, Simulation, Memory, Permissions) + P2 Loyalty 2.0 — 32/32 pytest cases PASS (~91s). Personas: GET /api/ash/personas returns exactly 6 (executive/finance/ops/hr/marketing/guest) with all 8 fields (id,label,tagline,modules,tone,focus,icon,color). Ash Agent with persona='finance' returns persona='finance', personaLabel='Ash Finance', coherent reply that does NOT leak {\"action\":\"final\"...} JSON envelope. HR persona asked about flour inventory correctly did NOT invoke any inventory tool (module scoping enforced). Planner: POST /plans/generate {goal,persona:'ops'} returns proposed plan with steps[] each having tool/args/rationale/status='pending', personaLabel='Ash Ops'. GET /plans lists, GET /plans/{id} fetches. POST /plans/{id}/simulate returns narrative + simulatedSteps where read-only tools have simStatus='read' with real outcomes and write tools have simStatus='would_write' (NO db mutation). POST /plans/{id}/steps/{idx}/approve routes read tools to status='executed' and write tools to status='pending_approval' with approvalId (verified via /approvals queue). POST /plans/{id}/reject moves plan to status='rejected'. POST /plans/{id}/steps/0/reject marks single step rejected. Permissions: GET /ash/tools returns all tools including new 'remember' and 'recall' with effectivePermission field; PUT /ash/tools/remember/permission {permission:'approval'} persists and reflects on next GET. Memory: POST /ash/memory creates; GET lists; GET /memory/scopes returns per-scope counts; storing same (text,scope) twice REINFORCES existing memory (reinforced=true, no duplicates); DELETE removes. Loyalty 2.0: GET /loyalty/v2/badges returns all 10 seeded (First Visit, Regular, Loyalist, Century Club, Big Spender, VIP Whale, Early Bird, Wine Buff, Community Builder, Birthday Guest); GET /milestones returns 6 seeded (5 Visits, 25 Visits, $100/$500/$2000/$5000 Spent); POST /evaluate/cust-1 IDEMPOTENT (second call awards 0 new badges/milestones); GET /progress/cust-1 returns {points, tier, tierProgress:{current,next,pointsNeeded,percent}, badges[.earned], milestones[.current,.progressPercent,.achieved], challenges[]}; POST/GET/DELETE /challenges CRUD works. Regression: /ash/insights, /ash/health-score, /ash/briefing, /ash/chat, /ash/tools, /approvals?status=pending, /accounting/kpis, /audit, /hq all healthy.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration55_p0_p2.py",
+    "/app/test_reports/pytest/iter55_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "services/ash_planner.py::_is_read_only — uses startswith on tuple _READ_ONLY_PREFIXES including 'run_ash_scan' with trailing underscore stripping heuristic (line 336-337). Fine but fragile — a future tool named 'run_ash_scan_report' would be treated read-only. Consider explicit read-only registry field on each tool instead of prefix matching.",
+    "services/ash_memory.py::remember — reinforcement bumps confidence by +0.1 (line 58). If the same fact is asserted 4 times from a 0.6 baseline it caps at 1.0 — fine. But there is NO downgrade path: if the owner corrects a memory (contradicts it), the old high-confidence row wins. Consider a 'contradict' verb or a scope-key uniqueness index.",
+    "services/ash_planner.py::generate_plan — LLM call has no timeout ceiling around GPT-5.2 (line 156). If OpenAI stalls, the /plans/generate endpoint stalls with it. Wrap in asyncio.wait_for(..., timeout=45).",
+    "services/ash_planner.py::simulate_plan — read-only tools are ACTUALLY EXECUTED during simulation (line 361). That's intentional per docstring but means /simulate can insert audit events, increment usageCount, etc. Consider passing a 'dry_run=True' hint through execute() for tools that touch counters.",
+    "routes/loyalty_v2.py::_ensure_seeded — called inside every read endpoint (badges, milestones, evaluate, progress). Cheap but adds 2 count_documents() per request. Move to app-startup lifespan hook.",
+    "routes/loyalty_v2.py::evaluate_customer — challenge progress row is written even when no active challenges exist for the customer; harmless but noisy. Skip the write path when challenges list is empty.",
+    "routes/loyalty_v2.py — no PATCH/PUT endpoint for challenges (cannot edit end date / target after creation). If the owner needs to extend a running challenge they must delete + recreate, which loses progress.",
+    "routes/ash.py — Planner mutation endpoints require owner_or_manager, but plan listing is get_user; a cashier could enumerate every plan (including 'reject/approve' actions on other users' plans via URL guessing). Tighten GET /plans and /plans/{id} to owner_or_manager if plans contain sensitive rationale.",
+    "services/ash_personas.py::filter_tools — persona modules are compared against tool.module by exact string match; if a new tool has module 'Marketing_Campaigns' it will silently be filtered out from every persona. Consider a set-of-tags model per tool."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration55_p0_p2.py (new — 32 tests across 6 classes, ~91s runtime)"
+  ],
+  "success_rate": {
+    "backend": "100% (32/32 pytest cases)",
+    "frontend": "N/A (frontend testing explicitly skipped per request)"
+  },
+  "test_credentials": "owner@nuva.com / NuvaOwner2026! — worked.",
+  "seed_data_creation": "Test run inserted: (a) ~3-4 new plans into db.ash_plans (goals: reduce food waste, audit POs, bump wine margin, investigate insights, adjust wine SKU); some are in 'rejected' status, others 'awaiting_approvals'. (b) 0 net new badges/milestones for cust-1 (already awarded from prior iterations). (c) 1 test challenge (TEST_SummerSpend) created and deleted. (d) TEST_scope memory created and deleted. (e) 'remember' tool permission bounced approval→auto (final state=auto). (f) LLM briefing regenerated fresh for today. Cleanup: rejected plans remain in db.ash_plans; filter by createdBy=owner@nuva.com and rejectionReason='not now' or status='awaiting_approvals'.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter55 tests at /app/backend/tests/test_iteration55_p0_p2.py — 32 tests / ~91s / 100% pass. Env var: run pytest with `export $(grep -v '^#' /app/frontend/.env | xargs)` first because REACT_APP_BACKEND_URL isn't in shell env. Key surface tested: GET /api/ash/personas (6 personas), POST /api/ash/agent {message,persona}, POST /api/ash/plans/generate, GET /api/ash/plans, GET /api/ash/plans/{id}, POST /api/ash/plans/{id}/{simulate,approve,reject}, POST /api/ash/plans/{id}/steps/{idx}/{approve,reject}, GET/POST/DELETE /api/ash/memory, GET /api/ash/memory/scopes, /api/ash/tools (with remember+recall), PUT /api/ash/tools/{name}/permission, /api/loyalty/v2/{badges,milestones,challenges,progress,evaluate}. Read-only prefix logic in ash_planner._is_read_only uses tuple ('fetch_','lookup_','generate_','run_ash_scan'); write tools = everything else. HR persona modules = ['Staff','Ash'] — inventory tools like fetch_low_stock aren't in Ash module, so are correctly filtered out. Loyalty evaluate is idempotent by composite key (customerId,badgeId) and (customerId,milestoneId). Test customer cust-1 has visits=89 and spend=$2515 so should already be at Silver tier + many badges. Nothing needs re-fixing.",
+  "rca of the issue": "N/A — all backend endpoints working as specified. Ash Agent JSON-envelope leak (from iter54) confirmed fixed: even with persona='finance' asking for margin, response.reply is plain prose, no {\"action\":\"final\"...} appearing in the reply string."
+}

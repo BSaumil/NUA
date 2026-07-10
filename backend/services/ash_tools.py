@@ -292,6 +292,30 @@ async def _tx_generate_daily_briefing(a):
     return await ash_briefing.generate_briefing()
 
 
+async def _tx_remember(a):
+    from services import ash_memory
+    doc = await ash_memory.remember(
+        text=a["text"],
+        scope=a.get("scope", "global"),
+        kind=a.get("kind", "fact"),
+        confidence=float(a.get("confidence") or 0.7),
+        source="ash_agent",
+        tags=a.get("tags") or [],
+    )
+    return {"memoryId": doc["id"], "reinforced": bool(doc.get("reinforced")),
+            "confidence": doc.get("confidence"), "scope": doc.get("scope")}
+
+
+async def _tx_recall(a):
+    from services import ash_memory
+    rows = await ash_memory.recall(scope=a.get("scope", "global"),
+                                     limit=int(a.get("limit") or 10),
+                                     kind=a.get("kind"))
+    return {"memories": [{"id": r["id"], "kind": r["kind"], "text": r["text"],
+                            "confidence": r["confidence"], "scope": r["scope"]}
+                            for r in rows]}
+
+
 # ═════════════════════════════════════════════════════════════════════════
 # Registration
 # ═════════════════════════════════════════════════════════════════════════
@@ -313,6 +337,22 @@ _TOOL_DEFS: List[Dict[str, Any]] = [
      "params": {"type": "object", "properties": {}}, "fn": _tx_generate_weekly_summary},
     {"n": "generate_daily_briefing", "l": "Generate this morning's briefing", "m": "Ash", "r": "low", "p": "auto",
      "params": {"type": "object", "properties": {}}, "fn": _tx_generate_daily_briefing},
+    {"n": "remember", "l": "Save a long-term memory / preference / pattern", "m": "Ash", "r": "low", "p": "auto",
+     "params": {"type": "object",
+                 "properties": {"text": {"type": "string"},
+                                 "scope": {"type": "string",
+                                             "description": "global | customer:<id> | staff:<id> | product:<id> | supplier:<id>"},
+                                 "kind": {"type": "string", "enum": ["preference", "pattern", "fact", "note"]},
+                                 "confidence": {"type": "number"},
+                                 "tags": {"type": "array", "items": {"type": "string"}}},
+                 "required": ["text"]},
+     "fn": _tx_remember, "impact": "informational"},
+    {"n": "recall", "l": "Retrieve long-term memories for a scope", "m": "Ash", "r": "low", "p": "auto",
+     "params": {"type": "object",
+                 "properties": {"scope": {"type": "string"},
+                                 "kind": {"type": "string"},
+                                 "limit": {"type": "integer", "default": 10}}},
+     "fn": _tx_recall},
 
     # ── Ash / dismiss / approvals ──
     {"n": "dismiss_insight", "l": "Dismiss an Ash insight", "m": "Ash", "r": "low", "p": "auto",

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
-import { Sparkles, Send, X, Minus, Brain } from 'lucide-react';
+import { Sparkles, Send, X, Minus, Brain, Crown, Calculator, Package, Users, Megaphone, Heart, ChevronDown } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Badge } from './ui/badge';
@@ -17,14 +17,44 @@ const userScope = () => {
 };
 const SESSION_KEY = () => `${SESSION_KEY_BASE}::${userScope()}`;
 const MSGS_KEY = () => `${SESSION_KEY_BASE}::${userScope()}::msgs`;
+const PERSONA_KEY = () => `${SESSION_KEY_BASE}::${userScope()}::persona`;
 
-const SUGGESTIONS = [
-  'What happened yesterday?',
-  'Who dismissed the burnout alert?',
-  'What should I do next?',
-  'Show me pending approvals',
-  'Which product needs a price change?',
-];
+const PERSONA_ICON = {
+  executive: Crown, finance: Calculator, ops: Package, hr: Users, marketing: Megaphone, guest: Heart,
+};
+
+const SUGGESTIONS_BY_PERSONA = {
+  executive: [
+    'What should I do next?',
+    'Give me today\u2019s briefing',
+    'What did we ship yesterday?',
+  ],
+  finance: [
+    'How did revenue trend this week?',
+    'Any journals awaiting approval?',
+    'What\u2019s our gross margin?',
+  ],
+  ops: [
+    'Which items are below par?',
+    'Any high-waste items to 86?',
+    'Create a PO for our top low-stock item',
+  ],
+  hr: [
+    'Any staff at burnout risk?',
+    'Create a task for pre-shift briefing',
+    'Who is rostered tomorrow?',
+  ],
+  marketing: [
+    'Suggest a promo for slow-moving stock',
+    'Which VIPs haven\u2019t visited in 30 days?',
+    'Draft an SMS to re-engage lapsed customers',
+  ],
+  guest: [
+    'Who are today\u2019s VIPs?',
+    'Anyone with a birthday this week?',
+    'Cancel my 7pm reservation for Table 4',
+  ],
+};
 
 export default function AshChat() {
   const [open, setOpen] = useState(false);
@@ -33,21 +63,40 @@ export default function AshChat() {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [sessionId, setSessionId] = useState(() => localStorage.getItem(SESSION_KEY()) || '');
+  const [persona, setPersona] = useState(() => localStorage.getItem(PERSONA_KEY()) || 'executive');
+  const [personas, setPersonas] = useState([]);
+  const [personaMenuOpen, setPersonaMenuOpen] = useState(false);
   const scrollRef = useRef(null);
+
+  useEffect(() => {
+    axios.get(`${API}/ash/personas`, { headers: H() }).then(r => setPersonas(r.data)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(MSGS_KEY(), JSON.stringify(msgs.slice(-40)));
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [msgs]);
 
+  const currentPersona = personas.find(p => p.id === persona) || { id: 'executive', label: 'Ash Executive', color: '#4f46e5', tagline: '', modules: [] };
+  const CurIcon = PERSONA_ICON[currentPersona.id] || Brain;
+
+  const switchPersona = (pid) => {
+    setPersona(pid);
+    localStorage.setItem(PERSONA_KEY(), pid);
+    setPersonaMenuOpen(false);
+    // Reset session so grounding is fresh for the new specialist
+    setSessionId('');
+    localStorage.removeItem(SESSION_KEY());
+  };
+
   const send = async (text) => {
     const trimmed = (text || input).trim();
     if (!trimmed || busy) return;
     setBusy(true);
-    setMsgs(m => [...m, { role: 'user', text: trimmed, ts: Date.now() }]);
+    setMsgs(m => [...m, { role: 'user', text: trimmed, ts: Date.now(), persona }]);
     setInput('');
     try {
-      const r = await axios.post(`${API}/ash/agent`, { message: trimmed, sessionId }, { headers: H() });
+      const r = await axios.post(`${API}/ash/agent`, { message: trimmed, sessionId, persona }, { headers: H() });
       if (!sessionId) {
         setSessionId(r.data.sessionId);
         localStorage.setItem(SESSION_KEY(), r.data.sessionId);
@@ -57,10 +106,12 @@ export default function AshChat() {
         text: r.data.reply,
         reasoning: r.data.reasoning,
         toolResults: r.data.toolResults,
+        persona: r.data.persona,
+        personaLabel: r.data.personaLabel,
         ts: Date.now(),
       }]);
     } catch (e) {
-      setMsgs(m => [...m, { role: 'ash', text: '⚠️ Ash is unreachable right now. Try again in a moment.', ts: Date.now() }]);
+      setMsgs(m => [...m, { role: 'ash', text: 'Ash is unreachable right now. Try again in a moment.', ts: Date.now() }]);
     } finally {
       setBusy(false);
     }
@@ -73,16 +124,19 @@ export default function AshChat() {
     localStorage.removeItem(MSGS_KEY());
   };
 
+  const suggestions = SUGGESTIONS_BY_PERSONA[persona] || SUGGESTIONS_BY_PERSONA.executive;
+
   // FAB when closed
   if (!open) {
     return (
       <button
         onClick={() => { setOpen(true); setMinimized(false); }}
-        className="fixed bottom-5 right-5 z-50 h-14 w-14 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-xl flex items-center justify-center transition-all hover:scale-105"
+        className="fixed bottom-5 right-5 z-50 h-14 w-14 rounded-full text-white shadow-xl flex items-center justify-center transition-all hover:scale-105"
+        style={{ background: currentPersona.color }}
         data-testid="ash-chat-fab"
         aria-label="Ask Ash"
       >
-        <Brain size={26} />
+        <CurIcon size={26} />
         <span className="absolute -top-1 -right-1 h-3 w-3 bg-emerald-400 rounded-full ring-2 ring-white animate-pulse" />
       </button>
     );
@@ -91,21 +145,28 @@ export default function AshChat() {
   return (
     <div
       className={`fixed bottom-5 right-5 z-50 bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col transition-all ${
-        minimized ? 'w-72 h-14' : 'w-96 h-[540px]'
+        minimized ? 'w-72 h-14' : 'w-96 h-[560px]'
       }`}
       data-testid="ash-chat-panel"
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-t-2xl">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between px-4 py-3 text-white rounded-t-2xl"
+        style={{ background: `linear-gradient(to right, ${currentPersona.color}, ${currentPersona.color}dd)` }}>
+        <button
+          className="flex items-center gap-2 hover:bg-white/10 rounded px-2 py-1 -ml-2 transition"
+          onClick={() => setPersonaMenuOpen(o => !o)}
+          data-testid="persona-picker-btn"
+        >
           <div className="h-8 w-8 bg-white/20 backdrop-blur rounded-full flex items-center justify-center">
-            <Brain size={16} />
+            <CurIcon size={16} />
           </div>
-          <div>
-            <p className="font-semibold text-sm">Ash</p>
-            {!minimized && <p className="text-[10px] opacity-80">Autonomous operating layer</p>}
+          <div className="text-left">
+            <p className="font-semibold text-sm flex items-center gap-1">
+              {currentPersona.label} <ChevronDown size={12} />
+            </p>
+            {!minimized && <p className="text-[10px] opacity-80 max-w-[190px] truncate">{currentPersona.tagline}</p>}
           </div>
-        </div>
+        </button>
         <div className="flex items-center gap-1">
           <button onClick={() => setMinimized(m => !m)} className="p-1 hover:bg-white/20 rounded" data-testid="ash-chat-minimize">
             <Minus size={14} />
@@ -116,6 +177,30 @@ export default function AshChat() {
         </div>
       </div>
 
+      {/* Persona menu overlay */}
+      {personaMenuOpen && !minimized && (
+        <div className="absolute top-16 left-3 right-3 bg-white shadow-xl border rounded-xl z-10 overflow-hidden" data-testid="persona-menu">
+          {personas.map(p => {
+            const Icon = PERSONA_ICON[p.id] || Brain;
+            return (
+              <button
+                key={p.id}
+                onClick={() => switchPersona(p.id)}
+                className={`w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-slate-50 border-b last:border-b-0 ${p.id === persona ? 'bg-indigo-50' : ''}`}
+                data-testid={`persona-opt-${p.id}`}
+              >
+                <div className="h-8 w-8 rounded-full flex items-center justify-center text-white flex-shrink-0"
+                  style={{ background: p.color }}><Icon size={14} /></div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">{p.label}</p>
+                  <p className="text-[10px] text-slate-500 truncate">{p.tagline}</p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {minimized ? null : (
         <>
           {/* Messages */}
@@ -123,10 +208,10 @@ export default function AshChat() {
             {msgs.length === 0 && (
               <div className="text-center py-6">
                 <Sparkles className="mx-auto mb-2 text-indigo-400" size={28} />
-                <p className="text-sm text-slate-600 mb-1">Hi &mdash; I&apos;m Ash.</p>
-                <p className="text-xs text-slate-500 mb-4">Ask me about the last 30 audit events, open insights, pending approvals, or what to do next.</p>
+                <p className="text-sm text-slate-600 mb-1">Hi, I&apos;m {currentPersona.label}.</p>
+                <p className="text-xs text-slate-500 mb-4">{currentPersona.tagline}</p>
                 <div className="space-y-2 text-left">
-                  {SUGGESTIONS.map((s, i) => (
+                  {suggestions.map((s, i) => (
                     <button key={i} onClick={() => send(s)} className="w-full text-left text-xs px-3 py-2 rounded-lg bg-white border hover:border-indigo-300 hover:bg-indigo-50 transition"
                       data-testid={`ash-suggest-${i}`}>
                       {s}
@@ -138,8 +223,13 @@ export default function AshChat() {
             {msgs.map((m, i) => (
               <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${
-                  m.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-white border shadow-sm'
-                }`} data-testid={`msg-${m.role}-${i}`}>
+                  m.role === 'user' ? 'text-white' : 'bg-white border shadow-sm'
+                }`}
+                  style={m.role === 'user' ? { background: currentPersona.color } : {}}
+                  data-testid={`msg-${m.role}-${i}`}>
+                  {m.role === 'ash' && m.personaLabel && (
+                    <p className="text-[9px] uppercase tracking-wider text-slate-400 mb-1">{m.personaLabel}</p>
+                  )}
                   <p className="whitespace-pre-wrap">{m.text}</p>
                   {(m.toolResults && m.toolResults.length > 0) && (
                     <div className="mt-2 pt-2 border-t border-slate-100 space-y-1">
@@ -151,7 +241,7 @@ export default function AshChat() {
                             t.status === 'blocked' ? 'bg-rose-500' : 'bg-slate-500'
                           }>{t.status.replace('_', ' ')}</Badge>
                           <span className="font-mono text-slate-600">{t.tool}</span>
-                          {t.approvalId && <span className="text-slate-400">→ approval {t.approvalId.slice(0, 6)}</span>}
+                          {t.approvalId && <span className="text-slate-400">approval {t.approvalId.slice(0, 6)}</span>}
                         </div>
                       ))}
                     </div>
@@ -175,7 +265,7 @@ export default function AshChat() {
             {busy && (
               <div className="flex justify-start">
                 <div className="bg-white border rounded-2xl px-3 py-2 text-sm text-slate-500 flex items-center gap-2 shadow-sm">
-                  <span className="animate-pulse">Ash is thinking…</span>
+                  <span className="animate-pulse">{currentPersona.label} is thinking&hellip;</span>
                 </div>
               </div>
             )}
@@ -187,7 +277,7 @@ export default function AshChat() {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-              placeholder="Ask Ash…"
+              placeholder={`Ask ${currentPersona.label}\u2026`}
               className="flex-1 text-sm"
               disabled={busy}
               data-testid="ash-chat-input"

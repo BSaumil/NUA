@@ -209,25 +209,130 @@ async def chat_history(session_id: str, limit: int = 40, _: dict = Depends(get_u
 # ═════════════════════════════════════════════════════════════════════════
 # Ash v3.0 — Tool-calling Agent, Health Score, Daily Briefing, Permissions
 # ═════════════════════════════════════════════════════════════════════════
-from services import ash_tools, ash_agent, health_score, ash_briefing
+from services import ash_tools, ash_agent, health_score, ash_briefing, ash_personas, ash_planner, ash_memory
+
+
+# ─── Memory ───────────────────────────────────────────────────────────────
+@router.get("/memory")
+async def list_memory(scope: Optional[str] = None, kind: Optional[str] = None,
+                        limit: int = 100, _: dict = Depends(get_user)):
+    return await ash_memory.list_memories(scope=scope, kind=kind, limit=limit)
+
+
+@router.get("/memory/scopes")
+async def memory_scopes(_: dict = Depends(get_user)):
+    return await ash_memory.scope_counts()
+
+
+@router.post("/memory")
+async def create_memory(body: dict, user: dict = Depends(require_owner_or_manager)):
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "text is required")
+    return await ash_memory.remember(
+        text=text,
+        scope=body.get("scope", "global"),
+        kind=body.get("kind", "fact"),
+        confidence=float(body.get("confidence") or 1.0),
+        source="owner",
+        tags=body.get("tags") or [],
+        actor=user.get("email"),
+    )
+
+
+@router.delete("/memory/{memory_id}")
+async def delete_memory(memory_id: str, user: dict = Depends(require_owner_or_manager)):
+    ok = await ash_memory.forget(memory_id, actor=user.get("email"))
+    if not ok:
+        raise HTTPException(404, "memory not found")
+    return {"deleted": True}
+
+
+@router.get("/personas")
+async def list_personas(_: dict = Depends(get_user)):
+    """List available Ash personas — used by the persona picker in Ash Chat."""
+    return ash_personas.catalog()
+
+
+# ─── Planning Engine ──────────────────────────────────────────────────────
+@router.post("/plans/generate")
+async def generate_plan(body: dict, user: dict = Depends(require_owner_or_manager)):
+    goal = (body.get("goal") or "").strip()
+    if not goal:
+        raise HTTPException(400, "goal is required")
+    return await ash_planner.generate_plan(
+        goal, actor=user.get("email") or "owner", persona=body.get("persona"),
+    )
+
+
+@router.get("/plans")
+async def list_plans(status: Optional[str] = None, limit: int = 50, _: dict = Depends(get_user)):
+    q: dict = {}
+    if status: q["status"] = status
+    rows = await db.ash_plans.find(q, {"_id": 0}).sort("createdAt", -1).limit(limit).to_list(limit)
+    return rows
+
+
+@router.get("/plans/{plan_id}")
+async def get_plan(plan_id: str, _: dict = Depends(get_user)):
+    plan = await db.ash_plans.find_one({"id": plan_id}, {"_id": 0})
+    if not plan:
+        raise HTTPException(404, "plan not found")
+    return plan
+
+
+@router.post("/plans/{plan_id}/simulate")
+async def simulate_plan(plan_id: str, user: dict = Depends(require_owner_or_manager)):
+    """Dry-run — describes writes without executing them."""
+    return await ash_planner.simulate_plan(plan_id, actor=user.get("email") or "owner")
+
+
+@router.post("/plans/{plan_id}/approve")
+async def approve_plan(plan_id: str, user: dict = Depends(require_owner_or_manager)):
+    return await ash_planner.approve_plan(plan_id, actor=user.get("email") or "owner")
+
+
+@router.post("/plans/{plan_id}/reject")
+async def reject_plan(plan_id: str, body: dict, user: dict = Depends(require_owner_or_manager)):
+    return await ash_planner.reject_plan(
+        plan_id, actor=user.get("email") or "owner", reason=body.get("reason"),
+    )
+
+
+@router.post("/plans/{plan_id}/steps/{idx}/approve")
+async def approve_step(plan_id: str, idx: int, user: dict = Depends(require_owner_or_manager)):
+    return await ash_planner.approve_step(plan_id, idx, actor=user.get("email") or "owner")
+
+
+@router.post("/plans/{plan_id}/steps/{idx}/reject")
+async def reject_step(plan_id: str, idx: int, body: dict, user: dict = Depends(require_owner_or_manager)):
+    return await ash_planner.reject_step(
+        plan_id, idx, actor=user.get("email") or "owner", reason=body.get("reason"),
+    )
 
 
 @router.post("/agent")
 async def agent(body: dict, user: dict = Depends(get_user)):
-    """The Ash v3 tool-calling agent. Accepts { message, sessionId? } and may
+    """The Ash v3 tool-calling agent. Accepts { message, sessionId?, persona? } and may
     invoke up to 4 tool-calls before returning a final reply.
     """
     message = (body.get("message") or "").strip()
     if not message:
         raise HTTPException(400, "message is required")
     session_id = body.get("sessionId") or f"ash-agent-{_uuid.uuid4()}"
+    persona = body.get("persona")
 
-    result = await ash_agent.run_agent_turn(message, session_id=session_id, actor=user.get("email") or "ash-agent")
+    result = await ash_agent.run_agent_turn(
+        message, session_id=session_id,
+        actor=user.get("email") or "ash-agent",
+        persona=persona,
+    )
 
     doc = {
         "id": str(_uuid.uuid4()),
         "sessionId": session_id,
         "actor": user.get("email"),
+        "persona": result.get("persona"),
         "message": message,
         "reply": result["reply"],
         "reasoning": result.get("reasoning"),

@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 from database import db
-from services import ash_tools
+from services import ash_tools, ash_personas, ash_memory
 import json
 import logging
 import os
@@ -108,7 +108,24 @@ def _extract_json(txt: str) -> Optional[Dict[str, Any]]:
             sanitised = re.sub(r"(?<!\\)\n", " ", blob)
             return json.loads(sanitised)
         except Exception:
-            return None
+            pass
+    # Last-resort regex fallback: rescue at least {action, reply} so the JSON
+    # envelope never leaks into the user-visible chat reply.
+    m_action = re.search(r'"action"\s*:\s*"([^"]+)"', blob)
+    m_reply = re.search(r'"reply"\s*:\s*"((?:[^"\\]|\\.)*)"', blob, re.DOTALL)
+    m_tool = re.search(r'"tool"\s*:\s*"([^"]+)"', blob)
+    if m_action:
+        out: Dict[str, Any] = {"action": m_action.group(1)}
+        if m_reply:
+            # Un-escape common sequences
+            out["reply"] = (m_reply.group(1)
+                              .replace('\\n', '\n')
+                              .replace('\\"', '"')
+                              .replace("\\\\", "\\"))
+        if m_tool:
+            out["tool"] = m_tool.group(1)
+        return out
+    return None
 
 
 async def _grounding_context() -> Dict[str, Any]:
@@ -126,19 +143,27 @@ async def _grounding_context() -> Dict[str, Any]:
     }
 
 
-async def run_agent_turn(user_message: str, *, session_id: str, actor: str = "ash-agent") -> Dict[str, Any]:
+async def run_agent_turn(user_message: str, *, session_id: str, actor: str = "ash-agent",
+                          persona: Optional[str] = None) -> Dict[str, Any]:
     """One user message → up to MAX_TURNS tool-calling iterations → final reply."""
     ctx = await _grounding_context()
     trace: List[Dict[str, Any]] = []
     tool_results: List[Dict[str, Any]] = []
 
+    # Persona filters which tools + which system prompt frames the loop
+    persona_obj = ash_personas.get_persona(persona)
+    visible_tools = ash_personas.filter_tools(ash_tools.catalog(), persona)
+
+    # Long-term memory context — scope defaults to global
+    memory_pack = await ash_memory.context_pack("global")
+
     # Compose the prompt manually — emergentintegrations wraps OpenAI calls
     # but tool-calling isn't first-class. We'll use text-based JSON contract.
-    system = AGENT_SYSTEM + f"""
+    base_body = f"""
 
 AVAILABLE TOOLS (call by returning JSON only — no prose):
 {json.dumps([{'name': t['name'], 'module': t['module'], 'risk': t['risk'],
-              'params': t['parameters']} for t in ash_tools.catalog()], indent=1)[:8000]}
+              'params': t['parameters']} for t in visible_tools], indent=1)[:8000]}
 
 Reply protocol
 ──────────────
@@ -154,7 +179,10 @@ When you have your FINAL ANSWER, respond with:
 
 Live context (last 15 audit rows, 10 open insights, 10 pending approvals):
 {json.dumps(ctx, indent=1)[:4000]}
+
+{memory_pack}
 """
+    system = ash_personas.system_prompt(persona, AGENT_SYSTEM + base_body)
     reply_text = "I couldn't reach the LLM right now."
     reasoning = None
     outcomes_summary: List[Dict[str, Any]] = []
@@ -184,7 +212,14 @@ Live context (last 15 audit rows, 10 open insights, 10 pending approvals):
                 args = parsed.get("args") or {}
                 trace.append({"turn": turn, "type": "tool_call", "tool": tool_name, "args": args,
                                 "reasoning": reasoning})
-                result = await ash_tools.execute_tool(tool_name, args, actor=actor)
+                # Persona guard — refuse tools outside remit
+                allowed_names = {t["name"] for t in visible_tools}
+                if tool_name not in allowed_names:
+                    result = {"status": "blocked",
+                                "reason": f"Tool '{tool_name}' is outside {persona_obj.label}'s remit — switch persona.",
+                                "tool": tool_name, "persona": persona_obj.id}
+                else:
+                    result = await ash_tools.execute_tool(tool_name, args, actor=actor)
                 tool_results.append(result)
                 outcomes_summary.append({
                     "tool": tool_name,
@@ -229,4 +264,6 @@ Live context (last 15 audit rows, 10 open insights, 10 pending approvals):
         "reasoning": reasoning,
         "toolResults": outcomes_summary,
         "trace": trace,
+        "persona": persona_obj.id,
+        "personaLabel": persona_obj.label,
     }

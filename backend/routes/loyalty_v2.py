@@ -1,0 +1,414 @@
+"""
+Loyalty 2.0 — Badges, Milestones, Seasonal Challenges & Tier Progression.
+
+Design
+──────
+• Badges are catalog entries (10 pre-seeded). Each has a `condition` string
+  interpreted by the engine (first_visit, visits>=10, spend>=500, categorySpend:Wine>=200).
+• Milestones are numeric thresholds (visits/spend) that award a `reward` — voucher, points, tier bump.
+• Challenges are owner-authored, time-boxed missions with a target + reward.
+• `evaluate_customer(customerId)` walks the catalog and idempotently awards new items.
+• `progress(customerId)` returns tier progress + milestone completion for the UI.
+
+Idempotency guaranteed by `customer_badges` composite key {customerId, badgeId}.
+"""
+from __future__ import annotations
+from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
+from fastapi import APIRouter, HTTPException, Depends
+from database import db
+from deps import get_user, require_owner_or_manager
+import uuid
+import logging
+
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/loyalty/v2")
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Seed catalogs (idempotent — only seeded if collection empty)
+# ═════════════════════════════════════════════════════════════════════════
+BADGE_SEEDS = [
+    {"id": "badge-first-visit", "name": "First Visit", "icon": "sparkles", "color": "#8b5cf6",
+     "description": "Welcome to the family!", "condition": "visits>=1", "points": 10},
+    {"id": "badge-regular", "name": "Regular", "icon": "coffee", "color": "#f59e0b",
+     "description": "5 visits and counting", "condition": "visits>=5", "points": 50},
+    {"id": "badge-loyalist", "name": "Loyalist", "icon": "heart", "color": "#dc2626",
+     "description": "10 visits — you know the staff by name", "condition": "visits>=10", "points": 100},
+    {"id": "badge-century", "name": "Century Club", "icon": "trophy", "color": "#eab308",
+     "description": "50 visits", "condition": "visits>=50", "points": 500},
+    {"id": "badge-spender", "name": "Big Spender", "icon": "dollar-sign", "color": "#10b981",
+     "description": "$500 lifetime spend", "condition": "spend>=500", "points": 100},
+    {"id": "badge-whale", "name": "VIP Whale", "icon": "crown", "color": "#7c3aed",
+     "description": "$5,000 lifetime spend", "condition": "spend>=5000", "points": 1000},
+    {"id": "badge-early-bird", "name": "Early Bird", "icon": "sunrise", "color": "#f97316",
+     "description": "3 breakfast visits", "condition": "categoryVisits:Breakfast>=3", "points": 30},
+    {"id": "badge-wine-buff", "name": "Wine Buff", "icon": "wine", "color": "#be123c",
+     "description": "$200 in wine purchases", "condition": "categorySpend:Wine>=200", "points": 100},
+    {"id": "badge-referrer", "name": "Community Builder", "icon": "users", "color": "#2563eb",
+     "description": "Referred 3 friends", "condition": "referrals>=3", "points": 200},
+    {"id": "badge-birthday", "name": "Birthday Guest", "icon": "gift", "color": "#ec4899",
+     "description": "Celebrated a birthday with us", "condition": "birthdayVisit=true", "points": 50},
+]
+
+MILESTONE_SEEDS = [
+    {"id": "mile-visits-5", "name": "5 Visits", "metric": "visits", "threshold": 5,
+     "reward": {"type": "voucher", "value": 5, "label": "$5 voucher"}, "order": 1},
+    {"id": "mile-visits-25", "name": "25 Visits", "metric": "visits", "threshold": 25,
+     "reward": {"type": "voucher", "value": 25, "label": "$25 voucher"}, "order": 2},
+    {"id": "mile-spend-100", "name": "$100 Spent", "metric": "spend", "threshold": 100,
+     "reward": {"type": "points", "value": 200, "label": "200 bonus points"}, "order": 3},
+    {"id": "mile-spend-500", "name": "$500 Spent", "metric": "spend", "threshold": 500,
+     "reward": {"type": "tier", "value": "Silver", "label": "Silver tier"}, "order": 4},
+    {"id": "mile-spend-2000", "name": "$2,000 Spent", "metric": "spend", "threshold": 2000,
+     "reward": {"type": "tier", "value": "Gold", "label": "Gold tier"}, "order": 5},
+    {"id": "mile-spend-5000", "name": "$5,000 Spent", "metric": "spend", "threshold": 5000,
+     "reward": {"type": "tier", "value": "Platinum", "label": "Platinum tier"}, "order": 6},
+]
+
+
+async def _ensure_seeded() -> None:
+    if await db.loyalty_badges.count_documents({}) == 0:
+        await db.loyalty_badges.insert_many([dict(b) for b in BADGE_SEEDS])
+    if await db.loyalty_milestones.count_documents({}) == 0:
+        await db.loyalty_milestones.insert_many([dict(m) for m in MILESTONE_SEEDS])
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Condition evaluator
+# ═════════════════════════════════════════════════════════════════════════
+def _customer_metric(customer: Dict[str, Any], metric: str) -> float:
+    if metric == "visits":
+        return float(customer.get("totalVisits") or customer.get("visits") or 0)
+    if metric == "spend":
+        return float(customer.get("totalSpend") or customer.get("totalSpent") or 0)
+    if metric == "referrals":
+        return float(customer.get("referrals") or 0)
+    return 0.0
+
+
+async def _category_spend(customer_id: str, category: str) -> float:
+    """Sum transactions where any line item has the given category."""
+    total = 0.0
+    async for t in db.transactions.find(
+        {"customerId": customer_id, "items.category": category},
+        {"_id": 0, "items": 1},
+    ):
+        for item in t.get("items", []):
+            if item.get("category") == category:
+                total += float(item.get("total") or (float(item.get("price") or 0) * float(item.get("quantity") or 1)))
+    return total
+
+
+async def _category_visits(customer_id: str, category: str) -> int:
+    return await db.transactions.count_documents(
+        {"customerId": customer_id, "items.category": category}
+    )
+
+
+async def _condition_met(customer: Dict[str, Any], cond: str) -> bool:
+    """Interpret a simple condition string. Very limited on purpose."""
+    if cond == "birthdayVisit=true":
+        return bool(customer.get("celebratedBirthday"))
+    if ":" in cond:
+        # Format: categoryMetric:Value>=Number
+        head, tail = cond.split(":", 1)
+        cat, expr = tail.split(">=", 1)
+        target = float(expr)
+        if head == "categorySpend":
+            return await _category_spend(customer["id"], cat) >= target
+        if head == "categoryVisits":
+            return (await _category_visits(customer["id"], cat)) >= target
+        return False
+    for op in (">=", "<=", ">", "<", "=="):
+        if op in cond:
+            key, val = cond.split(op, 1)
+            actual = _customer_metric(customer, key.strip())
+            target = float(val)
+            return {
+                ">=": actual >= target, "<=": actual <= target,
+                ">": actual > target, "<": actual < target,
+                "==": actual == target,
+            }[op]
+    return False
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Public evaluation + progress
+# ═════════════════════════════════════════════════════════════════════════
+async def evaluate_customer(customer_id: str) -> Dict[str, Any]:
+    """Award any newly-earned badges + milestones."""
+    await _ensure_seeded()
+    customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+    if not customer:
+        return {"error": "customer not found"}
+
+    awarded_badges: List[Dict[str, Any]] = []
+    awarded_milestones: List[Dict[str, Any]] = []
+
+    # ── Badges ──
+    badges = await db.loyalty_badges.find({}, {"_id": 0}).to_list(200)
+    for b in badges:
+        existing = await db.customer_badges.find_one({"customerId": customer_id, "badgeId": b["id"]})
+        if existing:
+            continue
+        if await _condition_met(customer, b.get("condition", "")):
+            doc = {
+                "id": str(uuid.uuid4()), "customerId": customer_id,
+                "badgeId": b["id"], "badgeName": b["name"], "icon": b.get("icon"), "color": b.get("color"),
+                "pointsAwarded": int(b.get("points") or 0), "awardedAt": _now(),
+            }
+            await db.customer_badges.insert_one(dict(doc))
+            if doc["pointsAwarded"]:
+                await db.customers.update_one(
+                    {"id": customer_id},
+                    {"$inc": {"loyaltyPoints": doc["pointsAwarded"]}},
+                )
+            awarded_badges.append(doc)
+
+    # ── Milestones ──
+    miles = await db.loyalty_milestones.find({}, {"_id": 0}).sort("order", 1).to_list(200)
+    for m in miles:
+        existing = await db.customer_milestones.find_one({"customerId": customer_id, "milestoneId": m["id"]})
+        if existing:
+            continue
+        actual = _customer_metric(customer, m["metric"])
+        if actual < float(m["threshold"]):
+            continue
+        reward = m.get("reward") or {}
+        rec = {
+            "id": str(uuid.uuid4()), "customerId": customer_id,
+            "milestoneId": m["id"], "name": m["name"],
+            "reward": reward, "achievedAt": _now(),
+        }
+        await db.customer_milestones.insert_one(dict(rec))
+        # Apply the reward
+        if reward.get("type") == "points":
+            await db.customers.update_one({"id": customer_id}, {"$inc": {"loyaltyPoints": int(reward.get("value") or 0)}})
+        elif reward.get("type") == "tier":
+            await db.customers.update_one({"id": customer_id}, {"$set": {"membershipTier": reward.get("value")}})
+        elif reward.get("type") == "voucher":
+            v = {
+                "id": str(uuid.uuid4()),
+                "customerId": customer_id,
+                "sourceType": "loyalty_milestone",
+                "sourceRef": m["id"],
+                "label": reward.get("label") or "Milestone voucher",
+                "valueType": "amount",
+                "value": float(reward.get("value") or 0),
+                "status": "active",
+                "createdAt": _now(),
+            }
+            try:
+                await db.vouchers.insert_one(dict(v))
+                rec["voucherId"] = v["id"]
+            except Exception:
+                pass
+        awarded_milestones.append(rec)
+
+    # ── Seasonal Challenges ──
+    challenges = await db.loyalty_challenges.find(
+        {"active": True, "startDate": {"$lte": _now()}, "endDate": {"$gte": _now()}},
+        {"_id": 0},
+    ).to_list(50)
+    challenge_progress = []
+    for ch in challenges:
+        prog = await db.customer_challenge_progress.find_one(
+            {"customerId": customer_id, "challengeId": ch["id"]},
+        )
+        # Compute the customer's live progress since the challenge started
+        current = 0.0
+        if ch["metric"] == "visits":
+            current = await db.transactions.count_documents(
+                {"customerId": customer_id, "timestamp": {"$gte": ch["startDate"]}},
+            )
+        elif ch["metric"] == "spend":
+            async for t in db.transactions.find(
+                {"customerId": customer_id, "timestamp": {"$gte": ch["startDate"]}},
+                {"_id": 0, "total": 1},
+            ):
+                current += float(t.get("total") or 0)
+        completed = current >= float(ch["target"])
+        rec = {
+            "challengeId": ch["id"], "customerId": customer_id,
+            "current": current, "target": ch["target"],
+            "progressPercent": min(100, round((current / max(1, ch["target"])) * 100)),
+            "completed": completed, "updatedAt": _now(),
+        }
+        if prog:
+            await db.customer_challenge_progress.update_one(
+                {"customerId": customer_id, "challengeId": ch["id"]},
+                {"$set": rec},
+            )
+        else:
+            rec["id"] = str(uuid.uuid4())
+            await db.customer_challenge_progress.insert_one(dict(rec))
+        if completed and not (prog or {}).get("rewarded"):
+            reward = ch.get("reward") or {}
+            if reward.get("type") == "points":
+                await db.customers.update_one({"id": customer_id}, {"$inc": {"loyaltyPoints": int(reward.get("value") or 0)}})
+            elif reward.get("type") == "voucher":
+                v = {
+                    "id": str(uuid.uuid4()), "customerId": customer_id,
+                    "sourceType": "loyalty_challenge", "sourceRef": ch["id"],
+                    "label": reward.get("label") or ch["name"],
+                    "valueType": "amount", "value": float(reward.get("value") or 0),
+                    "status": "active", "createdAt": _now(),
+                }
+                await db.vouchers.insert_one(dict(v))
+            await db.customer_challenge_progress.update_one(
+                {"customerId": customer_id, "challengeId": ch["id"]},
+                {"$set": {"rewarded": True, "rewardedAt": _now()}},
+            )
+        challenge_progress.append(rec)
+
+    return {"awardedBadges": awarded_badges, "awardedMilestones": awarded_milestones,
+            "challengeProgress": challenge_progress}
+
+
+async def get_customer_progress(customer_id: str) -> Dict[str, Any]:
+    await _ensure_seeded()
+    customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+    if not customer:
+        return {"error": "customer not found"}
+
+    # Tier calculation
+    tiers = await db.loyalty_tiers.find({}, {"_id": 0}).sort("minPoints", 1).to_list(20)
+    points = int(customer.get("loyaltyPoints") or 0)
+    current_tier = tiers[0] if tiers else None
+    next_tier = None
+    for t in tiers:
+        if points >= t["minPoints"]:
+            current_tier = t
+        elif not next_tier:
+            next_tier = t
+
+    tier_progress = None
+    if current_tier and next_tier:
+        span = max(1, next_tier["minPoints"] - current_tier["minPoints"])
+        prog = points - current_tier["minPoints"]
+        tier_progress = {
+            "current": current_tier["name"], "next": next_tier["name"],
+            "pointsNeeded": next_tier["minPoints"] - points,
+            "percent": max(0, min(100, round((prog / span) * 100))),
+        }
+    elif current_tier:
+        tier_progress = {"current": current_tier["name"], "next": None,
+                           "pointsNeeded": 0, "percent": 100}
+
+    # Earned badges + all badge catalog
+    catalog = await db.loyalty_badges.find({}, {"_id": 0}).to_list(200)
+    earned_badges = await db.customer_badges.find(
+        {"customerId": customer_id}, {"_id": 0},
+    ).to_list(200)
+    earned_ids = {b["badgeId"] for b in earned_badges}
+    badge_view = [{**b, "earned": b["id"] in earned_ids} for b in catalog]
+
+    # Milestones
+    miles = await db.loyalty_milestones.find({}, {"_id": 0}).sort("order", 1).to_list(200)
+    achieved = await db.customer_milestones.find(
+        {"customerId": customer_id}, {"_id": 0},
+    ).to_list(200)
+    achieved_ids = {m["milestoneId"] for m in achieved}
+    milestone_view = []
+    for m in miles:
+        actual = _customer_metric(customer, m["metric"])
+        milestone_view.append({
+            **m, "achieved": m["id"] in achieved_ids,
+            "current": actual,
+            "progressPercent": min(100, round((actual / max(1, m["threshold"])) * 100)),
+        })
+
+    # Active challenges
+    now = _now()
+    challenges = await db.loyalty_challenges.find(
+        {"active": True, "startDate": {"$lte": now}, "endDate": {"$gte": now}},
+        {"_id": 0},
+    ).to_list(50)
+    prog_rows = await db.customer_challenge_progress.find(
+        {"customerId": customer_id}, {"_id": 0},
+    ).to_list(100)
+    prog_map = {p["challengeId"]: p for p in prog_rows}
+    challenge_view = []
+    for ch in challenges:
+        p = prog_map.get(ch["id"]) or {"current": 0, "progressPercent": 0, "completed": False}
+        challenge_view.append({**ch, **p})
+
+    return {
+        "customerId": customer_id,
+        "customerName": customer.get("name"),
+        "points": points,
+        "tier": current_tier and current_tier["name"],
+        "tierProgress": tier_progress,
+        "badges": badge_view,
+        "milestones": milestone_view,
+        "challenges": challenge_view,
+    }
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# HTTP endpoints
+# ═════════════════════════════════════════════════════════════════════════
+@router.get("/badges")
+async def list_badges(_: dict = Depends(get_user)):
+    await _ensure_seeded()
+    return await db.loyalty_badges.find({}, {"_id": 0}).to_list(200)
+
+
+@router.get("/milestones")
+async def list_milestones(_: dict = Depends(get_user)):
+    await _ensure_seeded()
+    return await db.loyalty_milestones.find({}, {"_id": 0}).sort("order", 1).to_list(200)
+
+
+@router.get("/challenges")
+async def list_challenges(active_only: bool = True, _: dict = Depends(get_user)):
+    q: Dict[str, Any] = {}
+    if active_only:
+        now = _now()
+        q = {"active": True, "startDate": {"$lte": now}, "endDate": {"$gte": now}}
+    return await db.loyalty_challenges.find(q, {"_id": 0}).sort("startDate", -1).to_list(50)
+
+
+@router.post("/challenges")
+async def create_challenge(body: dict, user: dict = Depends(require_owner_or_manager)):
+    required = {"name", "metric", "target", "startDate", "endDate"}
+    if not required.issubset(body.keys()):
+        raise HTTPException(400, f"required: {sorted(required)}")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": body["name"],
+        "description": body.get("description", ""),
+        "metric": body["metric"],
+        "target": float(body["target"]),
+        "startDate": body["startDate"],
+        "endDate": body["endDate"],
+        "reward": body.get("reward") or {},
+        "active": True,
+        "createdBy": user.get("email"),
+        "createdAt": _now(),
+    }
+    await db.loyalty_challenges.insert_one(dict(doc))
+    return doc
+
+
+@router.delete("/challenges/{cid}")
+async def delete_challenge(cid: str, _: dict = Depends(require_owner_or_manager)):
+    r = await db.loyalty_challenges.delete_one({"id": cid})
+    if not r.deleted_count:
+        raise HTTPException(404, "not found")
+    return {"deleted": True}
+
+
+@router.get("/progress/{customer_id}")
+async def get_progress(customer_id: str, _: dict = Depends(get_user)):
+    return await get_customer_progress(customer_id)
+
+
+@router.post("/evaluate/{customer_id}")
+async def evaluate(customer_id: str, _: dict = Depends(get_user)):
+    return await evaluate_customer(customer_id)
