@@ -404,6 +404,22 @@ async def delete_challenge(cid: str, _: dict = Depends(require_owner_or_manager)
     return {"deleted": True}
 
 
+@router.patch("/challenges/{cid}")
+async def update_challenge(cid: str, body: dict, _: dict = Depends(require_owner_or_manager)):
+    allowed = {"name", "description", "target", "startDate", "endDate", "reward", "active"}
+    update = {k: v for k, v in body.items() if k in allowed}
+    if not update:
+        raise HTTPException(400, "no updatable fields provided")
+    update["updatedAt"] = _now()
+    r = await db.loyalty_challenges.find_one_and_update(
+        {"id": cid}, {"$set": update}, return_document=True,
+    )
+    if not r:
+        raise HTTPException(404, "not found")
+    r.pop("_id", None)
+    return r
+
+
 @router.get("/progress/{customer_id}")
 async def get_progress(customer_id: str, _: dict = Depends(get_user)):
     return await get_customer_progress(customer_id)

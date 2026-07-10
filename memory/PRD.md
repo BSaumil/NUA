@@ -1,4 +1,66 @@
-# NUA POS — PRD v32.0 (Ash Scheduler · Ash Chat · Modular Finance)
+# NUA POS — PRD v33.0 (Ash v3 Personas · Planner · Memory · Loyalty 2.0)
+
+
+## v33.0 — Iteration 55 (10 Feb 2026): Ash v3 Phases 4–19 + Loyalty 2.0
+
+### Shipped
+
+**Ash Personas** — `services/ash_personas.py`, `services/ash_agent.py`
+- 6 specialised Ash identities: **Executive** (all modules, chief-of-staff), **Finance** (CFO), **Ops** (kitchen/inventory), **HR** (people), **Marketing** (CMO), **Guest** (hospitality).
+- Each persona owns a tone, focus, colour, icon and a module allowlist that filters which of the 25 tools it may invoke.
+- Agent loop now accepts `persona` param — swaps system prompt and refuses tools outside remit ("switch to Ash Finance").
+- Endpoints: `GET /api/ash/personas`, `POST /api/ash/agent {message, persona}` returns `persona` + `personaLabel`.
+- Frontend `components/AshChat.jsx` — persona picker in the FAB header, colour-themed FAB icon per persona, per-persona suggestion prompts, session resets on persona swap.
+- **Bug fix** — `_extract_json` in `ash_agent.py` now has a regex last-resort so the `{"action":"final","reply":"..."}` envelope can never leak into the user-visible reply.
+
+**Ash Planner** — `services/ash_planner.py`, `pages/AshPlans.jsx`
+- `POST /api/ash/plans/generate {goal, persona?}` — GPT-5.2 proposes a 2-6 step plan, each step maps to a real tool from the catalog (steps referencing unknown tools are marked `invalid` and dropped from execution).
+- Persisted lifecycle: `proposed → executing → awaiting_approvals → completed | partial_failed | rejected`.
+- Endpoints: `GET /plans`, `GET /plans/{id}`, `POST /plans/{id}/approve` (walks all pending steps), `POST /plans/{id}/reject`, `POST /plans/{id}/steps/{idx}/approve`, `POST /plans/{id}/steps/{idx}/reject`.
+- Every step goes through the tool permission gate — write tools respect the same Approval Queue as manual invocations.
+
+**Ash Plan Simulation ("Digital Twin")** — `services/ash_planner.py::simulate_plan`
+- `POST /plans/{id}/simulate` — dry-run: read-only steps execute normally, write steps are DESCRIBED not executed.
+- GPT-5.2 writes a projected-impact narrative; UI shows per-step simulation in an expandable panel before Approve.
+
+**Ash Memory** — `services/ash_memory.py`, `pages/AshMemory.jsx`
+- Long-term structured store: `{scope, kind, text, confidence, source, usageCount}` where `kind ∈ {preference,pattern,fact,note}` and scope is `global | customer:<id> | staff:<id> | product:<id> | supplier:<id>`.
+- `remember()` is upsert-style: same `(scope, text)` reinforces (+0.1 confidence, no duplicates).
+- Memories are injected into every agent turn via `context_pack(scope)` — Ash grounds every reply in what it's already been taught.
+- Endpoints: `GET /ash/memory`, `GET /ash/memory/scopes`, `POST /ash/memory`, `DELETE /ash/memory/{id}` + `remember` and `recall` tools added to `ash_tools` (both auto-permission).
+- UI: teach-new-fact dialog, kind/scope filters, scope chips with counts.
+
+**Ash Permissions UI** — `pages/AshPermissions.jsx`
+- Dedicated permissions surface (was previously a tab in Command Center) — module-grouped cards, live counts of auto/approval/disabled, search, module & risk filters, per-module batch-set buttons ("All approval", "All disabled").
+- Same PUT `/ash/tools/{name}/permission` backend as before.
+
+**Loyalty 2.0** — `routes/loyalty_v2.py`, `pages/LoyaltyProgress.jsx`
+- **Badges** (10 seeded): First Visit, Regular, Loyalist, Century Club, Big Spender, VIP Whale, Early Bird, Wine Buff, Community Builder, Birthday Guest — each with icon, colour, condition string, awarded points.
+- **Milestones** (6 seeded): 5/25 visits and $100/$500/$2000/$5000 spent with tiered rewards (voucher | points | tier bump).
+- **Seasonal Challenges** — owner-authored, time-boxed missions (`metric`, `target`, `startDate`, `endDate`, `reward`); per-customer progress tracked in `customer_challenge_progress`.
+- **Tier progression** — server computes current tier, next tier, points-needed, percent-complete for the UI hero card.
+- `POST /loyalty/v2/evaluate/{cid}` idempotent — composite keys `(customerId, badgeId)` and `(customerId, milestoneId)` prevent double-award.
+- Endpoints: `GET/POST/PATCH/DELETE /loyalty/v2/challenges`, `GET /loyalty/v2/progress/{cid}`, `POST /loyalty/v2/evaluate/{cid}`, `GET /loyalty/v2/{badges,milestones}`.
+
+### Verification (Iteration 55)
+- Backend: **32/32 pytest cases pass** (~91s) at `/app/backend/tests/test_iteration55_p0_p2.py`.
+- Personas / Planner / Simulation / Memory / Permissions / Loyalty 2.0 all green. Zero regressions on Ash insights, health-score, briefing, chat, approvals, finance, audit, HQ.
+- JSON-envelope leak from iter54 confirmed FIXED — `reply` field is always clean prose.
+
+### Files added
+- `/app/backend/services/ash_personas.py`
+- `/app/backend/services/ash_planner.py`
+- `/app/backend/services/ash_memory.py`
+- `/app/backend/routes/loyalty_v2.py`
+- `/app/frontend/src/pages/AshPlans.jsx`
+- `/app/frontend/src/pages/AshPermissions.jsx`
+- `/app/frontend/src/pages/AshMemory.jsx`
+- `/app/frontend/src/pages/LoyaltyProgress.jsx`
+
+### Test credentials
+- `owner@nuva.com` / `NuvaOwner2026!`
+
+---
 
 
 ## v32.0 — Iteration 53 (10 Feb 2026): Ash goes always-on + conversational; Finance page modularised
