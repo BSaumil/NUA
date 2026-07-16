@@ -6,70 +6,135 @@ import uuid, os, base64
 
 router = APIRouter()
 
-# ============ AI MENU IMPORT (PDF/JPEG) ============
+# ============ AI MENU IMPORT (PDF/JPEG/PNG) ============
 @router.post("/menu/ai-import")
 async def ai_import_menu(data: dict, _: dict = Depends(require_owner_or_manager)):
-    """AI extracts menu items from uploaded image/PDF data (base64 encoded)"""
+    """AI extracts menu items from an uploaded image (JPG/PNG/WebP) or PDF.
 
-    file_data = data.get("fileData", "")  # base64 encoded
-    file_type = data.get("fileType", "image")  # image or pdf
+    Frontend sends `fileData` as base64 (data URL prefix stripped by caller or
+    still included — we normalise) and `fileType` = "image" | "pdf".
+    - Images: sent as a multimodal ImageContent so GPT-5.2 can actually SEE the
+      menu. (The previous implementation passed the raw base64 characters as
+      text, which is why it "never fetched anything".)
+    - PDFs:   text extracted with pypdf then fed to the LLM as plain text.
+    """
+    import json as _json
+    file_data = data.get("fileData", "") or ""
+    file_type = (data.get("fileType") or "image").lower()
+
+    # Normalise base64 — strip any leading data URL prefix
+    if "," in file_data and file_data.startswith("data:"):
+        file_data = file_data.split(",", 1)[1]
+    if not file_data:
+        return {"items": [], "count": 0, "message": "No file data received"}
+
+    system_msg = (
+        "You are a menu extraction expert. Extract EVERY menu item you can see.\n"
+        "Return ONLY a JSON array — no markdown fences, no explanations — with this exact shape:\n"
+        '[{"name": "Item Name", "category": "Category", "price": 12.50, "cost": 4.00, "description": "Brief desc"}]\n'
+        "Category must be one of: Beverages, Food, Bakery, Alcohol, Desserts, Appetizers, Mains, Sides, Coffee, Wine, Cocktails.\n"
+        "If cost is not on the menu, estimate at 30–35% of price. Include description only if the menu shows one."
+    )
 
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
         api_key = os.environ.get("EMERGENT_LLM_KEY", "")
-        chat = LlmChat(api_key=api_key, session_id=f"menu-import-{uuid.uuid4()}", system_message="""You are a menu extraction expert. Extract ALL menu items from the provided menu description.
-Return ONLY a JSON array of items with this exact format (no markdown, no explanation, just pure JSON):
-[{"name": "Item Name", "category": "Category", "price": 12.50, "cost": 4.00, "description": "Brief desc"}]
-Categories should be one of: Beverages, Food, Bakery, Alcohol, Desserts, Appetizers, Mains, Sides.
-Estimate cost at roughly 30-35% of price if not available.""")
-        chat.with_model("openai", "gpt-5.2")
+        if not api_key:
+            return {"items": [], "count": 0, "message": "LLM key not configured"}
 
-        prompt = f"Extract all menu items from this {file_type} menu. The file content is provided as base64. Parse it and return the JSON array of items:\n\n{file_data[:5000]}"
-        if len(file_data) > 5000:
-            prompt = f"Here is a menu to parse. Extract all items with their names, categories, prices. Estimate costs at 30-35% of price:\n\n{file_data[:3000]}"
+        chat = LlmChat(
+            api_key=api_key,
+            session_id=f"menu-import-{uuid.uuid4()}",
+            system_message=system_msg,
+        ).with_model("openai", "gpt-5.2")
 
-        msg = UserMessage(text=prompt)
-        response = await chat.send_message(msg)
+        if file_type == "pdf":
+            # Extract text from PDF then send as plain text
+            try:
+                import pypdf, io
+                pdf_bytes = base64.b64decode(file_data)
+                reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
+                pdf_text = "\n\n".join((page.extract_text() or "") for page in reader.pages)
+                pdf_text = pdf_text.strip()
+                if not pdf_text:
+                    return {"items": [], "count": 0, "message": "Could not read any text from the PDF. Try uploading a photo of the menu instead."}
+                user_msg = UserMessage(
+                    text=f"Parse this menu text and return the JSON array of items:\n\n{pdf_text[:12000]}",
+                )
+            except Exception as pdf_err:
+                return {"items": [], "count": 0, "message": f"PDF parse failed: {pdf_err}"}
+        else:
+            # Image — pass through multimodal vision so the model can actually SEE it
+            user_msg = UserMessage(
+                text="Extract every menu item from this image and return the JSON array.",
+                file_contents=[ImageContent(image_base64=file_data)],
+            )
 
-        # Parse the JSON response
-        import json
-        items = []
+        response = await chat.send_message(user_msg)
+
+        # Parse the JSON response — strip common fence patterns
+        items: list = []
+        text = (response or "").strip()
+        if text.startswith("```"):
+            # remove leading fence + optional language tag
+            text = text.split("```", 2)[1] if text.count("```") >= 2 else text.lstrip("`")
+            if text.lstrip().lower().startswith("json"):
+                text = text.split("\n", 1)[1] if "\n" in text else text[4:]
+            text = text.rsplit("```", 1)[0].strip()
         try:
-            # Try to find JSON array in the response
-            text = response.strip()
-            if text.startswith("```"):
-                text = text.split("```")[1]
-                if text.startswith("json"):
-                    text = text[4:]
-            items = json.loads(text)
-        except:
-            # If parsing fails, return the raw response for user to see
-            return {"items": [], "rawResponse": response, "message": "Could not auto-parse. Please check the raw response."}
+            parsed = _json.loads(text)
+            if isinstance(parsed, list):
+                items = parsed
+            elif isinstance(parsed, dict) and isinstance(parsed.get("items"), list):
+                items = parsed["items"]
+        except Exception:
+            return {"items": [], "count": 0, "rawResponse": response, "message": "Could not auto-parse the LLM response. See rawResponse."}
+
+        if not items:
+            return {"items": [], "count": 0, "message": "No menu items detected. Try a clearer photo or a different page."}
 
         # Create products in DB
+        from services.entity_service import stamped_insert
         created = []
         for item in items:
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            try:
+                price = float(item.get("price") or 0)
+            except (TypeError, ValueError):
+                price = 0.0
+            try:
+                cost = float(item.get("cost") or 0) or round(price * 0.35, 2)
+            except (TypeError, ValueError):
+                cost = round(price * 0.35, 2)
+            category = str(item.get("category") or "Food").strip() or "Food"
+            prod_id = str(uuid.uuid4())
             product = {
-                "id": str(uuid.uuid4()),
-                "name": item.get("name", "Unknown"),
-                "category": item.get("category", "Food"),
-                "price": float(item.get("price", 0)),
-                "cost": float(item.get("cost", 0)),
+                "id": prod_id,
+                "name": name,
+                "category": category,
+                "price": price,
+                "cost": cost,
                 "stock": 100,
-                "sku": f"{item.get('category', 'FOO')[:3].upper()}-{str(uuid.uuid4())[:4].upper()}",
-                "image": "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=200",
+                "sku": f"AI-{prod_id[:8].upper()}",
+                "image": "",
                 "gstRate": 10.0,
-                "description": item.get("description", ""),
-                "createdAt": datetime.now(timezone.utc).isoformat(),
-                "updatedAt": datetime.now(timezone.utc).isoformat(),
+                "description": str(item.get("description") or ""),
+                "active": True,
+                "eightySixed": False,
             }
-            await db.products.insert_one(product)
-            product.pop("_id", None)
-            created.append(product)
+            saved = await stamped_insert("products", product, entity_type="product")
+            saved.pop("_id", None)
+            created.append(saved)
 
-        return {"items": created, "count": len(created), "message": f"Successfully imported {len(created)} menu items"}
+        return {
+            "items": created,
+            "count": len(created),
+            "message": f"Successfully imported {len(created)} menu items",
+        }
     except Exception as e:
-        return {"items": [], "error": str(e), "message": "AI extraction failed - check your file format"}
+        return {"items": [], "count": 0, "error": str(e), "message": f"AI extraction failed: {e}"}
 
 # ============ PRICE ADJUSTMENT (Bulk) ============
 @router.post("/menu/price-adjust")

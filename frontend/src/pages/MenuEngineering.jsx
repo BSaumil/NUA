@@ -38,21 +38,40 @@ export default function MenuEngineering() {
     const file = e.target.files[0];
     if (!file) return;
     setImportLoading(true);
+    setImportResult(null);
     try {
       const reader = new FileReader();
       reader.onload = async (ev) => {
-        const base64 = ev.target.result.split(',')[1] || ev.target.result;
-        const fileType = file.type.includes('pdf') ? 'pdf' : 'image';
-        const res = await menuFeaturesAPI.aiImportMenu({ fileData: base64, fileType });
-        setImportResult(res.data);
-        if (res.data.count > 0) {
-          toast.success(`Imported ${res.data.count} menu items!`);
-          analyticsAPI.getMenuEngineering().then(r => setData(r.data)).catch(() => {});
+        try {
+          const raw = ev.target.result || '';
+          // Strip the data URL prefix — backend also normalises but we keep the
+          // payload small.
+          const base64 = typeof raw === 'string' && raw.includes(',') ? raw.split(',')[1] : raw;
+          const fileType = file.type?.includes('pdf') || /\.pdf$/i.test(file.name) ? 'pdf' : 'image';
+          const res = await menuFeaturesAPI.aiImportMenu({ fileData: base64, fileType });
+          setImportResult(res.data);
+          if (res.data?.count > 0) {
+            toast.success(`Imported ${res.data.count} menu items!`);
+            analyticsAPI.getMenuEngineering().then(r => setData(r.data)).catch(() => {});
+          } else {
+            toast.error(res.data?.message || 'No items detected');
+          }
+        } catch (err) {
+          toast.error(err?.response?.data?.detail || 'Import failed');
+          setImportResult({ count: 0, message: err?.message || 'Import failed' });
+        } finally {
+          setImportLoading(false);
         }
-        setImportLoading(false);
       };
+      reader.onerror = () => { setImportLoading(false); toast.error('Could not read file'); };
       reader.readAsDataURL(file);
-    } catch { setImportLoading(false); toast.error('Failed to import'); }
+    } catch {
+      setImportLoading(false);
+      toast.error('Failed to import');
+    } finally {
+      // Allow re-selecting the same file
+      e.target.value = '';
+    }
   };
 
   const handlePriceAdjust = async () => {
@@ -225,7 +244,7 @@ export default function MenuEngineering() {
             <div className="border-2 border-dashed rounded-lg p-6 text-center">
               <Upload size={32} className="mx-auto mb-2 text-gray-400" />
               <p className="text-sm text-gray-600 mb-2">Drop your menu file here or click to browse</p>
-              <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={handleFileUpload} className="w-full text-sm" data-testid="menu-file-input" />
+              <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,image/*,application/pdf" onChange={handleFileUpload} className="w-full text-sm" data-testid="menu-file-input" />
             </div>
             {importLoading && <div className="flex items-center justify-center gap-2 text-sm text-gray-500"><Loader2 size={16} className="animate-spin" /> AI is analyzing your menu...</div>}
             {importResult && (

@@ -1,4 +1,33 @@
-# NUA POS — PRD v36.1 (P0 dashboard products/categories repair)
+# NUA POS — PRD v36.2 (AI Menu Import fix · CSV Import UX polish)
+
+
+## v36.2 — Iteration 60 (Feb 2026): AI Menu Import + CSV Import fixes
+
+### Shipped
+
+**AI Menu Import — actually works now** (`routes/menu_features.py`, `MenuEngineering.jsx`)
+- Root cause: the endpoint was passing a base64 image string as **plain text** to the LLM. GPT can't "see" a raw base64 blob — it saw random characters and returned nothing.
+- Fix: images now travel via `emergentintegrations.ImageContent(image_base64=…)` so GPT-5.2 uses vision on the real menu. PDFs are handed to `pypdf` for text extraction first, then the extracted text is sent to the LLM.
+- Extra hardening: strips `data:` URL prefix, tolerates JSON returned inside code fences, per-item defensive parsing, `stamped_insert` writes so every AI-created product lands in the audit trail. UI shows an error toast if `count == 0` instead of silent failure.
+- Verified: 9 items extracted from a synthetic menu image (Flat White $5.20, Cappuccino $5.20, Long Black $4.80, Chai Latte $5.40, Beef Burger $16.50, Chicken Schnitzel $24.50, Fish & Chips $22.00, Chocolate Cake $8.50, Lemon Tart $7.80).
+
+**CSV Import UX — no more silent failures** (`pages/Products.jsx`)
+- Root cause: worked but felt broken — `alert("Imported undefined products")` on any error, `accept=".csv"` sometimes greyed out valid `.csv` files, no feedback on click failure.
+- Fix: swapped `alert()` for `sonner` toasts (`loading` + `success` / `error`), quote-aware CSV splitter, validates `name` column, broadened `accept` to `.csv,text/csv,application/vnd.ms-excel,text/plain`, safe optional-chaining on the button click.
+- Verified: 2/2 products imported → toast "Imported 2 of 2 products"; malformed CSV → toast "CSV must include a 'name' column".
+
+### Deps
+- `pypdf==6.14.2` added (PDF text extraction for AI menu import).
+
+### Backlog (unchanged)
+- **P1** Real Meta / TikTok / X OAuth (needs client IDs/secrets) — on hold per user.
+- **P1** SendGrid / Twilio production keys — on hold per user.
+- **P1** Hardware Health polish.
+- **P2** `ash` → `nua` backend namespace refactor.
+- **P2** `@dnd-kit` tablet-friendly DnD for Social Calendar.
+- **P2** Channel Menus per-channel pause/resume + schedule toggle UI.
+- **P2** `x-ai-parsed-fallback` header on AI endpoints.
+- **P2** Move `ai_weekly_plan` to a background task.
 
 
 ## v36.1 — Iteration 59 (Feb 2026): Dashboard products & categories repair
