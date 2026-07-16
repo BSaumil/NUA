@@ -70,7 +70,7 @@ async def start_kitchen_order(order_id: str, _: dict = Depends(get_user)):
 
 
 @router.post("/kitchen/orders/{order_id}/ready")
-async def mark_order_ready(order_id: str, _: dict = Depends(get_user)):
+async def mark_order_ready(order_id: str, user: dict = Depends(get_user)):
     result = await db.kitchen_orders.find_one_and_update(
         {"id": order_id}, {"$set": {"status": "ready", "readyAt": _now()}},
         return_document=True,
@@ -78,6 +78,23 @@ async def mark_order_ready(order_id: str, _: dict = Depends(get_user)):
     if not result:
         raise HTTPException(status_code=404, detail="Order not found")
     result.pop("_id", None)
+    try:
+        from services import notification_service as ns
+        server_email = result.get("serverId") or result.get("createdByEmail")
+        if server_email:
+            await ns.send(email=server_email, kind="kitchen", severity="info",
+                            title=f"Table {result.get('tableNumber') or '?'} — order ready",
+                            body=f"All items are ready to run for order {order_id[:8]}.",
+                            link=f"/kitchen?order={order_id}",
+                            data={"orderId": order_id, "tableNumber": result.get("tableNumber")})
+        else:
+            await ns.send(role="server", topic="kitchen.ready", kind="kitchen",
+                            title=f"Table {result.get('tableNumber') or '?'} — order ready",
+                            body=f"Order {order_id[:8]} is ready to run.",
+                            link=f"/kitchen?order={order_id}",
+                            data={"orderId": order_id})
+    except Exception:
+        pass
     return result
 
 
@@ -142,6 +159,24 @@ async def fire_course(order_id: str, course: int, user: dict = Depends(get_user)
     if not result:
         raise HTTPException(status_code=404, detail="Order not found")
     result.pop("_id", None)
+    try:
+        from services import notification_service as ns
+        server_email = result.get("serverId") or result.get("createdByEmail")
+        course_label = {1: "Starter", 2: "Main", 3: "Dessert", 4: "Coffee"}.get(course, f"Course {course}")
+        if server_email:
+            await ns.send(email=server_email, kind="kitchen", severity="info",
+                            title=f"Table {result.get('tableNumber') or '?'} — {course_label} fired",
+                            body=f"Kitchen just fired {course_label} for your order.",
+                            link=f"/kitchen?order={order_id}",
+                            data={"orderId": order_id, "course": course})
+        else:
+            await ns.send(role="server", topic="kitchen.fire", kind="kitchen",
+                            title=f"Table {result.get('tableNumber') or '?'} — {course_label} fired",
+                            body=f"Kitchen just fired {course_label}.",
+                            link=f"/kitchen?order={order_id}",
+                            data={"orderId": order_id, "course": course})
+    except Exception:
+        pass
     return result
 
 

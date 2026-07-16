@@ -40,6 +40,7 @@ from routes.v15_features import router as v15_router
 from routes.loyalty_engine import router as loyalty_engine_router
 from routes.loyalty_v2 import router as loyalty_v2_router
 from routes.measured_inventory import router as measured_inventory_router
+from routes.notifications import router as notifications_router
 from routes.phase_ef import router as phase_ef_router
 from routes.phase_ef_wave2 import router as phase_ef_wave2_router
 from routes.v25_suite import router as v25_suite_router
@@ -79,6 +80,7 @@ api_router.include_router(settings_router)
 api_router.include_router(loyalty_router)
 api_router.include_router(loyalty_v2_router)
 api_router.include_router(measured_inventory_router)
+api_router.include_router(notifications_router)
 api_router.include_router(public_router)
 api_router.include_router(table_ordering_router)
 api_router.include_router(integrations_router)
@@ -223,6 +225,15 @@ async def startup():
             logger.info("Chart of Accounts seeded: %s new accounts", r["seeded"])
     except Exception as exc:
         logger.warning("COA seed skipped: %s", exc)
+    # Seed alcohol catalog + measured stock (idempotent)
+    try:
+        from services.alcohol_seeder import seed_alcohol_catalog
+        r = await seed_alcohol_catalog()
+        if r.get("categoriesInserted") or r.get("productsInserted"):
+            logger.info("Alcohol catalog seeded: +%s categories, +%s products, +%s stock-units",
+                          r["categoriesInserted"], r["productsInserted"], r["stockUnitsInserted"])
+    except Exception as exc:
+        logger.warning("Alcohol seed skipped: %s", exc)
     # Start Ash background scheduler
     try:
         from services.ash_scheduler import start_scheduler

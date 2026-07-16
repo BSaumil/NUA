@@ -210,6 +210,8 @@ async def chat_history(session_id: str, limit: int = 40, _: dict = Depends(get_u
 # Ash v3.0 — Tool-calling Agent, Health Score, Daily Briefing, Permissions
 # ═════════════════════════════════════════════════════════════════════════
 from services import ash_tools, ash_agent, health_score, ash_briefing, ash_personas, ash_planner, ash_memory
+from services import approval_service
+import json
 
 
 # ─── Memory ───────────────────────────────────────────────────────────────
@@ -309,6 +311,109 @@ async def reject_step(plan_id: str, idx: int, body: dict, user: dict = Depends(r
     return await ash_planner.reject_step(
         plan_id, idx, actor=user.get("email") or "owner", reason=body.get("reason"),
     )
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# NUA Marketing — autonomous campaign draft → Approvals
+# ═════════════════════════════════════════════════════════════════════════
+@router.post("/marketing/draft-campaign")
+async def draft_campaign(body: dict, user: dict = Depends(require_owner_or_manager)):
+    """Have NUA Marketing draft a campaign end-to-end (segment, channel,
+    copy, offer, dates) and enqueue it in the Approval Queue. The owner
+    reviews the payload and clicks Approve to fire it — nothing goes out
+    without human sign-off."""
+    goal = (body.get("goal") or "").strip() or "Improve engagement over the next 14 days"
+    context = body.get("context") or {}
+
+    # ── Gather grounding data ──
+    try:
+        churning = await db.customers.count_documents({"totalVisits": {"$gte": 3}})
+    except Exception:
+        churning = 0
+    try:
+        slow_products = await db.products.find(
+            {"stock": {"$gt": 0}}, {"_id": 0, "name": 1, "stock": 1, "category": 1},
+        ).sort("stock", -1).limit(5).to_list(5)
+    except Exception:
+        slow_products = []
+
+    prompt = (
+        "You are NUA Marketing. Draft ONE campaign as strict JSON (no markdown).\n"
+        f"GOAL: {goal}\n"
+        f"AT-RISK COHORT: ~{churning} regulars\n"
+        f"SLOW INVENTORY: {json.dumps(slow_products)[:600]}\n"
+        f"EXTRA CONTEXT: {json.dumps(context)[:400]}\n\n"
+        "Fields required in your JSON:\n"
+        "  name, objective, segment (visits>=X or lapsed_30d etc.),\n"
+        "  channel (sms|email|push|mixed), offer (voucher amount + label),\n"
+        "  copy: {subject?, sms?, email?}, startDate (ISO), endDate (ISO),\n"
+        "  expectedReach, expectedRedemption, expectedRevenue, risk (low|med|high),\n"
+        "  reasoning (why this campaign now)."
+    )
+
+    parsed: Optional[dict] = None
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        import os as _os
+        key = _os.environ.get("EMERGENT_LLM_KEY")
+        if key:
+            chat = LlmChat(api_key=key,
+                            session_id=f"ash-marketing-{_uuid.uuid4()}",
+                            system_message="You are NUA Marketing — a CMO who ships campaigns.")\
+                .with_model("openai", "gpt-5.2")
+            raw = await chat.send_message(UserMessage(text=prompt))
+            parsed = ash_agent._extract_json(raw)
+    except Exception:
+        parsed = None
+
+    if not parsed:
+        # Deterministic fallback — never fail the endpoint
+        parsed = {
+            "name": "Autumn Regulars Warm-Up",
+            "objective": goal,
+            "segment": "visits>=3 AND lapsed_30d",
+            "channel": "sms",
+            "offer": {"type": "voucher", "value": 15, "label": "$15 comeback voucher"},
+            "copy": {"sms": "We miss you at NUA. Here's $15 on your next visit — this weekend only."},
+            "startDate": _now(),
+            "endDate": _now(),
+            "expectedReach": max(1, churning),
+            "expectedRedemption": max(1, churning // 5),
+            "expectedRevenue": max(1, churning // 5) * 40,
+            "risk": "low",
+            "reasoning": "LLM unavailable — deterministic warm-up template.",
+        }
+
+    # Enqueue in Approvals for owner sign-off
+    approval = await approval_service.enqueue_approval(
+        action_type="marketing.launch_campaign",
+        params=parsed,
+        requested_by=user.get("email") or "ash-marketing",
+        source="ash_marketing",
+        context={
+            "confidence": 0.75,
+            "reasoning": {
+                "problem": "Retention decay in the regulars cohort.",
+                "evidence": f"~{churning} regulars, slow inventory: {[p.get('name') for p in slow_products]}",
+                "alternatives": ["Do nothing", "Broader push", "Per-tier tailored offers"],
+                "risk": parsed.get("risk", "low"),
+                "expectedImpact": f"${parsed.get('expectedRevenue', 0)} incremental revenue",
+                "rollback": "Cancel the campaign before endDate; unclaimed vouchers auto-expire.",
+            },
+        },
+    )
+
+    try:
+        from services import notification_service as ns
+        await ns.send(role="owner", kind="marketing", severity="notice",
+                        title=f"NUA drafted campaign: {parsed.get('name')}",
+                        body=f"Expected ${parsed.get('expectedRevenue', 0)} revenue · risk {parsed.get('risk')}",
+                        link="/approvals",
+                        data={"approvalId": approval.get("id")})
+    except Exception:
+        pass
+
+    return {"approval": approval, "campaign": parsed}
 
 
 @router.post("/agent")

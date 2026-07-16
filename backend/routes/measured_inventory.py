@@ -166,6 +166,62 @@ async def product_summary(product_id: str, _: dict = Depends(get_user)):
     }
 
 
+@router.get("/beverage-margin/{product_id}")
+async def beverage_margin(product_id: str, _: dict = Depends(get_user)):
+    """True margin for a measured beverage product: pour cost vs sell price.
+    Falls back with a `measured: False` payload for non-measured products
+    so the UI can show recipe cost instead."""
+    prod = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not prod:
+        raise HTTPException(404, "product not found")
+    cost = await mi.beverage_cost(product_id)
+    if not cost:
+        return {"measured": False, "productId": product_id,
+                "price": float(prod.get("price") or 0)}
+    price = float(prod.get("price") or 0)
+    margin = price - cost["costPerPour"]
+    margin_pct = (margin / price) if price > 0 else 0.0
+    return {"measured": True, "productId": product_id,
+            "productName": prod.get("name"), "price": price,
+            "cost": cost["costPerPour"],
+            "poursPerContainer": cost["poursPerContainer"],
+            "containerCost": cost["containerCost"],
+            "margin": round(margin, 2),
+            "marginPct": round(margin_pct, 4)}
+
+
+@router.get("/beverage-margin")
+async def beverage_margin_all(_: dict = Depends(get_user)):
+    """P&L-ready roll-up of every measured beverage's margin. Feeds NUA
+    Finance and the Menu Engineering matrix so beverages sit on the same
+    data as food items."""
+    variants = await db.sell_variants.find({"deletedAt": None}, {"_id": 0}).to_list(500)
+    seen: set = set()
+    rows = []
+    for v in variants:
+        if v["productId"] in seen:
+            continue
+        seen.add(v["productId"])
+        prod = await db.products.find_one({"id": v["productId"]}, {"_id": 0, "name": 1, "category": 1, "price": 1})
+        if not prod:
+            continue
+        c = await mi.beverage_cost(v["productId"])
+        if not c:
+            continue
+        price = float(prod.get("price") or 0)
+        margin = price - c["costPerPour"]
+        rows.append({
+            "productId": v["productId"], "productName": prod.get("name"),
+            "category": prod.get("category"), "price": price,
+            "costPerPour": c["costPerPour"],
+            "margin": round(margin, 2),
+            "marginPct": round((margin / price) if price > 0 else 0, 4),
+            "poursPerContainer": c["poursPerContainer"],
+        })
+    rows.sort(key=lambda x: x["marginPct"], reverse=True)
+    return rows
+
+
 @router.get("/open-containers/all")
 async def all_open_containers(_: dict = Depends(get_user)):
     """Every container currently open, decorated with its stock unit +

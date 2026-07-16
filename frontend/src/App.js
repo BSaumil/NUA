@@ -65,6 +65,7 @@ import Approvals from './pages/Approvals';
 import AuditLogUniversal from './pages/AuditLogUniversal';
 import HQDashboard from './pages/HQDashboard';
 import AshChat from './components/AshChat';
+import NotificationBell from './components/NotificationBell';
 import Temperature from './pages/Temperature';
 import EndOfDay from './pages/EndOfDay';
 import TipManagement from './pages/TipManagement';
@@ -122,6 +123,7 @@ function StaffLayout({ children }) {
       <div className="px-6 py-6 max-w-screen-2xl mx-auto">{children}</div>
       <BottomDock />
       <AshChat />
+      <NotificationBell />
     </div>
   );
 }

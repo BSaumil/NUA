@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { toast } from 'sonner';
 import {
   Award, RefreshCw, Sparkles, Coffee, Heart, Trophy, DollarSign, Crown, Sunrise,
-  Wine, Users, Gift, Search, Plus, Trash2, Lock, CheckCircle2, Target,
+  Wine, Users, Gift, Search, Plus, Trash2, Lock, CheckCircle2, Target, UserPlus,
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -118,6 +118,8 @@ export default function LoyaltyProgress() {
       <Tabs defaultValue="customer">
         <TabsList>
           <TabsTrigger value="customer" data-testid="tab-customer"><Award size={14} className="mr-1" /> Per-customer</TabsTrigger>
+          <TabsTrigger value="leaderboard" data-testid="tab-leaderboard"><Trophy size={14} className="mr-1" /> Leaderboard</TabsTrigger>
+          <TabsTrigger value="referrals" data-testid="tab-referrals"><UserPlus size={14} className="mr-1" /> Referrals</TabsTrigger>
           <TabsTrigger value="challenges" data-testid="tab-challenges"><Target size={14} className="mr-1" /> Challenges</TabsTrigger>
         </TabsList>
 
@@ -274,6 +276,14 @@ export default function LoyaltyProgress() {
               )}
             </div>
           </div>
+        </TabsContent>
+
+        <TabsContent value="leaderboard">
+          <LeaderboardPanel customers={customers} />
+        </TabsContent>
+
+        <TabsContent value="referrals">
+          <ReferralsPanel customers={customers} />
         </TabsContent>
 
         <TabsContent value="challenges">

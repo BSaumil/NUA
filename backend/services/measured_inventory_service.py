@@ -186,7 +186,37 @@ async def apply_wastage_to_container(open_container_id: str, amount: float,
                                   entity_type="open_container")
 
 
-# ─── Reorder-point helper for Ash Insight #11 ────────────────────────────
+async def beverage_cost(product_id: str) -> Optional[Dict[str, Any]]:
+    """True cost-per-pour for a measured product. Returns None for
+    non-measured products so callers can fall back to recipe cost."""
+    variant = await db.sell_variants.find_one(
+        {"productId": product_id, "deletedAt": None}, {"_id": 0},
+    )
+    if not variant:
+        return None
+    su = await db.stock_units.find_one({"id": variant["stockUnitId"]}, {"_id": 0})
+    if not su:
+        return None
+    try:
+        deduct_in_su_uom = await convert(float(variant["deductAmount"]), variant["uom"], su["uom"])
+    except ValueError:
+        return None
+    if deduct_in_su_uom <= 0:
+        return None
+    pours_per_container = float(su["totalMeasure"]) / deduct_in_su_uom
+    cost_per_pour = float(su["costPerUnit"]) / pours_per_container
+    return {
+        "costPerPour": round(cost_per_pour, 4),
+        "poursPerContainer": round(pours_per_container, 2),
+        "poursAmount": variant["deductAmount"],
+        "poursUom": variant["uom"],
+        "containerCost": su["costPerUnit"],
+        "containerMeasure": su["totalMeasure"],
+        "containerUom": su["uom"],
+    }
+
+
+
 async def reorder_available(product_id: str) -> Dict[str, Any]:
     """Return an equivalent whole-unit stock count for reorder logic.
 

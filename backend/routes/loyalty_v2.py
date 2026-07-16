@@ -210,6 +210,46 @@ async def evaluate_customer(customer_id: str) -> Dict[str, Any]:
                 pass
         awarded_milestones.append(rec)
 
+    # ── Notifications for freshly-earned badges/milestones ──
+    if awarded_badges or awarded_milestones:
+        try:
+            from services import notification_service as ns
+            cust_email = customer.get("email")
+            cust_name = customer.get("name") or "Guest"
+            for b in awarded_badges:
+                await ns.send(
+                    role="marketing", kind="loyalty", severity="info",
+                    title=f"{cust_name} earned {b['badgeName']}",
+                    body=f"Consider a congrats message — worth {b.get('pointsAwarded', 0)} bonus pts.",
+                    link=f"/loyalty-progress?customer={customer_id}",
+                    data={"customerId": customer_id, "badgeId": b["badgeId"]},
+                )
+                if cust_email:
+                    await ns.send(
+                        email=cust_email, kind="loyalty", severity="info",
+                        title=f"You just earned the {b['badgeName']} badge!",
+                        body=f"Thanks for being one of us. Enjoy {b.get('pointsAwarded', 0)} bonus points.",
+                        data={"badgeId": b["badgeId"]},
+                    )
+            for m in awarded_milestones:
+                reward_label = (m.get("reward") or {}).get("label", "reward")
+                await ns.send(
+                    role="marketing", kind="loyalty", severity="notice",
+                    title=f"{cust_name} hit milestone: {m['name']}",
+                    body=f"Reward: {reward_label}.",
+                    link=f"/loyalty-progress?customer={customer_id}",
+                    data={"customerId": customer_id, "milestoneId": m["milestoneId"]},
+                )
+                if cust_email:
+                    await ns.send(
+                        email=cust_email, kind="loyalty", severity="notice",
+                        title=f"Milestone unlocked: {m['name']}",
+                        body=f"Your reward: {reward_label}.",
+                        data={"milestoneId": m["milestoneId"]},
+                    )
+        except Exception:
+            pass
+
     # ── Seasonal Challenges ──
     challenges = await db.loyalty_challenges.find(
         {"active": True, "startDate": {"$lte": _now()}, "endDate": {"$gte": _now()}},
@@ -428,3 +468,140 @@ async def get_progress(customer_id: str, _: dict = Depends(get_user)):
 @router.post("/evaluate/{customer_id}")
 async def evaluate(customer_id: str, _: dict = Depends(get_user)):
     return await evaluate_customer(customer_id)
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Loyalty 2.0 phase-2 — Referrals + Leaderboard
+# ═════════════════════════════════════════════════════════════════════════
+
+REFERRAL_REWARD_REFERRER = {"type": "voucher", "value": 20, "label": "$20 referrer voucher"}
+REFERRAL_REWARD_REFEREE = {"type": "voucher", "value": 10, "label": "$10 welcome voucher"}
+
+
+@router.post("/referrals")
+async def create_referral(body: dict, user: dict = Depends(get_user)):
+    """Referrer invites a friend. Body: {referrerId, refereeEmail} or
+    {referrerId, refereeId}. Creates a pending referral; when the referee's
+    first transaction posts (see `/api/loyalty/v2/referrals/{id}/complete`),
+    both parties collect their voucher and Insight #14 gets refreshed."""
+    referrer_id = body.get("referrerId")
+    referee_email = body.get("refereeEmail")
+    referee_id = body.get("refereeId")
+    if not referrer_id or not (referee_email or referee_id):
+        raise HTTPException(400, "referrerId + refereeEmail (or refereeId) required")
+    referrer = await db.customers.find_one({"id": referrer_id}, {"_id": 0})
+    if not referrer:
+        raise HTTPException(404, "referrer not found")
+
+    # De-dup: same referrer + referee pending / active
+    dup_q: Dict[str, Any] = {"referrerId": referrer_id}
+    if referee_id: dup_q["refereeId"] = referee_id
+    elif referee_email: dup_q["refereeEmail"] = referee_email
+    existing = await db.loyalty_referrals.find_one(dup_q, {"_id": 0})
+    if existing:
+        return existing
+
+    doc = {
+        "id": str(uuid.uuid4()),
+        "referrerId": referrer_id,
+        "referrerName": referrer.get("name"),
+        "refereeId": referee_id,
+        "refereeEmail": referee_email,
+        "code": (referrer.get("name") or "friend")[:6].upper().replace(" ", "") + "-" + str(uuid.uuid4())[:4].upper(),
+        "status": "pending",
+        "referrerRewardId": None,
+        "refereeRewardId": None,
+        "createdAt": _now(),
+        "createdBy": user.get("email"),
+    }
+    await db.loyalty_referrals.insert_one(dict(doc))
+    return doc
+
+
+@router.get("/referrals")
+async def list_referrals(referrerId: Optional[str] = None, status: Optional[str] = None,
+                          _: dict = Depends(get_user)):
+    q: Dict[str, Any] = {}
+    if referrerId: q["referrerId"] = referrerId
+    if status: q["status"] = status
+    return await db.loyalty_referrals.find(q, {"_id": 0}).sort("createdAt", -1).to_list(200)
+
+
+@router.post("/referrals/{ref_id}/complete")
+async def complete_referral(ref_id: str, body: dict, user: dict = Depends(get_user)):
+    """Fire once the referee has made their qualifying first transaction.
+    Body optionally { refereeId } — used when the invite was email-only."""
+    r = await db.loyalty_referrals.find_one({"id": ref_id}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "referral not found")
+    if r["status"] == "completed":
+        return r
+
+    referee_id = body.get("refereeId") or r.get("refereeId")
+    if not referee_id:
+        raise HTTPException(400, "refereeId is required")
+
+    def _make_voucher(cust_id: str, reward: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "id": str(uuid.uuid4()),
+            "customerId": cust_id,
+            "sourceType": "loyalty_referral",
+            "sourceRef": ref_id,
+            "label": reward.get("label"),
+            "valueType": "amount",
+            "value": float(reward.get("value") or 0),
+            "status": "active",
+            "createdAt": _now(),
+        }
+    referrer_v = _make_voucher(r["referrerId"], REFERRAL_REWARD_REFERRER)
+    referee_v = _make_voucher(referee_id, REFERRAL_REWARD_REFEREE)
+    await db.vouchers.insert_many([dict(referrer_v), dict(referee_v)])
+
+    await db.customers.update_one({"id": r["referrerId"]}, {"$inc": {"referrals": 1}})
+    await db.loyalty_referrals.update_one({"id": ref_id}, {"$set": {
+        "status": "completed", "refereeId": referee_id,
+        "referrerRewardId": referrer_v["id"], "refereeRewardId": referee_v["id"],
+        "completedAt": _now(), "completedBy": user.get("email"),
+    }})
+
+    # Re-evaluate referrer — 3 referrals unlocks the Community Builder badge
+    await evaluate_customer(r["referrerId"])
+
+    try:
+        from services import notification_service as ns
+        await ns.send(role="marketing", kind="referral", severity="notice",
+                        title=f"Referral completed by {r.get('referrerName')}",
+                        body=f"Both parties earned vouchers (${REFERRAL_REWARD_REFERRER['value']} / ${REFERRAL_REWARD_REFEREE['value']}).",
+                        link="/loyalty-progress",
+                        data={"referralId": ref_id})
+    except Exception:
+        pass
+    return await db.loyalty_referrals.find_one({"id": ref_id}, {"_id": 0})
+
+
+@router.get("/leaderboard")
+async def leaderboard(metric: str = "points", limit: int = 20, _: dict = Depends(get_user)):
+    """Top customers by metric ∈ {points, visits, spend, referrals}."""
+    field_map = {
+        "points": "loyaltyPoints", "visits": "totalVisits",
+        "spend": "totalSpend", "referrals": "referrals",
+    }
+    field = field_map.get(metric, "loyaltyPoints")
+    rows = await db.customers.find(
+        {field: {"$gt": 0}},
+        {"_id": 0, "id": 1, "name": 1, "email": 1, "membershipTier": 1,
+          "loyaltyPoints": 1, "totalVisits": 1, "totalSpend": 1, "referrals": 1},
+    ).sort(field, -1).limit(limit).to_list(limit)
+    return {
+        "metric": metric,
+        "entries": [
+            {"rank": i + 1, "customerId": r["id"], "name": r.get("name") or r.get("email"),
+             "tier": r.get("membershipTier"),
+             "value": r.get(field, 0),
+             "loyaltyPoints": r.get("loyaltyPoints", 0),
+             "totalVisits": r.get("totalVisits", 0),
+             "totalSpend": r.get("totalSpend", 0),
+             "referrals": r.get("referrals", 0)}
+            for i, r in enumerate(rows)
+        ],
+    }
