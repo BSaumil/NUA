@@ -1,4 +1,27 @@
-# NUA POS — PRD v36.0 (Loyalty v2 Phase-2 · Kitchen server-notify · Ash Marketing draft · Beverage margin · Alcohol catalog seed)
+# NUA POS — PRD v36.1 (P0 dashboard products/categories repair)
+
+
+## v36.1 — Iteration 59 (Feb 2026): Dashboard products & categories repair
+
+### Shipped
+
+**P0 bug fix — Empty POS dashboard + inactive alcohol categories** (`models/product.py`, `services/alcohol_seeder.py`)
+- Root cause: `Product` Pydantic model required `cost`, `sku`, `image` fields. The alcohol seeder omitted them → `GET /api/products` returned **HTTP 500** on every load, so the POS grid never rendered. Additionally 14/19 categories were missing the `active` flag → the Categories admin page rendered them as "Inactive".
+- Fix 1 — `Product` model: `category`, `cost`, `sku`, `image` now default to safe empty values so a legacy row never blows up the whole list.
+- Fix 2 — `alcohol_seeder.py`: new categories/products are stamped with `active=True`, `sortOrder`, `channels`, `prepTime`, plus `cost` (derived from measured stock pour-cost, or 35% of price), `sku=ALC-…`, `image=""`, `active=True`, `eightySixed=False`, `gstRate=10`.
+- Fix 3 — one-shot startup repair (`_repair_orphan_categories`, `_repair_orphan_products`): patches any legacy doc missing those fields so an existing DB self-heals on next boot without needing a wipe. Also normalises legacy lowercase icon names (beer/wine/glass) to the PascalCase keys the frontend icon map uses.
+- Verified: `/api/products` → HTTP 200 with 100 items; `/api/categories` → 19 items, 0 inactive; POS smoke-test shows 100 tiles across 20 category tabs.
+
+### Backlog (unchanged)
+- **P1** Real Meta / TikTok / X OAuth (needs client IDs/secrets).
+- **P1** SendGrid / Twilio production keys.
+- **P1** Hardware health monitoring polish (route exists, page skeletal).
+- **P2** `ash` → `nua` backend namespace refactor (aliases already exist).
+- **P2** `@dnd-kit` tablet-friendly DnD for Social Calendar.
+- **P2** Channel Menus per-channel pause/resume + schedule toggle UI.
+- **P2** `x-ai-parsed-fallback` header on AI endpoints so UI can warn on LLM fallback.
+- **P2** Move `ai_weekly_plan` to a background task (35 LLM calls inline).
+- **P2** Chargeback / dispute console UI polish.
 
 
 ## v36.0 — Iteration 58 (10 Feb 2026): Loyalty phase-2 + Kitchen server-notify + Ash Marketing + Beverage margin + Alcohol seed

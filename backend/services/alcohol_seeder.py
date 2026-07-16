@@ -21,22 +21,24 @@ def _now() -> str:
 
 
 # ─── Category tree ────────────────────────────────────────────────────────
+# `sortOrder` starts at 100 so alcohol slots after the SEED_CATEGORIES (0-4)
+# without conflicting with them.
 CATEGORIES: List[Dict[str, Any]] = [
     # Existing food kept intact — these are the alcoholic + non-alcoholic drink families
-    {"name": "Beer",              "group": "Alcohol",      "icon": "beer",       "color": "#f59e0b"},
-    {"name": "Wine — Red",        "group": "Alcohol",      "icon": "wine",       "color": "#7f1d1d"},
-    {"name": "Wine — White",      "group": "Alcohol",      "icon": "wine",       "color": "#d4d4aa"},
-    {"name": "Wine — Sparkling",  "group": "Alcohol",      "icon": "wine",       "color": "#fef3c7"},
-    {"name": "Wine — Rosé",       "group": "Alcohol",      "icon": "wine",       "color": "#fbcfe8"},
-    {"name": "Cocktails",         "group": "Alcohol",      "icon": "martini",    "color": "#ec4899"},
-    {"name": "Spirits — Whisky",  "group": "Alcohol",      "icon": "glass",      "color": "#a16207"},
-    {"name": "Spirits — Gin",     "group": "Alcohol",      "icon": "glass",      "color": "#0ea5e9"},
-    {"name": "Spirits — Vodka",   "group": "Alcohol",      "icon": "glass",      "color": "#e5e7eb"},
-    {"name": "Spirits — Rum",     "group": "Alcohol",      "icon": "glass",      "color": "#78350f"},
-    {"name": "Spirits — Tequila", "group": "Alcohol",      "icon": "glass",      "color": "#84cc16"},
-    {"name": "Liqueurs",          "group": "Alcohol",      "icon": "glass",      "color": "#a855f7"},
-    {"name": "Non-Alcoholic",     "group": "Drinks",       "icon": "cup-soda",   "color": "#22c55e"},
-    {"name": "Coffee & Tea",      "group": "Drinks",       "icon": "coffee",     "color": "#78350f"},
+    {"name": "Beer",              "group": "Alcohol",      "icon": "Beer",       "color": "#f59e0b", "sortOrder": 100, "prepTime": 2},
+    {"name": "Wine — Red",        "group": "Alcohol",      "icon": "Wine",       "color": "#7f1d1d", "sortOrder": 101, "prepTime": 2},
+    {"name": "Wine — White",      "group": "Alcohol",      "icon": "Wine",       "color": "#d4d4aa", "sortOrder": 102, "prepTime": 2},
+    {"name": "Wine — Sparkling",  "group": "Alcohol",      "icon": "Wine",       "color": "#fef3c7", "sortOrder": 103, "prepTime": 2},
+    {"name": "Wine — Rosé",       "group": "Alcohol",      "icon": "Wine",       "color": "#fbcfe8", "sortOrder": 104, "prepTime": 2},
+    {"name": "Cocktails",         "group": "Alcohol",      "icon": "GlassWater", "color": "#ec4899", "sortOrder": 105, "prepTime": 6},
+    {"name": "Spirits — Whisky",  "group": "Alcohol",      "icon": "GlassWater", "color": "#a16207", "sortOrder": 106, "prepTime": 2},
+    {"name": "Spirits — Gin",     "group": "Alcohol",      "icon": "GlassWater", "color": "#0ea5e9", "sortOrder": 107, "prepTime": 2},
+    {"name": "Spirits — Vodka",   "group": "Alcohol",      "icon": "GlassWater", "color": "#e5e7eb", "sortOrder": 108, "prepTime": 2},
+    {"name": "Spirits — Rum",     "group": "Alcohol",      "icon": "GlassWater", "color": "#78350f", "sortOrder": 109, "prepTime": 2},
+    {"name": "Spirits — Tequila", "group": "Alcohol",      "icon": "GlassWater", "color": "#84cc16", "sortOrder": 110, "prepTime": 2},
+    {"name": "Liqueurs",          "group": "Alcohol",      "icon": "GlassWater", "color": "#a855f7", "sortOrder": 111, "prepTime": 2},
+    {"name": "Non-Alcoholic",     "group": "Drinks",       "icon": "GlassWater", "color": "#22c55e", "sortOrder": 112, "prepTime": 2},
+    {"name": "Coffee & Tea",      "group": "Drinks",       "icon": "Coffee",     "color": "#78350f", "sortOrder": 113, "prepTime": 4},
 ]
 
 # ─── Products ─────────────────────────────────────────────────────────────
@@ -172,6 +174,24 @@ PRODUCTS: List[Dict[str, Any]] = [
 async def _upsert_category(cat: Dict[str, Any]) -> Dict[str, Any]:
     existing = await db.categories.find_one({"name": cat["name"]}, {"_id": 0})
     if existing:
+        # Repair: back-fill fields the initial seeder omitted so this category
+        # renders correctly on the POS + Categories admin page.
+        patch: Dict[str, Any] = {}
+        if existing.get("active") is None:
+            patch["active"] = True
+        if existing.get("sortOrder") is None:
+            patch["sortOrder"] = cat.get("sortOrder", 99)
+        if not existing.get("channels"):
+            patch["channels"] = ["dine-in", "pickup", "delivery"]
+        if existing.get("prepTime") is None:
+            patch["prepTime"] = cat.get("prepTime", 4)
+        # Normalise legacy lowercase icon names (beer/wine/glass/…) to the
+        # PascalCase keys the frontend icon map exposes.
+        if existing.get("icon") in {"beer","wine","glass","cup-soda","coffee","martini"}:
+            patch["icon"] = cat["icon"]
+        if patch:
+            await db.categories.update_one({"id": existing["id"]}, {"$set": patch})
+            existing.update(patch)
         return existing
     doc = {
         "id": str(uuid.uuid4()),
@@ -179,6 +199,10 @@ async def _upsert_category(cat: Dict[str, Any]) -> Dict[str, Any]:
         "group": cat.get("group"),
         "icon": cat.get("icon"),
         "color": cat.get("color"),
+        "active": True,
+        "sortOrder": cat.get("sortOrder", 99),
+        "prepTime": cat.get("prepTime", 4),
+        "channels": ["dine-in", "pickup", "delivery"],
     }
     return await stamped_insert("categories", doc, entity_type="category")
 
@@ -187,16 +211,52 @@ async def _upsert_product(name: str, category: Dict[str, Any], price: float,
                             measured: Dict[str, Any] | None = None) -> Dict[str, Any]:
     existing = await db.products.find_one({"name": name}, {"_id": 0})
     if existing:
+        # Repair: back-fill fields required by the Product Pydantic model so
+        # GET /products doesn't 500 on legacy alcohol rows.
+        patch: Dict[str, Any] = {}
+        if existing.get("cost") is None:
+            # Estimate cost from measured stock (pour cost) or 35% of price
+            if measured:
+                bottle_cost = float(measured["bottle"]["cost"])
+                pour_share = float(measured["pour"]["amount"]) / float(measured["bottle"]["totalMeasure"])
+                patch["cost"] = round(bottle_cost * pour_share, 2)
+            else:
+                patch["cost"] = round(price * 0.35, 2)
+        if existing.get("sku") is None:
+            patch["sku"] = f"ALC-{str(existing.get('id',''))[:8].upper()}"
+        if existing.get("image") is None:
+            patch["image"] = ""
+        if existing.get("active") is None:
+            patch["active"] = True
+        if existing.get("eightySixed") is None:
+            patch["eightySixed"] = False
+        if patch:
+            await db.products.update_one({"id": existing["id"]}, {"$set": patch})
+            existing.update(patch)
         return existing
+    # New product: seed cost from measured math (pour cost) or 35% of price
+    if measured:
+        bottle_cost = float(measured["bottle"]["cost"])
+        pour_share = float(measured["pour"]["amount"]) / float(measured["bottle"]["totalMeasure"])
+        est_cost = round(bottle_cost * pour_share, 2)
+    else:
+        est_cost = round(price * 0.35, 2)
+    prod_id = str(uuid.uuid4())
     prod = {
-        "id": str(uuid.uuid4()),
+        "id": prod_id,
         "name": name,
         "category": category["name"],
         "categoryId": category["id"],
         "price": price,
+        "cost": est_cost,
         "stock": 0 if measured else 20,   # measured items don't use scalar stock
+        "sku": f"ALC-{prod_id[:8].upper()}",
+        "image": "",
         "parLevel": 3,
         "taxRate": 0.10,
+        "gstRate": 10.0,
+        "active": True,
+        "eightySixed": False,
         "isMeasured": bool(measured),
     }
     saved = await stamped_insert("products", prod, entity_type="product")
@@ -222,6 +282,61 @@ async def _upsert_product(name: str, category: Dict[str, Any], price: float,
     return saved
 
 
+async def _repair_orphan_products() -> Dict[str, int]:
+    """Back-fill fields required by the Product Pydantic model on ANY product
+    (including legacy/test docs). Prevents GET /api/products from 500-ing when
+    a document is missing `category`, `cost`, `sku`, or `image`."""
+    fixed = 0
+    orphans = await db.products.find({
+        "$or": [
+            {"category": {"$exists": False}}, {"category": None}, {"category": ""},
+            {"cost": {"$exists": False}}, {"cost": None},
+            {"sku": {"$exists": False}}, {"sku": None},
+            {"image": {"$exists": False}}, {"image": None},
+        ]
+    }, {"_id": 0}).to_list(2000)
+    for p in orphans:
+        patch: Dict[str, Any] = {}
+        if not p.get("category"):
+            patch["category"] = "Uncategorized"
+        if p.get("cost") is None:
+            patch["cost"] = round(float(p.get("price", 0) or 0) * 0.35, 2)
+        if p.get("sku") is None:
+            patch["sku"] = f"LEG-{str(p.get('id',''))[:8].upper()}"
+        if p.get("image") is None:
+            patch["image"] = ""
+        if patch:
+            await db.products.update_one({"id": p["id"]}, {"$set": patch})
+            fixed += 1
+    return {"orphansFixed": fixed}
+
+
+async def _repair_orphan_categories() -> Dict[str, int]:
+    """Ensure every category has `active` (True) + `sortOrder` so it renders
+    on the Categories admin page and appears on the POS. Non-destructive."""
+    fixed = 0
+    orphans = await db.categories.find({
+        "$or": [
+            {"active": {"$exists": False}},
+            {"sortOrder": {"$exists": False}},
+        ]
+    }, {"_id": 0}).to_list(500)
+    for c in orphans:
+        patch: Dict[str, Any] = {}
+        if c.get("active") is None:
+            patch["active"] = True
+        if c.get("sortOrder") is None:
+            patch["sortOrder"] = 99
+        if c.get("prepTime") is None:
+            patch["prepTime"] = 4
+        if not c.get("channels"):
+            patch["channels"] = ["dine-in", "pickup", "delivery"]
+        if patch:
+            await db.categories.update_one({"id": c["id"]}, {"$set": patch})
+            fixed += 1
+    return {"orphansFixed": fixed}
+
+
 async def seed_alcohol_catalog() -> Dict[str, Any]:
     """Idempotent. Reports how many rows were newly created."""
     stats = {"categoriesInserted": 0, "productsInserted": 0, "stockUnitsInserted": 0}
@@ -243,5 +358,12 @@ async def seed_alcohol_catalog() -> Dict[str, Any]:
             stats["productsInserted"] += 1
             if p.get("measured"):
                 stats["stockUnitsInserted"] += 1
+
+    # One-shot repair of legacy/orphan docs so /products list endpoint
+    # doesn't blow up on Pydantic validation.
+    cat_fix = await _repair_orphan_categories()
+    prod_fix = await _repair_orphan_products()
+    stats["categoriesRepaired"] = cat_fix["orphansFixed"]
+    stats["productsRepaired"] = prod_fix["orphansFixed"]
 
     return {"seededAt": _now(), **stats}
