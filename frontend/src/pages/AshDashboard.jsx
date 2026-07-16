@@ -42,9 +42,9 @@ export default function AshDashboard() {
   const load = useCallback(async () => {
     try {
       const [i, s, c] = await Promise.all([
-        axios.get(`${API}/ash/insights?limit=200`, { headers: H() }),
-        axios.get(`${API}/ash/insights/summary`, { headers: H() }),
-        axios.get(`${API}/ash/capabilities`, { headers: H() }),
+        axios.get(`${API}/nua/insights?limit=200`, { headers: H() }),
+        axios.get(`${API}/nua/insights/summary`, { headers: H() }),
+        axios.get(`${API}/nua/capabilities`, { headers: H() }),
       ]);
       setInsights(i.data); setSummary(s.data); setCaps(c.data.capabilities || []);
     } catch { toast.error('Failed to load NUA insights'); }
@@ -54,7 +54,7 @@ export default function AshDashboard() {
   const run = async (includeSummary) => {
     setRunning(true);
     try {
-      const r = await axios.post(`${API}/ash/run?include_summary=${includeSummary}`, {}, { headers: H() });
+      const r = await axios.post(`${API}/nua/run?include_summary=${includeSummary}`, {}, { headers: H() });
       toast.success(`NUA generated ${r.data.generated} insight(s) across ${Object.keys(r.data.perCategory).length} categories`);
       load();
     } catch (e) { toast.error(e.response?.data?.detail || 'NUA run failed'); }
@@ -63,7 +63,7 @@ export default function AshDashboard() {
 
   const dismiss = async (id) => {
     setBusy(true);
-    try { await axios.post(`${API}/ash/insights/${id}/dismiss`, {}, { headers: H() }); load(); }
+    try { await axios.post(`${API}/nua/insights/${id}/dismiss`, {}, { headers: H() }); load(); }
     catch { toast.error('Failed'); }
     finally { setBusy(false); }
   };

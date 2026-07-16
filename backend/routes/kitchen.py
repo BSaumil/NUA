@@ -1,10 +1,16 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from database import db
+from deps import get_user
 from models.kitchen_order import KitchenOrder, KitchenOrderCreate
 
 router = APIRouter()
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
 
 # ============ KITCHEN DISPLAY (KDS) API ============
 @router.get("/kitchen/orders")
@@ -17,71 +23,197 @@ async def get_kitchen_orders(status: Optional[str] = None):
     orders = await db.kitchen_orders.find(query, {"_id": 0}).sort("createdAt", 1).to_list(100)
     return orders
 
+
 @router.post("/kitchen/orders")
-async def create_kitchen_order(order: KitchenOrderCreate):
-    order_obj = KitchenOrder(**order.dict())
+async def create_kitchen_order(order: KitchenOrderCreate, request: Request, user: dict = Depends(get_user)):
+    """Create a kitchen ticket. Auto-enriches docket fields from the request context:
+    who created (user), device (X-Device-Label header or User-Agent), covers
+    (from reservation if reservationId present), guest name (from reservation).
+    """
+    order_dict = order.dict()
+
+    # Actor metadata — always set unless already provided (e.g. by table QR flow)
+    order_dict["createdByEmail"] = order_dict.get("createdByEmail") or user.get("email")
+    order_dict["createdByName"] = order_dict.get("createdByName") or user.get("name") or user.get("email")
+
+    # Device metadata — prefer explicit header, fall back to UA
+    hdr_dev = request.headers.get("X-Device-Label") or request.headers.get("x-device-label")
+    hdr_devid = request.headers.get("X-Device-Id") or request.headers.get("x-device-id")
+    ua = request.headers.get("user-agent", "")
+    if not order_dict.get("deviceLabel"):
+        order_dict["deviceLabel"] = hdr_dev or ("Mobile" if "Mobile" in ua else "Web POS")
+    if not order_dict.get("deviceId"):
+        order_dict["deviceId"] = hdr_devid or (request.client.host if request.client else "?")
+
+    # Enrich from reservation if present
+    if order_dict.get("reservationId") and (not order_dict.get("covers") or not order_dict.get("guestName")):
+        res = await db.reservations.find_one({"id": order_dict["reservationId"]}, {"_id": 0})
+        if res:
+            order_dict["covers"] = order_dict.get("covers") or res.get("partySize") or res.get("guests")
+            order_dict["guestName"] = order_dict.get("guestName") or res.get("customerName") or res.get("guestName")
+
+    order_obj = KitchenOrder(**order_dict)
     await db.kitchen_orders.insert_one(order_obj.dict())
     return order_obj.dict()
 
+
 @router.post("/kitchen/orders/{order_id}/start")
-async def start_kitchen_order(order_id: str):
+async def start_kitchen_order(order_id: str, _: dict = Depends(get_user)):
     result = await db.kitchen_orders.find_one_and_update(
-        {"id": order_id}, {"$set": {"status": "preparing", "startedAt": datetime.utcnow().isoformat()}}, return_document=True
+        {"id": order_id}, {"$set": {"status": "preparing", "startedAt": _now()}},
+        return_document=True,
     )
     if not result:
         raise HTTPException(status_code=404, detail="Order not found")
     result.pop("_id", None)
     return result
+
 
 @router.post("/kitchen/orders/{order_id}/ready")
-async def mark_order_ready(order_id: str):
+async def mark_order_ready(order_id: str, _: dict = Depends(get_user)):
     result = await db.kitchen_orders.find_one_and_update(
-        {"id": order_id}, {"$set": {"status": "ready", "readyAt": datetime.utcnow().isoformat()}}, return_document=True
+        {"id": order_id}, {"$set": {"status": "ready", "readyAt": _now()}},
+        return_document=True,
     )
     if not result:
         raise HTTPException(status_code=404, detail="Order not found")
     result.pop("_id", None)
     return result
+
 
 @router.post("/kitchen/orders/{order_id}/served")
-async def mark_order_served(order_id: str):
+async def mark_order_served(order_id: str, _: dict = Depends(get_user)):
     result = await db.kitchen_orders.find_one_and_update(
-        {"id": order_id}, {"$set": {"status": "served", "servedAt": datetime.utcnow().isoformat()}}, return_document=True
+        {"id": order_id}, {"$set": {"status": "served", "servedAt": _now()}},
+        return_document=True,
     )
     if not result:
         raise HTTPException(status_code=404, detail="Order not found")
     result.pop("_id", None)
     return result
+
 
 @router.post("/kitchen/orders/{order_id}/cancel")
-async def cancel_kitchen_order(order_id: str):
+async def cancel_kitchen_order(order_id: str, _: dict = Depends(get_user)):
     result = await db.kitchen_orders.find_one_and_update(
-        {"id": order_id}, {"$set": {"status": "cancelled"}}, return_document=True
+        {"id": order_id}, {"$set": {"status": "cancelled", "cancelledAt": _now()}},
+        return_document=True,
     )
     if not result:
         raise HTTPException(status_code=404, detail="Order not found")
     result.pop("_id", None)
     return result
 
-@router.post("/kitchen/orders/{order_id}/fire-course")
-async def fire_next_course(order_id: str, course: int = 2):
+
+# ─── Course lifecycle — HOLD / FIRE / SERVE per course ────────────────────
+@router.post("/kitchen/orders/{order_id}/hold-course/{course}")
+async def hold_course(order_id: str, course: int, _: dict = Depends(get_user)):
+    """Explicitly hold a course — it will NOT fire automatically."""
+    key = f"courses.{course}"
     result = await db.kitchen_orders.find_one_and_update(
-        {"id": order_id}, {"$set": {"currentCourse": course}}, return_document=True
+        {"id": order_id},
+        {"$set": {f"{key}.status": "held", f"{key}.heldAt": _now(),
+                    f"{key}.firedAt": None, f"{key}.firedBy": None}},
+        return_document=True,
     )
     if not result:
         raise HTTPException(status_code=404, detail="Order not found")
     result.pop("_id", None)
     return result
+
+
+@router.post("/kitchen/orders/{order_id}/fire-course/{course}")
+async def fire_course(order_id: str, course: int, user: dict = Depends(get_user)):
+    """Fire a specific course — sets courseX.firedAt, courseX.firedBy and
+    updates the order's currentCourse pointer. Held courses can be fired
+    with this call too (the hold is lifted)."""
+    key = f"courses.{course}"
+    result = await db.kitchen_orders.find_one_and_update(
+        {"id": order_id},
+        {"$set": {
+            "currentCourse": course,
+            f"{key}.status": "fired",
+            f"{key}.firedAt": _now(),
+            f"{key}.firedBy": user.get("name") or user.get("email"),
+            f"{key}.heldAt": None,
+        }},
+        return_document=True,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Order not found")
+    result.pop("_id", None)
+    return result
+
+
+@router.post("/kitchen/orders/{order_id}/serve-course/{course}")
+async def serve_course(order_id: str, course: int, _: dict = Depends(get_user)):
+    key = f"courses.{course}"
+    result = await db.kitchen_orders.find_one_and_update(
+        {"id": order_id},
+        {"$set": {f"{key}.status": "served", f"{key}.servedAt": _now()}},
+        return_document=True,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Order not found")
+    result.pop("_id", None)
+    return result
+
 
 @router.post("/kitchen/orders/{order_id}/priority")
-async def set_order_priority(order_id: str, priority: str = "rush"):
+async def set_order_priority(order_id: str, priority: str = "rush", _: dict = Depends(get_user)):
     result = await db.kitchen_orders.find_one_and_update(
-        {"id": order_id}, {"$set": {"priority": priority}}, return_document=True
+        {"id": order_id}, {"$set": {"priority": priority}}, return_document=True,
     )
     if not result:
         raise HTTPException(status_code=404, detail="Order not found")
     result.pop("_id", None)
     return result
+
+
+# ─── Owner-configurable docket display ────────────────────────────────────
+DEFAULT_DOCKET_CONFIG = {
+    "showStaffName": True,
+    "showDevice": True,
+    "showCovers": True,
+    "showFireTime": True,
+    "showTable": True,
+    "showGuestName": True,
+    "showElapsedTimer": True,
+    "showItemNotes": True,
+    "showOrderNotes": True,
+    "showModifiers": True,
+    "fontSize": "medium",           # small | medium | large
+    "colourByCourse": True,
+    "warnMinutes": 15,              # elapsed threshold for amber warning
+    "criticalMinutes": 25,          # elapsed threshold for red critical
+}
+
+
+@router.get("/kitchen/docket-config")
+async def get_docket_config(_: dict = Depends(get_user)):
+    row = await db.kitchen_docket_config.find_one({"_id": "singleton"}, {"_id": 0})
+    if not row:
+        row = dict(DEFAULT_DOCKET_CONFIG)
+        await db.kitchen_docket_config.insert_one({"_id": "singleton", **row})
+    return row
+
+
+@router.put("/kitchen/docket-config")
+async def update_docket_config(body: dict, user: dict = Depends(get_user)):
+    if user.get("role") not in ("owner", "manager"):
+        raise HTTPException(status_code=403, detail="Owner or manager only")
+    allowed = set(DEFAULT_DOCKET_CONFIG.keys())
+    patch = {k: v for k, v in body.items() if k in allowed}
+    patch["updatedAt"] = _now()
+    patch["updatedBy"] = user.get("email")
+    await db.kitchen_docket_config.update_one(
+        {"_id": "singleton"},
+        {"$set": {"_id": "singleton", **patch}},
+        upsert=True,
+    )
+    row = await db.kitchen_docket_config.find_one({"_id": "singleton"}, {"_id": 0})
+    return row
+
 
 # ============ PREP MANAGEMENT API ============
 @router.get("/kitchen/prep-list")

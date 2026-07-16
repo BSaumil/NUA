@@ -1,4 +1,63 @@
-# NUA POS — PRD v33.0 (Ash v3 Personas · Planner · Memory · Loyalty 2.0)
+# NUA POS — PRD v34.0 (NUA rebrand · /api/nua alias · Kitchen course lifecycle · Master Roadmap)
+
+> **NOTE**: The **single source of truth** for the entire NUA product is now
+> `/app/memory/NUA_POS_Master_Roadmap_v1.txt`. This PRD file remains the
+> chronological version history. Read the master doc first for the full
+> picture; consult this file for how we got here.
+
+
+## v34.0 — Iteration 56 (10 Feb 2026): NUA rebrand · Kitchen course hold/fire + docket enrichment · Master Roadmap doc
+
+### Shipped
+
+**Rebrand — Ash → NUA (user-facing)**
+- Legacy floating `AskNua` button removed; the "Ask NUA" experience now lives inside the unified NUA FAB as the default persona.
+- All 6 personas relabeled: `Ask NUA` (executive), `NUA Finance`, `NUA Ops`, `NUA HR`, `NUA Marketing`, `NUA Guest`.
+- Sidebar labels & page titles updated: **NUA Command Center**, **NUA Planner**, **NUA Permissions**, **NUA Memory**, **NUA Intelligence**, **NUA Autonomy Controls**.
+- Agent system prompt updated so the AI refers to itself as **NUA** in every reply.
+- New `NuaAliasMiddleware` in `server.py` rewrites `/api/nua/*` → `/api/ash/*` at the ASGI level — both routes work; frontend now uses `/api/nua/*` exclusively.
+
+**Kitchen — Course Hold/Fire + Docket Enrichment**
+- New per-course lifecycle: `queued → held → fired → served` stored under `KitchenOrder.courses[c]` with `heldAt`, `firedAt`, `firedBy`, `servedAt`.
+- New endpoints: `POST /api/kitchen/orders/{id}/hold-course/{c}`, `.../fire-course/{c}`, `.../serve-course/{c}`.
+- Kitchen order creation auto-enriches every docket with:
+  - `createdByName` / `createdByEmail` (staff who put through the order).
+  - `deviceLabel` / `deviceId` (from `X-Device-Label` header or user-agent).
+  - `covers` (from reservation or manual entry).
+  - `guestName` (from reservation).
+- Owner-configurable docket display via `GET/PUT /api/kitchen/docket-config` — 11 toggles + fontSize + warn/critical thresholds. UI in `Kitchen.jsx` behind the "Docket" button (owner/manager only).
+- Redesigned `Kitchen.jsx` order card: docket meta row (staff · device · covers · guest · in-time), courses as coloured groups with per-course Hold/Fire/Serve controls, elapsed timer with tri-tone warn/critical, all fields respect owner toggles.
+
+**Master Roadmap document**
+- Authored `/app/memory/NUA_POS_Master_Roadmap_v1.txt` — single source of truth covering: vision · principles · tech stack · repo layout · Universal Entity Model · full NUA/Ash intelligence layer (6 personas, 25 tools, planning engine, simulation, memory, health score) · module-by-module inventory (28 sections) · security · analytics · user matrices · data models · 24-month prioritised roadmap · chronology · glossary.
+
+### Verification (smoke-tested via curl)
+- `GET /api/nua/personas` returns 6 renamed labels.
+- `GET /api/ash/personas` (legacy) still works — 6 items.
+- Kitchen order created with `X-Device-Label: Front POS` header captures `deviceLabel="Front POS"`, `createdByName="Owner"`, `covers=4`.
+- `fire-course/2` sets `courses.2.status="fired"`, `firedAt`, `firedBy="Owner"`.
+- `hold-course/3` sets `courses.3.status="held"` + `heldAt`.
+- `PUT /kitchen/docket-config` accepts partial patches (`showCovers=false`, `fontSize=large`, `warnMinutes=10`).
+
+### Files touched / added
+- `/app/backend/server.py` — NuaAliasMiddleware.
+- `/app/backend/services/ash_personas.py` — persona labels + tone updated.
+- `/app/backend/services/ash_agent.py` — self-refers as NUA.
+- `/app/backend/models/kitchen_order.py` — enriched fields + courses map.
+- `/app/backend/routes/kitchen.py` — hold/fire/serve endpoints + docket-config CRUD + docket auto-enrichment.
+- `/app/frontend/src/pages/Kitchen.jsx` — full redesign for course lifecycle + docket meta + settings dialog.
+- `/app/frontend/src/services/api.js` — kitchenAPI methods for hold/fire/serve/config.
+- `/app/frontend/src/App.js` — removed legacy AskNua button.
+- `/app/frontend/src/components/AshChat.jsx` — Ask NUA default persona label, warmer suggestions, `Sparkles` icon.
+- `/app/frontend/src/components/Sidebar.jsx` — NUA-branded labels.
+- `/app/frontend/src/components/BottomDock.jsx`, `pages/AgentDashboard.jsx`, `pages/AgentAutonomy.jsx`, `pages/Vouchers.jsx`, `pages/AshDashboard.jsx`, `pages/AshMemory.jsx`, `pages/AshPermissions.jsx`, `pages/AshPlans.jsx`, `pages/AshCommandCenter.jsx`, `pages/NuaPro.jsx`, `components/VoiceCommandCatalog.jsx` — user-visible "Ash" → "NUA".
+- **Deleted**: `/app/frontend/src/components/AskNua.jsx` (merged into AshChat FAB).
+- **New**: `/app/memory/NUA_POS_Master_Roadmap_v1.txt`.
+
+### Test credentials
+- `owner@nuva.com` / `NuvaOwner2026!`
+
+---
 
 
 ## v33.0 — Iteration 55 (10 Feb 2026): Ash v3 Phases 4–19 + Loyalty 2.0

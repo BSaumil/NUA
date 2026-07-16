@@ -1,6 +1,6 @@
 from pydantic import BaseModel
-from typing import Optional, List
-from datetime import datetime
+from typing import Optional, List, Dict, Any
+from datetime import datetime, timezone
 import uuid
 
 
@@ -23,6 +23,11 @@ class KitchenOrderCreate(BaseModel):
     notes: Optional[str] = None
     priority: str = "normal"  # normal, rush, vip
     serverId: Optional[str] = None
+    covers: Optional[int] = None
+    deviceLabel: Optional[str] = None  # e.g. "Front POS", "Tablet 3", "Online"
+    deviceId: Optional[str] = None
+    createdByName: Optional[str] = None
+    createdByEmail: Optional[str] = None
 
 
 class KitchenOrder(BaseModel):
@@ -37,6 +42,21 @@ class KitchenOrder(BaseModel):
     status: str = "new"  # new, preparing, ready, served, cancelled
     serverId: Optional[str] = None
     currentCourse: int = 1
+
+    # ── Enriched docket fields (v33) ──
+    covers: Optional[int] = None
+    deviceLabel: Optional[str] = None
+    deviceId: Optional[str] = None
+    createdByName: Optional[str] = None
+    createdByEmail: Optional[str] = None
+    guestName: Optional[str] = None            # from reservation
+
+    # ── Per-course lifecycle (v33) ──
+    # Keys are course numbers as strings ("1","2","3"). Each course has:
+    #   { status: "held"|"queued"|"fired"|"served",
+    #     heldAt, firedAt, firedBy, servedAt }
+    courses: Dict[str, Any] = {}
+
     createdAt: str = ""
     startedAt: Optional[str] = None
     readyAt: Optional[str] = None
@@ -48,4 +68,16 @@ class KitchenOrder(BaseModel):
         if not self.id:
             self.id = f"KO-{str(uuid.uuid4())[:8].upper()}"
         if not self.createdAt:
-            self.createdAt = datetime.utcnow().isoformat()
+            self.createdAt = datetime.now(timezone.utc).isoformat()
+        # Auto-seed the courses map from items so each distinct course starts
+        # in a known state ("queued" — will fire in the natural order, unless
+        # explicitly held).
+        if not self.courses:
+            seen = set()
+            for it in self.items or []:
+                c = str(it.get("course") or 1)
+                if c not in seen:
+                    seen.add(c)
+                    self.courses[c] = {"status": "queued",
+                                        "heldAt": None, "firedAt": None,
+                                        "firedBy": None, "servedAt": None}

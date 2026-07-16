@@ -37,7 +37,7 @@ export default function AshPermissions() {
   const load = useCallback(async () => {
     setRefreshing(true);
     try {
-      const r = await axios.get(`${API}/ash/tools`, { headers: H() });
+      const r = await axios.get(`${API}/nua/tools`, { headers: H() });
       setTools(r.data);
     } catch { toast.error('Failed to load tools'); }
     finally { setRefreshing(false); }
@@ -47,7 +47,7 @@ export default function AshPermissions() {
 
   const setPermission = async (toolName, permission) => {
     try {
-      await axios.put(`${API}/ash/tools/${toolName}/permission`, { permission }, { headers: H() });
+      await axios.put(`${API}/nua/tools/${toolName}/permission`, { permission }, { headers: H() });
       setTools(ts => ts.map(t => t.name === toolName ? { ...t, effectivePermission: permission } : t));
       toast.success(`${toolName} \u2192 ${permission}`);
     } catch { toast.error('Failed'); }
@@ -77,7 +77,7 @@ export default function AshPermissions() {
     if (!window.confirm(`Set all ${targets.length} ${moduleName} tools to "${permission}"?`)) return;
     for (const t of targets) {
       try {
-        await axios.put(`${API}/ash/tools/${t.name}/permission`, { permission }, { headers: H() });
+        await axios.put(`${API}/nua/tools/${t.name}/permission`, { permission }, { headers: H() });
       } catch { /* skip */ }
     }
     toast.success(`${moduleName} \u2192 ${permission}`);

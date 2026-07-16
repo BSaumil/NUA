@@ -71,7 +71,7 @@ export default function AshChat() {
   const scrollRef = useRef(null);
 
   useEffect(() => {
-    axios.get(`${API}/ash/personas`, { headers: H() }).then(r => setPersonas(r.data)).catch(() => {});
+    axios.get(`${API}/nua/personas`, { headers: H() }).then(r => setPersonas(r.data)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -98,7 +98,7 @@ export default function AshChat() {
     setMsgs(m => [...m, { role: 'user', text: trimmed, ts: Date.now(), persona }]);
     setInput('');
     try {
-      const r = await axios.post(`${API}/ash/agent`, { message: trimmed, sessionId, persona }, { headers: H() });
+      const r = await axios.post(`${API}/nua/agent`, { message: trimmed, sessionId, persona }, { headers: H() });
       if (!sessionId) {
         setSessionId(r.data.sessionId);
         localStorage.setItem(SESSION_KEY(), r.data.sessionId);

@@ -164,6 +164,23 @@ app.add_middleware(RateLimitMiddleware)
 app.add_middleware(LicenseEnforcementMiddleware)
 app.add_middleware(ActorContextMiddleware)
 
+
+# ═════════════════════════════════════════════════════════════════════════
+# /api/nua/* → /api/ash/* alias (backwards-compat shim during Ash → NUA rebrand)
+# ═════════════════════════════════════════════════════════════════════════
+class NuaAliasMiddleware(BaseHTTPMiddleware):
+    """Rewrite /api/nua/... to /api/ash/... so old tests + new code both work."""
+    async def dispatch(self, request, call_next):
+        p = request.url.path
+        if p.startswith("/api/nua/") or p == "/api/nua":
+            new_path = "/api/ash/" + p[len("/api/nua/"):] if p != "/api/nua" else "/api/ash"
+            request.scope["path"] = new_path
+            request.scope["raw_path"] = new_path.encode()
+        return await call_next(request)
+
+
+app.add_middleware(NuaAliasMiddleware)
+
 frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 app.add_middleware(
     CORSMiddleware,

@@ -1,0 +1,1024 @@
+════════════════════════════════════════════════════════════════════════════════
+                       NUA POS — MASTER ROADMAP v1
+                   Single Source of Truth · February 2026
+                    Prepared for developers · designers · AI agents
+                          · investors · operations
+════════════════════════════════════════════════════════════════════════════════
+
+Document owner    : NUA Product & Engineering
+File              : /app/memory/NUA_POS_Master_Roadmap_v1.txt
+Version           : v1.0
+Last updated      : 10 February 2026
+Supersedes        : PRD.md (v33.0), MISSION.md
+Related           : /app/memory/CHANGELOG.md (future), /app/memory/ROADMAP.md (future)
+
+────────────────────────────────────────────────────────────────────────────────
+0  ·  READER'S NOTE
+────────────────────────────────────────────────────────────────────────────────
+
+NUA is not a POS. NUA is an AI-powered Hospitality Operating System.
+Every module in this document is *live* in the codebase at the time of writing.
+Nothing here is aspirational unless it appears in Section 12 (Roadmap).
+
+If two features looked like duplicates in earlier PRDs, they have been merged
+here into a single canonical entry. No feature has been deleted.
+
+Any future AI agent or engineer continuing this project MUST:
+  1. Read this file end-to-end before proposing architectural changes.
+  2. Update this file (or its successor CHANGELOG.md) after every phase.
+  3. Preserve the section numbering; append new sections, do not renumber.
+  4. Treat sections 2 (Vision), 5 (Universal Entity Model), 6 (Ash), 8
+     (Security), and 12 (Roadmap) as contracts. Break them only with owner
+     sign-off.
+
+────────────────────────────────────────────────────────────────────────────────
+1  ·  ONE-LINE PITCH & POSITIONING
+────────────────────────────────────────────────────────────────────────────────
+
+NUA is an AI-powered Hospitality Operating System for restaurants, cafés,
+bars, quick-service outlets, dark kitchens, retail concepts, and franchised
+groups. It fuses point-of-sale, reservations, kitchen display, inventory,
+enterprise finance, payroll, CRM, loyalty, marketing, and a full autonomous
+AI operating layer ("NUA / Ash") into one system driven by a single source
+of truth and one universal event stream.
+
+Positioned against    : Toast, Square for Restaurants, Lightspeed Restaurant,
+                        SevenRooms, OpenTable, Deliverect, Xero + POS combos.
+Differentiator        : Autonomous AI agent that plans, predicts, and executes
+                        with a human-in-the-loop approval queue.
+
+────────────────────────────────────────────────────────────────────────────────
+2  ·  PRODUCT PRINCIPLES (CONTRACT)
+────────────────────────────────────────────────────────────────────────────────
+
+  2.1  Single Source of Truth
+       Every module — POS, Reservations, Kitchen, Payroll, Accounting,
+       Inventory, CRM, Marketing — reads and writes to one shared customer,
+       product, ingredient, staff, and financial database.
+
+  2.2  Total Traceability
+       Every action (human or AI) writes an immutable audit event: who,
+       when, from what device, from what IP, at what location, on which
+       business. Every entity has full version history and can be restored
+       to any prior state.
+
+  2.3  AI Recommends → Owner Approves → System Automates
+       NUA never performs high-risk actions (large POs, refunds, tier
+       downgrades, mass discounts) without explicit owner approval.
+       Low-risk actions (docket notifications, minor stock updates, notes)
+       are fully automated.
+
+  2.4  Multi-Site by Design
+       Every record carries `businessId` + `locationId`. Franchises
+       (brand → franchisee → location) are first-class citizens. HQ
+       dashboards roll up across the network.
+
+  2.5  Right To Be Forgotten
+       Soft-delete first. Hard-delete is an owner action that also purges
+       audit/version history for GDPR compliance.
+
+  2.6  Explainable AI
+       Every AI decision persists six explainability fields: problem,
+       evidence, confidence, alternatives, risk, expected impact, rollback.
+
+────────────────────────────────────────────────────────────────────────────────
+3  ·  TECHNOLOGY STACK
+────────────────────────────────────────────────────────────────────────────────
+
+  Frontend           : React 18, Tailwind CSS, shadcn/ui, lucide-react,
+                       Motion, sonner, Recharts, Playwright (test)
+  Backend            : FastAPI, Python 3.11, Motor (async MongoDB driver),
+                       pydantic v2
+  Database           : MongoDB (single logical DB; multi-tenant via
+                       businessId column)
+  AI runtime         : OpenAI GPT-5.2 · GPT-Image-1 (Emergent LLM key)
+                       Gemini 3 (Nano Banana)
+                       Claude Sonnet 4.5 (optional)
+                       Sora 2 (video, optional)
+                       Whisper (STT), Piper (TTS locally)
+  Payments           : Stripe · Emergent-managed Stripe
+                       Apple Pay · Google Pay · EFTPOS abstraction
+  Authentication     : JWT (email + password + optional PIN), bcrypt hashing
+                       Emergent Google OAuth ready
+                       Session cookies for staff PIN
+                       Rate-limit + brute-force guards
+  Realtime           : Polling (10s KDS), WebSocket-ready
+  Deployment         : Kubernetes container · supervisord (backend on 8001,
+                       frontend on 3000) · Emergent preview URL
+
+────────────────────────────────────────────────────────────────────────────────
+4  ·  REPOSITORY STRUCTURE
+────────────────────────────────────────────────────────────────────────────────
+
+  /app
+  ├── backend/
+  │   ├── server.py                     # FastAPI app + all router registrations
+  │   ├── database.py                   # Motor client (MONGO_URL from .env)
+  │   ├── deps.py                       # get_user, require_owner_or_manager, etc.
+  │   ├── models/                       # pydantic + BaseEntity models
+  │   │   accounting.py, base_entity.py, category.py, customer.py, discount.py,
+  │   │   eftpos.py, employee.py, expense.py, feedback.py, floor_plan.py,
+  │   │   gift_card.py, integration.py, kitchen_order.py, location.py,
+  │   │   loyalty.py, modifier.py, printer.py, product.py, promotion.py,
+  │   │   refund.py, reservation.py, staff.py, supplier.py, table.py,
+  │   │   transaction.py, user.py, variant.py, voucher.py, waitlist.py,
+  │   │   wallet_ledger.py, bas_report.py
+  │   ├── routes/                       # 40+ API routers, each mounted under /api
+  │   │   accounting, advanced_features, ai_pantry, analytics, approvals, ash,
+  │   │   audit, auth, automation, awards, bookings_inbox, channel_menus,
+  │   │   commerce_v29, customers, enterprise_features, finalize, gamification,
+  │   │   hq, integrations, inventory_accounting, items_system, kitchen,
+  │   │   licensing, loyalty, loyalty_engine, loyalty_v2, members, menu_features,
+  │   │   multi_tenant, online_orders, payroll, phase_ef, phase_ef_wave2,
+  │   │   products, public, reservation_features, reservations, rules_engine,
+  │   │   settings, social_media, staff_management, super, table_courses,
+  │   │   table_ordering, temperature, transactions, v15_features, v25_suite,
+  │   │   v26_commerce
+  │   ├── services/                     # domain services (no HTTP)
+  │   │   abr_service, accounting_service, approval_service, ash_agent,
+  │   │   ash_briefing, ash_intelligence, ash_memory, ash_personas, ash_planner,
+  │   │   ash_scheduler, ash_tools, audit_service, eftpos_service,
+  │   │   entity_service, health_score, integration_service, rules_engine
+  │   ├── utils/                        # mongo_safe, stamped_insert, etc.
+  │   ├── middleware/                   # ActorContext, RateLimit, License,
+  │   │                                 # NuaAlias (/api/nua → /api/ash shim)
+  │   └── tests/                        # pytest suites (per-iteration)
+  └── frontend/
+      ├── src/
+      │   ├── App.js                    # routing
+      │   ├── components/
+      │   │   AshChat.jsx               # Global NUA FAB (persona picker)
+      │   │   Sidebar.jsx               # module tree
+      │   │   BottomDock.jsx            # quick actions
+      │   │   VoiceCommandCatalog.jsx, VoiceOrderButton.jsx
+      │   │   Barcode128.jsx, ImageLibrary.jsx
+      │   │   ui/                       # shadcn primitives
+      │   ├── pages/                    # 92 pages (list in section 7)
+      │   ├── services/api.js           # axios wrappers per domain
+      │   └── contexts/                 # Theme, License
+      └── public/
+
+  /app/memory
+  ├── PRD.md                            # legacy version history (v18 → v33)
+  ├── NUA_POS_Master_Roadmap_v1.txt     # THIS FILE
+  └── test_credentials.md               # test accounts (owner / manager / cashier)
+
+  /app/MISSION.md                       # vision snapshot (Feb 2026)
+  /app/test_reports/                    # iteration_*.json testing outputs
+
+────────────────────────────────────────────────────────────────────────────────
+5  ·  UNIVERSAL ENTITY MODEL (CONTRACT)
+────────────────────────────────────────────────────────────────────────────────
+
+Every top-level entity extends BaseEntity:
+
+  Field            Purpose
+  ────────────────────────────────────────────────────────────────
+  id               UUID v4
+  businessId       Tenant / brand
+  locationId       Physical outlet (nullable for HQ-level entities)
+  createdBy        User email or `system:<subsystem>`
+  createdAt        ISO-8601 UTC
+  updatedBy        User email or `system:<subsystem>`
+  updatedAt        ISO-8601 UTC
+  deletedAt        Soft-delete tombstone
+  deletedBy        Who soft-deleted
+  device           Client user-agent snapshot
+  ip               Request IP
+  version          Monotonic counter — bumps on every update
+
+Tracked entity kinds:
+  customer, product, ingredient, recipe, supplier, purchase_order, booking,
+  table, employee, device, kitchen_ticket, voucher, wallet, loyalty_transaction,
+  payment, refund, journal_entry, bill, invoice, rule, audit_event, ash_plan,
+  ash_memory, badge, milestone, challenge, docket_config
+
+MongoDB safety rules:
+  • Never return raw MongoDB docs — always coerce _id → id via PyObjectId /
+    from_mongo() helpers.
+  • datetime.now(timezone.utc) — never datetime.utcnow().
+  • Use `stamped_insert` and `stamped_update` from utils/entity_service.py so
+    every write auto-populates version, updatedBy, device, ip, and emits an
+    audit event.
+
+════════════════════════════════════════════════════════════════════════════════
+6  ·  NUA / ASH — THE AUTONOMOUS OPERATING LAYER
+════════════════════════════════════════════════════════════════════════════════
+
+NUA (rebranded from "Ash") is the always-on AI agent that observes, analyses,
+plans, and executes across every module. It is the single most differentiated
+part of the product.
+
+6.1  ─  Persona Registry (6 identities)                    services/ash_personas.py
+──────────────────────────────────────────────────────────────────────────
+
+  ID          Label            Modules                                Voice
+  ─────────────────────────────────────────────────────────────────────────────────
+  executive   Ask NUA          all                                    warm, terse,
+                                                                      strategic
+  finance     NUA Finance      Finance, Ash                           precise, sceptical
+  ops         NUA Ops          Inventory, Ash                         hands-on, direct
+  hr          NUA HR           Staff, Ash                             empathetic, coaching
+  marketing   NUA Marketing    Marketing, Customers, Ash              creative, growth
+  guest       NUA Guest        Customers, Reservations, Ash           warm, hospitality
+
+  • Executive is default; represents the merged "Ask NUA" chat experience.
+  • Each persona filters the visible tool catalog by module. Tools outside
+    remit are refused with a "switch to persona X" suggestion.
+  • System prompt is wrapped per persona to shape tone + focus.
+
+6.2  ─  Tool Catalog (25 tools)                                services/ash_tools.py
+──────────────────────────────────────────────────────────────────────────
+
+  Every tool has: name, label, module, risk (low|medium|high|critical),
+  defaultPermission (auto|approval|disabled), and an execute() function.
+
+  Read-only  : fetch_open_insights, fetch_kpis, lookup_customer,
+               lookup_product, run_ash_scan, generate_daily_briefing, recall,
+               list_pending_approvals, get_health_score
+  Low-risk   : add_customer_note, create_task, remember
+  Mid-risk   : create_purchase_order, adjust_menu_price, issue_voucher,
+               cancel_reservation, credit_wallet, send_sms, send_email
+  High-risk  : issue_refund, bulk_promotion, tier_downgrade,
+               approve_pending_approval, reject_pending_approval
+
+  Permission gate:
+    • auto      → executes immediately, audit-logged
+    • approval  → enqueues in db.approvals for owner review
+    • disabled  → refused with an explanation
+
+  Owner controls each tool's effective permission via
+    PUT /api/nua/tools/{name}/permission
+  Managed in UI at /ash-permissions (page: AshPermissions.jsx).
+
+6.3  ─  Multi-Turn Agent Loop                                    services/ash_agent.py
+──────────────────────────────────────────────────────────────────────────
+
+  run_agent_turn(message, sessionId, actor, persona):
+    1. Load grounding context (last 15 audit rows, 10 open insights,
+       10 pending approvals, memory pack).
+    2. Wrap AGENT_SYSTEM prompt with persona voice.
+    3. Loop up to MAX_TURNS (4):
+         a. Call GPT-5.2 via emergentintegrations.
+         b. Parse strict JSON envelope {action, tool, args, reasoning}.
+         c. If tool_call → execute (or gate to approval), append result,
+            iterate.
+         d. If final → break.
+    4. Persist result + trace in db.ash_agent_log.
+    5. Return { reply, reasoning, toolResults, trace, persona, personaLabel }.
+
+  Robust JSON parsing: markdown-fence stripping, balanced-brace matching,
+  newline sanitisation, regex last-resort — the {"action":"final",...}
+  envelope can never leak into user-visible replies.
+
+6.4  ─  Long-Term Memory                                       services/ash_memory.py
+──────────────────────────────────────────────────────────────────────────
+
+  Collections   db.ash_memories, db.ash_memory_summary
+  Shape         { id, scope, kind, text, confidence, source, tags,
+                  usageCount, createdAt, updatedAt, lastUsedAt }
+  Kinds         preference | pattern | fact | note
+  Scopes        global | customer:<id> | staff:<id> | product:<id> |
+                supplier:<id>
+  API           GET /api/nua/memory · POST /api/nua/memory
+                GET /api/nua/memory/scopes · DELETE /api/nua/memory/{id}
+  UI            /ash-memory (page: AshMemory.jsx)
+  Reinforcement Same (scope,text) upserts with +0.1 confidence per repeat
+                (max 1.0).
+  Injection     context_pack(scope) is auto-appended to every agent turn.
+
+6.5  ─  Planning Engine                                      services/ash_planner.py
+──────────────────────────────────────────────────────────────────────────
+
+  A "plan" is a multi-step tool-backed proposal. Owner approves the whole
+  plan or individual steps; each step still respects the tool-permission
+  gate.
+
+  Lifecycle     proposed → executing → awaiting_approvals → completed
+                (or partial_failed, rejected)
+  Steps         [{ tool, args, rationale, status, outcome, approvalId }]
+  API           POST /api/nua/plans/generate { goal, persona? }
+                GET  /api/nua/plans (list)
+                GET  /api/nua/plans/{id}
+                POST /api/nua/plans/{id}/approve       (walk all pending)
+                POST /api/nua/plans/{id}/reject
+                POST /api/nua/plans/{id}/steps/{idx}/approve
+                POST /api/nua/plans/{id}/steps/{idx}/reject
+                POST /api/nua/plans/{id}/simulate      (dry-run + LLM narrative)
+  UI            /ash-plans (page: AshPlans.jsx) — simulate button before Approve
+
+6.6  ─  Digital Twin (Plan Simulation)                    ash_planner.simulate_plan
+──────────────────────────────────────────────────────────────────────────
+
+  Dry-runs a plan:
+    • Read-only tools ACTUALLY execute (grounding data is real).
+    • Write tools are DESCRIBED — no db mutation, no approvals enqueued.
+    • GPT-5.2 authors a projected-outcome narrative (revenue, cost, CSAT,
+      risks).
+  Owners see this in the AshPlans page as an "Simulate first" button —
+  a safety net before Approve & walk.
+
+6.7  ─  Health Score                                          services/health_score.py
+──────────────────────────────────────────────────────────────────────────
+
+  A 0-100 composite scored hourly by the Ash Scheduler:
+    Revenue delta vs. baseline
+    Margin health
+    Stock coverage days
+    Staff burnout signals
+    Guest satisfaction proxy (feedback + waitlist)
+    Compliance gaps (missing invoices, un-reconciled cash)
+  Displayed at /ash-hq as a live gauge with per-dimension drivers.
+
+6.8  ─  Ash Scheduler (background jobs)                     services/ash_scheduler.py
+──────────────────────────────────────────────────────────────────────────
+
+  Hourly    Recompute health score, refresh open insights.
+  Daily     Generate morning briefing (short LLM narrative + KPI card).
+  Weekly    Long-form business summary + strategic recommendations.
+  Ad-hoc    /api/nua/agent invocations from AshChat FAB.
+
+6.9  ─  Approval Queue                                     services/approval_service.py
+──────────────────────────────────────────────────────────────────────────
+
+  Any action that meets a policy threshold is enqueued instead of firing.
+  Defaults (env-configurable):
+    AI_APPROVE_PO_ABOVE=500        POs over $500
+    AI_APPROVE_REFUND_ABOVE=100    Refunds over $100
+    AI_APPROVE_TIER_DOWNGRADES=1   Any downgrade
+    AI_APPROVAL_MODE=thresholds|strict|off
+  UI          /approvals (page: Approvals.jsx)
+  Shape       { id, actionType, payload, confidence, reasoning, status,
+                requestedBy, requestedAt, decidedBy, decidedAt }
+
+6.10 ─  Ash Insights                                         services/ash_intelligence.py
+──────────────────────────────────────────────────────────────────────────
+
+  Sixteen continuous jobs write into db.ash_insights:
+    1. Staffing shortages (roster vs forecasted covers)
+    2. Theft (comp/void anomalies)
+    3. Fraud (card mismatches, refund velocity)
+    4. Pricing recommendations (margin decay)
+    5. Promotions on slow inventory
+    6. Food waste (pull rate vs stock aging)
+    7. Labour cost anomalies (wages ÷ revenue by shift)
+    8. Menu underperformance (Menu Engineering drift)
+    9. Weather impact forecast
+    10. Public holiday demand forecast
+    11. Purchasing recommendations (par + lead time + forecast)
+    12. Roster recommendations (sales forecast vs rostered hours)
+    13. Staff burnout prediction
+    14. Customer churn prediction (days-since-visit vs tier norm)
+    15. Menu Engineering (Star / Puzzle / Plow-Horse / Dog quadrants)
+    16. Auto weekly summary (LLM narrative over KPIs)
+
+  Each insight persists severity + recommendedActions[] + optional
+  approvalLink.
+
+6.11 ─  Owner-visible AI surfaces                                     (UI)
+──────────────────────────────────────────────────────────────────────────
+
+  /ash-hq                   NUA Command Center — health, briefing, tools
+  /ash-plans                NUA Planner — multi-step plans, simulate, approve
+  /ash-permissions          NUA Permissions — per-tool gate control
+  /ash-memory               NUA Memory — teach / recall / forget
+  /ash                      NUA Intelligence — legacy dashboard
+  /approvals                Approval Queue
+  /agent-autonomy           Autonomy toggles (owner-only)
+  /automation-triggers      Cross-module Rules Engine
+  Global FAB                Ask NUA (bottom-right, persona-switchable)
+
+6.12 ─  Route aliasing                                          (backwards compat)
+──────────────────────────────────────────────────────────────────────────
+
+  Middleware NuaAliasMiddleware rewrites /api/nua/* → /api/ash/* at the
+  ASGI level. Both routes work; the frontend uses /api/nua exclusively.
+  Old tests, external integrations, and any documentation using /api/ash
+  continue to function.
+
+════════════════════════════════════════════════════════════════════════════════
+7  ·  MODULE-BY-MODULE FEATURE INVENTORY
+════════════════════════════════════════════════════════════════════════════════
+
+7.1  ─  POS Terminal                              (POSTerminal.jsx · transactions.py)
+──────────────────────────────────────────────────────────────────────────
+  • Fluid, tablet-first cart UI with keypad and search.
+  • Category tiles, product grid, image thumbnails, barcode search (128).
+  • Modifier picker (multi-select, required modifiers, price deltas).
+  • Variant picker (size, style, etc.).
+  • Split payment (cash + card + wallet + voucher in one transaction).
+  • Custom discount (double-click title unlocks owner override PIN).
+  • Cash drawer float open/close.
+  • Refund with reason codes; over threshold routes to Approvals.
+  • Print receipt (PrintRouting.jsx) and email/SMS receipt.
+  • Comp / void with reason (feeds Ash theft detection).
+  • End-of-day cash reconciliation (EndOfDay.jsx).
+  • Offline queue (best-effort — planned for hardening).
+  • Owner-only shift close with variance report.
+
+7.2  ─  Reservations                                        (Reservations.jsx +
+──────────────────────────────────────────────────────────────────────────  reservations.py)
+  • Calendar with day/week views + drag-to-reschedule.
+  • Booking source attribution (Google, Direct, Instagram, Phone).
+  • BookingPortal.jsx — public booking site (deep-link with prefill).
+  • BookingsInbox.jsx — natural-language DM / SMS bookings parsed by AI.
+  • BookingHeatmap.jsx — weekly capacity heat overlay.
+  • BookingSettings.jsx — floor rules, cover caps, deposit rules.
+  • BookingAnalytics.jsx — no-show rate, source ROI, avg party size.
+  • BookingExperience.jsx — SMS/email confirmations, arrival prompts,
+    post-visit feedback triggers.
+  • Waitlist.jsx — walk-in queue with SMS ping when table ready.
+  • AI Bookings Inbox parses DMs/SMS → structured booking → Approval Queue.
+
+7.3  ─  Kitchen Display System (KDS)                        (Kitchen.jsx · kitchen.py)
+──────────────────────────────────────────────────────────────────────────
+  • Kanban columns: New · Preparing · Ready to Serve.
+  • Course grouping: Starter · Main · Dessert · Coffee · Extra (labels
+    configurable).
+  • Per-course lifecycle: queued → held → fired → served.
+        POST /api/kitchen/orders/{id}/hold-course/{c}
+        POST /api/kitchen/orders/{id}/fire-course/{c}
+        POST /api/kitchen/orders/{id}/serve-course/{c}
+  • Docket enrichment on every ticket:
+      - createdByName / createdByEmail (staff who put it through)
+      - deviceLabel / deviceId (which tablet or terminal)
+      - covers (party size, auto-pulled from reservation)
+      - guestName (from reservation)
+      - firedAt + firedBy per course
+      - elapsed timer with warn/critical thresholds
+  • Owner-configurable docket display (GET/PUT /api/kitchen/docket-config):
+      showStaffName, showDevice, showCovers, showGuestName, showTable,
+      showFireTime, showElapsedTimer, showItemNotes, showOrderNotes,
+      showModifiers, colourByCourse, fontSize (small|med|large),
+      warnMinutes, criticalMinutes.
+  • Priority: Normal · Rush · VIP with visual ring + auto-sort.
+  • Prep-list generator: today's expected covers × recipe-pull-rate.
+  • Auto-refresh every 10 s (WebSocket-ready).
+  • KitchenLoad.jsx — 30-minute forecast bar (Ash-generated).
+
+7.4  ─  Table Ordering                                (TableOrder.jsx · table_ordering.py)
+──────────────────────────────────────────────────────────────────────────
+  • Public QR-scan → menu → self-order → arrives at KDS.
+  • Runs on the same KitchenOrder pipeline, deviceLabel="Table QR".
+  • Course-aware ordering.
+  • Split-per-person bill flow.
+
+7.5  ─  Table Layout / Floor Plan                    (TableLayout.jsx · FloorPlan.jsx)
+──────────────────────────────────────────────────────────────────────────
+  • Drag-and-drop floor editor (@dnd-kit).
+  • Zones (Terrace · Main · Bar · Private).
+  • Live status: available · seated · dirty · reserved.
+  • Table combining / splitting for large parties.
+
+7.6  ─  Products / Menu / Modifiers                    (Products.jsx · Modifiers.jsx
+──────────────────────────────────────────────────────────────────────────  · items_system.py)
+  • Multi-category taxonomy; product can appear in N categories.
+  • Multi-modifier groups (chained: Meat → Sauce → Cook Level).
+  • Recipe builder (ingredients + yields).
+  • Variants (size, style, temperature).
+  • Bulk edit — filter, sort, drag-select marquee, inline field edits.
+  • Image Library + AI image generation (Gemini Nano Banana).
+  • Price rules per channel (dine-in vs delivery vs online).
+  • Menu Engineering matrix (Star / Puzzle / Plow-Horse / Dog).
+  • MenuABTesting.jsx — split-price experiments.
+  • PriceTune.jsx — AI margin recommender.
+
+7.7  ─  Inventory                                     (Inventory.jsx · inventory_*.py)
+──────────────────────────────────────────────────────────────────────────
+  • Ingredient master + product recipe consumption.
+  • Live stock, par level, reorder point, supplier lead time.
+  • Stock-take screen with variance reason codes.
+  • PurchaseOrders.jsx — auto-draft PO from Ash purchasing recommender.
+  • Invoice OCR — supplier invoice photo → line items → 3-way match.
+  • InventoryAccounting.jsx — COGS journal per period.
+  • InventoryAnomalies.jsx — Ash-flagged theft / spoilage.
+  • AI Pantry (AIPantry.jsx) — home-kitchen mode; scan fridge → recipes.
+
+7.8  ─  Customers / CRM                                    (Customers.jsx · customers.py)
+──────────────────────────────────────────────────────────────────────────
+  • Unified customer record (POS + reservations + loyalty + wallet).
+  • Household grouping; primary/secondary contacts.
+  • Consent flags: SMS · email · marketing · analytics.
+  • Notes timeline (staff + AI both write to it).
+  • Visit history · spend history · preferences (allergies, favourites).
+  • Right-to-be-forgotten workflow (owner-only hard delete).
+  • CohortRetention.jsx — RFM segmentation.
+
+7.9  ─  Loyalty 1.0                                        (Loyalty*.jsx · loyalty.py
+──────────────────────────────────────────────────────────────────────────  · loyalty_engine.py)
+  • Point ledger (earn on spend, redeem for products/vouchers).
+  • Tiers: Bronze · Silver · Gold · Platinum (thresholds configurable).
+  • Wallet pass (Apple Wallet + Google Wallet — real .pkpass generation).
+  • LoyaltyEvents.jsx — audit trail of every points event.
+  • Clubmember.jsx — member portal (view balance, redeem).
+  • 10-point floor rule (no fractional earn).
+
+7.10 ─  Loyalty 2.0                                (LoyaltyProgress.jsx · loyalty_v2.py)
+──────────────────────────────────────────────────────────────────────────
+  • Badge catalog (10 seeded):
+      First Visit · Regular · Loyalist · Century Club · Big Spender ·
+      VIP Whale · Early Bird · Wine Buff · Community Builder · Birthday Guest
+    Each with icon, colour, condition string, and awarded points.
+  • Milestone ladder (6 seeded):
+      5 Visits · 25 Visits · $100 · $500 (Silver) · $2 000 (Gold) ·
+      $5 000 (Platinum)
+    Rewards can be voucher, points, or tier bump.
+  • Seasonal Challenges — owner-authored, time-boxed missions with
+    metric (visits/spend), target, dates, and reward.
+  • Tier Progression UI — hero card with pts-to-next tier, progress bar,
+    colour gradient current→next.
+  • Idempotent evaluation: POST /api/loyalty/v2/evaluate/{customerId}
+    can be called any time without duplicates.
+  • Per-customer view at /loyalty-progress with badge grid, milestone
+    ladder, active challenge cards.
+
+7.11 ─  Vouchers & Wallet                                  (Vouchers.jsx · voucher.py
+──────────────────────────────────────────────────────────────────────────  · wallet_ledger.py)
+  • Universal Voucher Engine — one shape for gift cards, promos,
+    loyalty rewards, milestone rewards, referral credits.
+  • Value types: amount (cash) · percent · buy-X-get-Y · product-swap.
+  • Sources: manual · loyalty_milestone · loyalty_challenge ·
+    referral · birthday · ash_marketing.
+  • Wallet ledger tracks every credit/debit; balance is a derived view.
+  • Real Apple Wallet .pkpass + Google Wallet Save-to-Wallet URL.
+  • PaymentLinks.jsx — customer-scoped one-off payment/gift links.
+
+7.12 ─  Payments & EFTPOS                        (eftpos_service.py · Stripe playbook)
+──────────────────────────────────────────────────────────────────────────
+  • Stripe checkout, Apple Pay, Google Pay.
+  • Emergent-managed Stripe (no keys required in dev).
+  • EFTPOS abstraction: pinpad brand-agnostic API for Verifone /
+    Ingenico / Square terminal.
+  • Refund workflow with reason + Approvals gate (>$100 threshold).
+  • Chargeback console (v27.4).
+  • Split payments; per-line-item split; per-guest split.
+
+7.13 ─  Accounting & Finance (Enterprise)          (Accounting.jsx · FinanceLedger.jsx
+──────────────────────────────────────────────────────────────────────────  · accounting.py
+                                                                            · accounting_service.py)
+  • Full double-entry ledger: JournalEntries, Ledgers, Accounts.
+  • P&L, Balance Sheet, Cash Flow, Trial Balance, General Journal.
+  • AP / AR ageing.
+  • Bank reconciliation.
+  • BAS worksheet (Australian GST).
+  • Australian Payroll compliance (Payroll.jsx · payroll.py).
+  • Every mutation writes to db.audit_logs (universal audit trail).
+  • Journal entries over $500 route to Approvals (configurable).
+
+7.14 ─  HQ / Multi-Site                               (HQDashboard.jsx · hq.py
+──────────────────────────────────────────────────────────────────────────  · multi_tenant.py)
+  • Business (brand) → Franchisee → Location tree.
+  • HQ dashboards roll up sales, cost, staff, guest metrics.
+  • Cross-location leaderboards & benchmarks.
+  • Every mutation carries X-Business-Id + X-Location-Id.
+  • Location-scoped queries filter automatically.
+  • EnterpriseCommandCenter.jsx — 30-tile executive view.
+
+7.15 ─  Staff / HR / Payroll                             (StaffManagement.jsx +
+──────────────────────────────────────────────────────────────────────────  StaffRoster.jsx
+                                                                            + ShiftSwaps.jsx
+                                                                            + LaborForecast.jsx
+                                                                            + Payroll.jsx
+                                                                            + StaffLeaderboard.jsx)
+  • Staff master (name, role, hourly rate, cert expiry, allergies).
+  • Roster with AI-suggested shifts (LaborForecast.jsx).
+  • Roster blackout dates (AI recommends based on forecast).
+  • Shift swaps with manager approval.
+  • PreShift.jsx — daily briefing screen (Ash-generated summary).
+  • Time & attendance clock-in/out.
+  • Australian Payroll (SG / STP / Award compliance).
+  • Tip management (TipManagement.jsx).
+  • Staff leaderboard (sales · covers · CSAT).
+  • Ash predicts burnout from overtime streaks and clock patterns.
+
+7.16 ─  Marketing                                    (Marketing.jsx · SocialMedia.jsx
+──────────────────────────────────────────────────────────────────────────  · EmailMarketing.jsx
+                                                                            · social_media.py)
+  • Content calendar (drag-to-reschedule, campaign strands).
+  • AI weekly plan generator.
+  • Best-Time-to-Post analytics per channel.
+  • Multi-channel post composer (Instagram · Facebook · TikTok · X ·
+    Google Business · Email · SMS).
+    OAuth still Mocked for Meta / TikTok / X (planned real integration).
+  • Recently Edited sidebar.
+  • Drag-to-select marquee for bulk actions.
+  • Email marketing with segments + templates.
+  • Ash Marketing persona autonomously drafts promos (routes to Approvals).
+
+7.17 ─  Discounts & Promotions                            (Discounts.jsx · promotion.py)
+──────────────────────────────────────────────────────────────────────────
+  • Rule-based promotions (category × time × min-spend × customer segment).
+  • Bundle promotions (buy A + B → discount).
+  • Multi-select category picker for promotion targeting.
+  • Comp / Void reason codes (CompVoid.jsx).
+  • SurgePricing.jsx — AI-driven dynamic pricing.
+
+7.18 ─  Online Ordering / Delivery                    (OrderOnline.jsx · TrackOrder.jsx
+──────────────────────────────────────────────────────────────────────────  · online_orders.py)
+  • Public storefront (channel_menus per storefront).
+  • Delivery / pickup / dine-in modes.
+  • AI ETA per order.
+  • ChannelMenus.jsx — different menu per online channel.
+  • TrackOrder.jsx — public tracking page.
+  • Deliverect-style webhook adapter (planned).
+
+7.19 ─  Feedback & Reputation                          (feedback.py · Awards / Super)
+──────────────────────────────────────────────────────────────────────────
+  • Post-visit SMS feedback link.
+  • Star + comment; low-score triggers Ash "recover" playbook.
+  • Awards.jsx / Super.jsx — badges for staff & customer accomplishments.
+
+7.20 ─  Analytics & Reporting                     (Dashboard.jsx · analytics.py
+──────────────────────────────────────────────────────────────────────────  · Forecasting.jsx)
+  • Dashboard — live sales, cover count, top items.
+  • CohortRetention.jsx — RFM analysis.
+  • Forecasting.jsx — 30-day revenue forecast (Ash).
+  • QuarterlyReview.jsx — investor-ready deck generator.
+  • ProfitGuardian.jsx — margin sentinel.
+  • WhatIfSimulator.jsx — legacy "what-if"; use NUA Plan Simulation for
+    ops-level scenarios.
+
+7.21 ─  Voice & AI Utilities                                (VoiceCommandCatalog.jsx
+──────────────────────────────────────────────────────────────────────────  · VoiceOrderButton.jsx
+                                                                            · VoiceRecipe.jsx
+                                                                            · PhoneAgent.jsx)
+  • Voice command intent router (Whisper STT → LLM classifier).
+  • Voice ordering at POS (hands-free).
+  • Voice recipe reader.
+  • Phone Agent — inbound call answering with structured takeaway
+    of bookings and orders.
+
+7.22 ─  Integrations                          (integrations.py · integration_service.py)
+──────────────────────────────────────────────────────────────────────────
+  • Stripe (live) — Emergent-managed test key + custom prod key.
+  • OpenAI GPT-5.2 · Emergent LLM Key.
+  • Gemini Nano Banana (image gen) · Emergent LLM Key.
+  • Sora 2 (video) · Emergent LLM Key.
+  • Whisper (STT) · Emergent LLM Key.
+  • Apple Wallet · Google Wallet (real pass generation).
+  • ABR (Australian Business Register) — GST/ABN lookup (abr_service.py).
+  • Meta / TikTok / X OAuth — MOCKED (real integration planned).
+  • SendGrid / Twilio — abstraction ready, activation pending real keys.
+
+7.23 ─  Licensing & Multi-Tenancy                              (licensing.py
+──────────────────────────────────────────────────────────────────────────  · LicensePage.jsx)
+  • License plans (Starter · Growth · Enterprise · HQ).
+  • LicenseEnforcementMiddleware — module gating per plan.
+  • LicenseBanner + LicenseLockScreen on the frontend.
+  • Trial + grace-period logic.
+
+7.24 ─  Rules Engine (Automation Brain)                    (rules_engine.py
+──────────────────────────────────────────────────────────────────────────  · AutomationTriggers.jsx
+                                                                            · AutomationEngine.jsx)
+  • Owner-authored WHEN → THEN rules across every module.
+  • Natural-language builder — describe rule, GPT-5.2 emits the JSON.
+  • Trigger types: order.placed · inventory.low · reservation.no_show ·
+    payment.failed · customer.birthday · schedule.hourly · schedule.daily.
+  • Action types: send_email · send_sms · create_task · adjust_stock ·
+    issue_voucher · notify_slack · call_webhook · route_to_approvals.
+  • Every rule execution writes to audit_logs.
+
+7.25 ─  Universal Audit Trail                                (audit.py · audit_service.py)
+──────────────────────────────────────────────────────────────────────────
+  • audit_service.log_event(entity_type, entity_id, action, before,
+    after, actor, memo, severity, tags).
+  • Universal view at /audit-log-universal (AuditLogUniversal.jsx).
+  • Filter by entity, actor, action, severity, date.
+  • Export CSV.
+
+7.26 ─  Temperature & Compliance                       (Temperature.jsx · temperature.py)
+──────────────────────────────────────────────────────────────────────────
+  • Fridge / freezer temperature logs (manual or IoT-fed).
+  • Compliance alerts on threshold breach.
+  • SecurityCompliance.jsx — PCI / GDPR checklist.
+
+7.27 ─  Booking Portal, Storefront, Public Pages         (BookingPortal.jsx
+──────────────────────────────────────────────────────────────────────────  · MemberPortal.jsx
+                                                                            · public.py)
+  • Public booking site with theme override per business.
+  • Member portal (self-service loyalty view).
+  • Deep-link prefill (utm_source attribution).
+
+7.28 ─  Miscellaneous Owner Tools                                        (assorted)
+──────────────────────────────────────────────────────────────────────────
+  • DigitalTwin.jsx — legacy KPI what-if.
+  • AICostCoach.jsx — one-liner tips on P&L variance.
+  • CommandCenter.jsx — the OG single-page dashboard.
+  • NuaPro.jsx — one-click execution of NUA's daily plan.
+  • PrintRouting.jsx — receipt / docket printer routing per station.
+
+════════════════════════════════════════════════════════════════════════════════
+8  ·  SECURITY & COMPLIANCE
+════════════════════════════════════════════════════════════════════════════════
+
+8.1  Authentication
+     • JWT via /api/auth/login (email + password).
+     • Optional 4-digit PIN for POS shift-swap.
+     • bcrypt password hashing (never MD5 / SHA1).
+     • Emergent Google OAuth ready.
+     • Rate limiting (RateLimitMiddleware) — 60 req/min per IP.
+     • Brute-force lockout after 5 failed logins in 5 min.
+
+8.2  Authorisation
+     • Roles: owner · manager · cashier · kitchen · marketing · read-only.
+     • Every write endpoint uses Depends(get_user) or Depends(require_*).
+     • Owner-only actions include: license changes, tool permissions,
+       hard delete, payroll finalisation, tax settings.
+
+8.3  Auditability
+     • ActorContextMiddleware stamps every write with actor + IP + device.
+     • Immutable audit trail (no updates or deletes on audit_logs).
+     • Version counter on every entity for point-in-time restore.
+
+8.4  Data Protection
+     • Soft-delete tombstones; owner triggers hard-delete + audit-purge for
+       GDPR right-to-be-forgotten.
+     • PII fields flagged and redacted in logs.
+     • PCI: card data never touches NUA — Stripe.js tokenises client-side.
+
+8.5  Approvals
+     • Every high-risk AI or user action routes to Approvals with a
+       confidence + reasoning payload.
+     • Owner can require ALL AI actions to be approved by setting
+       AI_APPROVAL_MODE=strict.
+
+════════════════════════════════════════════════════════════════════════════════
+9  ·  ANALYTICS & KPIS
+════════════════════════════════════════════════════════════════════════════════
+
+Executive KPIs (Dashboard, HQ, Command Center):
+  Net revenue · Gross revenue · Gross margin · Net profit · Covers ·
+  Avg spend/cover · Labour cost % · CoGS % · Rent % · CSAT score ·
+  No-show rate · Repeat visit rate · Customer LTV · Loyalty enrolment %.
+
+Operational KPIs:
+  Ticket time (avg / 90th) · Course fire delay · Waste % · Stockout events
+  · Comp/Void % · Roster vs actual variance · Tips per cover.
+
+Guest KPIs:
+  Booking source ROI · Voucher redemption % · Tier progression rate ·
+  Birthday visit rate · Churn risk cohort size.
+
+Marketing KPIs:
+  Post reach · Best-time-to-post accuracy · Campaign ROI · Email open % ·
+  SMS open % · Voucher redemption per campaign.
+
+AI KPIs:
+  Insights generated · Insights actioned · Plan simulation runs ·
+  Plan approvals · Tool executions (auto / approval / disabled) ·
+  Approval turnaround time · Ash confidence average.
+
+════════════════════════════════════════════════════════════════════════════════
+10 ·  USER-FACING FEATURE MATRICES
+════════════════════════════════════════════════════════════════════════════════
+
+10.1  Customer-facing (public / QR / portal)
+      ─────────────────────────────────────
+      • Public booking site (BookingPortal.jsx).
+      • Table QR self-ordering (TableOrder.jsx).
+      • Public order tracking (TrackOrder.jsx).
+      • Payment success page (PaymentSuccess.jsx).
+      • Member portal — balance, tier, badges, milestones, challenges.
+      • Wallet passes (Apple + Google).
+      • Post-visit feedback link (SMS/email).
+      • Storefront online ordering with AI ETA.
+      • Voucher gifting / share.
+
+10.2  Staff-facing (cashier / floor / kitchen)
+      ─────────────────────────────────────
+      • POS Terminal (fluid, tablet-first).
+      • Kitchen Display (course lifecycle, docket enrichment).
+      • Waitlist screen.
+      • Floor plan (drag-and-drop status).
+      • Pre-shift briefing screen (Ash summary).
+      • Voice ordering.
+      • Shift swap requests.
+      • Tip management.
+      • End-of-day reconciliation.
+
+10.3  Manager-facing
+      ─────────────────────────────────────
+      • All staff surfaces.
+      • Approvals queue.
+      • Rules Engine editor.
+      • Purchase Orders.
+      • Payroll (view & submit).
+      • Docket configuration.
+      • Reservation settings.
+      • Marketing (compose + schedule).
+      • Discounts, promotions, comps.
+      • Analytics dashboards.
+
+10.4  Owner-facing
+      ─────────────────────────────────────
+      • All manager surfaces.
+      • NUA Command Center + full persona picker.
+      • NUA Planner (with Simulate).
+      • NUA Permissions (per-tool gate).
+      • NUA Memory.
+      • Full Accounting & Finance.
+      • BAS / GST.
+      • Australian Payroll finalisation.
+      • Universal audit log.
+      • Multi-site / HQ dashboards.
+      • Licensing.
+      • Security & compliance checklist.
+      • Enterprise Command Center (executive rollup).
+      • Rule of Right-to-be-forgotten.
+
+10.5  Admin (super)
+      ─────────────────────────────────────
+      • /super — cross-tenant management (Super.jsx).
+      • Tenant provisioning · billing · plan changes.
+      • Global feature flags per license plan.
+      • Force-upgrade / downgrade licenses.
+
+════════════════════════════════════════════════════════════════════════════════
+11 ·  DATA MODELS QUICK-REF
+════════════════════════════════════════════════════════════════════════════════
+
+MongoDB collections (canonical):
+
+  Core          users, staff, businesses, locations, licenses
+  Catalog       products, variants, modifiers, categories, ingredients,
+                recipes, suppliers
+  Sales         transactions, transaction_items, refunds, comps, splits,
+                payments, gift_cards
+  Kitchen       kitchen_orders, kitchen_docket_config, prep_lists
+  Reservations  reservations, waitlist, tables, floor_plans
+  CRM           customers, customer_households, customer_notes,
+                customer_badges, customer_milestones,
+                customer_challenge_progress, cohorts
+  Loyalty       loyalty_tiers, loyalty_events, loyalty_badges,
+                loyalty_milestones, loyalty_challenges
+  Vouchers      vouchers, voucher_rules, wallet_ledger
+  Marketing     campaigns, marketing_calendar, content_posts,
+                email_segments, sms_templates
+  Ops           purchase_orders, invoices, invoice_ocr,
+                stock_movements, stock_takes, waste_events
+  Finance       accounts, journal_entries, ledger_periods, bas_reports
+  Staff/Payroll shifts, timesheets, roster, tip_ledger, awards
+  NUA / AI      ash_insights, ash_plans, ash_memories, ash_agent_log,
+                ash_tool_permissions, health_scores, briefings,
+                approvals, rules, rule_runs
+  Audit         audit_logs, entity_versions, actor_context
+  Integrations  integration_configs, webhook_deliveries
+
+════════════════════════════════════════════════════════════════════════════════
+12 ·  24-MONTH ROADMAP (PRIORITISED)
+════════════════════════════════════════════════════════════════════════════════
+
+P0  = must-ship in the next 90 days
+P1  = quarter 2 - 3
+P2  = quarter 3 - 4
+P3  = year 2
+
+──────  Q1 2026  (Feb – Apr)  ──────
+
+  P0  Meta / TikTok / X OAuth (kill the mocks)                         Marketing
+  P0  Real SendGrid / Twilio activation via playbook + user keys       CRM/Marketing
+  P0  Ash Marketing autonomous campaign drafting → Approvals           NUA
+  P0  Hardware health monitoring (POS terminals, printers, KDS)        Ops
+  P0  KDS hold/fire multi-course notifications to servers              Kitchen
+  P0  Loyalty 2.0 phase-2: earn-notifications, referral engine,
+      leaderboard                                                      Loyalty
+
+──────  Q2 2026  (May – Jul)  ──────
+
+  P1  Offline-first POS (service-worker queue with sync)               POS
+  P1  Kitchen bump-bar hardware integration                            Kitchen
+  P1  Real-time WebSocket layer (replace 10 s polling)                 Platform
+  P1  Deliverect / Otter / DoorDash / UberEats direct connectors       Online
+  P1  Xero + MYOB + QuickBooks bi-directional accounting bridge        Finance
+  P1  Menu Engineering auto-suggestions with confidence intervals      NUA
+  P1  Digital Twin fully-fledged (simulate the whole business,
+      not just a plan)                                                 NUA
+  P1  Multi-currency + multi-tax jurisdiction                          Finance
+
+──────  Q3 2026  (Aug – Oct)  ──────
+
+  P1  Native mobile companion (React Native) — owner + staff           Platform
+  P1  Full Whatsapp Business integration (bookings + broadcasts)       Marketing
+  P1  Guest-facing PWA with push notifications                         CRM
+  P1  Voice-first POS mode (hands-free)                                POS
+  P2  Predictive maintenance for kitchen equipment                     Ops
+  P2  Recipe cost auto-refresh from live supplier invoices             Inventory
+  P2  Retail bundles + gift registry                                   Retail
+  P2  Franchise onboarding wizard                                      HQ
+
+──────  Q4 2026  (Nov – Jan 27)  ──────
+
+  P2  Predictive customer churn interventions (multi-arm bandit)       NUA
+  P2  Location-based push notifications (geo-fencing)                  Marketing
+  P2  Kitchen video documentation (Sora 2 recipe clips)                Kitchen
+  P2  Restaurant health-of-brand score published to public review      HQ
+  P2  Public API + Zapier / Make.com marketplace                       Platform
+  P2  White-label admin theme system                                   Platform
+
+──────  Q1 2027  (Feb – Apr)  ──────
+
+  P3  AI Head Chef persona — recipe R&D + menu generation              NUA
+  P3  Supply-chain optimisation across franchise network               HQ
+  P3  Dynamic pricing per-hour per-item (revenue management)           NUA
+  P3  Voice-agent for reservations (inbound + outbound)                CRM
+  P3  Vision-based dish quality control (in-kitchen camera + CV)       Kitchen
+
+──────  Q2 – Q4 2027  ──────
+
+  P3  Physical hardware line: NUA-branded POS terminals & KDS screens  Hardware
+  P3  Marketplace of NUA extensions (third-party plugin store)         Platform
+  P3  Real-time collaboration (Google-Docs-style presence on the
+      floor plan and roster)                                            Platform
+  P3  Global expansion pack — 10 currencies, 6 tax regimes,
+      3 languages                                                       Platform
+  P3  Guest wearable check-in (Apple Watch tap to seat)                CRM
+  P3  Autonomous supply-chain: NUA reorders directly with suppliers
+      inside approved budgets                                          NUA
+  P3  Investor mode: real-time cap-table + treasury dashboard          Owner
+
+════════════════════════════════════════════════════════════════════════════════
+13 ·  APPENDIX — CHRONOLOGY OF SHIPPED WORK
+════════════════════════════════════════════════════════════════════════════════
+
+  v33 (Feb 2026)   Ash → NUA rebrand. Personas (6), Planner, Simulation,
+                   Memory, Permissions UI. Loyalty 2.0 (badges + milestones
+                   + challenges + progression). Kitchen course hold/fire +
+                   docket enrichment. /api/nua/* alias middleware.
+  v32              Ash always-on scheduler + conversational FAB. Modular
+                   FinanceLedger split into components.
+  v31              Product-vision refactor into "AI Hospitality OS" language.
+                   MISSION.md authored.
+  v30              Enterprise double-entry accounting. Cross-module Rules
+                   Engine. Universal entity audit trail. Approval Queue
+                   gating.
+  v29              Customer Commerce Platform. Universal voucher engine.
+                   Unified wallet. AI personalisation.
+  v28.1            Australian Payroll compliance. BAS worksheet. Wallet
+                   creds UI. AI bundle discovery.
+  v28              Bundle & category multi-select promotions.
+  v27.9            Source attribution. Real wallet passes. @dnd-kit. Channel
+                   pause.
+  v27.8            Finalization UI batch. Locations hardening. Digital
+                   wallet. Automation triggers.
+  v27.6            Ops · Marketing · Super · Items · Floor 5-in-1.
+  v27.4            Best-time-to-post analytics. AI fallback header.
+                   Chargeback console.
+  v27.3            Background worker. Calendar edit/reuse. Bespoke auth
+                   cleanup.
+  v27.2            Content calendar. AI weekly plan. README.
+  v27.1            Social media marketing. Loyalty 10-pt floor. Split
+                   validation. Promotion dialog extract.
+  v27              Drag-to-select marquee. Recently-edited sidebar. NUA
+                   rebrand (branding).
+  v26.9            Full auth-Depends refactor. Products.jsx split.
+  v26.8            P0 auth-precedence refactor (Depends pattern).
+  v26.7            Cart inputs. POS status bar. AI Bookings Inbox.
+                   Super (Awards). Banks + payment terminals.
+  v26.6            Items page power tools — filter, sort, bulk edit, image
+                   library, inline edit.
+  v26.5            POS modifier picker end-to-end. NUA brand identity.
+                   Items: Categories & multi-modifiers. V25/V26 page split.
+  v26.4            Notifications + ingredients + recipes + BAS + stock-take.
+  v26.3            Online ordering + AI ETA + invoice OCR + item insights.
+  v26.2            Fluid POS. Category icons. Seed catalog. P2 refinement.
+  v26.1            Unified gift cards. AI marketing. AI roster blackouts.
+                   Live CFD.
+  v26 (Feb 2026)   Licensing release.
+  v25 (Feb 2026)   Enterprise release.
+  v18 (Feb 2026)   Original hospitality suite (v18 baseline).
+
+════════════════════════════════════════════════════════════════════════════════
+14 ·  GLOSSARY
+════════════════════════════════════════════════════════════════════════════════
+
+  Ash              Legacy name for the AI agent. Now branded as NUA. Backend
+                   collections and paths retain the "ash" prefix for stability;
+                   /api/nua middleware alias makes both interchangeable.
+  Approval Queue   db.approvals — human-in-the-loop safeguard.
+  BAS              Business Activity Statement (Australian GST filing).
+  Course           Kitchen sequencing unit: 1=Starter, 2=Main, 3=Dessert.
+  Docket           Kitchen ticket rendered on KDS or printer.
+  KDS              Kitchen Display System.
+  KPI              Key Performance Indicator.
+  Persona          A specialised NUA identity (Executive / Finance / Ops /
+                   HR / Marketing / Guest).
+  RFM              Recency-Frequency-Monetary customer segmentation.
+  Simulate         Dry-run a plan — writes are DESCRIBED, not executed.
+  Voucher          Universal reward unit (gift card, promo, milestone reward,
+                   referral credit).
+
+════════════════════════════════════════════════════════════════════════════════
+15 ·  CONTACT & CONTRIBUTION
+════════════════════════════════════════════════════════════════════════════════
+
+  Product owner        : Nua Founder (owner@nuva.com)
+  Test accounts        : /app/memory/test_credentials.md
+  Latest test reports  : /app/test_reports/iteration_*.json
+  Emergent LLM key     : Auto-injected in dev; owners top-up via
+                         Profile → Universal Key.
+  Save-to-GitHub       : Use the Emergent "Save to Github" chat action —
+                         no manual push required.
+
+────────────────────────────────────────────────────────────────────────────────
+END OF DOCUMENT — v1.0 · 10 Feb 2026
+────────────────────────────────────────────────────────────────────────────────

@@ -57,8 +57,8 @@ export default function AshPlans() {
     setRefreshing(true);
     try {
       const [p, pl] = await Promise.all([
-        axios.get(`${API}/ash/plans?limit=100`, { headers: H() }),
-        axios.get(`${API}/ash/personas`, { headers: H() }),
+        axios.get(`${API}/nua/plans?limit=100`, { headers: H() }),
+        axios.get(`${API}/nua/personas`, { headers: H() }),
       ]);
       setPlans(p.data);
       setPersonas(pl.data);
@@ -76,7 +76,7 @@ export default function AshPlans() {
     if (!goal.trim()) return;
     setBusy(true);
     try {
-      const r = await axios.post(`${API}/ash/plans/generate`, { goal, persona }, { headers: H() });
+      const r = await axios.post(`${API}/nua/plans/generate`, { goal, persona }, { headers: H() });
       toast.success(`Plan proposed (${r.data.steps.length} steps)`);
       setGenOpen(false);
       setGoal('');
@@ -88,7 +88,7 @@ export default function AshPlans() {
 
   const approvePlan = async (id) => {
     try {
-      const r = await axios.post(`${API}/ash/plans/${id}/approve`, {}, { headers: H() });
+      const r = await axios.post(`${API}/nua/plans/${id}/approve`, {}, { headers: H() });
       toast.success(`Plan walk complete: ${r.data.plan?.status}`);
       await load();
     } catch { toast.error('Approve failed'); }
@@ -96,7 +96,7 @@ export default function AshPlans() {
 
   const rejectPlan = async (id) => {
     try {
-      await axios.post(`${API}/ash/plans/${id}/reject`, { reason: 'Owner declined' }, { headers: H() });
+      await axios.post(`${API}/nua/plans/${id}/reject`, { reason: 'Owner declined' }, { headers: H() });
       toast('Plan rejected');
       await load();
     } catch { toast.error('Reject failed'); }
@@ -104,7 +104,7 @@ export default function AshPlans() {
 
   const approveStep = async (id, idx) => {
     try {
-      const r = await axios.post(`${API}/ash/plans/${id}/steps/${idx}/approve`, {}, { headers: H() });
+      const r = await axios.post(`${API}/nua/plans/${id}/steps/${idx}/approve`, {}, { headers: H() });
       toast.success(`Step ${idx + 1}: ${r.data.status || 'ok'}`);
       await load();
     } catch { toast.error('Step failed'); }
@@ -112,7 +112,7 @@ export default function AshPlans() {
 
   const rejectStep = async (id, idx) => {
     try {
-      await axios.post(`${API}/ash/plans/${id}/steps/${idx}/reject`, { reason: 'not needed' }, { headers: H() });
+      await axios.post(`${API}/nua/plans/${id}/steps/${idx}/reject`, { reason: 'not needed' }, { headers: H() });
       toast('Step rejected');
       await load();
     } catch { toast.error('Reject failed'); }
@@ -122,7 +122,7 @@ export default function AshPlans() {
     setSimulating(true);
     setSimulation(null);
     try {
-      const r = await axios.post(`${API}/ash/plans/${id}/simulate`, {}, { headers: H() });
+      const r = await axios.post(`${API}/nua/plans/${id}/simulate`, {}, { headers: H() });
       setSimulation(r.data);
       toast.success('Simulation complete');
     } catch { toast.error('Simulation failed'); }

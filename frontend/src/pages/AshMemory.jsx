@@ -32,8 +32,8 @@ export default function AshMemory() {
     setRefreshing(true);
     try {
       const [m, s] = await Promise.all([
-        axios.get(`${API}/ash/memory?limit=200`, { headers: H() }),
-        axios.get(`${API}/ash/memory/scopes`, { headers: H() }),
+        axios.get(`${API}/nua/memory?limit=200`, { headers: H() }),
+        axios.get(`${API}/nua/memory/scopes`, { headers: H() }),
       ]);
       setMemories(m.data);
       setScopes(s.data);
@@ -46,7 +46,7 @@ export default function AshMemory() {
   const saveMemory = async () => {
     if (!form.text.trim()) return;
     try {
-      await axios.post(`${API}/ash/memory`, form, { headers: H() });
+      await axios.post(`${API}/nua/memory`, form, { headers: H() });
       toast.success('Remembered');
       setAddOpen(false);
       setForm({ text: '', scope: 'global', kind: 'preference', confidence: 1 });
@@ -57,7 +57,7 @@ export default function AshMemory() {
   const deleteMemory = async (id) => {
     if (!window.confirm('Ask NUA to forget this? This cannot be undone.')) return;
     try {
-      await axios.delete(`${API}/ash/memory/${id}`, { headers: H() });
+      await axios.delete(`${API}/nua/memory/${id}`, { headers: H() });
       setMemories(ms => ms.filter(m => m.id !== id));
       toast('Forgotten');
     } catch { toast.error('Failed'); }

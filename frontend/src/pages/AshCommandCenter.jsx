@@ -31,11 +31,11 @@ export default function AshCommandCenter() {
     setRefreshing(true);
     try {
       const [h, i, b, a, t] = await Promise.all([
-        axios.get(`${API}/ash/health-score`, { headers: H() }),
-        axios.get(`${API}/ash/insights?limit=100`, { headers: H() }),
-        axios.get(`${API}/ash/briefing`, { headers: H() }),
+        axios.get(`${API}/nua/health-score`, { headers: H() }),
+        axios.get(`${API}/nua/insights?limit=100`, { headers: H() }),
+        axios.get(`${API}/nua/briefing`, { headers: H() }),
         axios.get(`${API}/approvals?status=pending`, { headers: H() }),
-        axios.get(`${API}/ash/tools`, { headers: H() }),
+        axios.get(`${API}/nua/tools`, { headers: H() }),
       ]);
       setHealth(h.data); setInsights(i.data); setBriefing(b.data);
       setApprovals(a.data); setTools(t.data);
@@ -46,7 +46,7 @@ export default function AshCommandCenter() {
 
   const regenerateBriefing = async () => {
     try {
-      const r = await axios.post(`${API}/ash/briefing/regenerate`, {}, { headers: H() });
+      const r = await axios.post(`${API}/nua/briefing/regenerate`, {}, { headers: H() });
       setBriefing(r.data);
       toast.success('Briefing regenerated');
     } catch { toast.error('Failed'); }
@@ -54,7 +54,7 @@ export default function AshCommandCenter() {
 
   const setPermission = async (toolName, permission) => {
     try {
-      await axios.put(`${API}/ash/tools/${toolName}/permission`, { permission }, { headers: H() });
+      await axios.put(`${API}/nua/tools/${toolName}/permission`, { permission }, { headers: H() });
       toast.success(`${toolName} → ${permission}`);
       load();
     } catch { toast.error('Failed'); }

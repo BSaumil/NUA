@@ -248,9 +248,13 @@ export const kitchenAPI = {
   readyOrder: (id) => api.post(`/kitchen/orders/${id}/ready`),
   servedOrder: (id) => api.post(`/kitchen/orders/${id}/served`),
   cancelOrder: (id) => api.post(`/kitchen/orders/${id}/cancel`),
-  fireCourse: (id, course) => api.post(`/kitchen/orders/${id}/fire-course`, null, { params: { course } }),
+  fireCourse: (id, course) => api.post(`/kitchen/orders/${id}/fire-course/${course}`),
+  holdCourse: (id, course) => api.post(`/kitchen/orders/${id}/hold-course/${course}`),
+  serveCourse: (id, course) => api.post(`/kitchen/orders/${id}/serve-course/${course}`),
   setPriority: (id, priority) => api.post(`/kitchen/orders/${id}/priority`, null, { params: { priority } }),
   getPrepList: () => api.get('/kitchen/prep-list'),
+  getDocketConfig: () => api.get('/kitchen/docket-config'),
+  updateDocketConfig: (data) => api.put('/kitchen/docket-config', data),
 };
 
 // Pre-Shift Dashboard API
