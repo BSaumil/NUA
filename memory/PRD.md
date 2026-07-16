@@ -1,6 +1,62 @@
-# NUA POS — PRD v35.0 (Measured Stock Phase 1)
+# NUA POS — PRD v36.0 (Loyalty v2 Phase-2 · Kitchen server-notify · Ash Marketing draft · Beverage margin · Alcohol catalog seed)
 
-> Master doc: `/app/memory/NUA_POS_Master_Roadmap_v1.txt` — read first.
+
+## v36.0 — Iteration 58 (10 Feb 2026): Loyalty phase-2 + Kitchen server-notify + Ash Marketing + Beverage margin + Alcohol seed
+
+### Shipped
+
+**Notifications** (`services/notification_service.py`, `routes/notifications.py`, `components/NotificationBell.jsx`)
+- Universal in-app notifications routed by email / role / topic — kinds: loyalty, kitchen, approval, marketing, referral, ash, system.
+- Global floating bell (bottom-right, next to NUA FAB) with unread badge + 30 s polling + slide-out panel.
+- Owner is super-user: sees all role-scoped notifications (marketing / manager / server / kitchen).
+
+**Loyalty 2.0 Phase-2** (`routes/loyalty_v2.py`, `pages/LoyaltyProgress.jsx`)
+- Earn notifications: badge / milestone awards fire simultaneous notifications to `role="marketing"` (for staff follow-up) and to the customer's email (respecting existing consent).
+- Referral engine: `POST /loyalty/v2/referrals` creates a pending referral, `POST .../{id}/complete` issues **$20 referrer + $10 referee vouchers** and refreshes Insight #14. UI: dedicated Referrals tab with create + complete flow.
+- Leaderboard: `GET /loyalty/v2/leaderboard?metric=points|visits|spend|referrals` — top-25 with rank medal styling. UI: dedicated Leaderboard tab with metric switcher.
+
+**Kitchen server-notifications** (`routes/kitchen.py`)
+- `fire-course` → notifies `serverId` (or role="server" fallback) with `Table X — Main fired` + link back to KDS.
+- `mark_order_ready` → notifies with `Table X — order ready`.
+
+**Ash Marketing autonomous draft** (`routes/ash.py`)
+- `POST /nua/marketing/draft-campaign {goal}` — GPT-5.2 grounds on churning-cohort + slow-inventory, emits a full campaign JSON (name / objective / segment / channel / offer / copy / dates / expectedReach / expectedRevenue / risk / reasoning), enqueues it in the Approval Queue with source="ash_marketing", and pings the owner.
+- Deterministic fallback (Weekend Winback template) so the endpoint never fails.
+
+**Beverage margin (enhancement)** (`services/measured_inventory_service.py`, `routes/measured_inventory.py`)
+- `beverage_cost(product_id)` → costPerPour derived from container cost / totalMeasure × deductAmount.
+- `GET /measured-inventory/beverage-margin/{id}` → single product margin card.
+- `GET /measured-inventory/beverage-margin` → P&L-ready roll-up of every measured beverage, sorted by margin %. Feeds NUA Finance and future Menu Engineering integration.
+
+**Alcohol catalog seed** (`services/alcohol_seeder.py`, `server.py` startup hook)
+- Idempotent on-startup seeder: 12 alcohol categories (Beer, Wine Red / White / Sparkling / Rosé, Cocktails, Spirits × 5, Liqueurs), 2 Drinks categories (Non-Alcoholic, Coffee & Tea).
+- ~38 products: draft beers, cocktails (Espresso Martini, Negroni, Old Fashioned, Margarita, Aperol Spritz, Whisky Sour, Mojito), spirits (30ml pours), wine glasses / bottles.
+- Every pourable product auto-links a StockUnit + SellVariant so beverage margin math is live from day one.
+
+### Verified via curl
+- 2 unread notifications after firing a kitchen course + completing a referral + drafting a campaign ✅
+- Leaderboard by spend returns Sarah Johnson #1 ($1500) ✅
+- Baileys 86.3%, Amaretto 83.7%, Vodka 83.6% pour margins ✅
+- Fire course #2 on order KO-E638A17D → notification "Table 7 — Main fired" ✅
+- 12 alcohol categories seeded on startup ✅
+- Referral created + completed → $20 & $10 vouchers issued to both parties ✅
+- Ash Marketing draft → Weekend Winback campaign queued in Approvals ✅
+
+### Files added / touched
+- backend/services/notification_service.py           NEW
+- backend/routes/notifications.py                    NEW
+- backend/services/alcohol_seeder.py                 NEW
+- backend/routes/loyalty_v2.py                       earn-notify + referrals + leaderboard
+- backend/routes/kitchen.py                          fire/ready notify hooks
+- backend/routes/ash.py                              draft-campaign endpoint
+- backend/services/measured_inventory_service.py     beverage_cost()
+- backend/routes/measured_inventory.py               beverage-margin endpoints
+- backend/server.py                                  notifications router + alcohol seed hook
+- frontend/src/components/NotificationBell.jsx       NEW (global bell)
+- frontend/src/App.js                                bell mounted in layout
+- frontend/src/pages/LoyaltyProgress.jsx             Leaderboard + Referrals tabs
+
+---
 
 
 ## v35.0 — Iteration 57 (10 Feb 2026): Measured / Fractional Stock (Phase 1)
