@@ -388,6 +388,8 @@ export const staffMgmtAPI = {
 // Menu Features — AI Import, Price Adjust, Ghost Discount, What-If Advanced
 export const menuFeaturesAPI = {
   aiImportMenu: (data) => api.post('/menu/ai-import', data),
+  aiPreviewMenu: (data) => api.post('/menu/ai-preview', data, { timeout: 90000 }),
+  aiCommitMenu: (data) => api.post('/menu/ai-commit', data),
   bulkPriceAdjust: (data) => api.post('/menu/price-adjust', data),
   ghostDiscount: (data) => api.post('/pos/ghost-discount', data),
   getGhostDiscounts: () => api.get('/pos/ghost-discounts'),

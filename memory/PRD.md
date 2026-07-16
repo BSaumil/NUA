@@ -1,4 +1,37 @@
-# NUA POS — PRD v36.2 (AI Menu Import fix · CSV Import UX polish)
+# NUA POS — PRD v36.3 (AI Menu Import — Preview → Review → Commit)
+
+
+## v36.3 — Iteration 61 (Feb 2026): AI Menu Import review flow
+
+### Shipped
+
+**AI Menu Import — 3-stage flow with review before persistence** (`routes/menu_features.py`, `components/menu/AIMenuImportReview.jsx`)
+- Replaced the one-shot "upload → items created blind" flow with **Preview → Review → Commit**.
+- **`POST /menu/ai-preview`** — runs GPT-5.2 vision on the image (or `pypdf` on the PDF), fuzzy-matches each proposed category against existing DB categories (`difflib.SequenceMatcher`, score ≥ 0.55, contains-boost to 0.85). Attaches `suggestedModifierIds` for every item whose matched category is in a modifier's `assignedCategories`. Detects duplicates by name. **No DB writes.**
+- **`POST /menu/ai-commit`** — accepts the reviewed items, writes them via `stamped_insert` (audit trail), honours `skipIfDuplicate` per-row.
+- **UI** — new `AIMenuImportReview` dialog with 3 stages (upload / review / done):
+  - Review table: editable name / category / price / cost, per-row include checkbox, tick-to-attach modifier chips (only modifiers assigned to that category are shown).
+  - Category dropdown: existing categories in **green**, "New: X" fallback in **amber** with an inline note ("AI suggested 'BRUNCH' — will be created").
+  - Live stats strip: Detected · Selected · Duplicates · Menu Value.
+  - Margin column colour-coded (≥60% emerald, ≥40% amber, else red) so the owner can spot cost issues at a glance.
+  - Bulk `Select all` / `Deselect all`.
+  - Duplicates auto-deselected, flagged with an amber "already exists — will be skipped" warning.
+- Legacy `/menu/ai-import` kept for backwards compat (also now fuzzy-matches categories + auto-attaches modifiers).
+
+### Verified
+- Preview on a 7-item menu image (Flat White, Cappuccino, Latte, Beef Burger, Chicken Schnitzel, Espresso Martini, Negroni): all 7 fuzzy-matched to existing categories (Coffee, Mains, Cocktails), all flagged as duplicates, "Selected=0 → Import 0 items" (correct).
+- Preview on a fresh 5-item brunch menu (Avocado Smash Bruschetta, Ricotta Hotcakes, Green Goddess Bowl, Berry Kombucha, Golden Latte): 0 duplicates, new categories `BRUNCH` and `DRINKS` proposed in amber. Select-all + Commit → 5 products written with SKUs `AI-…`, `createdBy=owner@nuva.com`, audit stamped.
+- Duplicate skip: replaying the same commit → `created=0 skipped=3` with detailed `skippedDetails`.
+
+### Backlog (unchanged)
+- **P1** Real Meta / TikTok / X OAuth (needs client IDs/secrets).
+- **P1** SendGrid / Twilio production keys.
+- **P1** Hardware Health polish.
+- **P2** `ash` → `nua` backend namespace refactor.
+- **P2** `@dnd-kit` tablet-friendly DnD for Social Calendar.
+- **P2** Channel Menus per-channel pause/resume + schedule toggle UI.
+- **P2** `x-ai-parsed-fallback` header on AI endpoints.
+- **P2** Move `ai_weekly_plan` to a background task.
 
 
 ## v36.2 — Iteration 60 (Feb 2026): AI Menu Import + CSV Import fixes
