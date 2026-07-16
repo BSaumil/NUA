@@ -493,6 +493,20 @@ part of the product.
   • InventoryAccounting.jsx — COGS journal per period.
   • InventoryAnomalies.jsx — Ash-flagged theft / spoilage.
   • AI Pantry (AIPantry.jsx) — home-kitchen mode; scan fridge → recipes.
+  • Measured / Fractional Stock (Phase 1) — MeasuredStock.jsx +
+    routes/measured_inventory.py + services/measured_inventory_service.py.
+    Buy-in-bottles-sell-in-glasses model. Five entities: UomConversion,
+    StockUnit, SellVariant, OpenContainer, WastageEvent. Auto-deducts from
+    the active container on every sale (via transactions.py hook), rolls
+    overdraw onto a freshly-opened container, logs wastage by reason,
+    stocktake-reconcile flags pour variance beyond configurable threshold
+    (default 5%). Feeds Ash Insights #2 (pour variance = theft signal),
+    #6 (wastage-event spikes), #11 (purchasing folds partial containers
+    into equivalent whole-unit stock so kegs mid-pour aren't invisible).
+    Endpoints under /api/measured-inventory. Zero regression for existing
+    whole-unit products (deduct_on_sale silently no-ops without a
+    SellVariant).
+
 
 7.8  ─  Customers / CRM                                    (Customers.jsx · customers.py)
 ──────────────────────────────────────────────────────────────────────────

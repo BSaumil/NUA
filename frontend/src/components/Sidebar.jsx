@@ -44,6 +44,7 @@ const NAV_STRUCTURE = [
       { path: '/menu-engineering', label: 'Menu Matrix' },
       { path: '/what-if', label: 'What-If Simulator' },
       { path: '/inventory', label: 'Inventory' },
+      { path: '/measured-stock', label: 'Measured Stock' },
       { path: '/ai-pantry', label: 'AI Smart Pantry' },
       { path: '/forecasting', label: 'Forecasting' },
       { path: '/quarterly-review', label: 'Quarterly Review' },

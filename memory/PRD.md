@@ -1,9 +1,63 @@
-# NUA POS — PRD v34.0 (NUA rebrand · /api/nua alias · Kitchen course lifecycle · Master Roadmap)
+# NUA POS — PRD v35.0 (Measured Stock Phase 1)
 
-> **NOTE**: The **single source of truth** for the entire NUA product is now
-> `/app/memory/NUA_POS_Master_Roadmap_v1.txt`. This PRD file remains the
-> chronological version history. Read the master doc first for the full
-> picture; consult this file for how we got here.
+> Master doc: `/app/memory/NUA_POS_Master_Roadmap_v1.txt` — read first.
+
+
+## v35.0 — Iteration 57 (10 Feb 2026): Measured / Fractional Stock (Phase 1)
+
+### Shipped
+
+- **Five new BaseEntity models** in `backend/models/measured_inventory.py`:
+  `UomConversion`, `StockUnit`, `SellVariant`, `OpenContainer`, `WastageEvent`.
+  All extend BaseEntity, all writes route through `stamped_insert` /
+  `stamped_update`, all audit-logged.
+- **`backend/services/measured_inventory_service.py`** — `deduct_on_sale`
+  (hooked in `transactions.py`), auto-open-container, overdraw rollover,
+  `apply_wastage_to_container`, `reorder_available`, `reconcile_stocktake`.
+  Built-in ml↔l and g↔kg conversion table + owner-configurable UomConversion
+  override.
+- **`backend/routes/measured_inventory.py`** at `/api/measured-inventory/*` —
+  CRUD for stock-units, sell-variants, open-containers, wastage,
+  stocktake-reconcile, and a per-product summary endpoint for the UI.
+- **Ash Intelligence updated**:
+  • Insight #2 (theft) now includes pour-variance signals from flagged reconciles.
+  • Insight #6 (waste) now includes wastage-event spikes (≥3 events or
+    ≥500 units in 7 days per stock unit).
+  • Insight #11 (purchasing) now folds partial container equivalents into
+    "available stock" so kegs mid-pour aren't invisible to reorder logic.
+- **Frontend**: `MeasuredStock.jsx` — grouped-by-station live containers with
+  remaining measure + progress bar + estimated serves; setup dialog to link
+  a product with stock units + sell variants; wastage modal; reconcile modal
+  showing theoretical vs counted + variance result. Registered in Sidebar
+  under Menu Engineering → Measured Stock.
+
+### Verified (curl + python asyncio)
+- AC #1: 5 × 150ml sales on a 750ml bottle → closes at 0 ✅
+- AC #2: overdraw of a bottle at 100ml by a 150ml glass → closes bottle 1
+  at 0 and auto-opens bottle 2 at 700ml (750 − 50 overdraw) ✅
+- AC #3: 4 wastage events / 480 units surfaced in Insight #6 as a warning ✅
+- AC #4: reconcile with 27.3% variance → Insight #2 fires severity=high ✅
+- AC #5: Insight #11 for a product with an open container shows
+  `available 0.93 < par 5` (sealed 0 + partial 0.93) ✅
+- AC #6: 20 audit_events written across stock_unit, open_container,
+  wastage_event, stocktake_reconcile with actor/device/version stamped ✅
+- AC #7: whole-unit products with no SellVariant behave identically —
+  `deduct_on_sale` returns `{measured: False}` and the existing
+  `$inc: stock -1` continues to fire ✅
+
+### Files added / touched
+- backend/models/measured_inventory.py                 NEW
+- backend/services/measured_inventory_service.py       NEW
+- backend/routes/measured_inventory.py                 NEW
+- backend/server.py                                    router registered
+- backend/routes/transactions.py                       hook in deduct_on_sale
+- backend/services/ash_intelligence.py                 insights #2, #6, #11 updated
+- frontend/src/pages/MeasuredStock.jsx                 NEW
+- frontend/src/App.js                                  route registered
+- frontend/src/components/Sidebar.jsx                  entry under Menu Engineering
+- memory/NUA_POS_Master_Roadmap_v1.txt                 §7.7 updated
+
+---
 
 
 ## v34.0 — Iteration 56 (10 Feb 2026): NUA rebrand · Kitchen course hold/fire + docket enrichment · Master Roadmap doc

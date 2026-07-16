@@ -156,12 +156,17 @@ async def create_transaction(transaction: TransactionCreate):
 
     # Update stock + deduct recipe ingredients via the central helper.
     from routes.inventory_accounting import deduct_recipe_stock
+    from services import measured_inventory_service as _mi
+    _actor = getattr(transaction, "cashier", None) or "pos"
     for item in transaction.items:
         await db.products.update_one(
             {"id": item.productId},
             {"$inc": {"stock": -item.quantity}}
         )
         try: await deduct_recipe_stock(item.productId, item.quantity)
+        except Exception: pass
+        # Measured-stock deduction — silent no-op for whole-unit products.
+        try: await _mi.deduct_on_sale(item.productId, item.quantity, _actor)
         except Exception: pass
         # Emit inventory events for rules engine
         try:

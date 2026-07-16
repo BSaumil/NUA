@@ -60,6 +60,7 @@ import AshPlans from './pages/AshPlans';
 import AshPermissions from './pages/AshPermissions';
 import AshMemory from './pages/AshMemory';
 import LoyaltyProgress from './pages/LoyaltyProgress';
+import MeasuredStock from './pages/MeasuredStock';
 import Approvals from './pages/Approvals';
 import AuditLogUniversal from './pages/AuditLogUniversal';
 import HQDashboard from './pages/HQDashboard';
@@ -176,6 +177,7 @@ function ProtectedRoutes() {
         <Route path="/ash-permissions" element={<AshPermissions />} />
         <Route path="/ash-memory" element={<AshMemory />} />
         <Route path="/loyalty-progress" element={<LoyaltyProgress />} />
+        <Route path="/measured-stock" element={<MeasuredStock />} />
         <Route path="/approvals" element={<Approvals />} />
         <Route path="/audit" element={<AuditLogUniversal />} />
         <Route path="/hq" element={<HQDashboard />} />

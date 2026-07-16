@@ -39,6 +39,7 @@ from routes.items_system import router as items_system_router
 from routes.v15_features import router as v15_router
 from routes.loyalty_engine import router as loyalty_engine_router
 from routes.loyalty_v2 import router as loyalty_v2_router
+from routes.measured_inventory import router as measured_inventory_router
 from routes.phase_ef import router as phase_ef_router
 from routes.phase_ef_wave2 import router as phase_ef_wave2_router
 from routes.v25_suite import router as v25_suite_router
@@ -77,6 +78,7 @@ api_router.include_router(automation_router)
 api_router.include_router(settings_router)
 api_router.include_router(loyalty_router)
 api_router.include_router(loyalty_v2_router)
+api_router.include_router(measured_inventory_router)
 api_router.include_router(public_router)
 api_router.include_router(table_ordering_router)
 api_router.include_router(integrations_router)

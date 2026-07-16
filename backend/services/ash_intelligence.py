@@ -73,12 +73,10 @@ async def predict_staffing_shortage() -> List[Dict[str, Any]]:
 async def detect_theft_signals() -> List[Dict[str, Any]]:
     since = (_now() - timedelta(days=7)).isoformat()
     voids = await db.transactions.find({"status": "voided", "timestamp": {"$gte": since}}, {"_id": 0}).to_list(2000)
-    if not voids:
-        return []
+    hits: List[Dict[str, Any]] = []
     by_staff: Dict[str, int] = {}
     for v in voids:
         by_staff[v.get("cashier", "unknown")] = by_staff.get(v.get("cashier", "unknown"), 0) + 1
-    hits = []
     for cashier, n in by_staff.items():
         if n >= 5:
             hits.append(_mk("theft", f"voids_{cashier}", "warning",
@@ -86,6 +84,30 @@ async def detect_theft_signals() -> List[Dict[str, Any]]:
                              "Review the transaction log; consider a manager-only void policy.",
                              actions=[{"type": "review_voids", "params": {"cashier": cashier}}],
                              data={"voids": n, "cashier": cashier}))
+
+    # Pour variance — flagged stocktake reconciles beyond threshold.
+    try:
+        recs = await db.stocktake_reconciles.find(
+            {"reconciledAt": {"$gte": since}, "flagged": True},
+            {"_id": 0},
+        ).sort("reconciledAt", -1).to_list(500)
+    except Exception:
+        recs = []
+    for r in recs:
+        variance = float(r.get("variance") or 0)
+        pct = float(r.get("variancePct") or 0)
+        if variance <= 0:
+            continue    # gain, not loss — not a theft signal
+        su_id = r.get("stockUnitId") or "?"
+        # Severity by size: 15% -> warning, 25% -> high
+        sev = "high" if pct >= 0.25 else "warning"
+        hits.append(_mk("theft", f"pour_variance_{su_id}_{r.get('reconciledAt', '')[:10]}", sev,
+                         f"Pour variance {pct*100:.1f}% on stock unit {su_id[:8]}",
+                         f"Stocktake counted {r.get('counted')}{r.get('uom')} — theoretical was "
+                         f"{r.get('theoretical')}{r.get('uom')} (variance {variance:.1f}{r.get('uom')}).",
+                         actions=[{"type": "review_pour_variance",
+                                    "params": {"stockUnitId": su_id, "reconciledAt": r.get("reconciledAt")}}],
+                         data={"variance": variance, "variancePct": pct}))
     return hits
 
 
@@ -155,7 +177,43 @@ async def predict_food_waste() -> List[Dict[str, Any]]:
                                      data={"daysLeft": dte, "stock": stock}))
             except Exception:
                 pass
-    return hits[:10]
+
+    # Wastage-event spike detection (measured stock).
+    try:
+        since = (_now() - timedelta(days=7)).isoformat()
+        events = await db.wastage_events.find(
+            {"createdAt": {"$gte": since}, "deletedAt": None}, {"_id": 0},
+        ).to_list(2000)
+    except Exception:
+        events = []
+    if events:
+        by_su: Dict[str, Dict[str, float]] = {}
+        for e in events:
+            su_id = e.get("stockUnitId") or e.get("openContainerId") or "?"
+            r = by_su.setdefault(su_id, {"amount": 0.0, "count": 0, "reasons": {}})
+            r["amount"] += float(e.get("amount") or 0)
+            r["count"] += 1
+            reason = e.get("reason") or "other"
+            r["reasons"][reason] = r["reasons"].get(reason, 0) + 1
+        for su_id, r in by_su.items():
+            if r["count"] >= 3 or r["amount"] >= 500:
+                # Look up product name via stock unit → product
+                pname = "?"
+                if su_id and su_id != "?":
+                    try:
+                        su_row = await db.stock_units.find_one({"id": su_id}, {"_id": 0})
+                        if su_row:
+                            p = await db.products.find_one({"id": su_row.get("productId")}, {"_id": 0, "name": 1})
+                            if p: pname = p.get("name") or pname
+                    except Exception:
+                        pass
+                top_reason = max(r["reasons"].items(), key=lambda x: x[1])[0] if r["reasons"] else "unknown"
+                hits.append(_mk("waste", f"wastage_spike_{su_id}", "warning",
+                                 f"Wastage spike on {pname} — {r['count']} events / {r['amount']:.0f} units in 7 days",
+                                 f"Top reason: {top_reason}. Investigate pour training, storage or supplier quality.",
+                                 actions=[{"type": "review_wastage", "params": {"stockUnitId": su_id}}],
+                                 data={**r, "productName": pname}))
+    return hits[:15]
 
 
 # ─── 7. Labour cost anomalies ─────────────────────────────────────────
@@ -242,17 +300,32 @@ async def forecast_public_holiday_demand() -> List[Dict[str, Any]]:
 async def recommend_purchasing() -> List[Dict[str, Any]]:
     products = await db.products.find({"stock": {"$gte": 0}}, {"_id": 0}).to_list(2000)
     hits = []
+    # Lazy import to avoid a cycle
+    from services import measured_inventory_service as _mi
     for p in products:
         stock = float(p.get("stock") or 0)
         par = float(p.get("parLevel") or p.get("lowStockThreshold") or 5)
-        if stock < par:
-            reorder_qty = max(1, int(par * 2 - stock))
+
+        # Measured-stock: fold currently-open containers into the available count.
+        try:
+            info = await _mi.reorder_available(p["id"])
+        except Exception:
+            info = {"measured": False}
+        effective = stock + float(info.get("partial") or 0) if info.get("measured") else stock
+
+        if effective < par:
+            reorder_qty = max(1, int(par * 2 - effective))
+            body_note = f"Suggested order quantity: {reorder_qty}"
+            if info.get("measured"):
+                body_note += (f" · sealed {info.get('sealed', 0)} + open "
+                              f"{info.get('partial', 0):.2f} = {info.get('equivalent', 0):.2f} eqv units")
             hits.append(_mk("purchasing", f"reorder_{p['id']}", "notice",
-                             f"Reorder {p.get('name')} — stock {stock:.0f} < par {par:.0f}",
-                             f"Suggested order quantity: {reorder_qty}",
+                             f"Reorder {p.get('name')} — available {effective:.2f} < par {par:.0f}",
+                             body_note,
                              actions=[{"type": "create_purchase_order",
                                         "params": {"productId": p["id"], "quantity": reorder_qty}}],
-                             data={"stock": stock, "par": par, "reorderQty": reorder_qty}))
+                             data={"stock": stock, "par": par, "reorderQty": reorder_qty,
+                                    "measured": info}))
     return hits[:10]
 
 
