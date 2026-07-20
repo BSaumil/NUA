@@ -80,24 +80,118 @@ async def get_live_sales(_: dict = Depends(require_owner_or_manager)):
     }
 
 # ============ CUSTOM PERMISSIONS (Granular) ============
-ALL_PERMISSIONS = [
-    "dashboard", "pre-shift", "command-center", "pos", "reservations", "floor-plan",
-    "waitlist", "kitchen", "menu-engineering", "what-if", "products", "customers",
-    "loyalty", "inventory", "ai-pantry", "forecasting", "automation", "accounting",
-    "bas-gst", "staff", "staff-roster", "email-marketing", "tip-management",
-    "end-of-day", "integrations", "settings",
-]
+from services.permission_catalog import (
+    PERMISSION_CATALOG, DEFAULT_ROLE_PERMISSIONS,
+    all_permission_ids, catalog_for_ui,
+)
+
+ALL_PERMISSIONS = all_permission_ids()
+
+
+async def _role_permissions_for(role: str) -> list:
+    """Read per-role permission list from `role_permissions` collection, with
+    fallback to the code-level DEFAULT_ROLE_PERMISSIONS. Owner is always full."""
+    if role == "owner":
+        return ["*"]
+    doc = await db.role_permissions.find_one({"role": role}, {"_id": 0})
+    if doc and isinstance(doc.get("permissions"), list):
+        return [p for p in doc["permissions"] if p in ALL_PERMISSIONS]
+    return list(DEFAULT_ROLE_PERMISSIONS.get(role, []))
+
 
 @router.get("/permissions/all")
 async def get_all_permissions():
+    # Kept flat for backwards-compat; new UIs should call /permissions/catalog.
     return ALL_PERMISSIONS
+
+
+@router.get("/permissions/catalog")
+async def get_permission_catalog():
+    """Section-grouped catalog for the Settings UI."""
+    return {"sections": catalog_for_ui(), "totalFeatures": len(ALL_PERMISSIONS)}
+
+
+@router.get("/permissions/roles")
+async def list_role_permissions():
+    """List of every role → its effective default permissions.
+
+    Includes Owner (always `*`), the four built-in roles, plus any custom roles
+    referenced on `auth_users`. Owner uses this to grant/revoke by role.
+    """
+    roles = list(DEFAULT_ROLE_PERMISSIONS.keys())
+    # Pick up any custom roles staff members were assigned
+    user_roles = await db.auth_users.distinct("role")
+    for r in user_roles or []:
+        if r and r not in roles:
+            roles.append(r)
+    out = []
+    for r in roles:
+        perms = await _role_permissions_for(r)
+        # Look up whether it's persisted (dbOverride) or still using code default
+        doc = await db.role_permissions.find_one({"role": r}, {"_id": 0})
+        out.append({
+            "role": r,
+            "permissions": perms,
+            "isOverridden": bool(doc),
+            "isOwner": r == "owner",
+            "featureCount": len(ALL_PERMISSIONS) if perms == ["*"] else len(perms),
+        })
+    return {"roles": out, "totalFeatures": len(ALL_PERMISSIONS)}
+
+
+@router.post("/permissions/roles/{role}")
+async def set_role_permissions(role: str, data: dict, _: dict = Depends(require_owner)):
+    """Owner-only: update the default permission list for a role. Owner role
+    itself can't be modified — Owner always has full access."""
+    role = role.strip()
+    if role == "owner":
+        raise HTTPException(status_code=400, detail="Owner permissions cannot be modified")
+    perms = data.get("permissions", [])
+    if not isinstance(perms, list):
+        raise HTTPException(status_code=400, detail="permissions must be a list")
+    valid = [p for p in perms if p in ALL_PERMISSIONS]
+    from services.entity_service import stamped_update
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.role_permissions.update_one(
+        {"role": role},
+        {"$set": {"role": role, "permissions": valid, "updatedAt": now_iso}},
+        upsert=True,
+    )
+    return {
+        "role": role,
+        "permissions": valid,
+        "featureCount": len(valid),
+        "message": f"Saved {len(valid)} permissions for {role}",
+    }
+
+
+@router.delete("/permissions/roles/{role}")
+async def reset_role_permissions(role: str, _: dict = Depends(require_owner)):
+    """Owner-only: reset a role back to its built-in defaults."""
+    if role == "owner":
+        raise HTTPException(status_code=400, detail="Owner permissions cannot be modified")
+    await db.role_permissions.delete_one({"role": role})
+    return {"role": role, "permissions": list(DEFAULT_ROLE_PERMISSIONS.get(role, [])), "message": f"{role} reset to defaults"}
+
 
 @router.get("/permissions/staff/{staff_id}")
 async def get_staff_permissions(staff_id: str, _: dict = Depends(require_owner_or_manager)):
     staff = await db.auth_users.find_one({"id": staff_id}, {"_id": 0, "password_hash": 0})
     if not staff:
         raise HTTPException(status_code=404, detail="Staff not found")
-    return {"staffId": staff_id, "name": staff.get("name"), "role": staff.get("role"), "customPermissions": staff.get("customPermissions", [])}
+    # Effective = customPermissions if set, else the role default
+    custom = staff.get("customPermissions")
+    role_default = await _role_permissions_for(staff.get("role"))
+    return {
+        "staffId": staff_id,
+        "name": staff.get("name"),
+        "role": staff.get("role"),
+        "customPermissions": custom or [],
+        "roleDefaults": role_default,
+        "usingRoleDefaults": not bool(custom),
+    }
+
 
 @router.post("/permissions/staff/{staff_id}")
 async def set_staff_permissions(staff_id: str, data: dict, _: dict = Depends(require_owner)):
@@ -105,6 +199,17 @@ async def set_staff_permissions(staff_id: str, data: dict, _: dict = Depends(req
     valid = [p for p in permissions if p in ALL_PERMISSIONS]
     await db.auth_users.update_one({"id": staff_id}, {"$set": {"customPermissions": valid}})
     return {"message": f"Permissions updated ({len(valid)} permissions set)", "permissions": valid}
+
+
+@router.delete("/permissions/staff/{staff_id}")
+async def clear_staff_override(staff_id: str, _: dict = Depends(require_owner)):
+    """Remove per-staff overrides — the user falls back to their role defaults."""
+    await db.auth_users.update_one({"id": staff_id}, {"$unset": {"customPermissions": ""}})
+    role_default = []
+    staff = await db.auth_users.find_one({"id": staff_id}, {"_id": 0, "role": 1})
+    if staff:
+        role_default = await _role_permissions_for(staff.get("role"))
+    return {"message": "Reverted to role defaults", "roleDefaults": role_default}
 
 # ============ SMART KIOSK UPSELLS ============
 @router.get("/pos/upsells")

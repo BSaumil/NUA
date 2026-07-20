@@ -1,4 +1,45 @@
-# NUA POS — PRD v36.3 (AI Menu Import — Preview → Review → Commit)
+# NUA POS — PRD v36.4 (Sectioned Role/Staff Permissions)
+
+
+## v36.4 — Iteration 62 (Feb 2026): Section-grouped permissions (role + staff)
+
+### Shipped
+
+**Feature Access Control — full RBAC redesign** (`services/permission_catalog.py`, `routes/enterprise_features.py`, `routes/auth.py`, `components/settings/PermissionsPanel.jsx`)
+- Expanded the flat 26-permission list into a **13-section catalog of 84 features** covering every route the Owner has: Sales, Bookings, Kitchen, Menu & Products, Inventory, Customers & Loyalty, Analytics & Insights, Finance, Staff & Rosters, Automation & AI, Approvals & Audit, Enterprise, Settings.
+- **Per-role defaults** now DB-backed (`db.role_permissions`) with code-level fallbacks — Owner sets what Manager / Staff (Cashier) / Kitchen / any custom role gets. Owner is protected (always `["*"]`, 400 on modification attempts).
+- **Two-mode Settings UI**:
+  - **By Role**: role tiles show live "X of 84 features" badges + a "Customised" indicator when the Owner has overridden the built-in defaults.
+  - **By Staff Member**: dropdown → panel shows "using role defaults" vs "custom override", one-click Reset reverts to role defaults.
+- **Collapsible sections** with an icon, "X / Y" counter, colour-coded progress bar (green all / amber some / grey none), section-level Select-All, and a grid of per-feature checkboxes.
+- Bulk Select-All / Clear + Save / Reset on the toolbar.
+- `auth.py` login and `/me` now resolve permissions via new `_effective_permissions` helper: **custom overrides > DB role defaults > code fallbacks**. Owner always full.
+
+### New endpoints
+- `GET  /api/permissions/catalog` — 13 sections × 84 features (labels + section-icon).
+- `GET  /api/permissions/roles` — every role + its effective perms + whether it's DB-overridden.
+- `POST /api/permissions/roles/{role}` — Owner sets a role's default (400 on `owner`).
+- `DELETE /api/permissions/roles/{role}` — reset a role to code defaults.
+- `GET  /api/permissions/staff/{id}` — now also returns `roleDefaults` + `usingRoleDefaults`.
+- `DELETE /api/permissions/staff/{id}` — clear per-user override.
+
+### Verified
+- Catalog returns 13 sections × 84 features.
+- Owner=84 · Manager=60 · Cashier=11 · Kitchen=6 built-in defaults.
+- Owner-modification attempt → HTTP 400 "Owner permissions cannot be modified".
+- Set Manager to `[pos, tables, kitchen, pre-shift, staff-roster, shift-swaps, products, customers, reservations, waitlist]` → persisted, `payroll=False`, `staff-roster=True`, `overridden=True`.
+- Reset → back to 60 defaults, `overridden=False`.
+- UI smoke test: role tiles, section progress bars (Sales 5/5 green, Kitchen 4/5 amber), per-feature toggles all render; Save toast confirms `"Saved 60 permissions for manager"`; staff-mode picker shows all non-owner staff; Reset toast confirms `"Reverted to role defaults"`.
+
+### Backlog (unchanged)
+- **P1** Real Meta / TikTok / X OAuth (needs client IDs/secrets).
+- **P1** SendGrid / Twilio production keys.
+- **P1** Hardware Health polish.
+- **P2** `ash` → `nua` backend namespace refactor.
+- **P2** `@dnd-kit` tablet-friendly DnD for Social Calendar.
+- **P2** Channel Menus per-channel pause/resume + schedule toggle UI.
+- **P2** `x-ai-parsed-fallback` header on AI endpoints.
+- **P2** Move `ai_weekly_plan` to a background task.
 
 
 ## v36.3 — Iteration 61 (Feb 2026): AI Menu Import review flow

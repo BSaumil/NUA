@@ -9,6 +9,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { locationsAPI, advancedAPI, staffMgmtAPI, enterpriseAPI, gamificationAPI, finalizeAPI } from '../services/api';
 import WalletCredentialsPanel from '../components/settings/WalletCredentialsPanel';
+import PermissionsPanel from '../components/settings/PermissionsPanel';
 import { toast } from 'sonner';
 import axios from 'axios';
 
@@ -176,53 +177,7 @@ const Settings = () => {
 
       {/* Permissions */}
       {activeTab === 'permissions' && user?.role === 'owner' && (
-        <div className="space-y-4">
-          <Card><CardHeader><CardTitle>Staff Permission Control</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-sm text-gray-500">Select a staff member to customize their feature access. Custom permissions override default role-based access.</p>
-            <select className="w-full p-2 border rounded-md text-sm" data-testid="perm-staff-select"
-              onChange={async (e) => {
-                const sid = e.target.value;
-                if (!sid) { setSelectedStaffPerms(null); return; }
-                try {
-                  const r = await enterpriseAPI.getStaffPermissions(sid);
-                  setSelectedStaffPerms(r.data);
-                  setEditingPerms(r.data.customPermissions || []);
-                } catch {}
-              }}>
-              <option value="">Select staff member...</option>
-              {staff.filter(s => s.role !== 'owner').map(s => <option key={s.id} value={s.id}>{s.name} ({s.role})</option>)}
-            </select>
-            {selectedStaffPerms && (
-              <div>
-                <p className="text-sm font-medium mb-2">{selectedStaffPerms.name} — {selectedStaffPerms.role}</p>
-                <div className="grid grid-cols-3 gap-2">
-                  {allPerms.map(p => (
-                    <label key={p} className="flex items-center gap-2 text-sm p-2 rounded border hover:bg-gray-50 cursor-pointer">
-                      <input type="checkbox" checked={editingPerms.includes(p)}
-                        onChange={(e) => {
-                          if (e.target.checked) setEditingPerms([...editingPerms, p]);
-                          else setEditingPerms(editingPerms.filter(x => x !== p));
-                        }} />
-                      <span className="capitalize">{p.replace(/-/g, ' ')}</span>
-                    </label>
-                  ))}
-                </div>
-                <div className="flex gap-2 mt-3">
-                  <Button size="sm" variant="outline" onClick={() => setEditingPerms([...allPerms])}>Select All</Button>
-                  <Button size="sm" variant="outline" onClick={() => setEditingPerms([])}>Clear All</Button>
-                  <Button size="sm" style={{ backgroundColor: theme.primary }} data-testid="save-perms-btn"
-                    onClick={async () => {
-                      try {
-                        await enterpriseAPI.setStaffPermissions(selectedStaffPerms.staffId, editingPerms);
-                        toast.success('Permissions saved'); fetchStaff();
-                      } catch { toast.error('Failed'); }
-                    }}>Save Permissions</Button>
-                </div>
-              </div>
-            )}
-          </CardContent></Card>
-        </div>
+        <PermissionsPanel staff={staff} />
       )}
 
       {/* Surcharges */}
