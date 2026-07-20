@@ -73,6 +73,8 @@ const POSTerminal = () => {
   const [pointsBalance, setPointsBalance] = useState(null);
   // Customer wallet: store credit + active vouchers + occasion offers
   const [wallet, setWallet] = useState(null);
+  // Category "More" overflow panel open state
+  const [showMoreCats, setShowMoreCats] = useState(false);
   const [pointsToRedeem, setPointsToRedeem] = useState(0);
   const [loyaltyCfg, setLoyaltyCfg] = useState({ minRedeem: 10, redeemRate: 0.01 });
 
@@ -631,24 +633,68 @@ const POSTerminal = () => {
               ))}
             </div>
           )}
-          <div className="flex gap-2 overflow-x-auto pb-1.5 justify-center">
-            {categories.map(cat => {
+          {/* Category bar — compact pills, max 6 visible + "More" overflow panel.
+              A category picked from the overflow is promoted into the visible
+              row, so frequent switches stay one tap away. */}
+          {(() => {
+            const MAX_VISIBLE = 6;
+            const all = categories[0];                    // 'All' is always first
+            const rest = categories.slice(1);
+            let visible = rest.slice(0, MAX_VISIBLE);
+            let overflow = rest.slice(MAX_VISIBLE);
+            if (overflow.length === 1) { visible = rest; overflow = []; }
+            const selInOverflow = overflow.find(c => c.name === selectedCategory);
+            if (selInOverflow) {
+              overflow = [visible[visible.length - 1], ...overflow.filter(c => c.name !== selectedCategory)];
+              visible = [...visible.slice(0, -1), selInOverflow];
+            }
+            const pill = (cat) => {
               const active = selectedCategory === cat.name;
               return (
                 <button key={cat.id || cat.name}
-                  onClick={() => setSelectedCategory(cat.name)}
-                  className={`flex flex-col items-center gap-1 px-3 py-2 rounded-xl whitespace-nowrap transition-all flex-shrink-0 min-w-[72px] ${active ? 'text-white shadow-md scale-[1.02]' : 'bg-white text-gray-700 border hover:border-gray-400'}`}
+                  onClick={() => { setSelectedCategory(cat.name); setShowMoreCats(false); }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full whitespace-nowrap transition-all flex-shrink-0 text-xs font-semibold ${active ? 'text-white shadow-md' : 'bg-white text-gray-700 border hover:border-gray-400'}`}
                   style={active ? { backgroundColor: cat.color || theme.primary } : { borderColor: `${cat.color || theme.primary}40` }}
                   data-testid={`pos-cat-${cat.name}`}>
-                  <div className="w-7 h-7 rounded-lg flex items-center justify-center"
-                    style={active ? { background: 'rgba(255,255,255,0.18)' } : { background: `${cat.color || theme.primary}15`, color: cat.color || theme.primary }}>
-                    <CategoryIcon name={cat.icon} size={18} />
-                  </div>
-                  <span className="text-[11px] font-semibold leading-none">{cat.name}</span>
+                  <CategoryIcon name={cat.icon} size={14} />
+                  {cat.name}
                 </button>
               );
-            })}
-          </div>
+            };
+            return (
+              <div className="relative">
+                <div className="flex gap-1.5 overflow-x-auto pb-1.5 items-center">
+                  {pill(all)}
+                  {visible.map(pill)}
+                  {overflow.length > 0 && (
+                    <button onClick={() => setShowMoreCats(v => !v)}
+                      className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold border flex-shrink-0 transition-all ${showMoreCats ? 'text-white' : 'bg-gray-50 text-gray-600 hover:border-gray-400'}`}
+                      style={showMoreCats ? { backgroundColor: theme.primary } : {}}
+                      data-testid="pos-cat-more">
+                      More · {overflow.length} {showMoreCats ? '▴' : '▾'}
+                    </button>
+                  )}
+                </div>
+                {showMoreCats && overflow.length > 0 && (
+                  <div className="absolute z-30 mt-1 left-0 right-0 bg-white border rounded-xl shadow-lg p-3 grid gap-1.5 [grid-template-columns:repeat(auto-fill,minmax(140px,1fr))]"
+                    data-testid="pos-cat-overflow">
+                    {overflow.map(cat => (
+                      <button key={cat.id || cat.name}
+                        onClick={() => { setSelectedCategory(cat.name); setShowMoreCats(false); }}
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-50 border border-transparent hover:border-gray-200 text-left"
+                        data-testid={`pos-cat-overflow-${cat.name}`}>
+                        <span className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0"
+                          style={{ background: `${cat.color || theme.primary}15`, color: cat.color || theme.primary }}>
+                          <CategoryIcon name={cat.icon} size={14} />
+                        </span>
+                        {cat.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
         <div className="flex-1 overflow-y-auto pr-1">
           {selectedCategory === 'All' ? (

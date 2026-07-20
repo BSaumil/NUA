@@ -16,14 +16,14 @@ import {
 // 4 most-common items per role, then "More" splash button.
 const QUICK_ACTIONS = {
   owner: [
+    { path: '/today', label: 'Today', icon: Sunrise },
     { path: '/pos', label: 'POS', icon: ShoppingCart },
-    { path: '/enterprise', label: 'Enterprise', icon: Brain },
     { path: '/reservations', label: 'Bookings', icon: Utensils },
     { path: '/products', label: 'Items', icon: Package },
   ],
   manager: [
+    { path: '/today', label: 'Today', icon: Sunrise },
     { path: '/pos', label: 'POS', icon: ShoppingCart },
-    { path: '/reservations', label: 'Bookings', icon: Utensils },
     { path: '/kitchen', label: 'Kitchen', icon: ChefHat },
     { path: '/staff-roster', label: 'Roster', icon: ClipboardList },
   ],
@@ -50,6 +50,7 @@ const QUICK_ACTIONS = {
 // Full feature catalog for the "More" splash modal — grouped by role access
 const ALL_FEATURES = [
   { group: 'Operations', items: [
+    { path: '/today', label: 'Today', icon: Sunrise, access: ['owner', 'manager'] },
     { path: '/pos', label: 'POS Terminal', icon: ShoppingCart, access: ['owner', 'manager', 'cashier', 'barista'] },
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, access: ['owner', 'manager'] },
     { path: '/pre-shift', label: 'Pre-Shift', icon: Sunrise, access: ['owner', 'manager', 'kitchen'] },

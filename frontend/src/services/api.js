@@ -267,6 +267,7 @@ export const preShiftAPI = {
 export const analyticsAPI = {
   getCommandCenter: () => api.get('/analytics/command-center'),
   getMenuEngineering: () => api.get('/analytics/menu-engineering'),
+  getTodayPulse: () => api.get('/analytics/today-pulse'),
 };
 
 // Automation API
