@@ -1,6 +1,188 @@
-# NUA POS — PRD v35.0 (Measured Stock Phase 1)
+# NUA POS — PRD v36.4 (Sectioned Role/Staff Permissions)
 
-> Master doc: `/app/memory/NUA_POS_Master_Roadmap_v1.txt` — read first.
+
+## v36.4 — Iteration 62 (Feb 2026): Section-grouped permissions (role + staff)
+
+### Shipped
+
+**Feature Access Control — full RBAC redesign** (`services/permission_catalog.py`, `routes/enterprise_features.py`, `routes/auth.py`, `components/settings/PermissionsPanel.jsx`)
+- Expanded the flat 26-permission list into a **13-section catalog of 84 features** covering every route the Owner has: Sales, Bookings, Kitchen, Menu & Products, Inventory, Customers & Loyalty, Analytics & Insights, Finance, Staff & Rosters, Automation & AI, Approvals & Audit, Enterprise, Settings.
+- **Per-role defaults** now DB-backed (`db.role_permissions`) with code-level fallbacks — Owner sets what Manager / Staff (Cashier) / Kitchen / any custom role gets. Owner is protected (always `["*"]`, 400 on modification attempts).
+- **Two-mode Settings UI**:
+  - **By Role**: role tiles show live "X of 84 features" badges + a "Customised" indicator when the Owner has overridden the built-in defaults.
+  - **By Staff Member**: dropdown → panel shows "using role defaults" vs "custom override", one-click Reset reverts to role defaults.
+- **Collapsible sections** with an icon, "X / Y" counter, colour-coded progress bar (green all / amber some / grey none), section-level Select-All, and a grid of per-feature checkboxes.
+- Bulk Select-All / Clear + Save / Reset on the toolbar.
+- `auth.py` login and `/me` now resolve permissions via new `_effective_permissions` helper: **custom overrides > DB role defaults > code fallbacks**. Owner always full.
+
+### New endpoints
+- `GET  /api/permissions/catalog` — 13 sections × 84 features (labels + section-icon).
+- `GET  /api/permissions/roles` — every role + its effective perms + whether it's DB-overridden.
+- `POST /api/permissions/roles/{role}` — Owner sets a role's default (400 on `owner`).
+- `DELETE /api/permissions/roles/{role}` — reset a role to code defaults.
+- `GET  /api/permissions/staff/{id}` — now also returns `roleDefaults` + `usingRoleDefaults`.
+- `DELETE /api/permissions/staff/{id}` — clear per-user override.
+
+### Verified
+- Catalog returns 13 sections × 84 features.
+- Owner=84 · Manager=60 · Cashier=11 · Kitchen=6 built-in defaults.
+- Owner-modification attempt → HTTP 400 "Owner permissions cannot be modified".
+- Set Manager to `[pos, tables, kitchen, pre-shift, staff-roster, shift-swaps, products, customers, reservations, waitlist]` → persisted, `payroll=False`, `staff-roster=True`, `overridden=True`.
+- Reset → back to 60 defaults, `overridden=False`.
+- UI smoke test: role tiles, section progress bars (Sales 5/5 green, Kitchen 4/5 amber), per-feature toggles all render; Save toast confirms `"Saved 60 permissions for manager"`; staff-mode picker shows all non-owner staff; Reset toast confirms `"Reverted to role defaults"`.
+
+### Backlog (unchanged)
+- **P1** Real Meta / TikTok / X OAuth (needs client IDs/secrets).
+- **P1** SendGrid / Twilio production keys.
+- **P1** Hardware Health polish.
+- **P2** `ash` → `nua` backend namespace refactor.
+- **P2** `@dnd-kit` tablet-friendly DnD for Social Calendar.
+- **P2** Channel Menus per-channel pause/resume + schedule toggle UI.
+- **P2** `x-ai-parsed-fallback` header on AI endpoints.
+- **P2** Move `ai_weekly_plan` to a background task.
+
+
+## v36.3 — Iteration 61 (Feb 2026): AI Menu Import review flow
+
+### Shipped
+
+**AI Menu Import — 3-stage flow with review before persistence** (`routes/menu_features.py`, `components/menu/AIMenuImportReview.jsx`)
+- Replaced the one-shot "upload → items created blind" flow with **Preview → Review → Commit**.
+- **`POST /menu/ai-preview`** — runs GPT-5.2 vision on the image (or `pypdf` on the PDF), fuzzy-matches each proposed category against existing DB categories (`difflib.SequenceMatcher`, score ≥ 0.55, contains-boost to 0.85). Attaches `suggestedModifierIds` for every item whose matched category is in a modifier's `assignedCategories`. Detects duplicates by name. **No DB writes.**
+- **`POST /menu/ai-commit`** — accepts the reviewed items, writes them via `stamped_insert` (audit trail), honours `skipIfDuplicate` per-row.
+- **UI** — new `AIMenuImportReview` dialog with 3 stages (upload / review / done):
+  - Review table: editable name / category / price / cost, per-row include checkbox, tick-to-attach modifier chips (only modifiers assigned to that category are shown).
+  - Category dropdown: existing categories in **green**, "New: X" fallback in **amber** with an inline note ("AI suggested 'BRUNCH' — will be created").
+  - Live stats strip: Detected · Selected · Duplicates · Menu Value.
+  - Margin column colour-coded (≥60% emerald, ≥40% amber, else red) so the owner can spot cost issues at a glance.
+  - Bulk `Select all` / `Deselect all`.
+  - Duplicates auto-deselected, flagged with an amber "already exists — will be skipped" warning.
+- Legacy `/menu/ai-import` kept for backwards compat (also now fuzzy-matches categories + auto-attaches modifiers).
+
+### Verified
+- Preview on a 7-item menu image (Flat White, Cappuccino, Latte, Beef Burger, Chicken Schnitzel, Espresso Martini, Negroni): all 7 fuzzy-matched to existing categories (Coffee, Mains, Cocktails), all flagged as duplicates, "Selected=0 → Import 0 items" (correct).
+- Preview on a fresh 5-item brunch menu (Avocado Smash Bruschetta, Ricotta Hotcakes, Green Goddess Bowl, Berry Kombucha, Golden Latte): 0 duplicates, new categories `BRUNCH` and `DRINKS` proposed in amber. Select-all + Commit → 5 products written with SKUs `AI-…`, `createdBy=owner@nuva.com`, audit stamped.
+- Duplicate skip: replaying the same commit → `created=0 skipped=3` with detailed `skippedDetails`.
+
+### Backlog (unchanged)
+- **P1** Real Meta / TikTok / X OAuth (needs client IDs/secrets).
+- **P1** SendGrid / Twilio production keys.
+- **P1** Hardware Health polish.
+- **P2** `ash` → `nua` backend namespace refactor.
+- **P2** `@dnd-kit` tablet-friendly DnD for Social Calendar.
+- **P2** Channel Menus per-channel pause/resume + schedule toggle UI.
+- **P2** `x-ai-parsed-fallback` header on AI endpoints.
+- **P2** Move `ai_weekly_plan` to a background task.
+
+
+## v36.2 — Iteration 60 (Feb 2026): AI Menu Import + CSV Import fixes
+
+### Shipped
+
+**AI Menu Import — actually works now** (`routes/menu_features.py`, `MenuEngineering.jsx`)
+- Root cause: the endpoint was passing a base64 image string as **plain text** to the LLM. GPT can't "see" a raw base64 blob — it saw random characters and returned nothing.
+- Fix: images now travel via `emergentintegrations.ImageContent(image_base64=…)` so GPT-5.2 uses vision on the real menu. PDFs are handed to `pypdf` for text extraction first, then the extracted text is sent to the LLM.
+- Extra hardening: strips `data:` URL prefix, tolerates JSON returned inside code fences, per-item defensive parsing, `stamped_insert` writes so every AI-created product lands in the audit trail. UI shows an error toast if `count == 0` instead of silent failure.
+- Verified: 9 items extracted from a synthetic menu image (Flat White $5.20, Cappuccino $5.20, Long Black $4.80, Chai Latte $5.40, Beef Burger $16.50, Chicken Schnitzel $24.50, Fish & Chips $22.00, Chocolate Cake $8.50, Lemon Tart $7.80).
+
+**CSV Import UX — no more silent failures** (`pages/Products.jsx`)
+- Root cause: worked but felt broken — `alert("Imported undefined products")` on any error, `accept=".csv"` sometimes greyed out valid `.csv` files, no feedback on click failure.
+- Fix: swapped `alert()` for `sonner` toasts (`loading` + `success` / `error`), quote-aware CSV splitter, validates `name` column, broadened `accept` to `.csv,text/csv,application/vnd.ms-excel,text/plain`, safe optional-chaining on the button click.
+- Verified: 2/2 products imported → toast "Imported 2 of 2 products"; malformed CSV → toast "CSV must include a 'name' column".
+
+### Deps
+- `pypdf==6.14.2` added (PDF text extraction for AI menu import).
+
+### Backlog (unchanged)
+- **P1** Real Meta / TikTok / X OAuth (needs client IDs/secrets) — on hold per user.
+- **P1** SendGrid / Twilio production keys — on hold per user.
+- **P1** Hardware Health polish.
+- **P2** `ash` → `nua` backend namespace refactor.
+- **P2** `@dnd-kit` tablet-friendly DnD for Social Calendar.
+- **P2** Channel Menus per-channel pause/resume + schedule toggle UI.
+- **P2** `x-ai-parsed-fallback` header on AI endpoints.
+- **P2** Move `ai_weekly_plan` to a background task.
+
+
+## v36.1 — Iteration 59 (Feb 2026): Dashboard products & categories repair
+
+### Shipped
+
+**P0 bug fix — Empty POS dashboard + inactive alcohol categories** (`models/product.py`, `services/alcohol_seeder.py`)
+- Root cause: `Product` Pydantic model required `cost`, `sku`, `image` fields. The alcohol seeder omitted them → `GET /api/products` returned **HTTP 500** on every load, so the POS grid never rendered. Additionally 14/19 categories were missing the `active` flag → the Categories admin page rendered them as "Inactive".
+- Fix 1 — `Product` model: `category`, `cost`, `sku`, `image` now default to safe empty values so a legacy row never blows up the whole list.
+- Fix 2 — `alcohol_seeder.py`: new categories/products are stamped with `active=True`, `sortOrder`, `channels`, `prepTime`, plus `cost` (derived from measured stock pour-cost, or 35% of price), `sku=ALC-…`, `image=""`, `active=True`, `eightySixed=False`, `gstRate=10`.
+- Fix 3 — one-shot startup repair (`_repair_orphan_categories`, `_repair_orphan_products`): patches any legacy doc missing those fields so an existing DB self-heals on next boot without needing a wipe. Also normalises legacy lowercase icon names (beer/wine/glass) to the PascalCase keys the frontend icon map uses.
+- Verified: `/api/products` → HTTP 200 with 100 items; `/api/categories` → 19 items, 0 inactive; POS smoke-test shows 100 tiles across 20 category tabs.
+
+### Backlog (unchanged)
+- **P1** Real Meta / TikTok / X OAuth (needs client IDs/secrets).
+- **P1** SendGrid / Twilio production keys.
+- **P1** Hardware health monitoring polish (route exists, page skeletal).
+- **P2** `ash` → `nua` backend namespace refactor (aliases already exist).
+- **P2** `@dnd-kit` tablet-friendly DnD for Social Calendar.
+- **P2** Channel Menus per-channel pause/resume + schedule toggle UI.
+- **P2** `x-ai-parsed-fallback` header on AI endpoints so UI can warn on LLM fallback.
+- **P2** Move `ai_weekly_plan` to a background task (35 LLM calls inline).
+- **P2** Chargeback / dispute console UI polish.
+
+
+## v36.0 — Iteration 58 (10 Feb 2026): Loyalty phase-2 + Kitchen server-notify + Ash Marketing + Beverage margin + Alcohol seed
+
+### Shipped
+
+**Notifications** (`services/notification_service.py`, `routes/notifications.py`, `components/NotificationBell.jsx`)
+- Universal in-app notifications routed by email / role / topic — kinds: loyalty, kitchen, approval, marketing, referral, ash, system.
+- Global floating bell (bottom-right, next to NUA FAB) with unread badge + 30 s polling + slide-out panel.
+- Owner is super-user: sees all role-scoped notifications (marketing / manager / server / kitchen).
+
+**Loyalty 2.0 Phase-2** (`routes/loyalty_v2.py`, `pages/LoyaltyProgress.jsx`)
+- Earn notifications: badge / milestone awards fire simultaneous notifications to `role="marketing"` (for staff follow-up) and to the customer's email (respecting existing consent).
+- Referral engine: `POST /loyalty/v2/referrals` creates a pending referral, `POST .../{id}/complete` issues **$20 referrer + $10 referee vouchers** and refreshes Insight #14. UI: dedicated Referrals tab with create + complete flow.
+- Leaderboard: `GET /loyalty/v2/leaderboard?metric=points|visits|spend|referrals` — top-25 with rank medal styling. UI: dedicated Leaderboard tab with metric switcher.
+
+**Kitchen server-notifications** (`routes/kitchen.py`)
+- `fire-course` → notifies `serverId` (or role="server" fallback) with `Table X — Main fired` + link back to KDS.
+- `mark_order_ready` → notifies with `Table X — order ready`.
+
+**Ash Marketing autonomous draft** (`routes/ash.py`)
+- `POST /nua/marketing/draft-campaign {goal}` — GPT-5.2 grounds on churning-cohort + slow-inventory, emits a full campaign JSON (name / objective / segment / channel / offer / copy / dates / expectedReach / expectedRevenue / risk / reasoning), enqueues it in the Approval Queue with source="ash_marketing", and pings the owner.
+- Deterministic fallback (Weekend Winback template) so the endpoint never fails.
+
+**Beverage margin (enhancement)** (`services/measured_inventory_service.py`, `routes/measured_inventory.py`)
+- `beverage_cost(product_id)` → costPerPour derived from container cost / totalMeasure × deductAmount.
+- `GET /measured-inventory/beverage-margin/{id}` → single product margin card.
+- `GET /measured-inventory/beverage-margin` → P&L-ready roll-up of every measured beverage, sorted by margin %. Feeds NUA Finance and future Menu Engineering integration.
+
+**Alcohol catalog seed** (`services/alcohol_seeder.py`, `server.py` startup hook)
+- Idempotent on-startup seeder: 12 alcohol categories (Beer, Wine Red / White / Sparkling / Rosé, Cocktails, Spirits × 5, Liqueurs), 2 Drinks categories (Non-Alcoholic, Coffee & Tea).
+- ~38 products: draft beers, cocktails (Espresso Martini, Negroni, Old Fashioned, Margarita, Aperol Spritz, Whisky Sour, Mojito), spirits (30ml pours), wine glasses / bottles.
+- Every pourable product auto-links a StockUnit + SellVariant so beverage margin math is live from day one.
+
+### Verified via curl
+- 2 unread notifications after firing a kitchen course + completing a referral + drafting a campaign ✅
+- Leaderboard by spend returns Sarah Johnson #1 ($1500) ✅
+- Baileys 86.3%, Amaretto 83.7%, Vodka 83.6% pour margins ✅
+- Fire course #2 on order KO-E638A17D → notification "Table 7 — Main fired" ✅
+- 12 alcohol categories seeded on startup ✅
+- Referral created + completed → $20 & $10 vouchers issued to both parties ✅
+- Ash Marketing draft → Weekend Winback campaign queued in Approvals ✅
+
+### Files added / touched
+- backend/services/notification_service.py           NEW
+- backend/routes/notifications.py                    NEW
+- backend/services/alcohol_seeder.py                 NEW
+- backend/routes/loyalty_v2.py                       earn-notify + referrals + leaderboard
+- backend/routes/kitchen.py                          fire/ready notify hooks
+- backend/routes/ash.py                              draft-campaign endpoint
+- backend/services/measured_inventory_service.py     beverage_cost()
+- backend/routes/measured_inventory.py               beverage-margin endpoints
+- backend/server.py                                  notifications router + alcohol seed hook
+- frontend/src/components/NotificationBell.jsx       NEW (global bell)
+- frontend/src/App.js                                bell mounted in layout
+- frontend/src/pages/LoyaltyProgress.jsx             Leaderboard + Referrals tabs
+
+---
 
 
 ## v35.0 — Iteration 57 (10 Feb 2026): Measured / Fractional Stock (Phase 1)

@@ -347,27 +347,62 @@ const Products = () => {
   const onCsvImport = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    // Accept anything the user picked — some OSes report .csv as text/plain
+    // or application/vnd.ms-excel, so we don't gate on file.type here.
     const text = await file.text();
     const lines = text.split(/\r?\n/).filter(l => l.trim());
-    if (lines.length < 2) return;
-    const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+    if (lines.length < 2) {
+      toast.error('CSV needs a header row + at least one data row');
+      e.target.value = '';
+      return;
+    }
+    // Split respecting quoted commas
+    const splitLine = (l) => {
+      const out = []; let cur = ''; let inQ = false;
+      for (let i = 0; i < l.length; i++) {
+        const ch = l[i];
+        if (ch === '"') { if (inQ && l[i+1] === '"') { cur += '"'; i++; } else { inQ = !inQ; } }
+        else if (ch === ',' && !inQ) { out.push(cur); cur = ''; }
+        else cur += ch;
+      }
+      out.push(cur);
+      return out;
+    };
+    const headers = splitLine(lines[0]).map(h => h.trim().toLowerCase());
+    if (!headers.includes('name')) {
+      toast.error('CSV must include a "name" column');
+      e.target.value = '';
+      return;
+    }
     const rows = lines.slice(1).map(l => {
-      const cells = l.split(',');
+      const cells = splitLine(l);
       const obj = {};
-      headers.forEach((h, i) => obj[h] = cells[i]?.trim());
+      headers.forEach((h, i) => obj[h] = (cells[i] || '').trim());
       return obj;
     });
+    const loadingId = toast.loading(`Importing ${rows.length} product${rows.length === 1 ? '' : 's'}…`);
     try {
       const r = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/items/bulk-import`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('nuva_token')}` },
         body: JSON.stringify({ rows }),
       });
+      if (!r.ok) {
+        const detail = await r.text().catch(() => '');
+        toast.dismiss(loadingId);
+        toast.error(`Import failed (${r.status}) ${detail.slice(0, 120)}`);
+        return;
+      }
       const d = await r.json();
-      alert(`Imported ${d.imported} products`);
+      toast.dismiss(loadingId);
+      toast.success(`Imported ${d.imported ?? 0} of ${rows.length} product${rows.length === 1 ? '' : 's'}`);
       fetchData();
-    } catch { alert('Import failed'); }
-    e.target.value = '';
+    } catch (err) {
+      toast.dismiss(loadingId);
+      toast.error(`Import failed: ${err?.message || 'network error'}`);
+    } finally {
+      e.target.value = '';
+    }
   };
 
   return (
@@ -379,10 +414,17 @@ const Products = () => {
         </div>
         {view === 'products' ? (
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => document.getElementById('csv-import-input').click()} data-testid="csv-import-btn">
+            <Button variant="outline" onClick={() => document.getElementById('csv-import-input')?.click()} data-testid="csv-import-btn">
               CSV Import
             </Button>
-            <input id="csv-import-input" type="file" accept=".csv" className="hidden" onChange={onCsvImport} />
+            <input
+              id="csv-import-input"
+              type="file"
+              accept=".csv,text/csv,application/vnd.ms-excel,text/plain"
+              className="hidden"
+              onChange={onCsvImport}
+              data-testid="csv-import-input"
+            />
             <Button style={{ backgroundColor: theme.primary }} onClick={openAddProduct} data-testid="add-product-btn">
               <Plus className="mr-2" size={18} /> Add Product
             </Button>

@@ -17,6 +17,166 @@ import {
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
 
+
+function LeaderboardPanel() {
+  const [metric, setMetric] = React.useState('points');
+  const [data, setData] = React.useState({ metric: 'points', entries: [] });
+  const [loading, setLoading] = React.useState(false);
+  const load = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await axios.get(`${API}/loyalty/v2/leaderboard?metric=${metric}&limit=25`, { headers: H() });
+      setData(r.data);
+    } catch { toast.error('Failed to load leaderboard'); }
+    finally { setLoading(false); }
+  }, [metric]);
+  React.useEffect(() => { load(); }, [load]);
+
+  const METRIC_LABEL = { points: 'Points', visits: 'Visits', spend: 'Spend ($)', referrals: 'Referrals' };
+  const METRIC_ICON = { points: Award, visits: Users, spend: DollarSign, referrals: UserPlus };
+  const CIcon = METRIC_ICON[metric] || Award;
+
+  return (
+    <Card><CardContent className="p-5 space-y-4">
+      <div className="flex justify-between items-center flex-wrap gap-2">
+        <div className="flex gap-1 flex-wrap">
+          {Object.entries(METRIC_LABEL).map(([m, l]) => (
+            <Button key={m} size="sm" variant={metric === m ? 'default' : 'outline'}
+              onClick={() => setMetric(m)} data-testid={`leader-metric-${m}`}>
+              {l}
+            </Button>
+          ))}
+        </div>
+        <Button size="sm" variant="outline" onClick={load} disabled={loading} data-testid="leader-refresh">
+          <RefreshCw size={12} className={`mr-1 ${loading ? 'animate-spin' : ''}`} /> Refresh
+        </Button>
+      </div>
+      <div className="space-y-1">
+        {data.entries.length === 0 && <p className="text-center text-sm text-slate-400 py-8">No data yet.</p>}
+        {data.entries.map(e => (
+          <div key={e.customerId} className={`flex items-center gap-3 p-3 rounded border ${e.rank <= 3 ? 'bg-gradient-to-r from-amber-50 to-white' : ''}`}
+            data-testid={`leader-row-${e.rank}`}>
+            <div className={`h-9 w-9 rounded-full flex items-center justify-center font-bold ${
+              e.rank === 1 ? 'bg-amber-400 text-white' :
+              e.rank === 2 ? 'bg-slate-300 text-white' :
+              e.rank === 3 ? 'bg-orange-400 text-white' :
+              'bg-slate-100 text-slate-500'
+            }`}>{e.rank}</div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium truncate">{e.name}</p>
+              <p className="text-[10px] text-slate-500">{e.tier || 'Bronze'} · {e.totalVisits || 0} visits · {e.referrals || 0} referrals</p>
+            </div>
+            <div className="text-right">
+              <p className="font-bold text-lg flex items-center gap-1" style={{ color: '#6366f1' }}>
+                <CIcon size={14} /> {(e.value || 0).toLocaleString()}
+              </p>
+              <p className="text-[10px] text-slate-400">{METRIC_LABEL[metric].toLowerCase()}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </CardContent></Card>
+  );
+}
+
+
+function ReferralsPanel({ customers }) {
+  const [refs, setRefs] = React.useState([]);
+  const [newRef, setNewRef] = React.useState({ referrerId: '', refereeEmail: '', refereeId: '' });
+  const [loading, setLoading] = React.useState(false);
+  const load = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await axios.get(`${API}/loyalty/v2/referrals`, { headers: H() });
+      setRefs(r.data);
+    } catch { toast.error('Failed to load referrals'); }
+    finally { setLoading(false); }
+  }, []);
+  React.useEffect(() => { load(); }, [load]);
+
+  const create = async () => {
+    if (!newRef.referrerId || (!newRef.refereeEmail && !newRef.refereeId)) {
+      toast.error('Pick a referrer and either a referee customer or email');
+      return;
+    }
+    try {
+      await axios.post(`${API}/loyalty/v2/referrals`, newRef, { headers: H() });
+      toast.success('Referral created');
+      setNewRef({ referrerId: '', refereeEmail: '', refereeId: '' });
+      load();
+    } catch { toast.error('Failed to create referral'); }
+  };
+
+  const complete = async (id, refereeId) => {
+    try {
+      await axios.post(`${API}/loyalty/v2/referrals/${id}/complete`, { refereeId }, { headers: H() });
+      toast.success('Referral completed — vouchers issued');
+      load();
+    } catch { toast.error('Failed to complete'); }
+  };
+
+  const nameFor = (id) => (customers.find(c => c.id === id) || {}).name || id?.slice(0, 8) || '—';
+
+  return (
+    <div className="space-y-4">
+      <Card><CardContent className="p-5 space-y-3">
+        <div className="flex items-center gap-2">
+          <UserPlus size={16} className="text-indigo-600" />
+          <h3 className="font-semibold text-sm">Create a referral</h3>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+          <Select value={newRef.referrerId} onValueChange={v => setNewRef(f => ({ ...f, referrerId: v }))}>
+            <SelectTrigger data-testid="ref-referrer"><SelectValue placeholder="Referrer" /></SelectTrigger>
+            <SelectContent className="max-h-64">
+              {customers.map(c => <SelectItem key={c.id} value={c.id}>{c.name || c.email}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={newRef.refereeId} onValueChange={v => setNewRef(f => ({ ...f, refereeId: v, refereeEmail: '' }))}>
+            <SelectTrigger data-testid="ref-referee"><SelectValue placeholder="Existing referee (optional)" /></SelectTrigger>
+            <SelectContent className="max-h-64">
+              {customers.filter(c => c.id !== newRef.referrerId).map(c => <SelectItem key={c.id} value={c.id}>{c.name || c.email}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Input placeholder="Or referee email" value={newRef.refereeEmail}
+            onChange={e => setNewRef(f => ({ ...f, refereeEmail: e.target.value, refereeId: '' }))}
+            data-testid="ref-email" />
+          <Button onClick={create} data-testid="ref-create">Create</Button>
+        </div>
+      </CardContent></Card>
+
+      <Card><CardContent className="p-5">
+        <div className="flex justify-between items-center mb-3">
+          <h3 className="font-semibold text-sm">Referrals ({refs.length})</h3>
+          <Button size="sm" variant="outline" onClick={load} disabled={loading} data-testid="ref-refresh">
+            <RefreshCw size={12} className={`mr-1 ${loading ? 'animate-spin' : ''}`} /> Refresh
+          </Button>
+        </div>
+        {refs.length === 0 && <p className="text-center text-sm text-slate-400 py-6">No referrals yet.</p>}
+        <div className="space-y-2">
+          {refs.map(r => (
+            <div key={r.id} className="p-3 border rounded flex justify-between items-center gap-3" data-testid={`ref-row-${r.id}`}>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm">
+                  <b>{nameFor(r.referrerId)}</b> → {r.refereeId ? <b>{nameFor(r.refereeId)}</b> : <span className="italic">{r.refereeEmail}</span>}
+                </p>
+                <p className="text-[10px] text-slate-500 mt-0.5">
+                  Code <code>{r.code}</code> · created {new Date(r.createdAt).toLocaleDateString()}
+                </p>
+              </div>
+              <Badge className={r.status === 'completed' ? 'bg-emerald-500' : 'bg-amber-500'}>{r.status}</Badge>
+              {r.status === 'pending' && r.refereeId && (
+                <Button size="sm" onClick={() => complete(r.id, r.refereeId)} data-testid={`ref-complete-${r.id}`}>
+                  Mark completed
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+      </CardContent></Card>
+    </div>
+  );
+}
+
 // Map lucide icon names in DB → components
 const ICONS = {
   sparkles: Sparkles, coffee: Coffee, heart: Heart, trophy: Trophy,

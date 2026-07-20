@@ -390,6 +390,8 @@ export const staffMgmtAPI = {
 // Menu Features — AI Import, Price Adjust, Ghost Discount, What-If Advanced
 export const menuFeaturesAPI = {
   aiImportMenu: (data) => api.post('/menu/ai-import', data),
+  aiPreviewMenu: (data) => api.post('/menu/ai-preview', data, { timeout: 90000 }),
+  aiCommitMenu: (data) => api.post('/menu/ai-commit', data),
   bulkPriceAdjust: (data) => api.post('/menu/price-adjust', data),
   ghostDiscount: (data) => api.post('/pos/ghost-discount', data),
   getGhostDiscounts: () => api.get('/pos/ghost-discounts'),
@@ -406,8 +408,13 @@ export const enterpriseAPI = {
   getLiveSales: () => api.get('/live-sales'),
   // Permissions
   getAllPermissions: () => api.get('/permissions/all'),
+  getPermissionCatalog: () => api.get('/permissions/catalog'),
+  getRolePermissions: () => api.get('/permissions/roles'),
+  setRolePermissions: (role, permissions) => api.post(`/permissions/roles/${role}`, { permissions }),
+  resetRolePermissions: (role) => api.delete(`/permissions/roles/${role}`),
   getStaffPermissions: (staffId) => api.get(`/permissions/staff/${staffId}`),
   setStaffPermissions: (staffId, permissions) => api.post(`/permissions/staff/${staffId}`, { permissions }),
+  clearStaffPermissionsOverride: (staffId) => api.delete(`/permissions/staff/${staffId}`),
   // Upsells
   getUpsells: (items) => api.get('/pos/upsells', { params: { items: items.join(',') } }),
   // Reports

@@ -2,74 +2,277 @@ from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Depends
 from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
+from typing import Any, Dict, List
 import uuid, os, base64
 
 router = APIRouter()
 
-# ============ AI MENU IMPORT (PDF/JPEG) ============
-@router.post("/menu/ai-import")
-async def ai_import_menu(data: dict, _: dict = Depends(require_owner_or_manager)):
-    """AI extracts menu items from uploaded image/PDF data (base64 encoded)"""
 
-    file_data = data.get("fileData", "")  # base64 encoded
-    file_type = data.get("fileType", "image")  # image or pdf
+async def _existing_categories() -> List[Dict[str, Any]]:
+    return await db.categories.find({}, {"_id": 0}).to_list(200)
+
+
+async def _existing_modifiers() -> List[Dict[str, Any]]:
+    return await db.modifiers.find({}, {"_id": 0}).to_list(500)
+
+
+def _fuzzy_match_category(proposed: str, cats: List[Dict[str, Any]]) -> Dict[str, Any] | None:
+    """Return the best matching existing category (score >= 0.55), else None."""
+    if not proposed:
+        return None
+    proposed_l = proposed.lower().strip()
+    best: tuple[float, Dict[str, Any] | None] = (0.0, None)
+    for c in cats:
+        cname = str(c.get("name", "")).lower()
+        # Direct contains gives a boost (Cocktails vs "Cocktail" / Wine — Red vs "Red Wine")
+        if proposed_l == cname:
+            return c
+        if proposed_l in cname or cname in proposed_l:
+            score = 0.85
+        else:
+            score = SequenceMatcher(None, proposed_l, cname).ratio()
+        if score > best[0]:
+            best = (score, c)
+    return best[1] if best[0] >= 0.55 else None
+
+
+def _suggest_modifiers(category_name: str, mods: List[Dict[str, Any]]) -> List[str]:
+    """Return modifier IDs whose `assignedCategories` include this category."""
+    out: List[str] = []
+    for m in mods:
+        assigned = m.get("assignedCategories") or []
+        if category_name in assigned:
+            out.append(m.get("id"))
+    return out
+
+
+async def _run_vision_extraction(file_data: str, file_type: str) -> Dict[str, Any]:
+    """Shared: pull items out of an image/pdf. Returns {items, message, rawResponse?}."""
+    import json as _json
+
+    # Normalise base64 — strip any leading data URL prefix
+    if "," in file_data and file_data.startswith("data:"):
+        file_data = file_data.split(",", 1)[1]
+    if not file_data:
+        return {"items": [], "message": "No file data received"}
+
+    system_msg = (
+        "You are a menu extraction expert. Extract EVERY menu item you can see.\n"
+        "Return ONLY a JSON array — no markdown fences, no explanations — with this exact shape:\n"
+        '[{"name": "Item Name", "category": "Category", "price": 12.50, "cost": 4.00, "description": "Brief desc"}]\n'
+        "Category should reflect what the menu itself uses (e.g. Coffee, Wine — Red, Cocktails, Mains, Beer). Prefer specific over generic.\n"
+        "If cost is not on the menu, estimate at 30–35% of price. Include description only if the menu shows one."
+    )
+
+    from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+    api_key = os.environ.get("EMERGENT_LLM_KEY", "")
+    if not api_key:
+        return {"items": [], "message": "LLM key not configured"}
+
+    chat = LlmChat(
+        api_key=api_key,
+        session_id=f"menu-import-{uuid.uuid4()}",
+        system_message=system_msg,
+    ).with_model("openai", "gpt-5.2")
+
+    if file_type == "pdf":
+        try:
+            import pypdf, io
+            pdf_bytes = base64.b64decode(file_data)
+            reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
+            pdf_text = "\n\n".join((page.extract_text() or "") for page in reader.pages).strip()
+            if not pdf_text:
+                return {"items": [], "message": "Could not read any text from the PDF. Try uploading a photo of the menu instead."}
+            user_msg = UserMessage(text=f"Parse this menu text and return the JSON array of items:\n\n{pdf_text[:12000]}")
+        except Exception as pdf_err:
+            return {"items": [], "message": f"PDF parse failed: {pdf_err}"}
+    else:
+        user_msg = UserMessage(
+            text="Extract every menu item from this image and return the JSON array.",
+            file_contents=[ImageContent(image_base64=file_data)],
+        )
+
+    response = await chat.send_message(user_msg)
+
+    text = (response or "").strip()
+    if text.startswith("```"):
+        text = text.split("```", 2)[1] if text.count("```") >= 2 else text.lstrip("`")
+        if text.lstrip().lower().startswith("json"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[4:]
+        text = text.rsplit("```", 1)[0].strip()
 
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-        api_key = os.environ.get("EMERGENT_LLM_KEY", "")
-        chat = LlmChat(api_key=api_key, session_id=f"menu-import-{uuid.uuid4()}", system_message="""You are a menu extraction expert. Extract ALL menu items from the provided menu description.
-Return ONLY a JSON array of items with this exact format (no markdown, no explanation, just pure JSON):
-[{"name": "Item Name", "category": "Category", "price": 12.50, "cost": 4.00, "description": "Brief desc"}]
-Categories should be one of: Beverages, Food, Bakery, Alcohol, Desserts, Appetizers, Mains, Sides.
-Estimate cost at roughly 30-35% of price if not available.""")
-        chat.with_model("openai", "gpt-5.2")
+        parsed = _json.loads(text)
+    except Exception:
+        return {"items": [], "message": "Could not auto-parse the LLM response.", "rawResponse": response}
 
-        prompt = f"Extract all menu items from this {file_type} menu. The file content is provided as base64. Parse it and return the JSON array of items:\n\n{file_data[:5000]}"
-        if len(file_data) > 5000:
-            prompt = f"Here is a menu to parse. Extract all items with their names, categories, prices. Estimate costs at 30-35% of price:\n\n{file_data[:3000]}"
-
-        msg = UserMessage(text=prompt)
-        response = await chat.send_message(msg)
-
-        # Parse the JSON response
-        import json
+    if isinstance(parsed, list):
+        items = parsed
+    elif isinstance(parsed, dict) and isinstance(parsed.get("items"), list):
+        items = parsed["items"]
+    else:
         items = []
+
+    return {"items": items, "message": ""}
+
+
+# ============ AI MENU IMPORT — PREVIEW (no DB writes) ============
+@router.post("/menu/ai-preview")
+async def ai_menu_preview(data: dict, _: dict = Depends(require_owner_or_manager)):
+    """Extract menu items from image/PDF, enrich with fuzzy-matched existing
+    categories + suggested modifiers. **Does not write to the DB** — the UI
+    shows a review table and calls /menu/ai-commit once the owner is happy.
+    """
+    result = await _run_vision_extraction(data.get("fileData", "") or "", (data.get("fileType") or "image").lower())
+    raw_items = result.get("items") or []
+    if not raw_items:
+        return {"items": [], "count": 0, "message": result.get("message") or "No menu items detected. Try a clearer image.", "rawResponse": result.get("rawResponse")}
+
+    cats = await _existing_categories()
+    mods = await _existing_modifiers()
+
+    proposed: List[Dict[str, Any]] = []
+    for item in raw_items:
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
         try:
-            # Try to find JSON array in the response
-            text = response.strip()
-            if text.startswith("```"):
-                text = text.split("```")[1]
-                if text.startswith("json"):
-                    text = text[4:]
-            items = json.loads(text)
-        except:
-            # If parsing fails, return the raw response for user to see
-            return {"items": [], "rawResponse": response, "message": "Could not auto-parse. Please check the raw response."}
+            price = float(item.get("price") or 0)
+        except (TypeError, ValueError):
+            price = 0.0
+        try:
+            cost = float(item.get("cost") or 0) or round(price * 0.35, 2)
+        except (TypeError, ValueError):
+            cost = round(price * 0.35, 2)
+        proposed_cat = str(item.get("category") or "").strip()
+        matched = _fuzzy_match_category(proposed_cat, cats)
+        matched_cat_name = matched["name"] if matched else (proposed_cat or "Food")
+        matched_cat_id = matched.get("id") if matched else None
+        suggested_mod_ids = _suggest_modifiers(matched_cat_name, mods)
+        # Check if a same-name product already exists (helps UI mark duplicates)
+        existing = await db.products.find_one({"name": name}, {"_id": 0, "id": 1})
+        proposed.append({
+            "tempId": str(uuid.uuid4()),
+            "name": name,
+            "proposedCategory": proposed_cat,
+            "category": matched_cat_name,
+            "categoryId": matched_cat_id,
+            "categoryMatched": bool(matched),
+            "price": price,
+            "cost": cost,
+            "description": str(item.get("description") or ""),
+            "suggestedModifierIds": suggested_mod_ids,
+            "isDuplicate": bool(existing),
+            "include": not bool(existing),
+        })
 
-        # Create products in DB
-        created = []
-        for item in items:
-            product = {
-                "id": str(uuid.uuid4()),
-                "name": item.get("name", "Unknown"),
-                "category": item.get("category", "Food"),
-                "price": float(item.get("price", 0)),
-                "cost": float(item.get("cost", 0)),
-                "stock": 100,
-                "sku": f"{item.get('category', 'FOO')[:3].upper()}-{str(uuid.uuid4())[:4].upper()}",
-                "image": "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=200",
-                "gstRate": 10.0,
-                "description": item.get("description", ""),
-                "createdAt": datetime.now(timezone.utc).isoformat(),
-                "updatedAt": datetime.now(timezone.utc).isoformat(),
-            }
-            await db.products.insert_one(product)
-            product.pop("_id", None)
-            created.append(product)
+    known_cats = [{"id": c.get("id"), "name": c.get("name"), "color": c.get("color"), "icon": c.get("icon")} for c in cats]
+    known_mods = [{"id": m.get("id"), "name": m.get("name"), "assignedCategories": m.get("assignedCategories") or []} for m in mods]
+    return {
+        "items": proposed,
+        "count": len(proposed),
+        "knownCategories": known_cats,
+        "knownModifiers": known_mods,
+        "message": f"Detected {len(proposed)} item{'s' if len(proposed) != 1 else ''} — review and commit.",
+    }
 
-        return {"items": created, "count": len(created), "message": f"Successfully imported {len(created)} menu items"}
-    except Exception as e:
-        return {"items": [], "error": str(e), "message": "AI extraction failed - check your file format"}
+
+# ============ AI MENU IMPORT — COMMIT (reviewed items → DB) ============
+@router.post("/menu/ai-commit")
+async def ai_menu_commit(data: dict, _: dict = Depends(require_owner_or_manager)):
+    """Persist reviewed items to /products. Expects
+    { items: [ { name, category, categoryId?, price, cost, description?, modifierIds?, skipIfDuplicate? } ] }
+    Skips rows where `name` is blank or (if `skipIfDuplicate`) an item with the
+    same name already exists.
+    """
+    from services.entity_service import stamped_insert
+    items = data.get("items") or []
+    created: List[Dict[str, Any]] = []
+    skipped: List[Dict[str, Any]] = []
+    for it in items:
+        name = str(it.get("name") or "").strip()
+        if not name:
+            skipped.append({"reason": "empty name", "item": it}); continue
+        if it.get("skipIfDuplicate"):
+            dup = await db.products.find_one({"name": name}, {"_id": 0, "id": 1})
+            if dup:
+                skipped.append({"reason": "duplicate", "name": name}); continue
+        try:
+            price = float(it.get("price") or 0)
+        except (TypeError, ValueError):
+            price = 0.0
+        try:
+            cost = float(it.get("cost") or 0) or round(price * 0.35, 2)
+        except (TypeError, ValueError):
+            cost = round(price * 0.35, 2)
+        cat_name = str(it.get("category") or "Food").strip() or "Food"
+        cat_id = it.get("categoryId")
+        prod_id = str(uuid.uuid4())
+        prod = {
+            "id": prod_id,
+            "name": name,
+            "category": cat_name,
+            "categoryId": cat_id,
+            "price": price,
+            "cost": cost,
+            "stock": int(it.get("stock") or 100),
+            "sku": f"AI-{prod_id[:8].upper()}",
+            "image": str(it.get("image") or ""),
+            "gstRate": float(it.get("gstRate") or 10.0),
+            "description": str(it.get("description") or ""),
+            "modifierIds": list(it.get("modifierIds") or []),
+            "active": True,
+            "eightySixed": False,
+        }
+        saved = await stamped_insert("products", prod, entity_type="product")
+        saved.pop("_id", None)
+        created.append(saved)
+    return {
+        "created": len(created),
+        "skipped": len(skipped),
+        "skippedDetails": skipped,
+        "items": created,
+        "message": f"Imported {len(created)} · Skipped {len(skipped)}",
+    }
+
+
+# ============ AI MENU IMPORT (LEGACY one-shot — kept for compat) ============
+@router.post("/menu/ai-import")
+async def ai_import_menu(data: dict, _: dict = Depends(require_owner_or_manager)):
+    """Backwards-compatible one-shot endpoint that extracts AND writes in one
+    call. New UIs should prefer /menu/ai-preview → /menu/ai-commit."""
+    result = await _run_vision_extraction(data.get("fileData", "") or "", (data.get("fileType") or "image").lower())
+    raw_items = result.get("items") or []
+    if not raw_items:
+        return {"items": [], "count": 0, "message": result.get("message") or "No items detected"}
+    cats = await _existing_categories()
+    mods = await _existing_modifiers()
+    from services.entity_service import stamped_insert
+    created = []
+    for item in raw_items:
+        name = str(item.get("name") or "").strip()
+        if not name: continue
+        try: price = float(item.get("price") or 0)
+        except (TypeError, ValueError): price = 0.0
+        try: cost = float(item.get("cost") or 0) or round(price * 0.35, 2)
+        except (TypeError, ValueError): cost = round(price * 0.35, 2)
+        matched = _fuzzy_match_category(str(item.get("category") or ""), cats)
+        cat_name = matched["name"] if matched else (str(item.get("category") or "Food") or "Food")
+        cat_id = matched.get("id") if matched else None
+        prod_id = str(uuid.uuid4())
+        product = {
+            "id": prod_id, "name": name, "category": cat_name, "categoryId": cat_id,
+            "price": price, "cost": cost, "stock": 100,
+            "sku": f"AI-{prod_id[:8].upper()}", "image": "", "gstRate": 10.0,
+            "description": str(item.get("description") or ""),
+            "modifierIds": _suggest_modifiers(cat_name, mods),
+            "active": True, "eightySixed": False,
+        }
+        saved = await stamped_insert("products", product, entity_type="product")
+        saved.pop("_id", None)
+        created.append(saved)
+    return {"items": created, "count": len(created), "message": f"Successfully imported {len(created)} menu items"}
 
 # ============ PRICE ADJUSTMENT (Bulk) ============
 @router.post("/menu/price-adjust")

@@ -23,6 +23,24 @@ ROLE_PERMISSIONS = {
     "kitchen": ["kitchen", "pre-shift"],
 }
 
+async def _effective_permissions(user: dict) -> list:
+    """Return the effective permission list for a user:
+      1. custom overrides if present on the user doc
+      2. else DB-persisted role defaults (`db.role_permissions`)
+      3. else code-level fallbacks in DEFAULT_ROLE_PERMISSIONS
+    Owner is always ["*"]."""
+    role = user.get("role")
+    if role == "owner":
+        return ["*"]
+    custom = user.get("customPermissions") or []
+    if custom:
+        return custom
+    from services.permission_catalog import DEFAULT_ROLE_PERMISSIONS
+    doc = await db.role_permissions.find_one({"role": role}, {"_id": 0})
+    if doc and isinstance(doc.get("permissions"), list):
+        return doc["permissions"]
+    return list(DEFAULT_ROLE_PERMISSIONS.get(role, ROLE_PERMISSIONS.get(role, [])))
+
 def _secret():
     return os.environ["JWT_SECRET"]
 
@@ -141,12 +159,8 @@ async def login(req: LoginRequest, request: Request, response: Response):
     _set_tokens(response, access, refresh)
     user.pop("_id", None)
     user.pop("password_hash", None)
-    # Add permissions to login response
-    custom = user.get("customPermissions", [])
-    if custom:
-        user["permissions"] = custom
-    else:
-        user["permissions"] = ROLE_PERMISSIONS.get(user["role"], [])
+    # Add effective permissions (custom > role DB override > code default)
+    user["permissions"] = await _effective_permissions(user)
     return {"user": user, "token": access}
 
 @router.post("/register")
@@ -185,12 +199,7 @@ async def register(req: RegisterRequest, response: Response):
 @router.get("/me")
 async def me(request: Request):
     user = await get_current_user(request)
-    # Custom permissions override default role permissions
-    custom = user.get("customPermissions", [])
-    if custom:
-        user["permissions"] = custom
-    else:
-        user["permissions"] = ROLE_PERMISSIONS.get(user["role"], [])
+    user["permissions"] = await _effective_permissions(user)
     return user
 
 @router.post("/logout")

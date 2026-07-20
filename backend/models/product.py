@@ -18,13 +18,15 @@ class ProductModifier(BaseModel):
 class Product(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
-    category: str
+    # Defensive defaults — legacy/seeded rows may omit these; a missing scalar
+    # should never 500 the whole /products list.
+    category: str = ""
     categoryId: Optional[str] = None
-    price: float
-    cost: float
-    stock: int
-    sku: str
-    image: str
+    price: float = 0.0
+    cost: float = 0.0
+    stock: int = 0
+    sku: str = ""
+    image: str = ""
     gstRate: float = 10.0
     modifiers: List[ProductModifier] = []
     # IDs of modifiers (from /api/modifiers) attached to this product.

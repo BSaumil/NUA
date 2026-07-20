@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { useTheme } from '../contexts/ThemeContext';
 import { analyticsAPI, menuFeaturesAPI } from '../services/api';
 import { toast } from 'sonner';
+import AIMenuImportReview from '../components/menu/AIMenuImportReview';
 
 const CLASS_CONFIG = {
   star: { label: 'Star', icon: Star, color: '#F59E0B', bg: '#FFFBEB', desc: 'High popularity, high profit' },
@@ -26,33 +27,14 @@ export default function MenuEngineering() {
   const [tab, setTab] = useState('matrix');
   const [showImport, setShowImport] = useState(false);
   const [showPriceAdjust, setShowPriceAdjust] = useState(false);
-  const [importLoading, setImportLoading] = useState(false);
-  const [importResult, setImportResult] = useState(null);
   const [priceForm, setPriceForm] = useState({ category: '', type: 'percentage', amount: '', direction: 'increase' });
 
   useEffect(() => {
     analyticsAPI.getMenuEngineering().then(r => setData(r.data)).catch(console.error);
   }, []);
 
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setImportLoading(true);
-    try {
-      const reader = new FileReader();
-      reader.onload = async (ev) => {
-        const base64 = ev.target.result.split(',')[1] || ev.target.result;
-        const fileType = file.type.includes('pdf') ? 'pdf' : 'image';
-        const res = await menuFeaturesAPI.aiImportMenu({ fileData: base64, fileType });
-        setImportResult(res.data);
-        if (res.data.count > 0) {
-          toast.success(`Imported ${res.data.count} menu items!`);
-          analyticsAPI.getMenuEngineering().then(r => setData(r.data)).catch(() => {});
-        }
-        setImportLoading(false);
-      };
-      reader.readAsDataURL(file);
-    } catch { setImportLoading(false); toast.error('Failed to import'); }
+  const onCommitted = () => {
+    analyticsAPI.getMenuEngineering().then(r => setData(r.data)).catch(() => {});
   };
 
   const handlePriceAdjust = async () => {
@@ -216,27 +198,8 @@ export default function MenuEngineering() {
         </TabsContent>
       </Tabs>
 
-      {/* AI Import Dialog */}
-      <Dialog open={showImport} onOpenChange={setShowImport}>
-        <DialogContent className="max-w-md" data-testid="ai-import-dialog">
-          <DialogHeader><DialogTitle>AI Menu Import</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-2">
-            <p className="text-sm text-gray-500">Upload a PDF or JPEG of your menu. AI will extract items, categories, and prices automatically.</p>
-            <div className="border-2 border-dashed rounded-lg p-6 text-center">
-              <Upload size={32} className="mx-auto mb-2 text-gray-400" />
-              <p className="text-sm text-gray-600 mb-2">Drop your menu file here or click to browse</p>
-              <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={handleFileUpload} className="w-full text-sm" data-testid="menu-file-input" />
-            </div>
-            {importLoading && <div className="flex items-center justify-center gap-2 text-sm text-gray-500"><Loader2 size={16} className="animate-spin" /> AI is analyzing your menu...</div>}
-            {importResult && (
-              <div className={`p-3 rounded-lg text-sm ${importResult.count > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-                {importResult.message}
-                {importResult.count > 0 && <p className="mt-1 text-xs">Items are now available in Products & POS.</p>}
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* AI Import — two-step review flow */}
+      <AIMenuImportReview open={showImport} onOpenChange={setShowImport} onCommitted={onCommitted} />
 
       {/* Price Adjustment Dialog */}
       <Dialog open={showPriceAdjust} onOpenChange={setShowPriceAdjust}>
