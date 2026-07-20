@@ -58,7 +58,7 @@ class PrinterService {
       receipt += `Customer: ${transaction.customerName}\n`;
     }
     receipt += `Location: ${transaction.location}\n`;
-    receipt += '================================\n\n`;
+    receipt += '================================\n\n';
 
     // Items
     receipt += this.ESC_POS.BOLD_ON;

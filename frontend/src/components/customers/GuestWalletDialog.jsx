@@ -3,7 +3,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { finalizeAPI } from '../../services/api';
+import { finalizeAPI, customersAPI } from '../../services/api';
 import { toast } from 'sonner';
 import { Wallet, Download, Copy, Loader2, Smartphone, ExternalLink } from 'lucide-react';
 
@@ -13,6 +13,7 @@ import { Wallet, Download, Copy, Loader2, Smartphone, ExternalLink } from 'lucid
  */
 export default function GuestWalletDialog({ open, onOpenChange, customer }) {
   const [wallet, setWallet] = useState(null);
+  const [balances, setBalances] = useState(null); // vouchers + occasion offers
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -22,6 +23,10 @@ export default function GuestWalletDialog({ open, onOpenChange, customer }) {
       .then(r => setWallet(r.data))
       .catch(() => toast.error('Failed to load wallet'))
       .finally(() => setLoading(false));
+    // Vouchers/offers load separately — the pass still renders if this fails.
+    customersAPI.getWallet(customer.id)
+      .then(r => setBalances(r.data))
+      .catch(() => setBalances(null));
   }, [open, customer?.id]);
 
   const copyToken = async () => {
@@ -120,6 +125,29 @@ export default function GuestWalletDialog({ open, onOpenChange, customer }) {
                 {wallet.barcode}
               </div>
             </div>
+
+            {/* Active vouchers & occasion offers */}
+            {(balances?.vouchers || []).length > 0 && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 space-y-2" data-testid="wallet-vouchers">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-700">
+                  Vouchers & Offers · ${(balances.totalVoucherValue || 0).toFixed(2)} available
+                </p>
+                {balances.vouchers.map(v => (
+                  <div key={v.id} className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-emerald-100" data-testid={`wallet-voucher-row-${v.id}`}>
+                    <div>
+                      <p className="text-sm font-semibold text-gray-800">
+                        {v.occasion || (v.reason === 'win_back' ? 'We miss you 💌' : 'Voucher')}
+                      </p>
+                      {v.expiresAt && (
+                        <p className="text-[10px] text-gray-400">Expires {new Date(v.expiresAt).toLocaleDateString()}</p>
+                      )}
+                    </div>
+                    <span className="text-sm font-bold text-emerald-700">${Number(v.amount).toFixed(2)}</span>
+                  </div>
+                ))}
+                <p className="text-[10px] text-emerald-700/70">Applied with one tap from the POS wallet panel at checkout.</p>
+              </div>
+            )}
 
             <div className="flex gap-2">
               <Button variant="outline" onClick={copyToken} className="flex-1" data-testid="wallet-copy-token">

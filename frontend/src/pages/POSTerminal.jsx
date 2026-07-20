@@ -71,6 +71,10 @@ const POSTerminal = () => {
   const [labels, setLabels] = useState({});
   // v17: Points-and-Pay
   const [pointsBalance, setPointsBalance] = useState(null);
+  // Customer wallet: store credit + active vouchers + occasion offers
+  const [wallet, setWallet] = useState(null);
+  // Category "More" overflow panel open state
+  const [showMoreCats, setShowMoreCats] = useState(false);
   const [pointsToRedeem, setPointsToRedeem] = useState(0);
   const [loyaltyCfg, setLoyaltyCfg] = useState({ minRedeem: 10, redeemRate: 0.01 });
 
@@ -359,6 +363,17 @@ const POSTerminal = () => {
     }
   };
 
+  // Discounts applied on screen, in the shape POST /transactions records
+  // (backend recomputes totals from these — keep in sync with calculateTotal).
+  const buildDiscountPayload = () => ({
+    appliedDiscounts: (appliedDiscounts || []).map(d => ({
+      label: d.label || '', amount: Number(d.discount) || 0,
+      promotionId: d.promotionId || null, voucherId: d.voucherId || null, code: d.code || null,
+    })),
+    pointsRedeemed: pointsToRedeem || 0,
+    pointsDiscount: redeemDiscount || 0,
+  });
+
   // ---- Standard checkout ----
   const handleCheckout = async (paymentMethod) => {
     if (loading) return;
@@ -374,7 +389,7 @@ const POSTerminal = () => {
         items: cart.map(item => toTxItem(item, true)),
         paymentMethod, customerId: selectedCustomer?.id || null, location: currentLocation, cashier: currentUser.name,
         orderType, tableNumber: orderType === 'dine-in' ? tableNumber : null, walkInName: orderType === 'takeaway' ? walkInName : null,
-        pointsRedeemed: pointsToRedeem, pointsDiscount: redeemDiscount,
+        ...buildDiscountPayload(),
       });
       setLastTxnId(res.data?.id || null);
       // Loyalty: redeem first (if applicable), then earn on net spend
@@ -439,6 +454,7 @@ const POSTerminal = () => {
         items: cart.map(item => toTxItem(item)),
         paymentMethod: paymentView === 'upi' ? 'UPI' : 'QR Code',
         customerId: selectedCustomer?.id || null, location: currentLocation, cashier: currentUser.name,
+        ...buildDiscountPayload(),
       });
       toast({ title: "Payment Confirmed!", description: `$${totalNum.toFixed(2)} received via ${paymentView === 'upi' ? 'UPI' : 'QR Code'}` });
       await settleGiftCards(res.data?.id);
@@ -531,6 +547,7 @@ const POSTerminal = () => {
           paymentMethod: 'Split Payment',
           customerId: selectedCustomer?.id || null, location: currentLocation, cashier: currentUser.name,
           splitDetails: updatedParts.map(s => ({ payerName: s.payerName, amount: s.amount, method: s.method })),
+          ...buildDiscountPayload(),
         });
         toast({ title: "All Splits Paid!", description: `Total $${totalNum.toFixed(2)} collected` });
         await settleGiftCards(res.data?.id);
@@ -616,24 +633,68 @@ const POSTerminal = () => {
               ))}
             </div>
           )}
-          <div className="flex gap-2 overflow-x-auto pb-1.5 justify-center">
-            {categories.map(cat => {
+          {/* Category bar — compact pills, max 6 visible + "More" overflow panel.
+              A category picked from the overflow is promoted into the visible
+              row, so frequent switches stay one tap away. */}
+          {(() => {
+            const MAX_VISIBLE = 6;
+            const all = categories[0];                    // 'All' is always first
+            const rest = categories.slice(1);
+            let visible = rest.slice(0, MAX_VISIBLE);
+            let overflow = rest.slice(MAX_VISIBLE);
+            if (overflow.length === 1) { visible = rest; overflow = []; }
+            const selInOverflow = overflow.find(c => c.name === selectedCategory);
+            if (selInOverflow) {
+              overflow = [visible[visible.length - 1], ...overflow.filter(c => c.name !== selectedCategory)];
+              visible = [...visible.slice(0, -1), selInOverflow];
+            }
+            const pill = (cat) => {
               const active = selectedCategory === cat.name;
               return (
                 <button key={cat.id || cat.name}
-                  onClick={() => setSelectedCategory(cat.name)}
-                  className={`flex flex-col items-center gap-1 px-3 py-2 rounded-xl whitespace-nowrap transition-all flex-shrink-0 min-w-[72px] ${active ? 'text-white shadow-md scale-[1.02]' : 'bg-white text-gray-700 border hover:border-gray-400'}`}
+                  onClick={() => { setSelectedCategory(cat.name); setShowMoreCats(false); }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full whitespace-nowrap transition-all flex-shrink-0 text-xs font-semibold ${active ? 'text-white shadow-md' : 'bg-white text-gray-700 border hover:border-gray-400'}`}
                   style={active ? { backgroundColor: cat.color || theme.primary } : { borderColor: `${cat.color || theme.primary}40` }}
                   data-testid={`pos-cat-${cat.name}`}>
-                  <div className="w-7 h-7 rounded-lg flex items-center justify-center"
-                    style={active ? { background: 'rgba(255,255,255,0.18)' } : { background: `${cat.color || theme.primary}15`, color: cat.color || theme.primary }}>
-                    <CategoryIcon name={cat.icon} size={18} />
-                  </div>
-                  <span className="text-[11px] font-semibold leading-none">{cat.name}</span>
+                  <CategoryIcon name={cat.icon} size={14} />
+                  {cat.name}
                 </button>
               );
-            })}
-          </div>
+            };
+            return (
+              <div className="relative">
+                <div className="flex gap-1.5 overflow-x-auto pb-1.5 items-center">
+                  {pill(all)}
+                  {visible.map(pill)}
+                  {overflow.length > 0 && (
+                    <button onClick={() => setShowMoreCats(v => !v)}
+                      className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold border flex-shrink-0 transition-all ${showMoreCats ? 'text-white' : 'bg-gray-50 text-gray-600 hover:border-gray-400'}`}
+                      style={showMoreCats ? { backgroundColor: theme.primary } : {}}
+                      data-testid="pos-cat-more">
+                      More · {overflow.length} {showMoreCats ? '▴' : '▾'}
+                    </button>
+                  )}
+                </div>
+                {showMoreCats && overflow.length > 0 && (
+                  <div className="absolute z-30 mt-1 left-0 right-0 bg-white border rounded-xl shadow-lg p-3 grid gap-1.5 [grid-template-columns:repeat(auto-fill,minmax(140px,1fr))]"
+                    data-testid="pos-cat-overflow">
+                    {overflow.map(cat => (
+                      <button key={cat.id || cat.name}
+                        onClick={() => { setSelectedCategory(cat.name); setShowMoreCats(false); }}
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-50 border border-transparent hover:border-gray-200 text-left"
+                        data-testid={`pos-cat-overflow-${cat.name}`}>
+                        <span className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0"
+                          style={{ background: `${cat.color || theme.primary}15`, color: cat.color || theme.primary }}>
+                          <CategoryIcon name={cat.icon} size={14} />
+                        </span>
+                        {cat.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
         <div className="flex-1 overflow-y-auto pr-1">
           {selectedCategory === 'All' ? (
@@ -761,8 +822,37 @@ const POSTerminal = () => {
             <div>
               <div className="flex items-center justify-between">
                 <div><p className="font-medium">{selectedCustomer.name}</p><p className="text-xs text-gray-500">{selectedCustomer.membershipTier} Member {pointsBalance !== null && <span className="ml-1 text-amber-600 font-semibold">⭐ {pointsBalance} pts</span>}</p></div>
-                <Button variant="ghost" size="sm" onClick={() => { setSelectedCustomer(null); setPointsBalance(null); setPointsToRedeem(0); }}>Remove</Button>
+                <Button variant="ghost" size="sm" onClick={() => { setSelectedCustomer(null); setPointsBalance(null); setPointsToRedeem(0); setWallet(null); }}>Remove</Button>
               </div>
+              {/* Wallet: store credit + vouchers + occasion offers */}
+              {wallet && (wallet.storeCredit > 0 || (wallet.vouchers || []).length > 0) && (
+                <div className="mt-2 p-2 rounded-lg border border-emerald-200 bg-emerald-50/60 space-y-1.5" data-testid="customer-wallet">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Wallet</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {wallet.storeCredit > 0 && (
+                      <span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-emerald-600 text-white" data-testid="wallet-store-credit">
+                        💳 ${wallet.storeCredit.toFixed(2)} credit
+                      </span>
+                    )}
+                    {(wallet.vouchers || []).map(v => {
+                      const applied = (appliedDiscounts || []).some(d => d.voucherId === v.id);
+                      return (
+                        <button key={v.id} disabled={applied}
+                          onClick={() => {
+                            addDiscount({ voucherId: v.id, label: `${v.occasion || 'Voucher'} · $${Number(v.amount).toFixed(2)}`, discount: Number(v.amount) || 0 });
+                            toast({ title: 'Voucher applied', description: `${v.occasion || v.reason || 'Wallet voucher'} — $${Number(v.amount).toFixed(2)} off` });
+                          }}
+                          className={`text-[11px] font-semibold px-2 py-1 rounded-full border transition-all ${applied ? 'bg-gray-200 text-gray-400 border-gray-200' : 'bg-white text-emerald-700 border-emerald-300 hover:bg-emerald-100'}`}
+                          title={applied ? 'Already applied to this order' : `Tap to apply $${Number(v.amount).toFixed(2)} off`}
+                          data-testid={`wallet-voucher-${v.id}`}>
+                          {v.occasion ? v.occasion : `🎟 ${v.reason === 'win_back' ? 'We miss you' : 'Voucher'}`} ${Number(v.amount).toFixed(2)}
+                          {applied ? ' ✓' : ''}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               {pointsBalance !== null && pointsBalance >= loyaltyCfg.minRedeem && (
                 <div className="mt-2 p-2 bg-amber-50 rounded text-xs space-y-1" data-testid="points-pay-block">
                   <p className="text-amber-700 font-medium">Points & Pay (1 pt = ${loyaltyCfg.redeemRate} · min {loyaltyCfg.minRedeem})</p>
@@ -784,6 +874,7 @@ const POSTerminal = () => {
                   setSelectedCustomer(c);
                   if (c) {
                     try { const r = await loyaltyEngineAPI.getBalance(c.id); setPointsBalance(r.data?.points || 0); } catch {}
+                    try { const r = await customersAPI.getWallet(c.id); setWallet(r.data); } catch { setWallet(null); }
                     try { const r = await phaseEFAPI.yourUsual(c.id); setYourUsual(r.data?.items || []); } catch {}
                   } else { setYourUsual([]); }
                 }}
@@ -902,6 +993,12 @@ const POSTerminal = () => {
         {cart.length > 0 && (
           <Card className="mb-4"><CardContent className="p-4 space-y-2">
             <div className="flex justify-between text-sm"><span>{labels.subtotal || 'Subtotal'}</span><span>${totals.subtotal}</span></div>
+            {parseFloat(totals.tierDiscount) > 0 && (
+              <div className="flex justify-between text-sm text-purple-700" data-testid="tier-discount-row">
+                <span>👑 {selectedCustomer?.membershipTier} member discount</span>
+                <span>-${totals.tierDiscount}</span>
+              </div>
+            )}
             {/* Applied discounts (auto promotions + manual vouchers) */}
             {(appliedDiscounts || []).map((d, i) => {
               const key = d.promotionId || d.voucherId || d.id;

@@ -72,6 +72,18 @@ async def get_customer_profile(customer_id: str):
         "transactionHistory": transactions,
     }
 
+# ============ CUSTOMER WALLET ============
+@router.get("/customers/{customer_id}/wallet")
+async def get_customer_wallet(customer_id: str):
+    """Store credit + points + active vouchers + occasion offers in one view.
+    Reading the wallet also lazily issues any due occasion vouchers
+    (e.g. birthday month), so offers always show up without a cron job."""
+    from services.wallet_service import get_wallet
+    wallet = await get_wallet(customer_id)
+    if wallet is None:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return wallet
+
 # ============ FEEDBACK API ============
 @router.get("/feedback", response_model=List[Feedback])
 async def get_feedback(customer_id: Optional[str] = None, status: Optional[str] = None):

@@ -40,6 +40,7 @@ export const customersAPI = {
   create: (data) => api.post('/customers', data),
   update: (id, data) => api.put(`/customers/${id}`, data),
   getProfile: (id) => api.get(`/customers/${id}/profile`),
+  getWallet: (id) => api.get(`/customers/${id}/wallet`),
 };
 
 // Feedback API
@@ -266,6 +267,7 @@ export const preShiftAPI = {
 export const analyticsAPI = {
   getCommandCenter: () => api.get('/analytics/command-center'),
   getMenuEngineering: () => api.get('/analytics/menu-engineering'),
+  getTodayPulse: () => api.get('/analytics/today-pulse'),
 };
 
 // Automation API

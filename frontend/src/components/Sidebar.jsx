@@ -11,54 +11,56 @@ import {
   ChevronDown, ChevronRight
 } from 'lucide-react';
 
+// Progressive disclosure: the everyday screens live in a handful of merged
+// groups; power/config screens live under "Advanced" so the 95%-of-the-time
+// sidebar stays clean. Everything is still reachable — nothing was removed.
 const NAV_STRUCTURE = [
-  { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', access: ['owner', 'manager'] },
-  { path: '/pre-shift', icon: Sunrise, label: 'Pre-Shift', access: ['owner', 'manager', 'kitchen'] },
-  { path: '/command-center', icon: Brain, label: 'Command Center', access: ['owner', 'manager'] },
-  { path: '/ash-hq', icon: Brain, label: 'NUA Command Center', access: ['owner', 'manager'] },
-  { path: '/ash-plans', icon: Trophy, label: 'NUA Planner', access: ['owner', 'manager'] },
-  { path: '/ash-permissions', icon: ShieldCheck, label: 'NUA Permissions', access: ['owner'] },
-  { path: '/ash-memory', icon: FileText, label: 'NUA Memory', access: ['owner', 'manager'] },
-  { path: '/ash', icon: Brain, label: 'NUA Intelligence', access: ['owner', 'manager'] },
-  { path: '/hq', icon: Store, label: 'HQ Roll-up', access: ['owner'] },
-  { path: '/approvals', icon: ShieldCheck, label: 'Approvals', access: ['owner', 'manager'] },
-  { path: '/audit', icon: FileText, label: 'Audit Log', access: ['owner'] },
+  { path: '/today', icon: Sunrise, label: 'Today', access: ['owner', 'manager'] },
   { path: '/pos', icon: ShoppingCart, label: 'POS Terminal', access: ['owner', 'manager', 'cashier'] },
+  { path: '/kitchen', icon: ChefHat, label: 'Kitchen', access: ['owner', 'manager', 'kitchen'] },
   {
-    icon: Utensils, label: 'Reservations', access: ['owner', 'manager', 'cashier'],
+    icon: Utensils, label: 'Bookings & Floor', access: ['owner', 'manager', 'cashier', 'kitchen'],
     children: [
       { path: '/reservations', label: 'Bookings' },
       { path: '/floor-plan', label: 'Floor Plan' },
       { path: '/waitlist', label: 'Waitlist' },
+      { path: '/pre-shift', label: 'Pre-Shift Briefing' },
       { path: '/table-layout', label: 'Table Layout' },
-      { path: '/booking-settings', label: 'Settings & Rules' },
-      { path: '/booking-experience', label: 'Experience' },
-      { path: '/clubmember', label: 'Clubmember' },
-      { path: '/booking-analytics', label: 'Analytics' },
-    ],
-  },
-  { path: '/kitchen', icon: ChefHat, label: 'Kitchen', access: ['owner', 'manager', 'kitchen'] },
-  {
-    icon: FlaskConical, label: 'Menu Engineering', access: ['owner', 'manager'],
-    children: [
-      { path: '/menu-engineering', label: 'Menu Matrix' },
-      { path: '/what-if', label: 'What-If Simulator' },
-      { path: '/inventory', label: 'Inventory' },
-      { path: '/measured-stock', label: 'Measured Stock' },
-      { path: '/ai-pantry', label: 'AI Smart Pantry' },
-      { path: '/forecasting', label: 'Forecasting' },
-      { path: '/quarterly-review', label: 'Quarterly Review' },
+      { path: '/booking-settings', label: 'Booking Rules' },
+      { path: '/booking-analytics', label: 'Booking Analytics' },
     ],
   },
   {
-    icon: Package, label: 'Items', access: ['owner', 'manager', 'cashier'],
+    icon: Package, label: 'Menu & Items', access: ['owner', 'manager', 'cashier'],
     children: [
       { path: '/products', label: 'Item Library' },
       { path: '/categories', label: 'Categories' },
       { path: '/modifiers', label: 'Modifiers' },
       { path: '/discounts', label: 'Discounts & Offers' },
       { path: '/comp-void', label: 'Comp / Void' },
-      { path: '/payment-links', label: 'Payment Links' },
+      { path: '/menu-engineering', label: 'Menu Matrix' },
+      { path: '/what-if', label: 'What-If Simulator' },
+    ],
+  },
+  {
+    icon: Warehouse, label: 'Inventory', access: ['owner', 'manager'],
+    children: [
+      { path: '/inventory', label: 'Stock Levels' },
+      { path: '/measured-stock', label: 'Measured Stock' },
+      { path: '/ai-pantry', label: 'AI Smart Pantry' },
+      { path: '/purchase-orders', label: 'Purchase Orders' },
+      { path: '/forecasting', label: 'Forecasting' },
+    ],
+  },
+  {
+    icon: Users, label: 'Customers', access: ['owner', 'manager', 'cashier'],
+    children: [
+      { path: '/customers', label: 'Customer List' },
+      { path: '/vouchers', label: 'Vouchers' },
+      { path: '/loyalty', label: 'Loyalty & Events' },
+      { path: '/loyalty-config', label: 'Loyalty Config' },
+      { path: '/loyalty-progress', label: 'Loyalty Progression' },
+      { path: '/marketing', label: 'Marketing Hub' },
     ],
   },
   {
@@ -71,25 +73,7 @@ const NAV_STRUCTURE = [
     ],
   },
   {
-    icon: Users, label: 'Customers', access: ['owner', 'manager', 'cashier'],
-    children: [
-      { path: '/customers', label: 'Customer List' },
-      { path: '/vouchers', label: 'Vouchers' },
-      { path: '/loyalty', label: 'Loyalty & Events' },
-      { path: '/loyalty-config', label: 'Loyalty Config' },
-      { path: '/loyalty-progress', label: 'Loyalty Progression' },
-      { path: '/email-marketing', label: 'Email Marketing' },
-    ],
-  },
-  {
-    icon: Zap, label: 'Automation', access: ['owner', 'manager'],
-    children: [
-      { path: '/automation', label: 'Automation Engine' },
-      { path: '/automation-triggers', label: 'Automation Brain' },
-    ],
-  },
-  {
-    icon: Calculator, label: 'Accounting', access: ['owner'],
+    icon: Calculator, label: 'Money', access: ['owner'],
     children: [
       { path: '/finance', label: 'Finance Suite' },
       { path: '/accounting', label: 'Transactions' },
@@ -97,10 +81,39 @@ const NAV_STRUCTURE = [
       { path: '/payroll', label: 'Payroll' },
       { path: '/super', label: 'Super' },
       { path: '/end-of-day', label: 'End of Day' },
-      { path: '/integrations', label: 'Integrations' },
     ],
   },
-  { path: '/settings', icon: Settings, label: 'Settings', access: ['owner', 'manager'] },
+  {
+    icon: BarChart3, label: 'Insights', access: ['owner', 'manager'],
+    children: [
+      { path: '/dashboard', label: 'Dashboard (classic)' },
+      { path: '/command-center', label: 'Command Center' },
+      { path: '/quarterly-review', label: 'Quarterly Review' },
+    ],
+  },
+  {
+    icon: Brain, label: 'NUA AI', access: ['owner', 'manager'],
+    children: [
+      { path: '/ash', label: 'Intelligence' },
+      { path: '/ash-hq', label: 'AI Command Center' },
+      { path: '/ash-plans', label: 'Planner' },
+      { path: '/ash-memory', label: 'Memory' },
+      { path: '/automation', label: 'Automation Engine' },
+      { path: '/automation-triggers', label: 'Automation Brain' },
+    ],
+  },
+  {
+    icon: Settings, label: 'Advanced', access: ['owner', 'manager'], advanced: true,
+    children: [
+      { path: '/settings', label: 'Settings' },
+      { path: '/integrations', label: 'Integrations' },
+      { path: '/approvals', label: 'Approvals' },
+      { path: '/audit', label: 'Audit Log' },
+      { path: '/ash-permissions', label: 'AI Permissions' },
+      { path: '/hq', label: 'HQ Roll-up' },
+      { path: '/license', label: 'License' },
+    ],
+  },
 ];
 
 const Sidebar = () => {
@@ -165,7 +178,7 @@ const Sidebar = () => {
               : item.children;
             if (filteredChildren.length === 0) return null;
             return (
-              <div key={item.label}>
+              <div key={item.label} className={item.advanced ? 'pt-2 mt-2 border-t border-gray-100' : ''}>
                 <button onClick={() => toggleGroup(item.label)}
                   className={`flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm transition-all ${isGroupActive(item.children) ? 'font-medium' : 'text-gray-600 hover:bg-gray-50'}`}
                   style={isGroupActive(item.children) ? { color: theme.primary } : {}}
