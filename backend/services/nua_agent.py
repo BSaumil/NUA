@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 from database import db
-from services import ash_tools, ash_personas, ash_memory
+from services import nua_tools, nua_personas, nua_memory
 import json
 import logging
 import os
@@ -151,11 +151,11 @@ async def run_agent_turn(user_message: str, *, session_id: str, actor: str = "as
     tool_results: List[Dict[str, Any]] = []
 
     # Persona filters which tools + which system prompt frames the loop
-    persona_obj = ash_personas.get_persona(persona)
-    visible_tools = ash_personas.filter_tools(ash_tools.catalog(), persona)
+    persona_obj = nua_personas.get_persona(persona)
+    visible_tools = nua_personas.filter_tools(nua_tools.catalog(), persona)
 
     # Long-term memory context — scope defaults to global
-    memory_pack = await ash_memory.context_pack("global")
+    memory_pack = await nua_memory.context_pack("global")
 
     # Compose the prompt manually — emergentintegrations wraps OpenAI calls
     # but tool-calling isn't first-class. We'll use text-based JSON contract.
@@ -182,7 +182,7 @@ Live context (last 15 audit rows, 10 open insights, 10 pending approvals):
 
 {memory_pack}
 """
-    system = ash_personas.system_prompt(persona, AGENT_SYSTEM + base_body)
+    system = nua_personas.system_prompt(persona, AGENT_SYSTEM + base_body)
     reply_text = "I couldn't reach the LLM right now."
     reasoning = None
     outcomes_summary: List[Dict[str, Any]] = []
@@ -219,7 +219,7 @@ Live context (last 15 audit rows, 10 open insights, 10 pending approvals):
                                 "reason": f"Tool '{tool_name}' is outside {persona_obj.label}'s remit — switch persona.",
                                 "tool": tool_name, "persona": persona_obj.id}
                 else:
-                    result = await ash_tools.execute_tool(tool_name, args, actor=actor)
+                    result = await nua_tools.execute_tool(tool_name, args, actor=actor)
                 tool_results.append(result)
                 outcomes_summary.append({
                     "tool": tool_name,

@@ -227,12 +227,12 @@ async def _tx_create_promotion(a):
 
 
 async def _tx_run_ash_scan(a):
-    from services.ash_intelligence import run_all_insights
+    from services.nua_intelligence import run_all_insights
     return await run_all_insights(include_summary=False)
 
 
 async def _tx_generate_weekly_summary(a):
-    from services.ash_intelligence import generate_weekly_summary
+    from services.nua_intelligence import generate_weekly_summary
     doc = await generate_weekly_summary()
     if not doc:
         return {"error": "no summary generated"}
@@ -288,13 +288,13 @@ async def _tx_lookup_product(a):
 
 async def _tx_generate_daily_briefing(a):
     """Delegate to briefing endpoint for consistency."""
-    from services import ash_briefing
-    return await ash_briefing.generate_briefing()
+    from services import nua_briefing
+    return await nua_briefing.generate_briefing()
 
 
 async def _tx_remember(a):
-    from services import ash_memory
-    doc = await ash_memory.remember(
+    from services import nua_memory
+    doc = await nua_memory.remember(
         text=a["text"],
         scope=a.get("scope", "global"),
         kind=a.get("kind", "fact"),
@@ -307,8 +307,8 @@ async def _tx_remember(a):
 
 
 async def _tx_recall(a):
-    from services import ash_memory
-    rows = await ash_memory.recall(scope=a.get("scope", "global"),
+    from services import nua_memory
+    rows = await nua_memory.recall(scope=a.get("scope", "global"),
                                      limit=int(a.get("limit") or 10),
                                      kind=a.get("kind"))
     return {"memories": [{"id": r["id"], "kind": r["kind"], "text": r["text"],

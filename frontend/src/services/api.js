@@ -218,6 +218,11 @@ export const reservationsAPI = {
   complete: (id) => api.post(`/reservations/${id}/complete`),
   noShow: (id, fee) => api.post(`/reservations/${id}/no-show`, null, { params: { fee } }),
   autoAssign: (id) => api.get(`/reservations/auto-assign/${id}`),
+  // Booking calendar helpers
+  dayCounts: (fromDate, toDate) => api.get('/reservations/day-counts', { params: { fromDate, toDate } }),
+  listBlackouts: (fromDate, toDate) => api.get('/reservations/blackouts', { params: { fromDate, toDate } }),
+  createBlackout: (data) => api.post('/reservations/blackouts', data),
+  deleteBlackout: (date) => api.delete(`/reservations/blackouts/${date}`),
 };
 
 // Floor Plans API
@@ -833,6 +838,9 @@ export const finalizeAPI = {
   marketingAnalytics: (days = 30) => api.get('/marketing/analytics', { params: { days } }),
   channelStates: () => api.get('/channels/state'),
   updateChannelState: (data) => api.post('/channels/state', data),
+  getChannelSchedule: (channel) => api.get(`/channels/${channel}/schedule`),
+  saveChannelSchedule: (channel, data) => api.post(`/channels/${channel}/schedule`, data),
+  channelEffectiveStatus: (channel) => api.get(`/channels/${channel}/effective-status`),
   guestWallet: (customerId) => api.get(`/customers/${customerId}/wallet`),
   guestWalletApplePkpassUrl: (customerId) => `${process.env.REACT_APP_BACKEND_URL}/api/customers/${customerId}/wallet/apple.pkpass`,
   guestWalletGoogle: (customerId) => api.get(`/customers/${customerId}/wallet/google`),

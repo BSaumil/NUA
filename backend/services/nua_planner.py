@@ -15,7 +15,7 @@ Design decisions
 • Steps are stored inline on the plan (not a separate collection) so a plan
   is atomic and easy to reason about.
 • Approving a plan doesn't fire everything — it walks steps sequentially,
-  routing each one through ash_tools.execute_tool which itself may enqueue
+  routing each one through nua_tools.execute_tool which itself may enqueue
   to /approvals if the tool's permission is 'approval'.
 • Rejection is terminal.
 """
@@ -23,7 +23,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 from database import db
-from services import ash_tools, ash_personas, audit_service
+from services import nua_tools, nua_personas, audit_service
 import json
 import logging
 import os
@@ -128,8 +128,8 @@ def _extract_json_object(text: str) -> Optional[Dict[str, Any]]:
 
 async def generate_plan(goal: str, *, actor: str, persona: Optional[str] = None) -> Dict[str, Any]:
     """Ask GPT-5.2 to propose a plan for the goal. Persist as draft."""
-    persona_obj = ash_personas.get_persona(persona)
-    visible_tools = ash_personas.filter_tools(ash_tools.catalog(), persona)
+    persona_obj = nua_personas.get_persona(persona)
+    visible_tools = nua_personas.filter_tools(nua_tools.catalog(), persona)
     ctx = await _grounding_data()
 
     prompt = f"""GOAL: {goal}
@@ -227,7 +227,7 @@ async def _execute_step(plan_id: str, idx: int, *, actor: str) -> Dict[str, Any]
     step = plan["steps"][idx]
     if step["status"] not in ("pending", "approved"):
         return {"error": f"step already {step['status']}"}
-    outcome = await ash_tools.execute_tool(step["tool"], step.get("args") or {}, actor=actor)
+    outcome = await nua_tools.execute_tool(step["tool"], step.get("args") or {}, actor=actor)
     new_status = ("pending_approval" if outcome.get("status") == "pending_approval"
                   else ("blocked" if outcome.get("status") == "blocked"
                         else ("executed" if outcome.get("status") == "executed" else "error")))
@@ -346,7 +346,7 @@ async def simulate_plan(plan_id: str, *, actor: str) -> Dict[str, Any]:
     plan = await db.ash_plans.find_one({"id": plan_id}, {"_id": 0})
     if not plan:
         return {"error": "plan not found"}
-    tool_map = {t.name: t for t in ash_tools.TOOLS.values()}
+    tool_map = {t.name: t for t in nua_tools.TOOLS.values()}
     simulated_steps: List[Dict[str, Any]] = []
 
     for step in plan["steps"]:

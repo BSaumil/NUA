@@ -257,6 +257,140 @@ async def update_channel_state(body: ChannelStateIn, user: dict = Depends(get_us
     return doc
 
 
+# ─── Channel schedule (simple daily + advanced weekly + date overrides) ──
+class ChannelHours(BaseModel):
+    open: Optional[str] = None      # "HH:MM" 24h
+    close: Optional[str] = None
+    closed: bool = False
+
+
+class ChannelScheduleOverride(BaseModel):
+    date: str                       # YYYY-MM-DD
+    closed: bool = False
+    open: Optional[str] = None
+    close: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class ChannelScheduleIn(BaseModel):
+    enabled: bool = False
+    mode: str = "simple"            # simple | weekly
+    simpleHours: Optional[ChannelHours] = None
+    weeklyHours: Optional[dict] = None   # {mon: {open,close,closed}, ...}
+    overrides: List[ChannelScheduleOverride] = []
+
+
+_WEEK_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+
+def _default_schedule(channel: str) -> dict:
+    return {
+        "channel": channel,
+        "enabled": False,
+        "mode": "simple",
+        "simpleHours": {"open": "09:00", "close": "22:00", "closed": False},
+        "weeklyHours": {d: {"open": "09:00", "close": "22:00", "closed": False} for d in _WEEK_KEYS},
+        "overrides": [],
+    }
+
+
+def _hhmm_to_min(s: Optional[str]) -> Optional[int]:
+    if not s or ":" not in s:
+        return None
+    try:
+        h, m = s.split(":")
+        return int(h) * 60 + int(m)
+    except Exception:
+        return None
+
+
+def _compute_open_now(schedule: dict, now: datetime) -> dict:
+    """Given a schedule doc and a datetime, return {isOpen, reason, nextChange}."""
+    if not schedule.get("enabled"):
+        return {"isOpen": True, "reason": "schedule disabled"}
+    today_key = _WEEK_KEYS[now.weekday()]
+    today_iso = now.date().isoformat()
+    minutes_now = now.hour * 60 + now.minute
+
+    # Check overrides for today first
+    for ov in schedule.get("overrides", []) or []:
+        if ov.get("date") == today_iso:
+            if ov.get("closed"):
+                return {"isOpen": False, "reason": ov.get("reason") or "closed (override)"}
+            o = _hhmm_to_min(ov.get("open"))
+            c = _hhmm_to_min(ov.get("close"))
+            if o is not None and c is not None and o <= minutes_now < c:
+                return {"isOpen": True, "reason": "override hours"}
+            return {"isOpen": False, "reason": ov.get("reason") or "outside override hours"}
+
+    mode = schedule.get("mode", "simple")
+    if mode == "simple":
+        h = schedule.get("simpleHours") or {}
+    else:
+        h = (schedule.get("weeklyHours") or {}).get(today_key, {})
+    if h.get("closed"):
+        return {"isOpen": False, "reason": f"closed {today_key}"}
+    o = _hhmm_to_min(h.get("open"))
+    c = _hhmm_to_min(h.get("close"))
+    if o is None or c is None:
+        return {"isOpen": True, "reason": "no hours set"}
+    if o <= minutes_now < c:
+        return {"isOpen": True, "reason": f"{h.get('open')}–{h.get('close')}"}
+    return {"isOpen": False, "reason": f"outside {h.get('open')}–{h.get('close')}"}
+
+
+@router.get("/channels/{channel}/schedule")
+async def get_channel_schedule(channel: str, _: dict = Depends(get_user)):
+    doc = await db.channel_schedules.find_one({"channel": channel}, {"_id": 0})
+    return doc or _default_schedule(channel)
+
+
+@router.post("/channels/{channel}/schedule")
+async def save_channel_schedule(channel: str, body: ChannelScheduleIn,
+                                 user: dict = Depends(get_user)):
+    if user["role"] not in ("owner", "manager"):
+        raise HTTPException(403, "Owner or manager only")
+    if body.mode not in ("simple", "weekly"):
+        raise HTTPException(400, "mode must be simple | weekly")
+    doc = {
+        "channel": channel,
+        "enabled": bool(body.enabled),
+        "mode": body.mode,
+        "simpleHours": body.simpleHours.dict() if body.simpleHours else _default_schedule(channel)["simpleHours"],
+        "weeklyHours": body.weeklyHours or _default_schedule(channel)["weeklyHours"],
+        "overrides": [o.dict() for o in body.overrides],
+        "updatedAt": _now(),
+        "updatedBy": user.get("email"),
+    }
+    await db.channel_schedules.update_one({"channel": channel}, {"$set": doc}, upsert=True)
+    return doc
+
+
+@router.get("/channels/{channel}/effective-status")
+async def channel_effective_status(channel: str, _: dict = Depends(get_user)):
+    """Merged live/paused view combining pause state + schedule."""
+    state = await db.channel_states.find_one({"channel": channel}, {"_id": 0}) or {"channel": channel, "status": "active"}
+    schedule = await db.channel_schedules.find_one({"channel": channel}, {"_id": 0}) or _default_schedule(channel)
+    now = datetime.now(timezone.utc)
+    # Auto-resume paused-until
+    if state.get("status") == "paused" and state.get("pausedUntil"):
+        try:
+            until = datetime.fromisoformat(state["pausedUntil"].replace("Z", "+00:00"))
+            if now >= until:
+                state = {**state, "status": "active", "pausedUntil": None}
+        except Exception:
+            pass
+    open_now = _compute_open_now(schedule, now)
+    effective = "paused" if state.get("status") == "paused" or not open_now["isOpen"] else "active"
+    return {
+        "channel": channel,
+        "state": state,
+        "schedule": {"enabled": schedule.get("enabled"), "mode": schedule.get("mode")},
+        "openNow": open_now,
+        "effective": effective,
+    }
+
+
 # ═════════════════════════════════════════════════════════════════════════
 # Guest digital wallet — QR/barcode for POS scan + AI CRM update
 # ═════════════════════════════════════════════════════════════════════════

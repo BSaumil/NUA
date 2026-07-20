@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 56 — NUA namespace refactor + Channel schedule (per-channel pause/resume + Simple/Weekly hours + date overrides). Backend: 20/20 pytest cases PASS in 9.36s. Frontend: All Channel Menus UI interactions confirmed (Live/Pause/Pause-until/Hours buttons, schedule dialog with enable checkbox + Simple/Weekly mode toggle + 7-day weekly rows + date overrides + Save). Schedule save persists (reopened dialog showed saved 10:30/21:45). Pause → Paused badge with reason → Resume → Live badge back. NUA Command Center (/ash-hq) shows Business Health Score 70.7 healthy, NUA Intelligence (/ash) shows 17 active insights across 16 categories. No NUA/Ash API errors on either page. /api/ash/* alias middleware works (all four alias endpoints return 200).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Channel hours dialog + Pause dialog", "issues": ["Radix DialogContent warnings: 'Missing `Description` or `aria-describedby={undefined}` for {DialogContent}' — accessibility warning; add a <DialogDescription/> to each of the two dialogs in ChannelPauseControl.jsx"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration56_nua_channels.py",
+    "/app/test_reports/pytest/iter56_results.xml"
+  ],
+  "action_items": [
+    "Optional: add <DialogDescription> to the Pause and Hours dialogs in /app/frontend/src/components/channel/ChannelPauseControl.jsx to silence Radix a11y warnings.",
+    "Investigate the 8 recurring /favicon or asset 404s in browser console (unrelated to NUA rebrand but noisy)."
+  ],
+  "critical_code_review_comments": [
+    "backend/routes/finalize.py::_compute_open_now — logic is correct but treats a schedule with `enabled=false` as ALWAYS open (`isOpen: True, reason: 'schedule disabled'`). That's fine per current UI contract, but keep in mind: if `state.status == 'paused'` AND `schedule.enabled == false`, /effective-status still returns `effective: 'paused'` (state check runs first) — verified working. No fix needed.",
+    "backend/routes/finalize.py::save_channel_schedule — when caller sends `weeklyHours: null`, we substitute the default 09:00–22:00 weeklyHours for every day. That means saving a Simple schedule silently overwrites any previously-customised weekly hours. Consider preserving the existing weeklyHours when mode=='simple' and weeklyHours is null.",
+    "backend/routes/finalize.py::_compute_open_now — overrides list is iterated linearly; for tenants with hundreds of overrides this is O(n) per request. Not a scale issue now, but consider indexing by date if overrides > 100.",
+    "backend/server.py::NuaAliasMiddleware — good implementation, but note this rewrites the request path at Starlette level. Any middleware installed BEFORE NuaAliasMiddleware sees the original /api/ash/* path. Rate-limit and license middleware here are fine (they don't switch on the /ash vs /nua prefix), but future path-based middleware needs to be aware.",
+    "backend/routes/nua.py — module docstring still says 'Ash — the autonomous operating layer endpoints.' Consider updating to NUA to match the rebrand (cosmetic).",
+    "frontend/ChannelPauseControl.jsx::defaultSchedule — new-override default is `{ date: today, closed: true }`. If the owner clicks 'Add date' twice, both rows point at today. Fine, but consider auto-incrementing to today+n so the two rows don't overlap silently."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration56_nua_channels.py (new — 20 tests across 5 classes, ~9s runtime)"
+  ],
+  "success_rate": {
+    "backend": "100% (20/20 pytest cases)",
+    "frontend": "100% (all critical selectors + flows verified: chips, Live/Pause/Pause-until/Hours buttons, enable checkbox, Simple/Weekly toggle, weekly-open-mon, add-override, save+persist, pause+resume)"
+  },
+  "test_credentials": "owner@nuva.com / NuvaOwner2026! + cashier@nuva.com / Staff2026! — both worked. Login returns {token, user}; token key is 'token' NOT 'access_token'.",
+  "seed_data_creation": "Test inserted 1 TEST_website channel doc into db.channel_schedules (Simple 10:30–21:45, then Weekly with holiday override 7 days out, then always-open 00:00–23:59 for openNow tests, then tiny 00:00–00:01 closed-window test). db.channel_states has a TEST_website row (currently 'active' after resume). No cleanup needed — TEST_ prefix makes it easy to spot.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter56 tests at /app/backend/tests/test_iteration56_nua_channels.py — run with `export $(grep -v '^#' /app/frontend/.env | xargs) && pytest backend/tests/test_iteration56_nua_channels.py -v`. Key surface: /api/nua/tools, /api/nua/personas, /api/nua/briefing, /api/nua/health-score, /api/nua/scheduler/status, /api/nua/agent + /api/ash/* alias (via NuaAliasMiddleware in server.py:175-187) + /api/channels/{c}/schedule (GET/POST, owner/manager only) + /api/channels/{c}/effective-status + /api/channels/state (POST for pause/resume). Schedule payload: {enabled, mode:'simple'|'weekly', simpleHours:{open,close,closed}, weeklyHours:{mon..sun:{open,close,closed}}, overrides:[{date,closed,open?,close?,reason?}]}. RBAC: cashier gets 403 on POST schedule + POST state. Bad mode returns 400. Login token field is 'token', not 'access_token'. Time-window test for closed-hours uses a 00:00–00:01 window; skips if current UTC minute is 00:00.",
+  "rca of the issue": "N/A — all endpoints and UI flows working as specified. NUA namespace refactor is clean: native /api/nua/* routes work, /api/ash/* alias routes work, DB collections (db.ash_*) intentionally unchanged per instructions. Channel schedule persistence verified end-to-end (backend POST → GET returns same data; frontend save → close → reopen shows saved values)."
+}

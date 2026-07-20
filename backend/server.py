@@ -58,7 +58,7 @@ from routes.accounting import router as accounting_router
 from routes.rules_engine import router as rules_engine_router
 from routes.audit import router as audit_router
 from routes.approvals import router as approvals_router
-from routes.ash import router as ash_router
+from routes.nua import router as nua_router
 from routes.hq import router as hq_router
 from middleware.license_middleware import LicenseEnforcementMiddleware
 from middleware.actor_context import ActorContextMiddleware
@@ -116,7 +116,7 @@ api_router.include_router(accounting_router)
 api_router.include_router(rules_engine_router)
 api_router.include_router(audit_router)
 api_router.include_router(approvals_router)
-api_router.include_router(ash_router)
+api_router.include_router(nua_router)
 api_router.include_router(hq_router)
 api_router.include_router(multi_tenant_router)
 
@@ -170,14 +170,15 @@ app.add_middleware(ActorContextMiddleware)
 
 
 # ═════════════════════════════════════════════════════════════════════════
-# /api/nua/* → /api/ash/* alias (backwards-compat shim during Ash → NUA rebrand)
+# /api/ash/* → /api/nua/* alias (backwards-compat shim after Ash → NUA rebrand)
 # ═════════════════════════════════════════════════════════════════════════
 class NuaAliasMiddleware(BaseHTTPMiddleware):
-    """Rewrite /api/nua/... to /api/ash/... so old tests + new code both work."""
+    """Rewrite /api/ash/... to /api/nua/... so old tests keep working after
+    the routes were renamed to the /nua namespace."""
     async def dispatch(self, request, call_next):
         p = request.url.path
-        if p.startswith("/api/nua/") or p == "/api/nua":
-            new_path = "/api/ash/" + p[len("/api/nua/"):] if p != "/api/nua" else "/api/ash"
+        if p.startswith("/api/ash/") or p == "/api/ash":
+            new_path = "/api/nua/" + p[len("/api/ash/"):] if p != "/api/ash" else "/api/nua"
             request.scope["path"] = new_path
             request.scope["raw_path"] = new_path.encode()
         return await call_next(request)
@@ -236,7 +237,7 @@ async def startup():
         logger.warning("Alcohol seed skipped: %s", exc)
     # Start Ash background scheduler
     try:
-        from services.ash_scheduler import start_scheduler
+        from services.nua_scheduler import start_scheduler
         start_scheduler()
     except Exception as exc:
         logger.warning("Ash scheduler failed to start: %s", exc)
@@ -244,7 +245,7 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown_db_client():
     try:
-        from services.ash_scheduler import stop_scheduler
+        from services.nua_scheduler import stop_scheduler
         stop_scheduler()
     except Exception:
         pass

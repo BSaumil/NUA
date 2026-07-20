@@ -21,6 +21,47 @@ async def get_reservations(date: Optional[str] = None, status: Optional[str] = N
     reservations = await db.reservations.find(query, {"_id": 0}).sort("time", 1).to_list(1000)
     return [Reservation(**r) for r in reservations]
 
+
+# NOTE: these two GET routes MUST come before /reservations/{reservation_id}
+# — otherwise FastAPI treats "day-counts" / "blackouts" as a reservation id.
+@router.get("/reservations/day-counts")
+async def day_counts(fromDate: str, toDate: str):
+    """Return {date: count} for the calendar dots + blackout state per date.
+    Range is inclusive; capped at ~120 days to keep the response small."""
+    from datetime import date as _date
+    d0 = _date.fromisoformat(fromDate); d1 = _date.fromisoformat(toDate)
+    if (d1 - d0).days > 120:
+        raise HTTPException(status_code=400, detail="Range too wide (max 120 days)")
+    reservations = await db.reservations.find(
+        {"date": {"$gte": fromDate, "$lte": toDate}},
+        {"_id": 0, "date": 1, "status": 1, "partySize": 1},
+    ).to_list(5000)
+    counts: dict = {}
+    covers: dict = {}
+    for r in reservations:
+        d = r.get("date")
+        if not d: continue
+        counts[d] = counts.get(d, 0) + 1
+        covers[d] = covers.get(d, 0) + int(r.get("partySize") or 0)
+    blackouts = await db.booking_blackouts.find(
+        {"date": {"$gte": fromDate, "$lte": toDate}},
+        {"_id": 0},
+    ).to_list(500)
+    black_map = {b["date"]: {"reason": b.get("reason"), "blockUntil": b.get("blockUntil")} for b in blackouts}
+    return {"counts": counts, "covers": covers, "blackouts": black_map}
+
+
+@router.get("/reservations/blackouts")
+async def list_blackouts(fromDate: Optional[str] = None, toDate: Optional[str] = None):
+    q: dict = {}
+    if fromDate or toDate:
+        q["date"] = {}
+        if fromDate: q["date"]["$gte"] = fromDate
+        if toDate:   q["date"]["$lte"] = toDate
+    docs = await db.booking_blackouts.find(q, {"_id": 0}).sort("date", 1).to_list(1000)
+    return docs
+
+
 @router.get("/reservations/{reservation_id}", response_model=Reservation)
 async def get_reservation(reservation_id: str):
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
@@ -30,6 +71,25 @@ async def get_reservation(reservation_id: str):
 
 @router.post("/reservations", response_model=Reservation)
 async def create_reservation(reservation: ReservationCreate):
+    # Refuse if the target date is under an active blackout (unless the
+    # blackout has an expiry that has already passed).
+    if reservation.date:
+        b = await db.booking_blackouts.find_one({"date": reservation.date}, {"_id": 0})
+        if b:
+            block_until = b.get("blockUntil")
+            expired = False
+            if block_until:
+                try:
+                    exp = datetime.fromisoformat(block_until.replace("Z", "+00:00"))
+                    from datetime import timezone as _tz
+                    if datetime.now(_tz.utc) > exp: expired = True
+                except Exception:
+                    pass
+            if not expired:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Bookings paused for {reservation.date}: {b.get('reason') or 'closed'}",
+                )
     res_obj = Reservation(**reservation.dict())
     doc = res_obj.dict()
     await db.reservations.insert_one(doc)
@@ -150,6 +210,64 @@ async def auto_assign_table(reservation_id: str):
         {"id": best["id"]}, {"$set": {"status": "reserved", "currentReservationId": reservation_id}}
     )
     return {"assigned": True, "table": best}
+
+
+# ============ BOOKING BLACKOUTS ============
+# Stops new incoming reservations for a date (or a range of dates) — e.g. a
+# private event, staff training day, storm closure, or a fully-booked day the
+# owner wants to lock down. Existing reservations are untouched.
+#
+# Collection: booking_blackouts  { id, date (YYYY-MM-DD), reason, blockUntil? }
+# `blockUntil` is optional — when set, the blackout auto-expires (used for
+# "pause bookings for the rest of today" style toggles).
+# GET endpoints for /blackouts and /day-counts are defined above the
+# /reservations/{id} route to avoid FastAPI catch-all path conflict.
+
+
+@router.post("/reservations/blackouts")
+async def create_blackout(data: dict):
+    """Create a blackout for a single date OR a `fromDate`→`toDate` inclusive range."""
+    import uuid
+    reason = str(data.get("reason") or "Bookings paused").strip()
+    now_iso = datetime.utcnow().isoformat()
+    from datetime import date as _date, timedelta as _td
+    def _parse(s):
+        return _date.fromisoformat(s)
+    if data.get("fromDate") and data.get("toDate"):
+        d0 = _parse(data["fromDate"]); d1 = _parse(data["toDate"])
+        if d1 < d0:
+            raise HTTPException(status_code=400, detail="toDate must be on/after fromDate")
+        created = []
+        cur = d0
+        while cur <= d1:
+            doc = {"id": str(uuid.uuid4()), "date": cur.isoformat(), "reason": reason, "blockUntil": data.get("blockUntil"), "createdAt": now_iso}
+            await db.booking_blackouts.update_one(
+                {"date": cur.isoformat()},
+                {"$set": {k: v for k, v in doc.items() if k != "id"},
+                 "$setOnInsert": {"id": doc["id"]}},
+                upsert=True,
+            )
+            created.append(cur.isoformat())
+            cur += _td(days=1)
+        return {"created": created, "count": len(created), "reason": reason}
+    single = str(data.get("date") or "").strip()
+    if not single:
+        raise HTTPException(status_code=400, detail="Provide 'date' or 'fromDate'+'toDate'")
+    doc = {"id": str(uuid.uuid4()), "date": single, "reason": reason, "blockUntil": data.get("blockUntil"), "createdAt": now_iso}
+    await db.booking_blackouts.update_one(
+        {"date": single},
+        {"$set": {k: v for k, v in doc.items() if k != "id"},
+         "$setOnInsert": {"id": doc["id"]}},
+        upsert=True,
+    )
+    return {"created": [single], "count": 1, "reason": reason}
+
+
+@router.delete("/reservations/blackouts/{date}")
+async def delete_blackout(date: str):
+    r = await db.booking_blackouts.delete_one({"date": date})
+    return {"deleted": r.deleted_count, "date": date}
+
 
 # ============ FLOOR PLANS API ============
 @router.get("/floor-plans", response_model=List[FloorPlan])
