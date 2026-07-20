@@ -1,4 +1,39 @@
-# NUA POS — PRD v36.4 (Sectioned Role/Staff Permissions)
+# NUA POS — PRD v36.5 (Cart swipe hardening · Split Payment QR/UPI dialog · Prominent remaining balance)
+
+
+## v36.5 — Iteration 63 (Feb 2026): POS cart & split payment fixes
+
+### Shipped
+
+**Cart swipe — reliable on tablets and POS terminals** (`components/pos/SwipeableCartItem.jsx`)
+- Root cause: previously only used `onPointerDown/Move/Up`. That works on desktop but is flaky on iPadOS Safari, older Android WebViews and some POS-terminal browsers (setPointerCapture throws/no-ops).
+- Fix: added explicit `onTouchStart/Move/End/Cancel` fallback next to the pointer handlers. Both drive a single shared `beginDrag/moveDrag/endDrag` state machine.
+- New axis-lock: after ~6px of movement the swipe locks to `x` or `y`. Vertical touches now cleanly hand off to the page's scroll instead of being stolen mid-drag.
+- Horizontal drag calls `preventDefault()` only on the swipe axis so native scroll is unaffected.
+- Verified end-to-end on desktop: right-swipe on Chocolate Cake bumped qty 1 → 2, left-swipe on the 2nd item removed it, `Subtotal $19.98 · Tax $2.00 · Total $21.98` reconciled correctly.
+
+**Split Payment — QR/UPI dialog actually shows now** (`pages/POSTerminal.jsx`, `components/pos/PaymentDialogs.jsx`)
+- Root cause: `handlePaySplit` was calling `paymentAPI.generateQR()` and then immediately `paymentAPI.confirm()` **without ever displaying the QR to the guest**. Clicking Pay on a UPI/QR split silently marked it paid.
+- Fix: refactored into two-phase flow —
+  1. `handlePaySplit` generates the QR and opens the `QrPaymentDialog`/`UpiPaymentDialog` stacked on top of the split dialog (with per-split amount + `nuva@upi` copy-to-clipboard).
+  2. Cashier taps **Confirm Payment Received** → `confirmSplitQr` calls `/payments/confirm` and only then `finaliseSplitPart` marks the row Paid.
+  3. Cancel/close in the QR dialog leaves the split row `pending` (no accidental writes).
+- Card and Cash split parts remain instant (no dialog, no external gateway needed).
+
+**Split Payment — remaining balance now impossible to miss** (`components/pos/PaymentDialogs.jsx`)
+- Root cause: remaining was a tiny badge next to the title; cashiers didn't realise it was live.
+- Fix: 3-tile header **Bill Total · Paid So Far · Remaining** — bill in grey, paid in emerald, remaining in orange (flips to emerald "All settled" once the maths balances). Every tile updates the instant `finaliseSplitPart` runs.
+- Verified: 3-way split of $28.92 → per-guest $9.64. After Guest 1 pays via UPI, header shows `Bill $28.92 · Paid $9.64 · Remaining $19.28` with Guest 1's card marked Paid.
+
+### Backlog (unchanged)
+- **P1** Real Meta / TikTok / X OAuth (on hold per user).
+- **P1** SendGrid / Twilio production keys (on hold per user).
+- **P1** Hardware Health polish.
+- **P2** `ash` → `nua` backend namespace refactor.
+- **P2** `@dnd-kit` tablet-friendly DnD for Social Calendar.
+- **P2** Channel Menus per-channel pause/resume + schedule toggle UI.
+- **P2** `x-ai-parsed-fallback` header on AI endpoints.
+- **P2** Move `ai_weekly_plan` to a background task.
 
 
 ## v36.4 — Iteration 62 (Feb 2026): Section-grouped permissions (role + staff)
