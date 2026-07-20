@@ -30,7 +30,14 @@ def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    # PIN-only staff are stored with an empty hash; bcrypt raises on malformed
+    # hashes, which would turn a bad login into a 500.
+    if not hashed:
+        return False
+    try:
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    except ValueError:
+        return False
 
 def create_access_token(user_id: str, email: str, role: str) -> str:
     payload = {"sub": user_id, "email": email, "role": role,
@@ -105,6 +112,9 @@ async def login(req: LoginRequest, request: Request, response: Response):
     attempts = await db.login_attempts.find_one({"identifier": identifier})
     if attempts and attempts.get("count", 0) >= 5:
         locked_until = attempts.get("locked_until")
+        # Mongo returns naive UTC datetimes; normalize before comparing
+        if locked_until and locked_until.tzinfo is None:
+            locked_until = locked_until.replace(tzinfo=timezone.utc)
         if locked_until and datetime.now(timezone.utc) < locked_until:
             raise HTTPException(status_code=429, detail="Account locked. Try again in 15 minutes.")
         else:
@@ -139,6 +149,15 @@ async def register(req: RegisterRequest, response: Response):
     existing = await db.auth_users.find_one({"email": email})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
+    # Public registration must not mint privileged accounts. "owner" is only
+    # allowed on first-run setup (no owner exists yet); anything else that
+    # isn't a known non-privileged role falls back to cashier.
+    if req.role == "owner":
+        owner_exists = await db.auth_users.find_one({"role": "owner"})
+        if owner_exists:
+            raise HTTPException(status_code=403, detail="An owner account already exists")
+    elif req.role not in ("cashier", "kitchen"):
+        req.role = "cashier"
     import uuid
     user_doc = {
         "id": str(uuid.uuid4()),

@@ -106,7 +106,8 @@ async def create_transaction(transaction: TransactionCreate):
     points_earned = int(total * loyalty_multiplier)
 
     txn_dict = {
-        "id": f"TXN-{datetime.utcnow().strftime('%Y%m%d')}-{str(uuid.uuid4())[:3].upper()}",
+        # 8 hex chars ≈ 4 billion combos/day; 3 chars collided within ~75 sales
+        "id": f"TXN-{datetime.utcnow().strftime('%Y%m%d')}-{str(uuid.uuid4())[:8].upper()}",
         "items": items_list,
         "subtotal": round(subtotal, 2),
         "discount": round(discount, 2),
@@ -199,17 +200,8 @@ async def create_transaction(transaction: TransactionCreate):
     return Transaction(**txn_dict)
 
 
-@router.get("/transactions/{txn_id}")
-async def get_transaction_detail(txn_id: str):
-    txn = await db.transactions.find_one({"id": txn_id}, {"_id": 0})
-    if not txn:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-    # Attach any refunds for this transaction
-    refunds = await db.refunds.find({"originalTransactionId": txn_id}, {"_id": 0}).to_list(100)
-    txn["refunds"] = refunds
-    return txn
-
-
+# NOTE: static route must be registered before /transactions/{txn_id},
+# otherwise "hourly" is captured as a txn_id and always 404s.
 @router.get("/transactions/hourly")
 async def get_hourly_transactions():
     transactions = await db.transactions.find().to_list(10000)
@@ -220,6 +212,17 @@ async def get_hourly_transactions():
             hour = ts.hour if hasattr(ts, 'hour') else 0
             hourly[hour] = hourly.get(hour, 0) + txn.get("total", 0)
     return [{"hour": h, "total": round(t, 2)} for h, t in sorted(hourly.items())]
+
+
+@router.get("/transactions/{txn_id}")
+async def get_transaction_detail(txn_id: str):
+    txn = await db.transactions.find_one({"id": txn_id}, {"_id": 0})
+    if not txn:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    # Attach any refunds for this transaction
+    refunds = await db.refunds.find({"originalTransactionId": txn_id}, {"_id": 0}).to_list(100)
+    txn["refunds"] = refunds
+    return txn
 
 # ============ GIFT CARDS API ============
 @router.get("/gift-cards")
@@ -251,17 +254,21 @@ async def create_gift_card(card: GiftCardCreate):
 
 @router.post("/gift-cards/{code}/redeem")
 async def redeem_gift_card(code: str, amount: float):
-    card = await db.gift_cards.find_one({"code": code})
-    if not card:
-        raise HTTPException(status_code=404, detail="Gift card not found")
-    if card["balance"] < amount:
-        raise HTTPException(status_code=400, detail="Insufficient balance")
-    new_balance = card["balance"] - amount
-    await db.gift_cards.update_one(
-        {"code": code},
-        {"$set": {"balance": new_balance}}
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Redemption amount must be positive")
+    # Atomic balance check + decrement: two terminals redeeming the same card
+    # concurrently must not both succeed off a stale read.
+    card = await db.gift_cards.find_one_and_update(
+        {"code": code, "balance": {"$gte": amount}},
+        {"$inc": {"balance": -amount}},
+        return_document=True,
     )
-    return {"message": "Gift card redeemed", "remaining_balance": new_balance}
+    if not card:
+        exists = await db.gift_cards.find_one({"code": code})
+        if not exists:
+            raise HTTPException(status_code=404, detail="Gift card not found")
+        raise HTTPException(status_code=400, detail="Insufficient balance")
+    return {"message": "Gift card redeemed", "remaining_balance": card["balance"]}
 
 # ============ REFUNDS API ============
 @router.get("/refunds", response_model=List[Refund])
@@ -274,6 +281,17 @@ async def create_refund(refund: RefundCreate):
     original_txn = await db.transactions.find_one({"id": refund.originalTransactionId})
     if not original_txn:
         raise HTTPException(status_code=404, detail="Original transaction not found")
+    if refund.amount <= 0:
+        raise HTTPException(status_code=400, detail="Refund amount must be positive")
+    # Cap cumulative refunds at the original transaction total
+    prior = await db.refunds.find({"originalTransactionId": refund.originalTransactionId}).to_list(1000)
+    already_refunded = sum(r.get("amount", 0) for r in prior)
+    refundable = round(original_txn.get("total", 0) - already_refunded, 2)
+    if refund.amount > refundable:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Refund exceeds remaining refundable amount (${refundable:.2f})"
+        )
     refund_obj = Refund(**refund.dict())
     await db.refunds.insert_one(refund_obj.dict())
     # Auto-post refund reversal to ledger
