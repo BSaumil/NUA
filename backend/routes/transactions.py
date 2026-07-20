@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Optional
 from datetime import datetime
 from database import db
+from deps import get_user, require_owner_or_manager
 from models.promotion import Promotion, PromotionCreate
 from models.transaction import Transaction, TransactionCreate
 from models.gift_card import GiftCard, GiftCardCreate
@@ -24,13 +25,13 @@ async def get_active_promotions():
     return safe_parse_list(promotions, Promotion, where="promotions")
 
 @router.post("/promotions", response_model=Promotion)
-async def create_promotion(promotion: PromotionCreate):
+async def create_promotion(promotion: PromotionCreate, _user: dict = Depends(require_owner_or_manager)):
     promo_obj = Promotion(**promotion.dict())
     await db.promotions.insert_one(promo_obj.dict())
     return promo_obj
 
 @router.put("/promotions/{promo_id}")
-async def update_promotion(promo_id: str, data: dict):
+async def update_promotion(promo_id: str, data: dict, _user: dict = Depends(require_owner_or_manager)):
     allowed = {"name", "type", "discount", "active", "schedule",
                "products", "category", "categories",
                "pricingMode", "bundlePrice",
@@ -45,7 +46,7 @@ async def update_promotion(promo_id: str, data: dict):
     return result
 
 @router.delete("/promotions/{promo_id}")
-async def delete_promotion(promo_id: str):
+async def delete_promotion(promo_id: str, _user: dict = Depends(require_owner_or_manager)):
     result = await db.promotions.delete_one({"id": promo_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Promotion not found")
@@ -57,7 +58,8 @@ async def get_transactions(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     payment_method: Optional[str] = None,
-    location: Optional[str] = None
+    location: Optional[str] = None,
+    _user: dict = Depends(get_user),
 ):
     query = {}
     if payment_method:
@@ -74,13 +76,26 @@ async def get_transactions(
     return safe_parse_list(transactions, Transaction, where="transactions")
 
 @router.post("/transactions", response_model=Transaction)
-async def create_transaction(transaction: TransactionCreate):
+async def create_transaction(transaction: TransactionCreate, user: dict = Depends(get_user)):
     items_list = []
     subtotal = 0
     for item in transaction.items:
+        if item.quantity <= 0:
+            raise HTTPException(status_code=400, detail=f"Invalid quantity for {item.productName}")
         item_dict = item.dict()
-        item_total = item.price * item.quantity
-        item_dict["total"] = item_total
+        # Server-authoritative pricing: unit price comes from the catalog, not
+        # the request body. Modifier surcharges are added on top (clamped to
+        # non-negative). Unknown productIds (open/custom lines) keep the client
+        # price, floored at zero.
+        product = await db.products.find_one({"id": item.productId}, {"_id": 0, "price": 1})
+        modifier_surcharge = sum(max(m.price, 0) for m in item.modifiers)
+        if product is not None and isinstance(product.get("price"), (int, float)):
+            unit_price = float(product["price"]) + modifier_surcharge
+        else:
+            unit_price = max(item.price, 0)
+        item_dict["price"] = round(unit_price, 2)
+        item_total = unit_price * item.quantity
+        item_dict["total"] = round(item_total, 2)
         subtotal += item_total
         items_list.append(item_dict)
 
@@ -116,7 +131,7 @@ async def create_transaction(transaction: TransactionCreate):
         "paymentMethod": transaction.paymentMethod,
         "customerId": transaction.customerId,
         "location": transaction.location or "Main",
-        "cashier": transaction.cashier or "Staff",
+        "cashier": transaction.cashier or user.get("name", "Staff"),
         "timestamp": datetime.utcnow(),
         "status": "completed",
         "receiptNumber": f"R-{str(uuid.uuid4())[:8].upper()}",
@@ -203,7 +218,7 @@ async def create_transaction(transaction: TransactionCreate):
 # NOTE: static route must be registered before /transactions/{txn_id},
 # otherwise "hourly" is captured as a txn_id and always 404s.
 @router.get("/transactions/hourly")
-async def get_hourly_transactions():
+async def get_hourly_transactions(_user: dict = Depends(get_user)):
     transactions = await db.transactions.find().to_list(10000)
     hourly = {}
     for txn in transactions:
@@ -215,7 +230,7 @@ async def get_hourly_transactions():
 
 
 @router.get("/transactions/{txn_id}")
-async def get_transaction_detail(txn_id: str):
+async def get_transaction_detail(txn_id: str, _user: dict = Depends(get_user)):
     txn = await db.transactions.find_one({"id": txn_id}, {"_id": 0})
     if not txn:
         raise HTTPException(status_code=404, detail="Transaction not found")
@@ -226,13 +241,13 @@ async def get_transaction_detail(txn_id: str):
 
 # ============ GIFT CARDS API ============
 @router.get("/gift-cards")
-async def get_gift_cards():
+async def get_gift_cards(_user: dict = Depends(get_user)):
     from utils.mongo_safe import safe_parse_list
     cards = await db.gift_cards.find({}, {"_id": 0}).to_list(1000)
     return safe_parse_list(cards, GiftCard, where="gift_cards")
 
 @router.post("/gift-cards", response_model=GiftCard)
-async def create_gift_card(card: GiftCardCreate):
+async def create_gift_card(card: GiftCardCreate, _user: dict = Depends(get_user)):
     card_dict = card.dict()
     card_dict["code"] = f"GC-{str(uuid.uuid4())[:8].upper()}"
     card_dict["balance"] = card.amount
@@ -253,7 +268,7 @@ async def create_gift_card(card: GiftCardCreate):
     return card_obj
 
 @router.post("/gift-cards/{code}/redeem")
-async def redeem_gift_card(code: str, amount: float):
+async def redeem_gift_card(code: str, amount: float, _user: dict = Depends(get_user)):
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Redemption amount must be positive")
     # Atomic balance check + decrement: two terminals redeeming the same card
@@ -272,12 +287,12 @@ async def redeem_gift_card(code: str, amount: float):
 
 # ============ REFUNDS API ============
 @router.get("/refunds", response_model=List[Refund])
-async def get_refunds():
+async def get_refunds(_user: dict = Depends(get_user)):
     refunds = await db.refunds.find().to_list(1000)
     return [Refund(**r) for r in refunds]
 
 @router.post("/refunds", response_model=Refund)
-async def create_refund(refund: RefundCreate):
+async def create_refund(refund: RefundCreate, _user: dict = Depends(require_owner_or_manager)):
     original_txn = await db.transactions.find_one({"id": refund.originalTransactionId})
     if not original_txn:
         raise HTTPException(status_code=404, detail="Original transaction not found")

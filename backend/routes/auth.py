@@ -79,9 +79,15 @@ def require_role(*roles):
         return user
     return checker
 
+# Set COOKIE_SECURE=true in any HTTPS deployment so auth cookies are never
+# sent over plain HTTP. Defaults to false for local development.
+def _cookie_secure() -> bool:
+    return os.environ.get("COOKIE_SECURE", "false").lower() in ("1", "true", "yes")
+
 def _set_tokens(response: Response, access: str, refresh: str):
-    response.set_cookie("access_token", access, httponly=True, secure=False, samesite="lax", max_age=28800, path="/")
-    response.set_cookie("refresh_token", refresh, httponly=True, secure=False, samesite="lax", max_age=604800, path="/")
+    secure = _cookie_secure()
+    response.set_cookie("access_token", access, httponly=True, secure=secure, samesite="lax", max_age=28800, path="/")
+    response.set_cookie("refresh_token", refresh, httponly=True, secure=secure, samesite="lax", max_age=604800, path="/")
 
 # Models
 class LoginRequest(BaseModel):
@@ -206,7 +212,7 @@ async def refresh_token(request: Request, response: Response):
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
         access = create_access_token(user["id"], user["email"], user["role"])
-        response.set_cookie("access_token", access, httponly=True, secure=False, samesite="lax", max_age=28800, path="/")
+        response.set_cookie("access_token", access, httponly=True, secure=_cookie_secure(), samesite="lax", max_age=28800, path="/")
         return {"message": "Token refreshed"}
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
