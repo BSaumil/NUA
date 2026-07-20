@@ -3,7 +3,7 @@ import { finalizeAPI } from '../../services/api';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '../ui/dialog';
 import { Input } from '../ui/input';
 import { Textarea } from '../ui/textarea';
@@ -212,6 +212,11 @@ export default function ChannelPauseControl({ channel, theme }) {
               {mode === 'schedule' ? <Clock size={16} /> : <Pause size={16} />}
               {mode === 'schedule' ? 'Pause until…' : 'Pause channel'}
             </DialogTitle>
+            <DialogDescription className="text-xs text-gray-500">
+              {mode === 'schedule'
+                ? 'The channel will stop taking orders until the chosen time. Staff will see the reason on the dashboard.'
+                : 'Immediately stop this channel from taking orders. Resume any time from this bar.'}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">
             {mode === 'schedule' && (
@@ -244,6 +249,9 @@ export default function ChannelPauseControl({ channel, theme }) {
             <DialogTitle className="flex items-center gap-2">
               <CalendarClock size={16} /> Channel hours — {channel}
             </DialogTitle>
+            <DialogDescription className="text-xs text-gray-500">
+              Set when this channel should accept orders. Simple mode uses the same window every day; Weekly lets you set different hours per day. Date overrides handle holidays and one-offs.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">

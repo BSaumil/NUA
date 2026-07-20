@@ -1,4 +1,36 @@
-# NUA POS — PRD v36.5 (Cart swipe hardening · Split Payment QR/UPI dialog · Prominent remaining balance)
+# NUA POS — PRD v36.6 (NUA namespace refactor · Per-channel schedule/hours UI)
+
+
+## v36.6 — Iteration 64 (Feb 2026): NUA namespace refactor + Channel schedule UI
+
+### Shipped
+
+**Backend `ash` → `nua` namespace refactor** (`services/nua_*.py`, `routes/nua.py`, `server.py`)
+- Renamed Python modules: `services/ash_{agent,memory,tools,scheduler,briefing,personas,intelligence,planner}.py` → `services/nua_*.py`; `routes/ash.py` → `routes/nua.py`.
+- Route prefix flipped: native routes are now `/api/nua/*` (was `/api/ash/*`).
+- Rewrote all Python import statements and attribute references (from `ash_x` module identifiers to `nua_x`) with a scripted rewriter — 6 files changed. String literals used as DB source tags (e.g. `sourceType: "ash_agent"`) intentionally preserved for data compatibility.
+- Flipped `NuaAliasMiddleware` direction: it now rewrites `/api/ash/*` → `/api/nua/*` so old integrations, tests and iteration reports keep working.
+- DB collection names (`db.ash_insights`, `db.ash_plans`, `db.ash_memories`, `db.ash_agent_traces`, `db.ash_agent_log`, `db.ash_chat_log`, `db.ash_tool_config`, `db.ash_briefings`) intentionally unchanged — no data migration.
+- Testing: 20/20 backend pytest cases PASS (`test_iteration56_nua_channels.py`), both `/api/nua/*` and `/api/ash/*` return 200 for tools/personas/briefing/health-score/scheduler-status/agent.
+
+**Per-channel schedule UI (simple + advanced)** (`components/channel/ChannelPauseControl.jsx`, `routes/finalize.py`)
+- Existing pause/resume/pause-until buttons preserved; added a new **Hours** button per channel.
+- **Simple mode**: single daily open/close window applied every day (with a Closed toggle).
+- **Weekly mode**: 7-day grid with per-day open/close and Closed toggle.
+- **Date overrides**: Add-date rows for holidays/one-offs — each has date + closed toggle + optional open/close + reason.
+- New backend endpoints (owner/manager only):
+  - `GET /api/channels/{channel}/schedule` — returns saved schedule or defaults.
+  - `POST /api/channels/{channel}/schedule` — save; preserves previously-saved weeklyHours when caller only updates Simple mode.
+  - `GET /api/channels/{channel}/effective-status` — merges pause-state + schedule + overrides + current UTC time to return `{state, schedule, openNow:{isOpen,reason}, effective:'active'|'paused'}`.
+- Live status pill on Channel Menus now shows Open-hours reason (e.g. "11:00–22:00" or "outside 11:00–22:00") when scheduling is enabled.
+
+### Backlog (unchanged)
+- **P1** Real Meta / TikTok / X OAuth (on hold per user).
+- **P1** SendGrid / Twilio production keys (on hold per user).
+- **P1** Hardware Health polish.
+- **P2** `@dnd-kit` tablet-friendly DnD for Social Calendar.
+- **P2** `x-ai-parsed-fallback` header on AI endpoints.
+- **P2** Move `ai_weekly_plan` to a background task.
 
 
 ## v36.5 — Iteration 63 (Feb 2026): POS cart & split payment fixes
@@ -29,9 +61,9 @@
 - **P1** Real Meta / TikTok / X OAuth (on hold per user).
 - **P1** SendGrid / Twilio production keys (on hold per user).
 - **P1** Hardware Health polish.
-- **P2** `ash` → `nua` backend namespace refactor.
+- **P2** ~~`ash` → `nua` backend namespace refactor~~ ✅ Done in v36.6.
 - **P2** `@dnd-kit` tablet-friendly DnD for Social Calendar.
-- **P2** Channel Menus per-channel pause/resume + schedule toggle UI.
+- **P2** ~~Channel Menus per-channel pause/resume + schedule toggle UI~~ ✅ Done in v36.6.
 - **P2** `x-ai-parsed-fallback` header on AI endpoints.
 - **P2** Move `ai_weekly_plan` to a background task.
 

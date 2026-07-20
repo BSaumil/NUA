@@ -352,12 +352,14 @@ async def save_channel_schedule(channel: str, body: ChannelScheduleIn,
         raise HTTPException(403, "Owner or manager only")
     if body.mode not in ("simple", "weekly"):
         raise HTTPException(400, "mode must be simple | weekly")
+    existing = await db.channel_schedules.find_one({"channel": channel}, {"_id": 0}) or _default_schedule(channel)
     doc = {
         "channel": channel,
         "enabled": bool(body.enabled),
         "mode": body.mode,
-        "simpleHours": body.simpleHours.dict() if body.simpleHours else _default_schedule(channel)["simpleHours"],
-        "weeklyHours": body.weeklyHours or _default_schedule(channel)["weeklyHours"],
+        "simpleHours": body.simpleHours.dict() if body.simpleHours else existing.get("simpleHours") or _default_schedule(channel)["simpleHours"],
+        # Preserve previously-saved weekly hours when caller doesn't send them.
+        "weeklyHours": body.weeklyHours or existing.get("weeklyHours") or _default_schedule(channel)["weeklyHours"],
         "overrides": [o.dict() for o in body.overrides],
         "updatedAt": _now(),
         "updatedBy": user.get("email"),

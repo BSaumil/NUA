@@ -1,5 +1,8 @@
 """
-Ash — the autonomous operating layer endpoints.
+NUA — the autonomous operating layer endpoints (formerly `ash`).
+
+Native prefix: /api/nua/*.  /api/ash/* still works via NuaAliasMiddleware
+in server.py for backwards-compatibility.
 """
 import logging
 from fastapi import APIRouter, HTTPException, Depends
