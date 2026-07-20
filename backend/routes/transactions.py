@@ -99,25 +99,35 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
         subtotal += item_total
         items_list.append(item_dict)
 
-    # Apply customer discount
-    discount = 0
+    # Apply customer membership-tier discount
+    tier_discount = 0
     loyalty_multiplier = 1.0
     if transaction.customerId:
         customer = await db.customers.find_one({"id": transaction.customerId})
         if customer:
             tier = customer.get("membershipTier", "Bronze")
             if tier == "Silver":
-                discount = subtotal * 0.03
+                tier_discount = subtotal * 0.03
                 loyalty_multiplier = 1.25
             elif tier == "Gold":
-                discount = subtotal * 0.05
+                tier_discount = subtotal * 0.05
                 loyalty_multiplier = 1.5
             elif tier == "Platinum":
-                discount = subtotal * 0.10
+                tier_discount = subtotal * 0.10
                 loyalty_multiplier = 2.0
 
-    gst = (subtotal - discount) * 0.1
-    total = subtotal - discount + gst
+    # Voucher/promotion discounts applied at the POS + loyalty-point redemption.
+    # Amounts are clamped non-negative and the combined discount can never
+    # exceed the subtotal.
+    applied_discounts = [d.dict() for d in transaction.appliedDiscounts]
+    for d in applied_discounts:
+        d["amount"] = max(float(d.get("amount") or 0), 0)
+    voucher_discount = sum(d["amount"] for d in applied_discounts)
+    points_discount = max(float(transaction.pointsDiscount or 0), 0)
+    discount_total = min(round(tier_discount + voucher_discount + points_discount, 2), round(subtotal, 2))
+
+    gst = (subtotal - discount_total) * 0.1
+    total = subtotal - discount_total + gst
     points_earned = int(total * loyalty_multiplier)
 
     txn_dict = {
@@ -125,7 +135,11 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
         "id": f"TXN-{datetime.utcnow().strftime('%Y%m%d')}-{str(uuid.uuid4())[:8].upper()}",
         "items": items_list,
         "subtotal": round(subtotal, 2),
-        "discount": round(discount, 2),
+        "discount": round(tier_discount, 2),
+        "discountAmount": discount_total,
+        "appliedDiscounts": applied_discounts,
+        "pointsRedeemed": max(int(transaction.pointsRedeemed or 0), 0),
+        "pointsDiscount": round(points_discount, 2),
         "gst": round(gst, 2),
         "total": round(total, 2),
         "paymentMethod": transaction.paymentMethod,
@@ -139,6 +153,16 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
 
     await db.transactions.insert_one(txn_dict)
     txn_dict.pop("_id", None)
+
+    # Consume wallet vouchers used as discounts (no-op for v26 commerce
+    # vouchers, which track their own redemption counts).
+    try:
+        from services.wallet_service import redeem_wallet_voucher
+        for d in applied_discounts:
+            if d.get("voucherId"):
+                await redeem_wallet_voucher(d["voucherId"], txn_dict["id"])
+    except Exception:
+        pass
     # Audit trail — POS transactions are ledger-grade, always logged
     try:
         from services.audit_service import log_event

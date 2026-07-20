@@ -71,6 +71,8 @@ const POSTerminal = () => {
   const [labels, setLabels] = useState({});
   // v17: Points-and-Pay
   const [pointsBalance, setPointsBalance] = useState(null);
+  // Customer wallet: store credit + active vouchers + occasion offers
+  const [wallet, setWallet] = useState(null);
   const [pointsToRedeem, setPointsToRedeem] = useState(0);
   const [loyaltyCfg, setLoyaltyCfg] = useState({ minRedeem: 10, redeemRate: 0.01 });
 
@@ -359,6 +361,17 @@ const POSTerminal = () => {
     }
   };
 
+  // Discounts applied on screen, in the shape POST /transactions records
+  // (backend recomputes totals from these — keep in sync with calculateTotal).
+  const buildDiscountPayload = () => ({
+    appliedDiscounts: (appliedDiscounts || []).map(d => ({
+      label: d.label || '', amount: Number(d.discount) || 0,
+      promotionId: d.promotionId || null, voucherId: d.voucherId || null, code: d.code || null,
+    })),
+    pointsRedeemed: pointsToRedeem || 0,
+    pointsDiscount: redeemDiscount || 0,
+  });
+
   // ---- Standard checkout ----
   const handleCheckout = async (paymentMethod) => {
     if (loading) return;
@@ -374,7 +387,7 @@ const POSTerminal = () => {
         items: cart.map(item => toTxItem(item, true)),
         paymentMethod, customerId: selectedCustomer?.id || null, location: currentLocation, cashier: currentUser.name,
         orderType, tableNumber: orderType === 'dine-in' ? tableNumber : null, walkInName: orderType === 'takeaway' ? walkInName : null,
-        pointsRedeemed: pointsToRedeem, pointsDiscount: redeemDiscount,
+        ...buildDiscountPayload(),
       });
       setLastTxnId(res.data?.id || null);
       // Loyalty: redeem first (if applicable), then earn on net spend
@@ -439,6 +452,7 @@ const POSTerminal = () => {
         items: cart.map(item => toTxItem(item)),
         paymentMethod: paymentView === 'upi' ? 'UPI' : 'QR Code',
         customerId: selectedCustomer?.id || null, location: currentLocation, cashier: currentUser.name,
+        ...buildDiscountPayload(),
       });
       toast({ title: "Payment Confirmed!", description: `$${totalNum.toFixed(2)} received via ${paymentView === 'upi' ? 'UPI' : 'QR Code'}` });
       await settleGiftCards(res.data?.id);
@@ -531,6 +545,7 @@ const POSTerminal = () => {
           paymentMethod: 'Split Payment',
           customerId: selectedCustomer?.id || null, location: currentLocation, cashier: currentUser.name,
           splitDetails: updatedParts.map(s => ({ payerName: s.payerName, amount: s.amount, method: s.method })),
+          ...buildDiscountPayload(),
         });
         toast({ title: "All Splits Paid!", description: `Total $${totalNum.toFixed(2)} collected` });
         await settleGiftCards(res.data?.id);
@@ -761,8 +776,37 @@ const POSTerminal = () => {
             <div>
               <div className="flex items-center justify-between">
                 <div><p className="font-medium">{selectedCustomer.name}</p><p className="text-xs text-gray-500">{selectedCustomer.membershipTier} Member {pointsBalance !== null && <span className="ml-1 text-amber-600 font-semibold">⭐ {pointsBalance} pts</span>}</p></div>
-                <Button variant="ghost" size="sm" onClick={() => { setSelectedCustomer(null); setPointsBalance(null); setPointsToRedeem(0); }}>Remove</Button>
+                <Button variant="ghost" size="sm" onClick={() => { setSelectedCustomer(null); setPointsBalance(null); setPointsToRedeem(0); setWallet(null); }}>Remove</Button>
               </div>
+              {/* Wallet: store credit + vouchers + occasion offers */}
+              {wallet && (wallet.storeCredit > 0 || (wallet.vouchers || []).length > 0) && (
+                <div className="mt-2 p-2 rounded-lg border border-emerald-200 bg-emerald-50/60 space-y-1.5" data-testid="customer-wallet">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Wallet</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {wallet.storeCredit > 0 && (
+                      <span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-emerald-600 text-white" data-testid="wallet-store-credit">
+                        💳 ${wallet.storeCredit.toFixed(2)} credit
+                      </span>
+                    )}
+                    {(wallet.vouchers || []).map(v => {
+                      const applied = (appliedDiscounts || []).some(d => d.voucherId === v.id);
+                      return (
+                        <button key={v.id} disabled={applied}
+                          onClick={() => {
+                            addDiscount({ voucherId: v.id, label: `${v.occasion || 'Voucher'} · $${Number(v.amount).toFixed(2)}`, discount: Number(v.amount) || 0 });
+                            toast({ title: 'Voucher applied', description: `${v.occasion || v.reason || 'Wallet voucher'} — $${Number(v.amount).toFixed(2)} off` });
+                          }}
+                          className={`text-[11px] font-semibold px-2 py-1 rounded-full border transition-all ${applied ? 'bg-gray-200 text-gray-400 border-gray-200' : 'bg-white text-emerald-700 border-emerald-300 hover:bg-emerald-100'}`}
+                          title={applied ? 'Already applied to this order' : `Tap to apply $${Number(v.amount).toFixed(2)} off`}
+                          data-testid={`wallet-voucher-${v.id}`}>
+                          {v.occasion ? v.occasion : `🎟 ${v.reason === 'win_back' ? 'We miss you' : 'Voucher'}`} ${Number(v.amount).toFixed(2)}
+                          {applied ? ' ✓' : ''}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               {pointsBalance !== null && pointsBalance >= loyaltyCfg.minRedeem && (
                 <div className="mt-2 p-2 bg-amber-50 rounded text-xs space-y-1" data-testid="points-pay-block">
                   <p className="text-amber-700 font-medium">Points & Pay (1 pt = ${loyaltyCfg.redeemRate} · min {loyaltyCfg.minRedeem})</p>
@@ -784,6 +828,7 @@ const POSTerminal = () => {
                   setSelectedCustomer(c);
                   if (c) {
                     try { const r = await loyaltyEngineAPI.getBalance(c.id); setPointsBalance(r.data?.points || 0); } catch {}
+                    try { const r = await customersAPI.getWallet(c.id); setWallet(r.data); } catch { setWallet(null); }
                     try { const r = await phaseEFAPI.yourUsual(c.id); setYourUsual(r.data?.items || []); } catch {}
                   } else { setYourUsual([]); }
                 }}
@@ -902,6 +947,12 @@ const POSTerminal = () => {
         {cart.length > 0 && (
           <Card className="mb-4"><CardContent className="p-4 space-y-2">
             <div className="flex justify-between text-sm"><span>{labels.subtotal || 'Subtotal'}</span><span>${totals.subtotal}</span></div>
+            {parseFloat(totals.tierDiscount) > 0 && (
+              <div className="flex justify-between text-sm text-purple-700" data-testid="tier-discount-row">
+                <span>👑 {selectedCustomer?.membershipTier} member discount</span>
+                <span>-${totals.tierDiscount}</span>
+              </div>
+            )}
             {/* Applied discounts (auto promotions + manual vouchers) */}
             {(appliedDiscounts || []).map((d, i) => {
               const key = d.promotionId || d.voucherId || d.id;

@@ -22,6 +22,14 @@ class TransactionDiscount(BaseModel):
     value: float
     reason: Optional[str] = None
 
+class AppliedDiscount(BaseModel):
+    """A voucher/promotion discount applied at the POS, in dollars."""
+    label: str = ""
+    amount: float = 0.0
+    promotionId: Optional[str] = None
+    voucherId: Optional[str] = None
+    code: Optional[str] = None
+
 class PaymentSplit(BaseModel):
     method: str  # card, cash, gift_card, store_credit
     amount: float
@@ -34,6 +42,9 @@ class Transaction(BaseModel):
     subtotal: float
     discount: Any = None
     discountAmount: float = 0.0
+    appliedDiscounts: List[AppliedDiscount] = []
+    pointsRedeemed: int = 0
+    pointsDiscount: float = 0.0
     tipAmount: float = 0.0
     gst: float
     total: float
@@ -62,6 +73,9 @@ class TransactionCreate(BaseModel):
     location: str
     cashier: str
     discount: Optional[TransactionDiscount] = None
+    appliedDiscounts: List[AppliedDiscount] = []
+    pointsRedeemed: int = 0
+    pointsDiscount: float = 0.0
     emailReceipt: Optional[str] = None
     smsReceipt: Optional[str] = None
     tableNumber: Optional[str] = None

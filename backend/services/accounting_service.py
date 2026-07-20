@@ -479,14 +479,19 @@ async def auto_post_pos_sale(txn: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if total <= 0:
         return None
     gst = float(txn.get("gst") or 0)
-    subtotal = round(total - gst, 2)
+    discount = float(txn.get("discountAmount") or 0)
+    # Post gross revenue and show discounts explicitly as contra-revenue (4090):
+    # Bank DR total, Discounts DR, Sales CR gross, GST CR.
+    gross_sales = round(total - gst + discount, 2)
     method = (txn.get("paymentMethod") or "").lower()
     bank_code = "1010" if "cash" in method else "1000"
 
     lines = [
         {"accountCode": bank_code, "debit": total, "credit": 0.0, "description": f"POS sale #{txn.get('id')}"},
-        {"accountCode": "4000",    "debit": 0.0, "credit": subtotal, "description": "Sales revenue"},
     ]
+    if discount > 0:
+        lines.append({"accountCode": "4090", "debit": discount, "credit": 0.0, "description": "Sales discounts (vouchers/loyalty)"})
+    lines.append({"accountCode": "4000", "debit": 0.0, "credit": gross_sales, "description": "Sales revenue"})
     if gst > 0:
         lines.append({"accountCode": "2100", "debit": 0.0, "credit": gst, "description": "GST on sales"})
     return await post_entry(

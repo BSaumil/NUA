@@ -212,25 +212,22 @@ async def agent_tick(request: Request, user: dict = Depends(require_owner_or_man
         decisions.append(await _record_decision("at_risk_flagged",
             f"Flagged {len(segs['at_risk'])} customers as at-risk (no visit in 60 days)",
             {"customerIds": segs["at_risk"][:20]}))
-    # 2. Birthday vouchers — find customers with birthday in next 7 days
-    today = datetime.now(timezone.utc)
+    # 2. Birthday vouchers — actually issue wallet vouchers for customers whose
+    # birthday month is now (idempotent per customer per year).
+    from services.wallet_service import ensure_birthday_voucher
     customers = await db.customers.find({"birthday": {"$exists": True}}, {"_id": 0}).to_list(5000)
-    bday_count = 0
+    issued = []
     for c in customers:
-        bd = c.get("birthday", "")
         try:
-            bm, bdd = int(bd.split("-")[1]), int(bd.split("-")[2])
-            for d in range(7):
-                check = today + timedelta(days=d)
-                if check.month == bm and check.day == bdd:
-                    bday_count += 1
-                    break
+            v = await ensure_birthday_voucher(c)
+            if v:
+                issued.append({"customerId": c["id"], "name": c.get("name"), "voucherId": v["id"], "amount": v["amount"]})
         except Exception:
             continue
-    if bday_count > 0:
+    if issued:
         decisions.append(await _record_decision("birthday_vouchers",
-            f"Generated birthday vouchers for {bday_count} customers (next 7 days)",
-            {"count": bday_count}))
+            f"Issued {len(issued)} birthday-month vouchers straight to customer wallets",
+            {"issued": issued[:20]}))
     # 3. Inventory low-stock reorder suggestions
     products = await db.products.find({"stock": {"$lte": 5}, "active": {"$ne": False}}, {"_id": 0, "id": 1, "name": 1, "stock": 1}).to_list(500)
     if products:

@@ -91,7 +91,12 @@ export const POSProvider = ({ children }) => {
 
   const calculateTotal = () => {
     const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-    const discount = appliedDiscounts.reduce((s, d) => s + (Number(d.discount) || 0), 0);
+    // Membership-tier discount — mirrors the backend so the screen total
+    // matches the recorded transaction exactly.
+    const tierRates = { Silver: 0.03, Gold: 0.05, Platinum: 0.10 };
+    const tierDiscount = subtotal * (tierRates[selectedCustomer?.membershipTier] || 0);
+    const voucherDiscount = appliedDiscounts.reduce((s, d) => s + (Number(d.discount) || 0), 0);
+    const discount = tierDiscount + voucherDiscount;
     const afterDiscount = Math.max(0, subtotal - discount);
     const gst = afterDiscount * 0.1;
     const grossTotal = afterDiscount + gst;
@@ -100,6 +105,7 @@ export const POSProvider = ({ children }) => {
     return {
       subtotal: subtotal.toFixed(2),
       discount: discount.toFixed(2),
+      tierDiscount: tierDiscount.toFixed(2),
       gst: gst.toFixed(2),
       total: grossTotal.toFixed(2),
       giftCardTender: giftCardTender.toFixed(2),
