@@ -160,12 +160,17 @@ async def get_end_of_day_report( period: str = "today", start_date: str = None, 
             h = ts.hour
             by_hour[h] = by_hour.get(h, 0) + t.get("total", 0)
 
-    # By category
+    # By category — categories marked "reports under" another category roll
+    # their sales up into that category's label (e.g. an "Iced Coffee"
+    # sub-category reporting as "Coffee"), resolved from the current
+    # category setup at report time.
+    from routes.items_system import build_reporting_map
+    reporting_map = await build_reporting_map()
     by_category = {}
     product_sales = {}
     for t in txns:
         for item in t.get("items", []):
-            cat = item.get("category", "Uncategorized")
+            cat = reporting_map.get(item.get("category", "Uncategorized"), item.get("category", "Uncategorized"))
             pid = item.get("productId", "")
             qty = item.get("quantity", 0)
             rev = item.get("price", 0) * qty

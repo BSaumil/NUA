@@ -494,6 +494,7 @@ export const itemsSystemAPI = {
   createCategory: (data) => api.post('/categories', data),
   updateCategory: (id, data) => api.put(`/categories/${id}`, data),
   deleteCategory: (id) => api.delete(`/categories/${id}`),
+  mergeCategory: (sourceId, targetId) => api.post(`/categories/${sourceId}/merge/${targetId}`),
   cleanupLegacyCategories: () => api.post('/categories/cleanup-legacy'),
   getModifiers: () => api.get('/modifiers'),
   createModifier: (data) => api.post('/modifiers', data),
