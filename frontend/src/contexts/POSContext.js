@@ -16,6 +16,10 @@ export const POSProvider = ({ children }) => {
   const [appliedGiftCards, setAppliedGiftCards] = useState([]);
   // Gift cards being SOLD in this cart (pending_activation → activate after payment).
   const [pendingGiftActivations, setPendingGiftActivations] = useState([]);
+  // Store credit applied as a tender (dollars). Reduces balanceDue exactly
+  // like a gift card; settled via /customers/{id}/store-credit/redeem after
+  // the rest of the payment completes successfully.
+  const [storeCreditApplied, setStoreCreditApplied] = useState(0);
 
   const addToCart = (product, quantity = 1, selectedModifiers = null, extraPrice = 0) => {
     setCart(prev => {
@@ -61,6 +65,7 @@ export const POSProvider = ({ children }) => {
     setAppliedDiscounts([]);
     setAppliedGiftCards([]);
     setPendingGiftActivations([]);
+    setStoreCreditApplied(0);
   };
 
   const addDiscount = (d) => setAppliedDiscounts(prev => {
@@ -101,7 +106,7 @@ export const POSProvider = ({ children }) => {
     const gst = afterDiscount * 0.1;
     const grossTotal = afterDiscount + gst;
     const giftCardTender = appliedGiftCards.reduce((s, gc) => s + (Number(gc.amount) || 0), 0);
-    const balanceDue = Math.max(0, grossTotal - giftCardTender);
+    const balanceDue = Math.max(0, grossTotal - giftCardTender - (Number(storeCreditApplied) || 0));
     return {
       subtotal: subtotal.toFixed(2),
       discount: discount.toFixed(2),
@@ -109,6 +114,7 @@ export const POSProvider = ({ children }) => {
       gst: gst.toFixed(2),
       total: grossTotal.toFixed(2),
       giftCardTender: giftCardTender.toFixed(2),
+      storeCreditApplied: (Number(storeCreditApplied) || 0).toFixed(2),
       balanceDue: balanceDue.toFixed(2),
     };
   };
@@ -123,6 +129,7 @@ export const POSProvider = ({ children }) => {
         appliedDiscounts, addDiscount, removeDiscount,
         appliedGiftCards, addGiftCard, removeGiftCard, updateGiftCardAmount,
         pendingGiftActivations, queueGiftActivation, clearGiftActivations,
+        storeCreditApplied, setStoreCreditApplied,
       }}
     >
       {children}

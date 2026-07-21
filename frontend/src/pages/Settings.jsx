@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Palette, MapPin, Users as UsersIcon, Building, GraduationCap, Plus, Edit, Trash2, Save, Receipt, Shield, Monitor, Zap, Printer, Globe, Clock, KeyRound } from 'lucide-react';
+import { Palette, MapPin, Users as UsersIcon, Building, GraduationCap, Plus, Edit, Trash2, Save, Receipt, Shield, Monitor, Zap, Printer, Globe, Clock, KeyRound, Target, Gift } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { Badge } from '../components/ui/badge';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
-import { locationsAPI, advancedAPI, staffMgmtAPI, enterpriseAPI, gamificationAPI, finalizeAPI } from '../services/api';
+import { locationsAPI, advancedAPI, staffMgmtAPI, enterpriseAPI, gamificationAPI, finalizeAPI, analyticsAPI, customersAPI } from '../services/api';
 import WalletCredentialsPanel from '../components/settings/WalletCredentialsPanel';
 import PermissionsPanel from '../components/settings/PermissionsPanel';
 import { toast } from 'sonner';
@@ -55,6 +55,10 @@ const Settings = () => {
   // Business hours
   const [bizHours, setBizHours] = useState({ openTime: '07:00', closeTime: '23:00', onlineOpenTime: '08:00', onlineCloseTime: '22:00', googleBusinessUrl: '', googleSync: false });
 
+  // Today home-screen targets + wallet occasion offers
+  const [todayTargets, setTodayTargets] = useState({ dailySalesTarget: 0, laborPctThreshold: 32, refundRateThreshold: 5 });
+  const [walletOffers, setWalletOffers] = useState({ birthdayEnabled: true, birthdayAmount: 10 });
+
   useEffect(() => {
     advancedAPI.getTrainingMode().then(r => setTrainingMode(r.data?.enabled || false)).catch(() => {});
     fetchLocations(); fetchStaff(); fetchBusiness();
@@ -82,6 +86,8 @@ const Settings = () => {
     axios.get(`${API}/api/business/settings`, { headers: authHeader() }).then(r => {
       if (r.data?.hours) setBizHours(prev => ({ ...prev, ...r.data.hours }));
     }).catch(() => {});
+    analyticsAPI.getTodayTargets().then(r => { if (r.data) setTodayTargets(r.data); }).catch(() => {});
+    customersAPI.getWalletOffers().then(r => { if (r.data) setWalletOffers(r.data); }).catch(() => {});
   }, []);
 
   const fetchLocations = async () => {
@@ -148,6 +154,7 @@ const Settings = () => {
 
   const tabs = [
     { id: 'theme', label: 'Theme', icon: Palette },
+    { id: 'targets', label: 'Targets & Offers', icon: Target },
     { id: 'receipt', label: 'Receipt', icon: Receipt },
     { id: 'print-routing', label: 'Print Routing', icon: Printer },
     { id: 'permissions', label: 'Permissions', icon: Shield },
@@ -210,6 +217,58 @@ const Settings = () => {
             try { await enterpriseAPI.saveSurchargeSettings(surchargeSettings); toast.success('Surcharge settings saved'); } catch { toast.error('Failed'); }
           }} data-testid="save-surcharge-btn"><Save size={16} className="mr-1" /> Save Surcharge Settings</Button>
         </CardContent></Card>
+      )}
+
+      {/* Today home screen targets + wallet occasion offers */}
+      {activeTab === 'targets' && (user?.role === 'owner' || user?.role === 'manager') && (
+        <div className="space-y-4">
+          <Card><CardHeader><CardTitle className="flex items-center gap-2"><Target size={18} /> Today Home Screen Targets</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-gray-500">Drives the progress bar and exception alerts on the Today home screen.</p>
+            <div className="grid grid-cols-3 gap-4">
+              <div><label className="text-sm font-medium mb-1 block">Daily Sales Target ($)</label>
+                <Input type="number" min="0" step="50" value={todayTargets.dailySalesTarget}
+                  onChange={e => setTodayTargets({ ...todayTargets, dailySalesTarget: parseFloat(e.target.value) || 0 })}
+                  placeholder="0 = no target shown" data-testid="today-sales-target" /></div>
+              <div><label className="text-sm font-medium mb-1 block">Labor % Alert Threshold</label>
+                <Input type="number" min="1" step="1" value={todayTargets.laborPctThreshold}
+                  onChange={e => setTodayTargets({ ...todayTargets, laborPctThreshold: parseFloat(e.target.value) || 32 })}
+                  data-testid="today-labor-threshold" /></div>
+              <div><label className="text-sm font-medium mb-1 block">Refund Rate Alert %</label>
+                <Input type="number" min="0" step="0.5" value={todayTargets.refundRateThreshold}
+                  onChange={e => setTodayTargets({ ...todayTargets, refundRateThreshold: parseFloat(e.target.value) || 0 })}
+                  data-testid="today-refund-threshold" /></div>
+            </div>
+            <Button style={{ backgroundColor: theme.primary }} onClick={async () => {
+              try { await analyticsAPI.saveTodayTargets(todayTargets); toast.success('Today targets saved'); }
+              catch { toast.error('Failed to save'); }
+            }} data-testid="save-today-targets-btn"><Save size={16} className="mr-1" /> Save Targets</Button>
+          </CardContent></Card>
+
+          <Card><CardHeader><CardTitle className="flex items-center gap-2"><Gift size={18} /> Wallet Occasion Offers</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-gray-500">
+              Auto-issued straight to a customer's wallet — no manual codes. Birthday-month
+              vouchers are issued once per customer per year, the first time their wallet is opened
+              or the loyalty agent runs during their birthday month.
+            </p>
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <input type="checkbox" checked={walletOffers.birthdayEnabled}
+                onChange={e => setWalletOffers({ ...walletOffers, birthdayEnabled: e.target.checked })}
+                data-testid="birthday-offer-enabled" />
+              Enable Birthday Month offer
+            </label>
+            <div className="w-48"><label className="text-sm font-medium mb-1 block">Voucher Amount ($)</label>
+              <Input type="number" min="0" step="1" value={walletOffers.birthdayAmount}
+                disabled={!walletOffers.birthdayEnabled}
+                onChange={e => setWalletOffers({ ...walletOffers, birthdayAmount: parseFloat(e.target.value) || 0 })}
+                data-testid="birthday-offer-amount" /></div>
+            <Button style={{ backgroundColor: theme.primary }} onClick={async () => {
+              try { await customersAPI.saveWalletOffers(walletOffers); toast.success('Wallet offers saved'); }
+              catch { toast.error('Failed to save'); }
+            }} data-testid="save-wallet-offers-btn"><Save size={16} className="mr-1" /> Save Offers</Button>
+          </CardContent></Card>
+        </div>
       )}
 
       {/* Hardware */}

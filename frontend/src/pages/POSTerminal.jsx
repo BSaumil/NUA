@@ -28,7 +28,7 @@ import { CategoryIcon } from './Categories';
 const POSTerminal = () => {
   const { theme } = useTheme();
   const { user } = useAuth();
-  const { cart, addToCart, removeFromCart, updateQuantity, clearCart, calculateTotal, selectedCustomer, setSelectedCustomer, currentUser, currentLocation, appliedDiscounts, addDiscount, removeDiscount, appliedGiftCards, addGiftCard, removeGiftCard, pendingGiftActivations } = usePOS();
+  const { cart, addToCart, removeFromCart, updateQuantity, clearCart, calculateTotal, selectedCustomer, setSelectedCustomer, currentUser, currentLocation, appliedDiscounts, addDiscount, removeDiscount, appliedGiftCards, addGiftCard, removeGiftCard, pendingGiftActivations, storeCreditApplied, setStoreCreditApplied } = usePOS();
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -360,6 +360,12 @@ const POSTerminal = () => {
       try {
         if (gc.amount > 0) await v26API.redeemGiftPartial(gc.code, gc.amount, txId);
       } catch (e) { console.warn('Gift redeem failed', gc.code, e); }
+    }
+    // Store credit tender — settle after the sale has actually gone through,
+    // same as gift cards, so a failed payment never touches the balance.
+    if (storeCreditApplied > 0 && selectedCustomer?.id) {
+      try { await customersAPI.redeemStoreCredit(selectedCustomer.id, storeCreditApplied); }
+      catch (e) { console.warn('Store credit redeem failed', e); }
     }
   };
 
@@ -822,7 +828,7 @@ const POSTerminal = () => {
             <div>
               <div className="flex items-center justify-between">
                 <div><p className="font-medium">{selectedCustomer.name}</p><p className="text-xs text-gray-500">{selectedCustomer.membershipTier} Member {pointsBalance !== null && <span className="ml-1 text-amber-600 font-semibold">⭐ {pointsBalance} pts</span>}</p></div>
-                <Button variant="ghost" size="sm" onClick={() => { setSelectedCustomer(null); setPointsBalance(null); setPointsToRedeem(0); setWallet(null); }}>Remove</Button>
+                <Button variant="ghost" size="sm" onClick={() => { setSelectedCustomer(null); setPointsBalance(null); setPointsToRedeem(0); setWallet(null); setStoreCreditApplied(0); }}>Remove</Button>
               </div>
               {/* Wallet: store credit + vouchers + occasion offers */}
               {wallet && (wallet.storeCredit > 0 || (wallet.vouchers || []).length > 0) && (
@@ -830,9 +836,17 @@ const POSTerminal = () => {
                   <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Wallet</p>
                   <div className="flex flex-wrap gap-1.5">
                     {wallet.storeCredit > 0 && (
-                      <span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-emerald-600 text-white" data-testid="wallet-store-credit">
-                        💳 ${wallet.storeCredit.toFixed(2)} credit
-                      </span>
+                      <button
+                        onClick={() => {
+                          if (storeCreditApplied > 0) { setStoreCreditApplied(0); return; }
+                          const dueBeforeCredit = totalNum + (Number(storeCreditApplied) || 0);
+                          setStoreCreditApplied(Number(Math.min(wallet.storeCredit, dueBeforeCredit).toFixed(2)));
+                        }}
+                        className={`text-[11px] font-semibold px-2 py-1 rounded-full transition-all ${storeCreditApplied > 0 ? 'bg-emerald-800 text-white ring-2 ring-emerald-300' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
+                        title={storeCreditApplied > 0 ? 'Tap to remove store credit tender' : `Tap to apply up to $${wallet.storeCredit.toFixed(2)} credit to this order`}
+                        data-testid="wallet-store-credit">
+                        💳 ${wallet.storeCredit.toFixed(2)} credit{storeCreditApplied > 0 ? ` · $${Number(storeCreditApplied).toFixed(2)} applied ✓` : ''}
+                      </button>
                     )}
                     {(wallet.vouchers || []).map(v => {
                       const applied = (appliedDiscounts || []).some(d => d.voucherId === v.id);
@@ -1035,6 +1049,18 @@ const POSTerminal = () => {
                 </span>
               </div>
             ))}
+            {parseFloat(totals.storeCreditApplied) > 0 && (
+              <div className="flex justify-between text-sm text-emerald-700" data-testid="store-credit-tender">
+                <span className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100">CREDIT</span>
+                  Store credit
+                </span>
+                <span className="flex items-center gap-1.5">
+                  -${totals.storeCreditApplied}
+                  <button onClick={() => setStoreCreditApplied(0)} className="text-emerald-600 hover:text-red-600" data-testid="remove-store-credit">×</button>
+                </span>
+              </div>
+            )}
             {selectedCustomer && (
               <div className="flex justify-between text-xs bg-amber-50 -mx-2 px-2 py-1 rounded" data-testid="loyalty-preview">
                 <span className="text-amber-700">⭐ Loyalty preview</span>
@@ -1042,9 +1068,9 @@ const POSTerminal = () => {
               </div>
             )}
             <div className="border-t pt-2 flex justify-between font-bold text-lg"><span>{labels.total || 'Total'}</span><span style={{ color: theme.primary }} data-testid="pos-total">${totals.total}</span></div>
-            {appliedGiftCards.length > 0 && (
+            {(appliedGiftCards.length > 0 || parseFloat(totals.storeCreditApplied) > 0) && (
               <div className="flex justify-between text-sm font-semibold text-violet-700" data-testid="pos-balance-due">
-                <span>Balance due (after gift cards)</span><span>${totals.balanceDue}</span>
+                <span>Balance due (after tenders)</span><span>${totals.balanceDue}</span>
               </div>
             )}
           </CardContent></Card>
