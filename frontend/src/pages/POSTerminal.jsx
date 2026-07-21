@@ -12,7 +12,7 @@ import {
 } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { usePOS } from '../contexts/POSContext';
-import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API, v26API, floorPlansAPI } from '../services/api';
+import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API, v26API, floorPlansAPI, itemsSystemAPI } from '../services/api';
 import { useToast } from '../hooks/use-toast';
 import { useAuth } from '../contexts/AuthContext';
 import VoiceOrderButton from '../components/VoiceOrderButton';
@@ -299,8 +299,8 @@ const POSTerminal = () => {
         productsAPI.getAll(),
         promotionsAPI.getActive(),
         customersAPI.getAll(),
-        fetch(`${process.env.REACT_APP_BACKEND_URL}/api/categories`).then(r => r.json()).catch(() => []),
-        fetch(`${process.env.REACT_APP_BACKEND_URL}/api/modifiers`).then(r => r.json()).catch(() => []),
+        itemsSystemAPI.getCategories(),
+        itemsSystemAPI.getModifiers(),
         loyaltyEngineAPI.getConfig(),
         v15API.getLabels(localStorage.getItem('nua_lang') || 'en'),
         advancedAPI.getTrainingMode(),
@@ -308,15 +308,18 @@ const POSTerminal = () => {
       if (productsRes.status === 'fulfilled') setProducts(productsRes.value.data || []);
       if (promotionsRes.status === 'fulfilled') setPromotions(promotionsRes.value.data || []);
       if (customersRes.status === 'fulfilled') setCustomers(customersRes.value.data || []);
-      if (catsRes.status === 'fulfilled' && Array.isArray(catsRes.value)) {
-        const active = catsRes.value
+      if (catsRes.status === 'fulfilled' && Array.isArray(catsRes.value?.data)) {
+        const active = catsRes.value.data
           .filter(c => c.active !== false)
           .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99))
           .map(c => ({ id: c.id, name: c.name, icon: c.icon || 'Tag', color: c.color || '#6366f1' }));
         setCategories([{ id: 'all', name: 'All', icon: 'Sparkles', color: '#6366f1' }, ...active]);
+      } else if (catsRes.status === 'rejected') {
+        console.error('Failed to load categories', catsRes.reason);
+        toast({ title: 'Categories failed to load', description: 'Showing "All" only — check your connection and refresh.', variant: 'destructive' });
       }
-      if (modsRes.status === 'fulfilled' && Array.isArray(modsRes.value)) {
-        setModifiers(modsRes.value);
+      if (modsRes.status === 'fulfilled' && Array.isArray(modsRes.value?.data)) {
+        setModifiers(modsRes.value.data);
       }
       if (loyaltyRes.status === 'fulfilled') setLoyaltyCfg(loyaltyRes.value.data || { minRedeem: 10, redeemRate: 0.01 });
       if (labelsRes.status === 'fulfilled') setLabels(labelsRes.value.data || {});
@@ -648,7 +651,11 @@ const POSTerminal = () => {
         </div>
       )}
       {/* Products Grid — smaller cards, category-wise */}
-      <div className="flex-1 flex flex-col min-w-0">
+      {/* min-h-0 is required here: a flex-col child won't shrink below its
+          content's natural height otherwise, so the overflow-y-auto grid
+          below never actually constrains — the category bar gets pushed
+          around and the whole page scrolls instead of just the grid. */}
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <div className="mb-3">
           {/* Compact status bar replaces the bulky "POS Terminal" title */}
           <div onDoubleClick={() => { if (user?.role === 'owner') setShowGhost(true); }} data-testid="pos-title">
@@ -878,7 +885,9 @@ const POSTerminal = () => {
       </div>
 
       {/* Cart Panel — bigger for easier billing */}
-      <div className="w-full lg:w-[440px] flex-shrink-0 flex flex-col border bg-white rounded-xl shadow-sm p-4" data-testid="pos-cart-panel">
+      {/* Same min-h-0 fix as the products column — the cart-items list below
+          uses flex-1 overflow-y-auto and needs this to actually scroll. */}
+      <div className="w-full lg:w-[440px] flex-shrink-0 flex flex-col min-h-0 border bg-white rounded-xl shadow-sm p-4" data-testid="pos-cart-panel">
         <h2 className="text-xl font-bold mb-3" style={{ color: theme.text }}>{labels.cart || 'Current Order'}</h2>
         {/* Customer Selection */}
         <Card className="mb-4"><CardContent className="p-4">
