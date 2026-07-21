@@ -41,6 +41,9 @@ export const customersAPI = {
   update: (id, data) => api.put(`/customers/${id}`, data),
   getProfile: (id) => api.get(`/customers/${id}/profile`),
   getWallet: (id) => api.get(`/customers/${id}/wallet`),
+  getWalletOffers: () => api.get('/customers/wallet-offers'),
+  saveWalletOffers: (data) => api.post('/customers/wallet-offers', data),
+  redeemStoreCredit: (id, amount) => api.post(`/customers/${id}/store-credit/redeem`, { amount }),
 };
 
 // Feedback API
@@ -268,6 +271,8 @@ export const analyticsAPI = {
   getCommandCenter: () => api.get('/analytics/command-center'),
   getMenuEngineering: () => api.get('/analytics/menu-engineering'),
   getTodayPulse: () => api.get('/analytics/today-pulse'),
+  getTodayTargets: () => api.get('/analytics/today-targets'),
+  saveTodayTargets: (data) => api.post('/analytics/today-targets', data),
 };
 
 // Automation API

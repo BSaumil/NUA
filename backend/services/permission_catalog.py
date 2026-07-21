@@ -68,6 +68,7 @@ PERMISSION_CATALOG: List[Dict[str, Any]] = [
         ("leaderboard", "Staff Leaderboard"),
     ]},
     {"section": "Analytics & Insights", "icon": "BarChart3", "features": [
+        ("today", "Today (Home)"),
         ("dashboard", "Dashboard"),
         ("command-center", "Command Center"),
         ("hq", "HQ Dashboard"),
@@ -142,6 +143,7 @@ def catalog_for_ui() -> List[Dict[str, Any]]:
 DEFAULT_ROLE_PERMISSIONS: Dict[str, List[str]] = {
     "owner": ["*"],
     "manager": [
+        "today",
         "pos", "tables", "comp-void", "payment-links", "tip-management",
         "reservations", "bookings-inbox", "waitlist", "floor-plan", "table-layout",
         "booking-settings", "booking-analytics", "booking-heatmap",

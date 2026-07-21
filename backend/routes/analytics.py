@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from deps import get_user
+from deps import get_user, require_owner_or_manager
 from typing import List, Optional
 from datetime import datetime
 from database import db
@@ -767,3 +767,29 @@ async def get_today_pulse(_user: dict = Depends(get_user)):
         "service": {"bookingsTonight": bookings_tonight, "openKitchenTickets": open_kitchen},
         "alerts": alerts,
     }
+
+
+# ============ TODAY TARGETS (config for the Today home screen) ============
+TODAY_TARGETS_DEFAULTS = {"dailySalesTarget": 0, "laborPctThreshold": 32, "refundRateThreshold": 5}
+
+
+@router.get("/analytics/today-targets")
+async def get_today_targets(_user: dict = Depends(get_user)):
+    s = await db.settings.find_one({"key": "today_targets"}, {"_id": 0})
+    cfg = dict(TODAY_TARGETS_DEFAULTS)
+    if s and isinstance(s.get("value"), dict):
+        cfg.update({k: v for k, v in s["value"].items() if v is not None})
+    return cfg
+
+
+@router.post("/analytics/today-targets")
+async def save_today_targets(data: dict, _user: dict = Depends(require_owner_or_manager)):
+    cfg = {
+        "dailySalesTarget": max(float(data.get("dailySalesTarget", 0) or 0), 0),
+        "laborPctThreshold": max(float(data.get("laborPctThreshold", 32) or 0), 1),
+        "refundRateThreshold": max(float(data.get("refundRateThreshold", 5) or 0), 0),
+    }
+    await db.settings.update_one(
+        {"key": "today_targets"}, {"$set": {"key": "today_targets", "value": cfg}}, upsert=True
+    )
+    return cfg
