@@ -50,6 +50,10 @@ const POSTerminal = () => {
   const [splitCount, setSplitCount] = useState(2);
   const [splitParts, setSplitParts] = useState([]);
   const [activeSplitIndex, setActiveSplitIndex] = useState(null);
+  // When a split part uses QR/UPI, we surface a scan dialog instead of silently
+  // confirming — the cashier confirms once the guest actually pays.
+  const [splitQrData, setSplitQrData] = useState(null);   // {qrData, transactionId, method, ...}
+  const [splitQrView, setSplitQrView] = useState(null);   // 'qr' | 'upi' | null
 
   // Cash payment state
   const [cashTendered, setCashTendered] = useState(0);
@@ -526,28 +530,84 @@ const POSTerminal = () => {
     setLoading(true);
     try {
       if (part.method === 'UPI' || part.method === 'QR Code') {
-        const res = await paymentAPI.generateQR({ amount: part.amount, method: part.method === 'UPI' ? 'upi' : 'qr_code' });
-        await paymentAPI.confirm(res.data.paymentId);
+        // NEW: generate the QR, then SHOW it to the guest. Nothing is marked
+        // paid until the cashier taps "Confirm Payment Received" in the dialog.
+        const res = await paymentAPI.generateQR({
+          amount: part.amount,
+          method: part.method === 'UPI' ? 'upi' : 'qr_code',
+        });
+        setSplitQrData({ ...res.data, method: part.method, splitIndex: idx });
+        setSplitQrView(part.method === 'UPI' ? 'upi' : 'qr');
+        setLoading(false);
+        return; // wait for cashier to confirm in the dialog
       }
-      updateSplitPart(idx, 'status', 'confirmed');
-      toast({ title: `Split #${idx + 1} Paid`, description: `$${part.amount.toFixed(2)} from ${part.payerName}` });
+      // Card / Cash — no external QR needed, mark straight away.
+      await finaliseSplitPart(idx);
+    } catch {
+      toast({ title: "Error", description: "Split payment failed.", variant: "destructive" });
+      setLoading(false);
+      setActiveSplitIndex(null);
+    }
+  };
 
-      // Check if all paid AND the maths balances
-      const updatedParts = splitParts.map((s, i) => i === idx ? { ...s, status: 'confirmed' } : s);
-      const allPaid = updatedParts.every(s => s.status === 'confirmed');
-      if (allPaid) {
-        const totalPaid = updatedParts.reduce((sum, s) => sum + Number(s.amount || 0), 0);
-        // Defensive: refuse to finalise if the splits don't add up.
-        if (Math.abs(totalPaid - totalNum) > 0.01) {
-          toast({
-            title: "Split doesn't balance",
-            description: `Collected $${totalPaid.toFixed(2)} vs bill $${totalNum.toFixed(2)}. Adjust amounts before closing.`,
-            variant: "destructive",
-          });
-          // Revert the just-confirmed status so the cashier can fix it
-          updateSplitPart(idx, 'status', 'pending');
-          return;
-        }
+  /** Second half of the split-QR / split-UPI flow: called once the cashier
+   *  taps "Confirm Payment Received" inside the QR/UPI dialog. */
+  const confirmSplitQr = async () => {
+    if (splitQrData == null) return;
+    const idx = splitQrData.splitIndex;
+    setLoading(true);
+    try {
+      if (splitQrData.paymentId) {
+        try { await paymentAPI.confirm(splitQrData.paymentId); } catch { /* backend may already be confirmed; not fatal */ }
+      }
+      setSplitQrView(null);
+      setSplitQrData(null);
+      await finaliseSplitPart(idx);
+    } catch {
+      toast({ title: "Error", description: "Could not confirm QR payment.", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const cancelSplitQr = () => {
+    // Guest didn't scan / cashier bailed out — leave the split part pending.
+    setSplitQrView(null);
+    setSplitQrData(null);
+    setActiveSplitIndex(null);
+    setLoading(false);
+  };
+
+  /** Common tail — mark the split part paid, check overall balance, and if
+   *  every part is confirmed, create the transaction and reset. */
+  const finaliseSplitPart = async (idx) => {
+    setSplitParts(prev => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], status: 'confirmed' };
+      return next;
+    });
+    const paidPart = splitParts[idx];
+    toast({ title: `Split #${idx + 1} Paid`, description: `$${Number(paidPart.amount).toFixed(2)} from ${paidPart.payerName}` });
+
+    const updatedParts = splitParts.map((s, i) => i === idx ? { ...s, status: 'confirmed' } : s);
+    const allPaid = updatedParts.every(s => s.status === 'confirmed');
+    if (allPaid) {
+      const totalPaid = updatedParts.reduce((sum, s) => sum + Number(s.amount || 0), 0);
+      if (Math.abs(totalPaid - totalNum) > 0.01) {
+        toast({
+          title: "Split doesn't balance",
+          description: `Collected $${totalPaid.toFixed(2)} vs bill $${totalNum.toFixed(2)}. Adjust amounts before closing.`,
+          variant: "destructive",
+        });
+        setSplitParts(prev => {
+          const next = [...prev];
+          next[idx] = { ...next[idx], status: 'pending' };
+          return next;
+        });
+        setActiveSplitIndex(null);
+        return;
+      }
+      try {
         const res = await transactionsAPI.create({
           items: cart.map(item => toTxItem(item)),
           paymentMethod: 'Split Payment',
@@ -559,15 +619,17 @@ const POSTerminal = () => {
         await settleGiftCards(res.data?.id);
         setTimeout(() => { resetPayment(); clearCart(); }, 1200);
         productsAPI.getAll().then(r => setProducts(r.data));
+      } catch {
+        toast({ title: "Error", description: "Could not finalise transaction.", variant: "destructive" });
       }
-    } catch {
-      toast({ title: "Error", description: "Split payment failed.", variant: "destructive" });
-    } finally { setLoading(false); setActiveSplitIndex(null); }
+    }
+    setActiveSplitIndex(null);
   };
 
   const resetPayment = () => {
     setShowPayment(false); setPaymentView('methods'); setQrData(null);
     setSplitParts([]); setSplitCount(2); setSplitMode('equal');
+    setSplitQrData(null); setSplitQrView(null);
     setCashTendered(0); setShowCashChange(false);
   };
 
@@ -1247,6 +1309,27 @@ const POSTerminal = () => {
         onPayPart={handlePaySplit}
         splitRemaining={splitRemaining}
         loading={loading} activeSplitIndex={activeSplitIndex}
+      />
+
+      {/* QR / UPI scan dialog stacked on top of the split dialog. Nothing is
+          marked paid until the cashier taps Confirm — solves the earlier bug
+          where selecting UPI/QR on a split silently confirmed the payment. */}
+      <QrPaymentDialog
+        open={splitQrView === 'qr'}
+        onClose={cancelSplitQr}
+        qrData={splitQrData || {}}
+        total={Number(splitQrData?.amount || 0)}
+        onConfirm={confirmSplitQr}
+        loading={loading}
+      />
+      <UpiPaymentDialog
+        open={splitQrView === 'upi'}
+        onClose={cancelSplitQr}
+        qrData={splitQrData || {}}
+        total={Number(splitQrData?.amount || 0)}
+        onConfirm={confirmSplitQr}
+        loading={loading}
+        onCopyUpi={copyToClipboard}
       />
 
       {/* Ghost Discount (Owner Secret - triple-click POS title to show) */}

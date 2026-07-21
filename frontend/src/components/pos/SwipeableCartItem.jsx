@@ -1,43 +1,86 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Minus, Plus } from 'lucide-react';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 
 /**
  * Left-swipe deletes a cart line; right-swipe repeats (+1 quantity).
- * Extracted from POSTerminal for readability and reuse.
+ * Uses BOTH pointer events (desktop / most modern browsers) AND explicit
+ * touch events (older tablet browsers / iPadOS Safari where setPointerCapture
+ * is flaky) so the swipe works everywhere a POS runs.
  */
 export default function SwipeableCartItem({ item, onUpdateQty, onRemove, onRepeat, theme }) {
   const [dragX, setDragX] = useState(0);
-  const startXRef = React.useRef(null);
-  const isDraggingRef = React.useRef(false);
+  const startXRef = useRef(null);
+  const startYRef = useRef(null);
+  const isDraggingRef = useRef(false);
+  const axisRef = useRef(null); // 'x' | 'y' | null — locked after ~6px of movement
   const THRESHOLD = 80;
 
-  const onPointerDown = (e) => {
-    if (e.target.closest('[data-no-swipe]')) return;
-    startXRef.current = e.clientX;
+  const beginDrag = (clientX, clientY) => {
+    startXRef.current = clientX;
+    startYRef.current = clientY;
     isDraggingRef.current = true;
-    e.currentTarget.setPointerCapture(e.pointerId);
+    axisRef.current = null;
+    setDragX(0);
   };
-  const onPointerMove = (e) => {
+  const moveDrag = (clientX, clientY, evt) => {
     if (!isDraggingRef.current || startXRef.current === null) return;
-    setDragX(e.clientX - startXRef.current);
+    const dx = clientX - startXRef.current;
+    const dy = clientY - startYRef.current;
+    // Axis lock — decide once movement is meaningful.
+    if (axisRef.current === null) {
+      const ax = Math.abs(dx), ay = Math.abs(dy);
+      if (ax < 6 && ay < 6) return;
+      axisRef.current = ax > ay ? 'x' : 'y';
+    }
+    if (axisRef.current !== 'x') return; // vertical scroll — let the page have it
+    // Block native scroll only while we're horizontally dragging.
+    if (evt && evt.cancelable) { try { evt.preventDefault(); } catch { /* ignore */ } }
+    setDragX(dx);
   };
-  const onPointerUp = (e) => {
+  const endDrag = () => {
     if (!isDraggingRef.current) return;
     isDraggingRef.current = false;
-    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch {}
-    if (dragX <= -THRESHOLD) {
+    const finalX = dragX;
+    axisRef.current = null;
+    startXRef.current = null;
+    startYRef.current = null;
+    if (finalX <= -THRESHOLD) {
       setDragX(-400);
       setTimeout(() => onRemove(item.id), 180);
-    } else if (dragX >= THRESHOLD) {
+    } else if (finalX >= THRESHOLD) {
       onRepeat(item);
       setDragX(0);
     } else {
       setDragX(0);
     }
-    startXRef.current = null;
   };
+
+  // Pointer handlers (desktop mouse + modern touch)
+  const onPointerDown = (e) => {
+    if (e.target.closest('[data-no-swipe]')) return;
+    beginDrag(e.clientX, e.clientY);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+  };
+  const onPointerMove = (e) => moveDrag(e.clientX, e.clientY, e);
+  const onPointerUp = (e) => {
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+    endDrag();
+  };
+
+  // Touch fallback — some tablet browsers (iPadOS Safari, older Android WebView,
+  // some POS terminal browsers) don't reliably fire pointer events for touch.
+  const onTouchStart = (e) => {
+    if (e.target.closest('[data-no-swipe]')) return;
+    const t = e.touches[0]; if (!t) return;
+    beginDrag(t.clientX, t.clientY);
+  };
+  const onTouchMove = (e) => {
+    const t = e.touches[0]; if (!t) return;
+    moveDrag(t.clientX, t.clientY, e);
+  };
+  const onTouchEnd = () => endDrag();
 
   const bgIntensity = Math.min(Math.abs(dragX) / THRESHOLD, 1);
 
@@ -58,7 +101,16 @@ export default function SwipeableCartItem({ item, onUpdateQty, onRemove, onRepea
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
-        style={{ transform: `translateX(${dragX}px)`, transition: isDraggingRef.current ? 'none' : 'transform 0.2s ease-out', touchAction: 'pan-y' }}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchEnd}
+        style={{
+          transform: `translateX(${dragX}px)`,
+          transition: isDraggingRef.current ? 'none' : 'transform 0.2s ease-out',
+          touchAction: 'pan-y',
+          userSelect: 'none',
+        }}
         className="relative bg-white cursor-grab active:cursor-grabbing select-none"
         data-testid={`cart-item-${item.id}`}
       >

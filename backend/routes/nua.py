@@ -1,15 +1,18 @@
 """
-Ash — the autonomous operating layer endpoints.
+NUA — the autonomous operating layer endpoints (formerly `ash`).
+
+Native prefix: /api/nua/*.  /api/ash/* still works via NuaAliasMiddleware
+in server.py for backwards-compatibility.
 """
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 from database import db
 from deps import get_user, require_owner_or_manager
-from services import ash_intelligence
+from services import nua_intelligence
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/ash")
+router = APIRouter(prefix="/nua")
 
 
 @router.get("/insights")
@@ -51,12 +54,12 @@ async def insights_summary(_: dict = Depends(get_user)):
 @router.post("/run")
 async def run(include_summary: bool = False, _: dict = Depends(require_owner_or_manager)):
     """Manually trigger a full Ash pass — normally run on a cadence."""
-    return await ash_intelligence.run_all_insights(include_summary=include_summary)
+    return await nua_intelligence.run_all_insights(include_summary=include_summary)
 
 
 @router.post("/summary/weekly")
 async def weekly_summary(_: dict = Depends(require_owner_or_manager)):
-    doc = await ash_intelligence.generate_weekly_summary()
+    doc = await nua_intelligence.generate_weekly_summary()
     if doc:
         await db.ash_insights.update_one(
             {"category": doc["category"], "key": doc["key"]},
@@ -103,17 +106,17 @@ async def capabilities(_: dict = Depends(get_user)):
 # ═════════════════════════════════════════════════════════════════════════
 # Scheduler + Digest
 # ═════════════════════════════════════════════════════════════════════════
-from services import ash_scheduler
+from services import nua_scheduler
 
 
 @router.get("/scheduler/status")
 async def scheduler_status(_: dict = Depends(get_user)):
-    return await ash_scheduler.digest_status()
+    return await nua_scheduler.digest_status()
 
 
 @router.post("/scheduler/digest-now")
 async def force_digest(_: dict = Depends(require_owner_or_manager)):
-    return await ash_scheduler.force_digest_now()
+    return await nua_scheduler.force_digest_now()
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -209,7 +212,7 @@ async def chat_history(session_id: str, limit: int = 40, _: dict = Depends(get_u
 # ═════════════════════════════════════════════════════════════════════════
 # Ash v3.0 — Tool-calling Agent, Health Score, Daily Briefing, Permissions
 # ═════════════════════════════════════════════════════════════════════════
-from services import ash_tools, ash_agent, health_score, ash_briefing, ash_personas, ash_planner, ash_memory
+from services import nua_tools, nua_agent, health_score, nua_briefing, nua_personas, nua_planner, nua_memory
 from services import approval_service
 import json
 
@@ -218,12 +221,12 @@ import json
 @router.get("/memory")
 async def list_memory(scope: Optional[str] = None, kind: Optional[str] = None,
                         limit: int = 100, _: dict = Depends(get_user)):
-    return await ash_memory.list_memories(scope=scope, kind=kind, limit=limit)
+    return await nua_memory.list_memories(scope=scope, kind=kind, limit=limit)
 
 
 @router.get("/memory/scopes")
 async def memory_scopes(_: dict = Depends(get_user)):
-    return await ash_memory.scope_counts()
+    return await nua_memory.scope_counts()
 
 
 @router.post("/memory")
@@ -231,7 +234,7 @@ async def create_memory(body: dict, user: dict = Depends(require_owner_or_manage
     text = (body.get("text") or "").strip()
     if not text:
         raise HTTPException(400, "text is required")
-    return await ash_memory.remember(
+    return await nua_memory.remember(
         text=text,
         scope=body.get("scope", "global"),
         kind=body.get("kind", "fact"),
@@ -244,7 +247,7 @@ async def create_memory(body: dict, user: dict = Depends(require_owner_or_manage
 
 @router.delete("/memory/{memory_id}")
 async def delete_memory(memory_id: str, user: dict = Depends(require_owner_or_manager)):
-    ok = await ash_memory.forget(memory_id, actor=user.get("email"))
+    ok = await nua_memory.forget(memory_id, actor=user.get("email"))
     if not ok:
         raise HTTPException(404, "memory not found")
     return {"deleted": True}
@@ -253,7 +256,7 @@ async def delete_memory(memory_id: str, user: dict = Depends(require_owner_or_ma
 @router.get("/personas")
 async def list_personas(_: dict = Depends(get_user)):
     """List available Ash personas — used by the persona picker in Ash Chat."""
-    return ash_personas.catalog()
+    return nua_personas.catalog()
 
 
 # ─── Planning Engine ──────────────────────────────────────────────────────
@@ -262,7 +265,7 @@ async def generate_plan(body: dict, user: dict = Depends(require_owner_or_manage
     goal = (body.get("goal") or "").strip()
     if not goal:
         raise HTTPException(400, "goal is required")
-    return await ash_planner.generate_plan(
+    return await nua_planner.generate_plan(
         goal, actor=user.get("email") or "owner", persona=body.get("persona"),
     )
 
@@ -286,29 +289,29 @@ async def get_plan(plan_id: str, _: dict = Depends(get_user)):
 @router.post("/plans/{plan_id}/simulate")
 async def simulate_plan(plan_id: str, user: dict = Depends(require_owner_or_manager)):
     """Dry-run — describes writes without executing them."""
-    return await ash_planner.simulate_plan(plan_id, actor=user.get("email") or "owner")
+    return await nua_planner.simulate_plan(plan_id, actor=user.get("email") or "owner")
 
 
 @router.post("/plans/{plan_id}/approve")
 async def approve_plan(plan_id: str, user: dict = Depends(require_owner_or_manager)):
-    return await ash_planner.approve_plan(plan_id, actor=user.get("email") or "owner")
+    return await nua_planner.approve_plan(plan_id, actor=user.get("email") or "owner")
 
 
 @router.post("/plans/{plan_id}/reject")
 async def reject_plan(plan_id: str, body: dict, user: dict = Depends(require_owner_or_manager)):
-    return await ash_planner.reject_plan(
+    return await nua_planner.reject_plan(
         plan_id, actor=user.get("email") or "owner", reason=body.get("reason"),
     )
 
 
 @router.post("/plans/{plan_id}/steps/{idx}/approve")
 async def approve_step(plan_id: str, idx: int, user: dict = Depends(require_owner_or_manager)):
-    return await ash_planner.approve_step(plan_id, idx, actor=user.get("email") or "owner")
+    return await nua_planner.approve_step(plan_id, idx, actor=user.get("email") or "owner")
 
 
 @router.post("/plans/{plan_id}/steps/{idx}/reject")
 async def reject_step(plan_id: str, idx: int, body: dict, user: dict = Depends(require_owner_or_manager)):
-    return await ash_planner.reject_step(
+    return await nua_planner.reject_step(
         plan_id, idx, actor=user.get("email") or "owner", reason=body.get("reason"),
     )
 
@@ -362,7 +365,7 @@ async def draft_campaign(body: dict, user: dict = Depends(require_owner_or_manag
                             system_message="You are NUA Marketing — a CMO who ships campaigns.")\
                 .with_model("openai", "gpt-5.2")
             raw = await chat.send_message(UserMessage(text=prompt))
-            parsed = ash_agent._extract_json(raw)
+            parsed = nua_agent._extract_json(raw)
     except Exception:
         parsed = None
 
@@ -427,7 +430,7 @@ async def agent(body: dict, user: dict = Depends(get_user)):
     session_id = body.get("sessionId") or f"ash-agent-{_uuid.uuid4()}"
     persona = body.get("persona")
 
-    result = await ash_agent.run_agent_turn(
+    result = await nua_agent.run_agent_turn(
         message, session_id=session_id,
         actor=user.get("email") or "ash-agent",
         persona=persona,
@@ -455,7 +458,7 @@ async def agent(body: dict, user: dict = Depends(get_user)):
 @router.get("/tools")
 async def tool_catalog(_: dict = Depends(get_user)):
     """Enumerate available agent tools with current effective permissions."""
-    catalog = ash_tools.catalog()
+    catalog = nua_tools.catalog()
     overrides = {c["toolName"]: c for c in await db.ash_tool_config.find({}, {"_id": 0}).to_list(200)}
     for t in catalog:
         t["effectivePermission"] = (overrides.get(t["name"]) or {}).get("permission") or t["defaultPermission"]
@@ -465,7 +468,7 @@ async def tool_catalog(_: dict = Depends(get_user)):
 @router.post("/tools/{tool_name}/execute")
 async def execute_tool(tool_name: str, body: dict, user: dict = Depends(require_owner_or_manager)):
     """Manual tool invocation with permission enforcement."""
-    return await ash_tools.execute_tool(tool_name, body.get("args") or {}, actor=user.get("email"))
+    return await nua_tools.execute_tool(tool_name, body.get("args") or {}, actor=user.get("email"))
 
 
 @router.put("/tools/{tool_name}/permission")
@@ -474,7 +477,7 @@ async def set_tool_permission(tool_name: str, body: dict, _: dict = Depends(requ
     perm = (body.get("permission") or "").lower()
     if perm not in ("auto", "approval", "disabled"):
         raise HTTPException(400, "permission must be auto|approval|disabled")
-    if tool_name not in ash_tools.TOOLS:
+    if tool_name not in nua_tools.TOOLS:
         raise HTTPException(404, "Unknown tool")
     await db.ash_tool_config.update_one(
         {"toolName": tool_name},
@@ -498,12 +501,12 @@ async def get_briefing(force: bool = False, _: dict = Depends(get_user)):
         existing = await db.ash_briefings.find_one({"date": today}, {"_id": 0})
         if existing:
             return existing
-    return await ash_briefing.generate_briefing()
+    return await nua_briefing.generate_briefing()
 
 
 @router.post("/briefing/regenerate")
 async def regenerate_briefing(_: dict = Depends(require_owner_or_manager)):
-    return await ash_briefing.generate_briefing()
+    return await nua_briefing.generate_briefing()
 
 
 @router.get("/agent/trace/{session_id}")

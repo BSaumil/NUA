@@ -14,7 +14,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from database import db
-from services import ash_intelligence
+from services import nua_intelligence
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ async def _maybe_send_daily_digest(*, force: bool = False) -> None:
     existing = await db.ash_digests.find_one({"date": today_key}, {"_id": 0})
     if existing and not force:
         return
-    weekly = await ash_intelligence.generate_weekly_summary()
+    weekly = await nua_intelligence.generate_weekly_summary()
     if not weekly:
         return
     # Persist as insight so it appears on the dashboard too
@@ -85,7 +85,7 @@ async def _loop() -> None:
     await asyncio.sleep(15)
     while True:
         try:
-            result = await ash_intelligence.run_all_insights(include_summary=False)
+            result = await nua_intelligence.run_all_insights(include_summary=False)
             logger.info(f"[ash] hourly scan generated={result['generated']} categories={list(result['perCategory'].keys())}")
             await _maybe_send_daily_digest()
         except Exception as e:

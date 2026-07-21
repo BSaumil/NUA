@@ -68,16 +68,30 @@ export function SplitPaymentDialog({
   open, onClose, total, splitParts, splitMode, splitCount,
   onSetMode, onChangeCount, onUpdatePart, onPayPart, splitRemaining, loading, activeSplitIndex,
 }) {
+  const paidSoFar = Math.max(0, Math.round((Number(total) - Number(splitRemaining)) * 100) / 100);
+  const allPaid = splitRemaining === 0 && splitParts.length > 0;
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto" data-testid="split-payment-dialog">
         <DialogHeader>
-          <DialogTitle className="flex items-center justify-between">
-            <span>Split Payment — ${total.toFixed(2)}</span>
-            {splitRemaining > 0 && <Badge variant="outline" className="text-orange-600 border-orange-300" data-testid="split-remaining-badge">${splitRemaining.toFixed(2)} remaining</Badge>}
-            {splitRemaining === 0 && splitParts.length > 0 && <Badge className="bg-green-600 text-white">All paid</Badge>}
-          </DialogTitle>
+          <DialogTitle>Split Payment</DialogTitle>
         </DialogHeader>
+        {/* Prominent bill breakdown — remaining is the number the cashier
+            actually cares about after each guest pays. */}
+        <div className="grid grid-cols-3 gap-2 my-2 text-center">
+          <div className="rounded-lg bg-gray-50 border p-2" data-testid="split-total-tile">
+            <p className="text-[10px] uppercase text-gray-500 font-bold">Bill total</p>
+            <p className="text-xl font-bold">${Number(total).toFixed(2)}</p>
+          </div>
+          <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-2" data-testid="split-paid-tile">
+            <p className="text-[10px] uppercase text-emerald-700 font-bold">Paid so far</p>
+            <p className="text-xl font-bold text-emerald-700">${paidSoFar.toFixed(2)}</p>
+          </div>
+          <div className={`rounded-lg border p-2 ${allPaid ? 'bg-emerald-100 border-emerald-300' : 'bg-orange-50 border-orange-200'}`} data-testid="split-remaining-tile">
+            <p className={`text-[10px] uppercase font-bold ${allPaid ? 'text-emerald-700' : 'text-orange-700'}`}>{allPaid ? 'All settled' : 'Remaining'}</p>
+            <p className={`text-xl font-bold ${allPaid ? 'text-emerald-700' : 'text-orange-700'}`}>${Number(splitRemaining).toFixed(2)}</p>
+          </div>
+        </div>
         {(() => {
           if (splitMode === 'custom' && splitParts.length > 0) {
             const sum = splitParts.reduce((s, p) => s + Number(p.amount || 0), 0);

@@ -19,6 +19,7 @@ import { reservationsAPI, floorPlansAPI, aiWave2API, reservationsAIAPI } from '.
 import { toast } from 'sonner';
 import BookingsInbox from './BookingsInbox';
 import BookingSourceStrip from '../components/reservations/BookingSourceStrip';
+import BookingMonthCalendar from '../components/reservations/BookingMonthCalendar';
 
 const TIME_SLOTS = [];
 for (let h = 9; h <= 22; h++) {
@@ -52,7 +53,7 @@ export default function Reservations() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editId, setEditId] = useState(null);
   const [form, setForm] = useState({ ...emptyForm });
-  const [view, setView] = useState('list'); // list | calendar
+  const [view, setView] = useState('list'); // list | calendar | month
   const [mainTab, setMainTab] = useState('bookings'); // bookings | inbox
 
   const fetchData = useCallback(async () => {
@@ -274,6 +275,7 @@ export default function Reservations() {
           <TabsList>
             <TabsTrigger value="list" data-testid="list-view-btn">List</TabsTrigger>
             <TabsTrigger value="calendar" data-testid="calendar-view-btn">Timeline</TabsTrigger>
+            <TabsTrigger value="month" data-testid="month-view-btn">Month</TabsTrigger>
           </TabsList>
         </Tabs>
       </div>
@@ -409,6 +411,9 @@ export default function Reservations() {
       )}
 
       {/* Timeline / Calendar View */}
+      {view === 'month' && (
+        <BookingMonthCalendar onSelectDate={(d) => { setSelectedDate(d); setView('list'); }} />
+      )}
       {view === 'calendar' && (
         <Card className="border-0 shadow-sm">
           <CardContent className="p-4">
