@@ -261,6 +261,31 @@ def accrue_leave(ordinary_hours: float, *, is_casual: bool = False) -> Dict[str,
 
 
 # ═════════════════════════════════════════════════════════════════════════
+# 4b) Pay-rate unit conversion — payRate is stored in whatever unit
+# salaryType names (hourly / weekly / annually); every hours×rate
+# calculation needs it as an hourly-equivalent first.
+# ═════════════════════════════════════════════════════════════════════════
+STANDARD_WEEKLY_HOURS = 38.0  # same full-time assumption used for leave accrual above
+
+
+def effective_hourly_rate(pay_rate: float, salary_type: Optional[str]) -> float:
+    """Convert a staff member's stored payRate into an hourly-equivalent for
+    payroll/cost math. 'hourly' passes through unchanged; 'weekly' divides by
+    the standard full-time week; 'annually' divides by 52 weeks first.
+    'daily' is kept for records created before the Hourly/Weekly/Annually
+    options existed, treated as a standard 7.6-hour day."""
+    pay_rate = float(pay_rate or 0)
+    salary_type = (salary_type or "hourly").lower()
+    if salary_type == "weekly":
+        return round(pay_rate / STANDARD_WEEKLY_HOURS, 4)
+    if salary_type in ("annually", "annual", "yearly"):
+        return round(pay_rate / 52 / STANDARD_WEEKLY_HOURS, 4)
+    if salary_type == "daily":
+        return round(pay_rate / (STANDARD_WEEKLY_HOURS / 5), 4)
+    return pay_rate
+
+
+# ═════════════════════════════════════════════════════════════════════════
 # 5) Full pay-run row assembly
 # ═════════════════════════════════════════════════════════════════════════
 def assemble_payslip_row(

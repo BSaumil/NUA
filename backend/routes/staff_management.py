@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Request, Depends
 from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone, timedelta
+from utils.au_payroll import effective_hourly_rate
 import uuid
 
 router = APIRouter()
@@ -50,6 +51,7 @@ async def clock_in(user: dict = Depends(get_user)):
         "clockIn": datetime.now(timezone.utc).isoformat(),
         "clockOut": None, "breakMinutes": 0, "hoursWorked": 0,
         "payRate": user.get("payRate", 0),
+        "salaryType": user.get("salaryType", "hourly"),
     }
     await db.timecards.insert_one(tc)
     tc.pop("_id", None)
@@ -160,7 +162,7 @@ async def calculate_payrun( period: str = "week", _: dict = Depends(require_owne
     for s in staff:
         cards = [tc for tc in timecards if tc.get("staffId") == s["id"]]
         total_hours = sum(tc.get("hoursWorked", 0) for tc in cards)
-        rate = s.get("payRate", 0)
+        rate = effective_hourly_rate(s.get("payRate", 0), s.get("salaryType"))
         gross = round(total_hours * rate, 2)
         super_amount = round(gross * 0.115, 2)  # 11.5% super in AU
         tax = round(gross * 0.20, 2)  # Approx withholding
@@ -248,11 +250,12 @@ async def get_staff_reports( period: str = "week", _: dict = Depends(require_own
         total_hours = sum(tc.get("hoursWorked", 0) for tc in completed)
         total_shifts = len(completed)
         avg_hours = total_hours / max(total_shifts, 1)
-        total_wages = round(total_hours * s.get("payRate", 0), 2)
+        rate = effective_hourly_rate(s.get("payRate", 0), s.get("salaryType"))
+        total_wages = round(total_hours * rate, 2)
 
         staff_stats.append({
             "id": s["id"], "name": s["name"], "role": s["role"],
-            "payRate": s.get("payRate", 0),
+            "payRate": rate,
             "totalShifts": total_shifts, "totalHours": round(total_hours, 2),
             "avgHoursPerShift": round(avg_hours, 2), "totalWages": total_wages,
             "currentlyClockedIn": any(tc.get("clockOut") is None for tc in cards),

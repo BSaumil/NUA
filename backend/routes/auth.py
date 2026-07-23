@@ -315,6 +315,7 @@ async def delete_staff(staff_id: str, request: Request):
 # --- Owner-Only Reports ---
 @router.get("/reports/labor-cost")
 async def get_labor_cost_report(request: Request):
+    from utils.au_payroll import effective_hourly_rate, STANDARD_WEEKLY_HOURS
     user = await get_current_user(request)
     if user["role"] != "owner":
         raise HTTPException(status_code=403, detail="Owner access only")
@@ -324,9 +325,16 @@ async def get_labor_cost_report(request: Request):
     expenses = await db.expenses.find({}, {"_id": 0}).to_list(10000)
     total_expenses = sum(e.get("amount", 0) for e in expenses)
     total_cogs = sum(e.get("amount", 0) for e in expenses if e.get("category") in ("Ingredients", "Food Supplies", "Beverages"))
-    roster_cost = sum(s.get("payRate", 0) * 38 for s in staff)  # 38 hrs/week estimate
+    # payRate is stored in whatever unit salaryType names — convert to an
+    # hourly-equivalent before the *38 standard-week estimate, or a flat
+    # hourly rate (like a casual on $30/hr) gets treated as if it were an
+    # annual salary of $30/year and vice versa.
+    rates = {s["id"]: effective_hourly_rate(s.get("payRate", 0), s.get("salaryType")) for s in staff}
+    roster_cost = sum(rates[s["id"]] * STANDARD_WEEKLY_HOURS for s in staff)
     return {
-        "staff": [{"name": s["name"], "role": s["role"], "payRate": s.get("payRate", 0), "weeklyEstimate": s.get("payRate", 0) * 38} for s in staff],
+        "staff": [{"name": s["name"], "role": s["role"], "payRate": s.get("payRate", 0),
+                   "salaryType": s.get("salaryType", "hourly"),
+                   "weeklyEstimate": round(rates[s["id"]] * STANDARD_WEEKLY_HOURS, 2)} for s in staff],
         "totalRosterCost": round(roster_cost, 2),
         "totalRevenue": round(total_revenue, 2),
         "cogs": round(total_cogs, 2),

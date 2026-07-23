@@ -14,6 +14,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { staffMgmtAPI } from '../services/api';
 import { toast } from 'sonner';
 import axios from 'axios';
+import { effectiveHourlyRate, salaryTypeSuffix } from '../lib/staffPay';
 import { DndContext, useDraggable, useDroppable, DragOverlay, PointerSensor, KeyboardSensor, useSensor, useSensors } from '@dnd-kit/core';
 
 const API = process.env.REACT_APP_BACKEND_URL;
@@ -180,7 +181,7 @@ export default function StaffRoster() {
       const start = s.startTime?.split(':').map(Number) || [0, 0];
       const end = s.endTime?.split(':').map(Number) || [0, 0];
       const hours = Math.max((end[0] + end[1] / 60) - (start[0] + start[1] / 60), 0);
-      const cost = hours * (staffMember.payRate || 0);
+      const cost = hours * effectiveHourlyRate(staffMember.payRate, staffMember.salaryType);
       totalHours += hours;
       totalCost += cost;
       const day = s.date || 'Unknown';
@@ -318,7 +319,7 @@ export default function StaffRoster() {
                     });
                     const dayCost = dayShifts.reduce((sum, s) => {
                       const sm = staff.find(st => st.id === s.staffId) || {};
-                      return sum + calcShiftHours(s) * (sm.payRate || 0);
+                      return sum + calcShiftHours(s) * effectiveHourlyRate(sm.payRate, sm.salaryType);
                     }, 0);
                     return (
                       <DroppableDay key={day} day={day} dayCost={dayCost} theme={theme}>
@@ -376,7 +377,7 @@ export default function StaffRoster() {
                     <td className="p-3 text-xs">{tc.clockOut ? new Date(tc.clockOut).toLocaleString() : <Badge className="bg-green-100 text-green-700 text-xs">Active</Badge>}</td>
                     <td className="p-3 text-right">{tc.breakMinutes}m</td>
                     <td className="p-3 text-right font-bold">{tc.hoursWorked}h</td>
-                    {canManage && <td className="p-3 text-right font-mono" style={{ color: theme.primary }}>${(tc.hoursWorked * (tc.payRate || 0)).toFixed(2)}</td>}
+                    {canManage && <td className="p-3 text-right font-mono" style={{ color: theme.primary }}>${(tc.hoursWorked * effectiveHourlyRate(tc.payRate, tc.salaryType)).toFixed(2)}</td>}
                   </tr>
                 ))}
               </tbody>
@@ -479,6 +480,7 @@ export default function StaffRoster() {
             {weekForm.staffId && (() => {
               const staffMember = staff.find(s => s.id === weekForm.staffId);
               const rate = staffMember?.payRate || 0;
+              const hourlyRate = effectiveHourlyRate(staffMember?.payRate, staffMember?.salaryType);
               const totalHrs = Object.values(weekForm.shifts).filter(s => s.enabled).reduce((sum, s) => {
                 const st = s.startTime?.split(':').map(Number) || [0, 0];
                 const en = s.endTime?.split(':').map(Number) || [0, 0];
@@ -487,8 +489,8 @@ export default function StaffRoster() {
               return totalHrs > 0 ? (
                 <div className="p-3 bg-gray-50 rounded-lg text-sm">
                   <div className="flex justify-between"><span>Total Hours:</span><span className="font-bold">{totalHrs.toFixed(1)}h</span></div>
-                  <div className="flex justify-between"><span>Rate:</span><span>${rate}/hr</span></div>
-                  <div className="flex justify-between text-emerald-700 font-bold"><span>Estimated Cost:</span><span>${(totalHrs * rate).toFixed(2)}</span></div>
+                  <div className="flex justify-between"><span>Rate:</span><span>${rate}{salaryTypeSuffix(staffMember?.salaryType)}</span></div>
+                  <div className="flex justify-between text-emerald-700 font-bold"><span>Estimated Cost:</span><span>${(totalHrs * hourlyRate).toFixed(2)}</span></div>
                 </div>
               ) : null;
             })()}

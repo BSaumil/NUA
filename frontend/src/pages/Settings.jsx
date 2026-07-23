@@ -12,6 +12,7 @@ import WalletCredentialsPanel from '../components/settings/WalletCredentialsPane
 import PermissionsPanel from '../components/settings/PermissionsPanel';
 import { toast } from 'sonner';
 import axios from 'axios';
+import { salaryTypeSuffix } from '../lib/staffPay';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
@@ -480,7 +481,7 @@ const Settings = () => {
                       {(s.status || 'active').toUpperCase()}
                     </span>
                   </td>
-                  {user?.role === 'owner' && <td className="p-4 text-right font-mono text-sm">${s.payRate || 0}<span className="text-gray-400 text-[10px] ml-0.5">/{(s.salaryType || 'hourly').slice(0, 2)}</span></td>}
+                  {user?.role === 'owner' && <td className="p-4 text-right font-mono text-sm">${s.payRate || 0}<span className="text-gray-400 text-[10px] ml-0.5">{salaryTypeSuffix(s.salaryType)}</span></td>}
                   {user?.role === 'owner' && <td className="p-4 text-center">
                     <div className="flex justify-center gap-2">
                       <Button variant="outline" size="sm" onClick={() => openEditStaff(s)} data-testid={`edit-staff-${s.id}`}><Edit size={14} /></Button>
@@ -663,7 +664,7 @@ const Settings = () => {
                 <label className="text-xs font-medium text-gray-500 mb-1 block">Salary Type</label>
                 <select className="w-full p-2 border rounded-md text-sm" value={staffForm.salaryType} onChange={e => setStaffForm({ ...staffForm, salaryType: e.target.value })} data-testid="staff-salary-type">
                   <option value="hourly">Hourly</option>
-                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
                   <option value="annually">Annually</option>
                 </select>
               </div>
