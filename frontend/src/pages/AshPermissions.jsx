@@ -6,7 +6,7 @@ import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../components/ui/select';
 import { toast } from 'sonner';
-import { ShieldCheck, RefreshCw, Search, Lock, Zap, Eye } from 'lucide-react';
+import { ShieldCheck, RefreshCw, Search, Lock, Zap, Eye, Sparkles, TrendingUp } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
@@ -33,14 +33,22 @@ export default function AshPermissions() {
   const [query, setQuery] = useState('');
   const [moduleFilter, setModuleFilter] = useState('all');
   const [riskFilter, setRiskFilter] = useState('all');
+  // Graduated trust: tools that have earned their way to a promotion suggestion.
+  const [suggestions, setSuggestions] = useState([]);
+  const [dismissed, setDismissed] = useState(() => new Set());
+  const [promoting, setPromoting] = useState(() => new Set());
 
   const load = useCallback(async () => {
     setRefreshing(true);
     try {
-      const r = await axios.get(`${API}/nua/tools`, { headers: H() });
-      setTools(r.data);
-    } catch { toast.error('Failed to load tools'); }
-    finally { setRefreshing(false); }
+      const [toolsRes, suggRes] = await Promise.allSettled([
+        axios.get(`${API}/nua/tools`, { headers: H() }),
+        axios.get(`${API}/nua/trust/suggestions`, { headers: H() }),
+      ]);
+      if (toolsRes.status === 'fulfilled') setTools(toolsRes.value.data);
+      else toast.error('Failed to load tools');
+      if (suggRes.status === 'fulfilled') setSuggestions(suggRes.value.data);
+    } finally { setRefreshing(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -51,6 +59,21 @@ export default function AshPermissions() {
       setTools(ts => ts.map(t => t.name === toolName ? { ...t, effectivePermission: permission } : t));
       toast.success(`${toolName} \u2192 ${permission}`);
     } catch { toast.error('Failed'); }
+  };
+
+  const promoteTool = async (toolName) => {
+    setPromoting(s => new Set(s).add(toolName));
+    try {
+      await axios.post(`${API}/nua/tools/${toolName}/promote`, {}, { headers: H() });
+      toast.success(`${toolName} promoted to Auto \u2014 earned it with a clean streak`);
+      setSuggestions(s => s.filter(x => x.toolName !== toolName));
+      load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Promotion failed \u2014 the streak may have reset');
+      load();
+    } finally {
+      setPromoting(s => { const n = new Set(s); n.delete(toolName); return n; });
+    }
   };
 
   const modules = useMemo(() => Array.from(new Set(tools.map(t => t.module))).sort(), [tools]);
@@ -103,6 +126,45 @@ export default function AshPermissions() {
           <RefreshCw size={14} className={`mr-1.5 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
         </Button>
       </div>
+
+      {/* Graduated trust: tools with a clean-enough streak to suggest promoting */}
+      {suggestions.filter(s => !dismissed.has(s.toolName)).length > 0 && (
+        <Card className="border-emerald-200 bg-emerald-50/60" data-testid="trust-suggestions-banner">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <Sparkles size={16} className="text-emerald-600" />
+              <p className="font-semibold text-sm text-emerald-800">
+                NUA earned trust on {suggestions.filter(s => !dismissed.has(s.toolName)).length} tool
+                {suggestions.filter(s => !dismissed.has(s.toolName)).length === 1 ? '' : 's'} this week
+              </p>
+            </div>
+            {suggestions.filter(s => !dismissed.has(s.toolName)).map(s => (
+              <div key={s.toolName} className="flex items-center justify-between gap-3 bg-white rounded-lg border border-emerald-200 px-3 py-2"
+                data-testid={`suggestion-${s.toolName}`}>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate">{s.label}</p>
+                  <p className="text-xs text-slate-500">
+                    {s.consecutiveApproved}/{s.minStreak} approved with no rejections
+                    {s.streakStartedAt ? ` since ${new Date(s.streakStartedAt).toLocaleDateString()}` : ''}
+                  </p>
+                </div>
+                <div className="flex gap-2 flex-shrink-0">
+                  <Button size="sm" variant="ghost" onClick={() => setDismissed(d => new Set(d).add(s.toolName))}
+                    data-testid={`dismiss-suggestion-${s.toolName}`}>Not yet</Button>
+                  <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                    disabled={promoting.has(s.toolName)} onClick={() => promoteTool(s.toolName)}
+                    data-testid={`promote-${s.toolName}`}>
+                    <TrendingUp size={14} className="mr-1" /> {promoting.has(s.toolName) ? 'Promoting…' : 'Promote to Auto'}
+                  </Button>
+                </div>
+              </div>
+            ))}
+            <p className="text-[11px] text-emerald-700/70">
+              A single rejection resets the streak to zero — losing trust is instant, earning it back takes a fresh clean run.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Stat summary */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -175,6 +237,7 @@ export default function AshPermissions() {
                   <th className="p-2 text-left">Risk</th>
                   <th className="p-2 text-left">Impact</th>
                   <th className="p-2 text-left">Default</th>
+                  <th className="p-2 text-left">Trust</th>
                   <th className="p-2 pr-4 text-left">Owner override</th>
                 </tr>
               </thead>
@@ -188,6 +251,19 @@ export default function AshPermissions() {
                     <td className="p-2"><Badge className={RISK_BG[t.risk] || 'bg-slate-500'}>{t.risk}</Badge></td>
                     <td className="p-2 text-xs text-slate-500">{t.expectedImpact}</td>
                     <td className="p-2 text-xs text-slate-500">{t.defaultPermission}</td>
+                    <td className="p-2 text-xs" data-testid={`trust-${t.name}`}>
+                      {!t.trust ? (
+                        <span className="text-slate-300">—</span>
+                      ) : t.promotedBy === 'trust' ? (
+                        <span className="text-emerald-600 font-medium flex items-center gap-1"><Sparkles size={11} /> Earned</span>
+                      ) : t.trust.consecutiveApproved > 0 ? (
+                        <span className={t.trust.eligibleSince ? 'text-emerald-600 font-medium' : 'text-slate-500'}>
+                          {t.trust.consecutiveApproved}/{t.trust.minStreak} clean
+                        </span>
+                      ) : (
+                        <span className="text-slate-300">—</span>
+                      )}
+                    </td>
                     <td className="p-2 pr-4">
                       <Select value={t.effectivePermission} onValueChange={v => setPermission(t.name, v)}>
                         <SelectTrigger className="w-32" data-testid={`perm-${t.name}`}><SelectValue /></SelectTrigger>

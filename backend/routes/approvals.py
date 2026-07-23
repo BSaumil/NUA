@@ -29,8 +29,23 @@ async def get_approval(aid: str, _: dict = Depends(get_user)):
     return doc
 
 
-async def _execute_action(params: dict, action_type: str, rule_id: Optional[str] = None) -> dict:
-    """Look up a rule + action and execute it with params."""
+async def _execute_action(params: dict, action_type: str, rule_id: Optional[str] = None,
+                           source: Optional[str] = None) -> dict:
+    """Look up a rule action (rules engine) or an NUA agent tool and execute it.
+
+    Agent-tool approvals (source="ash_agent") are dispatched to nua_tools.TOOLS
+    first — action_type is the tool name in that case, e.g. "issue_voucher".
+    Everything else goes through the rules-engine ACTION_LIBRARY as before.
+    Gated on source rather than name collision: a couple of names (issue_voucher,
+    mark_dish_86) exist in both registries with slightly different param shapes,
+    so we only redirect when we know the approval actually came from the agent.
+    """
+    if source == "ash_agent":
+        from services import nua_tools
+        tool = nua_tools.TOOLS.get(action_type)
+        if not tool:
+            return {"error": f"Unknown agent tool: {action_type}"}
+        return await tool.execute(params)
     action_meta = re_svc.ACTION_LIBRARY.get(action_type)
     if not action_meta:
         return {"error": f"Unknown action {action_type}"}
@@ -51,7 +66,7 @@ async def approve(aid: str, user: dict = Depends(require_owner_or_manager)):
         raise HTTPException(404, "Approval not found")
 
     async def exec_fn(params):
-        return await _execute_action(params, doc["actionType"], doc.get("sourceRef"))
+        return await _execute_action(params, doc["actionType"], doc.get("sourceRef"), doc.get("source"))
 
     try:
         return await approval_service.approve(aid, actor=user["email"], execute_fn=exec_fn)
