@@ -133,7 +133,7 @@ export default function AshChat() {
     return (
       <button
         onClick={() => { setOpen(true); setMinimized(false); }}
-        className="fixed bottom-5 right-5 z-50 h-14 w-14 rounded-full text-white shadow-xl flex items-center justify-center transition-all hover:scale-105"
+        className="fixed bottom-20 right-5 z-50 h-14 w-14 rounded-full text-white shadow-xl flex items-center justify-center transition-all hover:scale-105"
         style={{ background: currentPersona.color }}
         data-testid="ash-chat-fab"
         aria-label="Ask NUA"

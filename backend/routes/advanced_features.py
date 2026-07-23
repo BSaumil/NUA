@@ -22,6 +22,26 @@ async def save_business_settings(data: dict):
     return {"message": "Business settings saved"}
 
 
+# Brand theme (colors) — shared across every terminal/device for the business,
+# not just the browser that changed it. The Settings color pickers still give
+# an instant local preview as you drag/type; "Save" is what makes it apply
+# everywhere else too.
+@router.get("/business/theme")
+async def get_business_theme():
+    doc = await db.settings.find_one({"key": "business_theme"}, {"_id": 0})
+    return doc.get("value") if doc else None
+
+
+@router.post("/business/theme")
+async def save_business_theme(data: dict, _: dict = Depends(require_owner_or_manager)):
+    allowed = {"primary", "secondary", "accent", "background", "text", "sidebar"}
+    theme = {k: v for k, v in data.items() if k in allowed and isinstance(v, str)}
+    await db.settings.update_one(
+        {"key": "business_theme"}, {"$set": {"key": "business_theme", "value": theme}}, upsert=True
+    )
+    return theme
+
+
 # ============ TIP MANAGEMENT (Toast-style) ============
 @router.post("/tips/add")
 async def add_tip(data: dict):

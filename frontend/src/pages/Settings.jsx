@@ -17,7 +17,7 @@ const API = process.env.REACT_APP_BACKEND_URL;
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
 
 const Settings = () => {
-  const { theme, updateTheme, resetTheme } = useTheme();
+  const { theme, updateTheme, resetTheme, saveThemeToServer, themeSaving, themeSavedAt } = useTheme();
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('theme');
   const [trainingMode, setTrainingMode] = useState(false);
@@ -362,18 +362,32 @@ const Settings = () => {
       {activeTab === 'theme' && (
         <Card><CardHeader><CardTitle>Color Customization</CardTitle></CardHeader>
         <CardContent className="space-y-6">
+          <p className="text-sm text-gray-500 -mt-2">
+            Changes preview instantly on this screen. Click <strong>Save</strong> to push the brand
+            colors to every terminal — until then, they only apply to this browser.
+          </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {[{ key: 'primary', label: 'Primary Color' }, { key: 'secondary', label: 'Secondary Color' }, { key: 'accent', label: 'Accent Color' }, { key: 'sidebar', label: 'Sidebar Background' }].map(c => (
               <div key={c.key} className="space-y-2">
                 <label className="font-medium text-sm">{c.label}</label>
                 <div className="flex items-center gap-3">
-                  <input type="color" value={theme[c.key]} onChange={e => updateTheme({ [c.key]: e.target.value })} className="w-20 h-10 rounded border cursor-pointer" />
-                  <Input value={theme[c.key]} onChange={e => updateTheme({ [c.key]: e.target.value })} className="flex-1 font-mono text-sm" />
+                  <input type="color" value={theme[c.key]} onChange={e => updateTheme({ [c.key]: e.target.value })} className="w-20 h-10 rounded border cursor-pointer" data-testid={`theme-color-${c.key}`} />
+                  <Input value={theme[c.key]} onChange={e => updateTheme({ [c.key]: e.target.value })} className="flex-1 font-mono text-sm" data-testid={`theme-color-input-${c.key}`} />
                 </div>
               </div>
             ))}
           </div>
-          <Button variant="outline" onClick={resetTheme}>Reset to Default</Button>
+          <div className="flex items-center gap-3">
+            <Button style={{ backgroundColor: theme.primary }} disabled={themeSaving}
+              onClick={async () => {
+                try { await saveThemeToServer(); toast.success('Saved — every terminal will pick this up'); }
+                catch { toast.error('Failed to save theme'); }
+              }} data-testid="save-theme-btn">
+              <Save size={16} className="mr-1" /> {themeSaving ? 'Saving…' : 'Save to all terminals'}
+            </Button>
+            <Button variant="outline" onClick={resetTheme} data-testid="reset-theme-btn">Reset to Default</Button>
+            {themeSavedAt && <span className="text-xs text-gray-400">Saved {new Date(themeSavedAt).toLocaleTimeString()}</span>}
+          </div>
         </CardContent></Card>
       )}
 

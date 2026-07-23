@@ -113,3 +113,38 @@ code {
         border-bottom-color: inherit;
     }
 }
+
+/* Dark-mode retrofit for pages written with hardcoded light-only Tailwind
+ * classes (bg-white, text-gray-500, etc.) instead of the semantic
+ * bg-card/text-muted-foreground tokens above. Rather than touching every
+ * page individually, route the common light-only utilities to the same
+ * CSS variables in dark mode — same intent (card surface / muted text /
+ * primary text / border), just wired up. Only low-numbered gray shades are
+ * remapped; bg-gray-700/800/900 etc. are left alone since those are already
+ * deliberately-dark elements in some pages (e.g. dark hero sections) that
+ * should look the same in both modes. Higher specificity than the plain
+ * Tailwind utility (two classes vs one) means no !important needed, and
+ * everything here is scoped under .dark so light mode is untouched. */
+@layer base {
+    .dark .bg-white { background-color: hsl(var(--card)); }
+    .dark .bg-gray-50 { background-color: hsl(var(--muted)); }
+    .dark .bg-gray-100 { background-color: hsl(var(--muted)); }
+    .dark .bg-gray-200 { background-color: hsl(var(--secondary)); }
+    .dark .hover\:bg-gray-50:hover { background-color: hsl(var(--accent)); }
+    .dark .hover\:bg-gray-100:hover { background-color: hsl(var(--accent)); }
+    .dark .hover\:bg-gray-200:hover { background-color: hsl(var(--accent)); }
+
+    .dark .text-gray-300,
+    .dark .text-gray-400,
+    .dark .text-gray-500,
+    .dark .text-gray-600 { color: hsl(var(--muted-foreground)); }
+
+    .dark .text-gray-700,
+    .dark .text-gray-800,
+    .dark .text-gray-900 { color: hsl(var(--foreground)); }
+
+    .dark .border-gray-100,
+    .dark .border-gray-200,
+    .dark .border-gray-300,
+    .dark .border-gray-400 { border-color: hsl(var(--border)); }
+}
