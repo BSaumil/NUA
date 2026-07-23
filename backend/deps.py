@@ -24,3 +24,24 @@ async def require_owner(user: dict = Depends(get_user)) -> dict:
     if user.get("role") != "owner":
         raise HTTPException(status_code=403, detail="Owner only")
     return user
+
+
+def require_permission(perm_id: str):
+    """Gate an endpoint on the same granular permission catalog Settings >
+    Permissions already manages. Owner always passes. Anyone else needs
+    `perm_id` in their effective permissions — custom override, else the
+    owner's saved default for their role, else the code-level default.
+    Mirrors the frontend's AuthContext.hasPermission(), so what a staff
+    member can *see* in the UI and what the API actually *allows* agree."""
+    async def checker(user: dict = Depends(get_user)) -> dict:
+        if user.get("role") == "owner":
+            return user
+        from routes.auth import effective_permissions
+        perms = await effective_permissions(user)
+        if "*" in perms or perm_id in perms:
+            return user
+        raise HTTPException(
+            status_code=403,
+            detail=f"You don't have access to this yet — ask the owner to grant '{perm_id}' access in Settings > Permissions",
+        )
+    return checker

@@ -23,7 +23,7 @@ ROLE_PERMISSIONS = {
     "kitchen": ["kitchen", "pre-shift"],
 }
 
-async def _effective_permissions(user: dict) -> list:
+async def effective_permissions(user: dict) -> list:
     """Return the effective permission list for a user:
       1. custom overrides if present on the user doc
       2. else DB-persisted role defaults (`db.role_permissions`)
@@ -160,7 +160,7 @@ async def login(req: LoginRequest, request: Request, response: Response):
     user.pop("_id", None)
     user.pop("password_hash", None)
     # Add effective permissions (custom > role DB override > code default)
-    user["permissions"] = await _effective_permissions(user)
+    user["permissions"] = await effective_permissions(user)
     return {"user": user, "token": access}
 
 @router.post("/register")
@@ -199,7 +199,7 @@ async def register(req: RegisterRequest, response: Response):
 @router.get("/me")
 async def me(request: Request):
     user = await get_current_user(request)
-    user["permissions"] = await _effective_permissions(user)
+    user["permissions"] = await effective_permissions(user)
     return user
 
 @router.post("/logout")
