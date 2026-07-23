@@ -218,6 +218,33 @@ async def _tx_create_task(a):
     return {"taskId": doc["id"]}
 
 
+async def _tx_check_promo_voucher(a):
+    """Read-only: look up a venue promo/voucher code (e.g. one embedded in an
+    email campaign) and report whether it's still redeemable. Staff can ask
+    NUA to check a code a guest presents at the venue before it's applied
+    through the normal POS voucher flow — NUA never redeems it directly, so
+    the money-moving step always stays inside POS's own audit trail."""
+    code = (a.get("code") or "").strip().upper()
+    if not code:
+        return {"error": "code required"}
+    v = await db.commerce_vouchers.find_one(
+        {"$or": [{"manualCode": code}, {"barcode": code}, {"id": code}]}, {"_id": 0},
+    )
+    if not v:
+        return {"valid": False, "code": code, "reason": "Code not found"}
+    from routes.v26_commerce import _voucher_within_window
+    valid = bool(v.get("active")) and _voucher_within_window(v)
+    reason = None
+    if not valid:
+        reason = "Deactivated" if not v.get("active") else "Expired or fully redeemed"
+    return {
+        "valid": valid, "code": v.get("manualCode"), "name": v.get("name"),
+        "discountType": v.get("discountType"), "value": v.get("value"),
+        "minSpend": v.get("minSpend"), "usedCount": v.get("usedCount"),
+        "maxUses": v.get("maxUses"), "validTo": v.get("validTo"), "reason": reason,
+    }
+
+
 async def _tx_create_promotion(a):
     doc = {"id": str(uuid.uuid4()), "name": a["name"], "type": a.get("type", "percent"),
            "discount": float(a.get("discount") or 10), "active": True, "createdBy": "ash-agent",
@@ -441,6 +468,10 @@ _TOOL_DEFS: List[Dict[str, Any]] = [
                                  "type": {"type": "string"}, "productId": {"type": "string"}},
                  "required": ["name"]},
      "fn": _tx_create_promotion, "impact": "revenue"},
+    {"n": "check_promo_voucher", "l": "Check whether a promo/voucher code is still redeemable", "m": "Marketing",
+     "r": "low", "p": "auto",
+     "params": {"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]},
+     "fn": _tx_check_promo_voucher, "impact": "informational"},
 
     # ── Staff ──
     {"n": "create_staff_task", "l": "Create a task for a staff member", "m": "Staff", "r": "low", "p": "auto",

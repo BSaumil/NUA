@@ -21,6 +21,7 @@ import CustomerCombobox from '../components/pos/CustomerCombobox';
 import { QrPaymentDialog, UpiPaymentDialog, SplitPaymentDialog } from '../components/pos/PaymentDialogs';
 import ModifierSheet from '../components/pos/ModifierSheet';
 import POSHeaderBar from '../components/pos/POSHeaderBar';
+import ScanVoucherButton from '../components/pos/ScanVoucherButton';
 import { CategoryIcon } from './Categories';
 
 // SwipeableCartItem and CustomerCombobox now live in components/pos/.
@@ -229,8 +230,8 @@ const POSTerminal = () => {
     v26API.listVouchers().then(r => setAvailableVouchers(r.data || [])).catch(() => {});
   }, [showDiscountPicker]);
 
-  const applyManualCode = async () => {
-    const code = (voucherCode || '').trim().toUpperCase();
+  const applyManualCode = async (codeOverride) => {
+    const code = (codeOverride ?? voucherCode ?? '').trim().toUpperCase();
     if (!code) return;
     setVoucherLoading(true);
     try {
@@ -244,6 +245,14 @@ const POSTerminal = () => {
     } catch (e) {
       toast({ title: 'Could not apply', description: e?.response?.data?.detail || 'Invalid code', variant: 'destructive' });
     } finally { setVoucherLoading(false); }
+  };
+
+  // Scanning fills the input (so staff sees what was read) and applies it —
+  // same server-side validation path as a hand-typed code.
+  const handleScannedVoucher = (rawValue) => {
+    const code = rawValue.trim().toUpperCase();
+    setVoucherCode(code);
+    applyManualCode(code);
   };
 
   const applyAvailableVoucher = async (v) => {
@@ -1159,7 +1168,8 @@ const POSTerminal = () => {
                 <div className="flex gap-2">
                   <Input value={voucherCode} onChange={e => setVoucherCode(e.target.value)}
                     placeholder="Voucher code (NUA-XXXX)" className="text-sm" data-testid="voucher-code-input" />
-                  <Button onClick={applyManualCode} disabled={voucherLoading || !voucherCode} data-testid="apply-voucher-btn" style={{ background: theme.primary }}>
+                  <ScanVoucherButton onDetected={handleScannedVoucher} />
+                  <Button onClick={() => applyManualCode()} disabled={voucherLoading || !voucherCode} data-testid="apply-voucher-btn" style={{ background: theme.primary }}>
                     {voucherLoading ? '…' : 'Apply'}
                   </Button>
                 </div>

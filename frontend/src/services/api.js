@@ -377,6 +377,9 @@ export const advancedAPI = {
   createCampaign: (data) => api.post('/marketing/campaigns', data),
   sendCampaign: (id) => api.post(`/marketing/campaigns/${id}/send`),
   deleteCampaign: (id) => api.delete(`/marketing/campaigns/${id}`),
+  getCampaignTemplates: () => api.get('/marketing/campaigns/templates'),
+  draftCampaign: (data) => api.post('/marketing/campaigns/draft', data),
+  improveCampaignCopy: (data) => api.post('/marketing/campaigns/improve', data),
 };
 
 // Staff Management — PIN, Timecards, Roster, Payrun
