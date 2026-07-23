@@ -1111,7 +1111,6 @@ const POSTerminal = () => {
                 </div>
               );
             })}
-            <div className="flex justify-between text-sm"><span>{labels.tax || 'GST (10%)'}</span><span>${totals.gst}</span></div>
             {totals.pointsDiscount && (
               <div className="flex justify-between text-sm text-green-700" data-testid="points-discount-row">
                 <span>⭐ Points redeemed ({pointsToRedeem} pts)</span><span>-${totals.pointsDiscount}</span>
@@ -1147,12 +1146,22 @@ const POSTerminal = () => {
                 <span className="font-bold text-amber-700">+{Math.floor(parseFloat(totals.total))} pts</span>
               </div>
             )}
+            {parseFloat(totals.surchargeAmount) > 0 && (
+              <div className="flex justify-between text-sm text-amber-700" data-testid="surcharge-row">
+                <span>⚡ {totals.surchargeReason || `Surcharge (${totals.surchargePercent}%)`}</span>
+                <span>+${totals.surchargeAmount}</span>
+              </div>
+            )}
             <div className="border-t pt-2 flex justify-between font-bold text-lg"><span>{labels.total || 'Total'}</span><span style={{ color: theme.primary }} data-testid="pos-total">${totals.total}</span></div>
+            <div className="flex justify-between text-[11px] text-gray-400" data-testid="gst-included-note">
+              <span>{labels.tax || 'GST Included'}</span><span>${totals.gst}</span>
+            </div>
             {(appliedGiftCards.length > 0 || parseFloat(totals.storeCreditApplied) > 0) && (
               <div className="flex justify-between text-sm font-semibold text-violet-700" data-testid="pos-balance-due">
                 <span>Balance due (after tenders)</span><span>${totals.balanceDue}</span>
               </div>
             )}
+            <p className="text-[10px] text-gray-400 text-center pt-1">Prices include GST</p>
           </CardContent></Card>
         )}
 

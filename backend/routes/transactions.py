@@ -126,8 +126,29 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
     points_discount = max(float(transaction.pointsDiscount or 0), 0)
     discount_total = min(round(tier_discount + voucher_discount + points_discount, 2), round(subtotal, 2))
 
-    gst = (subtotal - discount_total) * 0.1
-    total = subtotal - discount_total + gst
+    # Menu/product prices are GST-inclusive — the configured price IS what the
+    # customer pays, GST is a component disclosed on the receipt, not an
+    # amount added on top of the subtotal.
+    net_before_surcharge = max(subtotal - discount_total, 0)
+
+    # Auto-surcharge (weekend/public holiday, configured in Settings >
+    # Surcharges) applies on top of the GST-inclusive net — a genuine
+    # additional fee, unlike GST which is already baked into subtotal.
+    surcharge_percent = 0.0
+    surcharge_reason = None
+    try:
+        from routes.enterprise_features import check_surcharge
+        surcharge_info = await check_surcharge()
+        surcharge_percent = float(surcharge_info.get("surchargePercent") or 0)
+        surcharge_reason = surcharge_info.get("reason")
+    except Exception:
+        pass
+    surcharge_amount = round(net_before_surcharge * surcharge_percent / 100, 2)
+
+    total = net_before_surcharge + surcharge_amount
+    # GST component contained within the final (GST-inclusive) total, at the
+    # standard AU 10%-inclusive rate: gst = total / 11.
+    gst = total / 11
     points_earned = int(total * loyalty_multiplier)
 
     txn_dict = {
@@ -140,6 +161,9 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
         "appliedDiscounts": applied_discounts,
         "pointsRedeemed": max(int(transaction.pointsRedeemed or 0), 0),
         "pointsDiscount": round(points_discount, 2),
+        "surchargeAmount": surcharge_amount,
+        "surchargePercent": surcharge_percent,
+        "surchargeReason": surcharge_reason,
         "gst": round(gst, 2),
         "total": round(total, 2),
         "paymentMethod": transaction.paymentMethod,

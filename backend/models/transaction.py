@@ -46,6 +46,9 @@ class Transaction(BaseModel):
     pointsRedeemed: int = 0
     pointsDiscount: float = 0.0
     tipAmount: float = 0.0
+    surchargeAmount: float = 0.0
+    surchargePercent: float = 0.0
+    surchargeReason: Optional[str] = None
     gst: float
     total: float
     paymentMethod: str

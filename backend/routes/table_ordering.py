@@ -86,9 +86,11 @@ async def place_table_order(table_id: str, data: dict):
         "notes": notes,
         "source": "table_qr",
         "status": "new",
+        # Menu prices are GST-inclusive — total is the subtotal itself, GST is
+        # the disclosed component within it, not an amount added on top.
         "subtotal": round(subtotal, 2),
-        "gst": round(subtotal * 0.1, 2),
-        "total": round(subtotal * 1.1, 2),
+        "gst": round(subtotal / 11, 2),
+        "total": round(subtotal, 2),
         "createdAt": datetime.utcnow().isoformat(),
         "priority": "normal",
     }

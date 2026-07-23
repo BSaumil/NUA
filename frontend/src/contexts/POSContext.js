@@ -1,9 +1,18 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { enterpriseAPI } from '../services/api';
 
 const POSContext = createContext();
 
 export const POSProvider = ({ children }) => {
   const [cart, setCart] = useState([]);
+  // Weekend/public-holiday auto-surcharge (Settings > Surcharges), refreshed
+  // once per session — it changes at most daily, no need to poll.
+  const [surcharge, setSurcharge] = useState({ percent: 0, reason: null });
+  useEffect(() => {
+    enterpriseAPI.checkSurcharge()
+      .then(r => setSurcharge({ percent: Number(r.data?.surchargePercent) || 0, reason: r.data?.reason || null }))
+      .catch(() => {});
+  }, []);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [currentLocation, setCurrentLocation] = useState('Main Street');
   const [currentUser, setCurrentUser] = useState({ name: 'John Doe', role: 'Admin' });
@@ -102,15 +111,23 @@ export const POSProvider = ({ children }) => {
     const tierDiscount = subtotal * (tierRates[selectedCustomer?.membershipTier] || 0);
     const voucherDiscount = appliedDiscounts.reduce((s, d) => s + (Number(d.discount) || 0), 0);
     const discount = tierDiscount + voucherDiscount;
-    const afterDiscount = Math.max(0, subtotal - discount);
-    const gst = afterDiscount * 0.1;
-    const grossTotal = afterDiscount + gst;
+    // Item prices already include GST — no tax is added on top of the
+    // subtotal. Any auto-surcharge (weekend/public holiday) is a genuine
+    // extra fee and is the only thing calculated on top of that GST-inclusive
+    // net; gst below is the component contained within the final total.
+    const netBeforeSurcharge = Math.max(0, subtotal - discount);
+    const surchargeAmount = netBeforeSurcharge * (surcharge.percent / 100);
+    const grossTotal = netBeforeSurcharge + surchargeAmount;
+    const gst = grossTotal / 11;
     const giftCardTender = appliedGiftCards.reduce((s, gc) => s + (Number(gc.amount) || 0), 0);
     const balanceDue = Math.max(0, grossTotal - giftCardTender - (Number(storeCreditApplied) || 0));
     return {
       subtotal: subtotal.toFixed(2),
       discount: discount.toFixed(2),
       tierDiscount: tierDiscount.toFixed(2),
+      surchargeAmount: surchargeAmount.toFixed(2),
+      surchargePercent: surcharge.percent,
+      surchargeReason: surcharge.reason,
       gst: gst.toFixed(2),
       total: grossTotal.toFixed(2),
       giftCardTender: giftCardTender.toFixed(2),

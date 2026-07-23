@@ -84,24 +84,35 @@ class PrinterService {
 
     receipt += '--------------------------------\n';
 
-    // Totals
+    // Totals — item prices already include GST, so it is never added on top
+    // of the subtotal here. A surcharge (if active) is the only thing
+    // calculated on top of that GST-inclusive net.
     receipt += `Subtotal:${' '.repeat(16)}$${transaction.subtotal.toFixed(2).padStart(7)}\n`;
-    
+
     if (transaction.discount && transaction.discountAmount > 0) {
-      const discountText = transaction.discount.type === 'percentage' 
-        ? `Discount (${transaction.discount.value}%)` 
+      const discountText = transaction.discount.type === 'percentage'
+        ? `Discount (${transaction.discount.value}%)`
         : 'Discount';
       receipt += `${discountText}:${' '.repeat(20 - discountText.length)}-$${transaction.discountAmount.toFixed(2).padStart(6)}\n`;
     }
 
-    receipt += `GST (10%):${' '.repeat(15)}$${transaction.gst.toFixed(2).padStart(7)}\n`;
+    if (transaction.surchargeAmount > 0) {
+      const surchargeText = transaction.surchargeReason || 'Surcharge';
+      receipt += `${surchargeText}:${' '.repeat(Math.max(1, 20 - surchargeText.length))}+$${transaction.surchargeAmount.toFixed(2).padStart(6)}\n`;
+    }
+
     receipt += '================================\n';
     receipt += this.ESC_POS.BOLD_ON;
     receipt += this.ESC_POS.DOUBLE_HEIGHT;
     receipt += `TOTAL:${' '.repeat(13)}$${transaction.total.toFixed(2).padStart(7)}\n`;
     receipt += this.ESC_POS.NORMAL_SIZE;
     receipt += this.ESC_POS.BOLD_OFF;
-    receipt += '================================\n\n';
+    receipt += `GST Included:${' '.repeat(11)}$${transaction.gst.toFixed(2).padStart(7)}\n`;
+    receipt += '================================\n';
+    receipt += this.ESC_POS.ALIGN_CENTER;
+    receipt += 'Prices include GST\n';
+    receipt += this.ESC_POS.ALIGN_LEFT;
+    receipt += '\n';
 
     // Payment method
     receipt += `Payment: ${transaction.paymentMethod}\n\n`;
@@ -222,12 +233,16 @@ class PrinterService {
           ${transaction.discount && transaction.discountAmount > 0 ? `
             <tr><td>Discount:</td><td style="text-align: right">-$${transaction.discountAmount.toFixed(2)}</td></tr>
           ` : ''}
-          <tr><td>GST (10%):</td><td style="text-align: right">$${transaction.gst.toFixed(2)}</td></tr>
+          ${transaction.surchargeAmount > 0 ? `
+            <tr><td>${transaction.surchargeReason || 'Surcharge'}:</td><td style="text-align: right">+$${transaction.surchargeAmount.toFixed(2)}</td></tr>
+          ` : ''}
           <tr class="total"><td>TOTAL:</td><td style="text-align: right">$${transaction.total.toFixed(2)}</td></tr>
+          <tr style="font-size: 10px; color: #666"><td>GST Included:</td><td style="text-align: right">$${transaction.gst.toFixed(2)}</td></tr>
         </table>
         <div class="separator"></div>
         <div>Payment: ${transaction.paymentMethod}</div>
         <div class="separator"></div>
+        <div class="center" style="font-size: 10px">Prices include GST</div>
         <div class="center">Thank you for your business!</div>
         <div class="center">Please come again</div>
       </body>

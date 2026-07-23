@@ -216,11 +216,11 @@ export default function TableOrder() {
                     className="bg-gray-900 border-gray-700 text-white" data-testid="order-notes-input" />
                 </div>
                 <div className="bg-gray-900 rounded-lg p-4 border border-gray-800 space-y-2">
-                  <div className="flex justify-between text-sm text-gray-400"><span>Subtotal</span><span>${cartTotal.toFixed(2)}</span></div>
-                  <div className="flex justify-between text-sm text-gray-400"><span>GST (10%)</span><span>${(cartTotal * 0.1).toFixed(2)}</span></div>
-                  <div className="flex justify-between font-bold text-lg pt-1 border-t border-gray-700">
-                    <span>Total</span><span className="text-emerald-400" data-testid="cart-total">${(cartTotal * 1.1).toFixed(2)}</span>
+                  <div className="flex justify-between font-bold text-lg">
+                    <span>Total</span><span className="text-emerald-400" data-testid="cart-total">${cartTotal.toFixed(2)}</span>
                   </div>
+                  <div className="flex justify-between text-[11px] text-gray-500 pt-1 border-t border-gray-700"><span>GST Included</span><span>${(cartTotal / 11).toFixed(2)}</span></div>
+                  <p className="text-[10px] text-gray-500 text-center">Prices include GST</p>
                 </div>
               </>
             )}
@@ -280,7 +280,7 @@ export default function TableOrder() {
           <div className="max-w-lg mx-auto">
             <Button className="w-full h-12 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-base"
               onClick={() => setView('cart')} data-testid="view-cart-btn">
-              <ShoppingCart size={18} className="mr-2" /> View Cart ({cartCount}) — ${(cartTotal * 1.1).toFixed(2)}
+              <ShoppingCart size={18} className="mr-2" /> View Cart ({cartCount}) — ${cartTotal.toFixed(2)}
             </Button>
           </div>
         </div>
@@ -292,7 +292,7 @@ export default function TableOrder() {
           <div className="max-w-lg mx-auto">
             <Button className="w-full h-12 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-base"
               onClick={placeOrder} disabled={loading} data-testid="place-order-btn">
-              <Send size={18} className="mr-2" /> {loading ? 'Placing Order...' : `Place Order — $${(cartTotal * 1.1).toFixed(2)}`}
+              <Send size={18} className="mr-2" /> {loading ? 'Placing Order...' : `Place Order — $${cartTotal.toFixed(2)}`}
             </Button>
           </div>
         </div>
