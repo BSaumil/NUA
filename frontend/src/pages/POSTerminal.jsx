@@ -12,7 +12,7 @@ import {
 } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { usePOS } from '../contexts/POSContext';
-import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API, v26API, floorPlansAPI } from '../services/api';
+import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API, v26API, floorPlansAPI, itemsSystemAPI } from '../services/api';
 import { useToast } from '../hooks/use-toast';
 import { useAuth } from '../contexts/AuthContext';
 import VoiceOrderButton from '../components/VoiceOrderButton';
@@ -21,6 +21,7 @@ import CustomerCombobox from '../components/pos/CustomerCombobox';
 import { QrPaymentDialog, UpiPaymentDialog, SplitPaymentDialog } from '../components/pos/PaymentDialogs';
 import ModifierSheet from '../components/pos/ModifierSheet';
 import POSHeaderBar from '../components/pos/POSHeaderBar';
+import ScanVoucherButton from '../components/pos/ScanVoucherButton';
 import { CategoryIcon } from './Categories';
 
 // SwipeableCartItem and CustomerCombobox now live in components/pos/.
@@ -229,8 +230,8 @@ const POSTerminal = () => {
     v26API.listVouchers().then(r => setAvailableVouchers(r.data || [])).catch(() => {});
   }, [showDiscountPicker]);
 
-  const applyManualCode = async () => {
-    const code = (voucherCode || '').trim().toUpperCase();
+  const applyManualCode = async (codeOverride) => {
+    const code = (codeOverride ?? voucherCode ?? '').trim().toUpperCase();
     if (!code) return;
     setVoucherLoading(true);
     try {
@@ -244,6 +245,14 @@ const POSTerminal = () => {
     } catch (e) {
       toast({ title: 'Could not apply', description: e?.response?.data?.detail || 'Invalid code', variant: 'destructive' });
     } finally { setVoucherLoading(false); }
+  };
+
+  // Scanning fills the input (so staff sees what was read) and applies it —
+  // same server-side validation path as a hand-typed code.
+  const handleScannedVoucher = (rawValue) => {
+    const code = rawValue.trim().toUpperCase();
+    setVoucherCode(code);
+    applyManualCode(code);
   };
 
   const applyAvailableVoucher = async (v) => {
@@ -299,8 +308,8 @@ const POSTerminal = () => {
         productsAPI.getAll(),
         promotionsAPI.getActive(),
         customersAPI.getAll(),
-        fetch(`${process.env.REACT_APP_BACKEND_URL}/api/categories`).then(r => r.json()).catch(() => []),
-        fetch(`${process.env.REACT_APP_BACKEND_URL}/api/modifiers`).then(r => r.json()).catch(() => []),
+        itemsSystemAPI.getCategories(),
+        itemsSystemAPI.getModifiers(),
         loyaltyEngineAPI.getConfig(),
         v15API.getLabels(localStorage.getItem('nua_lang') || 'en'),
         advancedAPI.getTrainingMode(),
@@ -308,15 +317,18 @@ const POSTerminal = () => {
       if (productsRes.status === 'fulfilled') setProducts(productsRes.value.data || []);
       if (promotionsRes.status === 'fulfilled') setPromotions(promotionsRes.value.data || []);
       if (customersRes.status === 'fulfilled') setCustomers(customersRes.value.data || []);
-      if (catsRes.status === 'fulfilled' && Array.isArray(catsRes.value)) {
-        const active = catsRes.value
+      if (catsRes.status === 'fulfilled' && Array.isArray(catsRes.value?.data)) {
+        const active = catsRes.value.data
           .filter(c => c.active !== false)
           .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99))
           .map(c => ({ id: c.id, name: c.name, icon: c.icon || 'Tag', color: c.color || '#6366f1' }));
         setCategories([{ id: 'all', name: 'All', icon: 'Sparkles', color: '#6366f1' }, ...active]);
+      } else if (catsRes.status === 'rejected') {
+        console.error('Failed to load categories', catsRes.reason);
+        toast({ title: 'Categories failed to load', description: 'Showing "All" only — check your connection and refresh.', variant: 'destructive' });
       }
-      if (modsRes.status === 'fulfilled' && Array.isArray(modsRes.value)) {
-        setModifiers(modsRes.value);
+      if (modsRes.status === 'fulfilled' && Array.isArray(modsRes.value?.data)) {
+        setModifiers(modsRes.value.data);
       }
       if (loyaltyRes.status === 'fulfilled') setLoyaltyCfg(loyaltyRes.value.data || { minRedeem: 10, redeemRate: 0.01 });
       if (labelsRes.status === 'fulfilled') setLabels(labelsRes.value.data || {});
@@ -648,7 +660,11 @@ const POSTerminal = () => {
         </div>
       )}
       {/* Products Grid — smaller cards, category-wise */}
-      <div className="flex-1 flex flex-col min-w-0">
+      {/* min-h-0 is required here: a flex-col child won't shrink below its
+          content's natural height otherwise, so the overflow-y-auto grid
+          below never actually constrains — the category bar gets pushed
+          around and the whole page scrolls instead of just the grid. */}
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <div className="mb-3">
           {/* Compact status bar replaces the bulky "POS Terminal" title */}
           <div onDoubleClick={() => { if (user?.role === 'owner') setShowGhost(true); }} data-testid="pos-title">
@@ -878,7 +894,9 @@ const POSTerminal = () => {
       </div>
 
       {/* Cart Panel — bigger for easier billing */}
-      <div className="w-full lg:w-[440px] flex-shrink-0 flex flex-col border bg-white rounded-xl shadow-sm p-4" data-testid="pos-cart-panel">
+      {/* Same min-h-0 fix as the products column — the cart-items list below
+          uses flex-1 overflow-y-auto and needs this to actually scroll. */}
+      <div className="w-full lg:w-[440px] flex-shrink-0 flex flex-col min-h-0 border bg-white rounded-xl shadow-sm p-4" data-testid="pos-cart-panel">
         <h2 className="text-xl font-bold mb-3" style={{ color: theme.text }}>{labels.cart || 'Current Order'}</h2>
         {/* Customer Selection */}
         <Card className="mb-4"><CardContent className="p-4">
@@ -1093,7 +1111,6 @@ const POSTerminal = () => {
                 </div>
               );
             })}
-            <div className="flex justify-between text-sm"><span>{labels.tax || 'GST (10%)'}</span><span>${totals.gst}</span></div>
             {totals.pointsDiscount && (
               <div className="flex justify-between text-sm text-green-700" data-testid="points-discount-row">
                 <span>⭐ Points redeemed ({pointsToRedeem} pts)</span><span>-${totals.pointsDiscount}</span>
@@ -1129,12 +1146,22 @@ const POSTerminal = () => {
                 <span className="font-bold text-amber-700">+{Math.floor(parseFloat(totals.total))} pts</span>
               </div>
             )}
+            {parseFloat(totals.surchargeAmount) > 0 && (
+              <div className="flex justify-between text-sm text-amber-700" data-testid="surcharge-row">
+                <span>⚡ {totals.surchargeReason || `Surcharge (${totals.surchargePercent}%)`}</span>
+                <span>+${totals.surchargeAmount}</span>
+              </div>
+            )}
             <div className="border-t pt-2 flex justify-between font-bold text-lg"><span>{labels.total || 'Total'}</span><span style={{ color: theme.primary }} data-testid="pos-total">${totals.total}</span></div>
+            <div className="flex justify-between text-[11px] text-gray-400" data-testid="gst-included-note">
+              <span>{labels.tax || 'GST Included'}</span><span>${totals.gst}</span>
+            </div>
             {(appliedGiftCards.length > 0 || parseFloat(totals.storeCreditApplied) > 0) && (
               <div className="flex justify-between text-sm font-semibold text-violet-700" data-testid="pos-balance-due">
                 <span>Balance due (after tenders)</span><span>${totals.balanceDue}</span>
               </div>
             )}
+            <p className="text-[10px] text-gray-400 text-center pt-1">Prices include GST</p>
           </CardContent></Card>
         )}
 
@@ -1150,7 +1177,8 @@ const POSTerminal = () => {
                 <div className="flex gap-2">
                   <Input value={voucherCode} onChange={e => setVoucherCode(e.target.value)}
                     placeholder="Voucher code (NUA-XXXX)" className="text-sm" data-testid="voucher-code-input" />
-                  <Button onClick={applyManualCode} disabled={voucherLoading || !voucherCode} data-testid="apply-voucher-btn" style={{ background: theme.primary }}>
+                  <ScanVoucherButton onDetected={handleScannedVoucher} />
+                  <Button onClick={() => applyManualCode()} disabled={voucherLoading || !voucherCode} data-testid="apply-voucher-btn" style={{ background: theme.primary }}>
                     {voucherLoading ? '…' : 'Apply'}
                   </Button>
                 </div>

@@ -158,7 +158,12 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, List[str]] = {
         "end-of-day",
         "staff", "staff-roster", "shift-swaps", "shift-manager", "labor-forecast",
         "automation", "automation-triggers",
-        "ash", "ash-plans", "ash-memory",
+        # "ash" (Ask NUA / the agent chat) is deliberately NOT a manager
+        # default — it's owner-only until the owner explicitly grants it via
+        # Settings > Permissions, either for the manager role or a specific
+        # staff member. ash-plans/ash-memory (viewing plan + memory history)
+        # stay on since those are read-only, not "ask NUA anything".
+        "ash-plans", "ash-memory",
         "approvals", "audit", "audit-log", "exceptions",
         "hardware-health", "integrations",
     ],

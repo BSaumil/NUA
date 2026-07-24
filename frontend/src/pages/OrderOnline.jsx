@@ -44,9 +44,10 @@ export default function OrderOnline() {
     ? products
     : products.filter(p => p.category === selectedCat);
 
+  // Menu prices already include GST — it's disclosed below, not added on top.
   const subtotal = cart.reduce((s, i) => s + i.price * i.quantity, 0);
-  const gst = subtotal * 0.1;
-  const total = subtotal + gst;
+  const total = subtotal;
+  const gst = total / 11;
 
   const maxPrepMin = useMemo(() => {
     if (cart.length === 0) return 0;
@@ -177,9 +178,9 @@ export default function OrderOnline() {
                   ))}
 
                   <div className="pt-2 border-t text-sm space-y-1">
-                    <div className="flex justify-between"><span>Subtotal</span><span>${subtotal.toFixed(2)}</span></div>
-                    <div className="flex justify-between text-xs text-gray-500"><span>GST</span><span>${gst.toFixed(2)}</span></div>
                     <div className="flex justify-between font-bold"><span>Total</span><span>${total.toFixed(2)}</span></div>
+                    <div className="flex justify-between text-[11px] text-gray-400"><span>GST Included</span><span>${gst.toFixed(2)}</span></div>
+                    <p className="text-[10px] text-gray-400 text-center">Prices include GST</p>
                   </div>
 
                   <div className="pt-2 border-t space-y-2">

@@ -35,21 +35,98 @@ async def create_category(data: dict, _: dict = Depends(require_owner_or_manager
         # channels it's available on.
         "prepTime": int(data.get("prepTime", 8)),
         "channels": data.get("channels", ["dine-in", "pickup", "delivery"]),
+        # Menu organisation: nest under another category (drag-and-drop in the UI).
+        "parentId": data.get("parentId") or None,
+        # Reporting rollup: sales in this category display under the target
+        # category's name in revenue reports. None = reports as itself.
+        "reportsUnderId": data.get("reportsUnderId") or None,
     }
     await db.categories.insert_one(cat)
     cat.pop("_id", None)
     return cat
 
+
+async def _would_create_cycle(cat_id: str, new_parent_id: str, field: str = "parentId") -> bool:
+    """Walk the target's chain (parentId or reportsUnderId) looking for cat_id.
+    Used to reject drag-drop nesting/reporting assignments that would loop."""
+    seen = set()
+    current_id = new_parent_id
+    while current_id:
+        if current_id == cat_id or current_id in seen:
+            return True
+        seen.add(current_id)
+        node = await db.categories.find_one({"id": current_id}, {"_id": 0, field: 1})
+        current_id = node.get(field) if node else None
+    return False
+
+
 @router.put("/categories/{cat_id}")
 async def update_category(cat_id: str, data: dict, _: dict = Depends(require_owner_or_manager)):
-    allowed = {"name", "sortOrder", "active", "icon", "color", "prepTime", "channels"}
+    allowed = {"name", "sortOrder", "active", "icon", "color", "prepTime", "channels", "parentId", "reportsUnderId"}
     update = {k: v for k, v in data.items() if k in allowed}
     if "prepTime" in update: update["prepTime"] = int(update["prepTime"] or 0)
+    if update.get("parentId"):
+        if update["parentId"] == cat_id:
+            raise HTTPException(status_code=400, detail="A category can't be its own sub-category")
+        if await _would_create_cycle(cat_id, update["parentId"], "parentId"):
+            raise HTTPException(status_code=400, detail="That would nest a category under its own sub-category")
+    if update.get("reportsUnderId"):
+        if update["reportsUnderId"] == cat_id:
+            raise HTTPException(status_code=400, detail="A category can't report under itself")
+        if await _would_create_cycle(cat_id, update["reportsUnderId"], "reportsUnderId"):
+            raise HTTPException(status_code=400, detail="That would create a reporting loop")
     result = await db.categories.find_one_and_update({"id": cat_id}, {"$set": update}, return_document=True)
     if not result:
         raise HTTPException(status_code=404, detail="Not found")
     result.pop("_id", None)
     return result
+
+
+@router.post("/categories/{source_id}/merge/{target_id}")
+async def merge_categories(source_id: str, target_id: str, _: dict = Depends(require_owner_or_manager)):
+    """Drag-and-drop merge: every product in `source` moves to `target`
+    (matched by categoryId, falling back to the legacy name string for rows
+    that predate categoryId), any sub-categories or reporting-rollups that
+    pointed at `source` are re-pointed to `target`, then `source` is deleted."""
+    if source_id == target_id:
+        raise HTTPException(status_code=400, detail="Can't merge a category into itself")
+    source = await db.categories.find_one({"id": source_id}, {"_id": 0})
+    target = await db.categories.find_one({"id": target_id}, {"_id": 0})
+    if not source or not target:
+        raise HTTPException(status_code=404, detail="Category not found")
+
+    result = await db.products.update_many(
+        {"$or": [{"categoryId": source_id}, {"categoryId": {"$in": [None, ""]}, "category": source["name"]}]},
+        {"$set": {"categoryId": target_id, "category": target["name"]}},
+    )
+    await db.categories.update_many({"parentId": source_id}, {"$set": {"parentId": target_id}})
+    await db.categories.update_many({"reportsUnderId": source_id}, {"$set": {"reportsUnderId": target_id}})
+    await db.categories.delete_one({"id": source_id})
+    return {
+        "message": f"Merged '{source['name']}' into '{target['name']}'",
+        "productsMoved": result.modified_count,
+        "targetId": target_id,
+    }
+
+
+async def build_reporting_map() -> dict:
+    """name -> the name its sales should be attributed to in revenue reports,
+    following reportsUnderId chains. Cycle-safe; falls back to the category's
+    own name if the chain is broken or missing."""
+    cats = await db.categories.find({}, {"_id": 0}).to_list(500)
+    by_id = {c["id"]: c for c in cats}
+
+    def resolve(cat: dict, seen: set) -> str:
+        target_id = cat.get("reportsUnderId")
+        if not target_id or target_id == cat["id"] or cat["id"] in seen:
+            return cat["name"]
+        target = by_id.get(target_id)
+        if not target:
+            return cat["name"]
+        seen.add(cat["id"])
+        return resolve(target, seen)
+
+    return {c["name"]: resolve(c, set()) for c in cats}
 
 
 @router.post("/categories/cleanup-legacy")

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { advancedAPI } from '../services/api';
 
 const ThemeContext = createContext();
 
@@ -71,12 +72,43 @@ export const ThemeProvider = ({ children }) => {
 
   useEffect(() => { localStorage.setItem('nua_lang', lang); }, [lang]);
 
+  // Business-wide theme: colors are per-browser (localStorage) until saved,
+  // at which point every other terminal/device picks it up on next load —
+  // otherwise an owner setting the brand color on one register would never
+  // see it reflected on the others.
+  const [themeSaving, setThemeSaving] = useState(false);
+  const [themeSavedAt, setThemeSavedAt] = useState(null);
+  useEffect(() => {
+    advancedAPI.getTheme()
+      .then(r => { if (r.data && Object.keys(r.data).length > 0) setTheme(prev => ({ ...prev, ...r.data })); })
+      .catch(() => {}); // no saved business theme yet, or not reachable — keep local/default
+  }, []);
+
   const updateTheme = (updates) => setTheme(prev => ({ ...prev, ...updates }));
   const resetTheme = () => setTheme(defaultTheme);
   const toggleDarkMode = () => setDarkMode(d => !d);
+  const saveThemeToServer = async () => {
+    setThemeSaving(true);
+    try {
+      await advancedAPI.saveTheme(theme);
+      setThemeSavedAt(Date.now());
+    } finally {
+      setThemeSaving(false);
+    }
+  };
+
+  // theme.text is consumed all over the app via inline `style={{color: theme.text}}`
+  // for headings — that's a static hex meant for a light background, so pages
+  // using it went dark-gray-on-black (nearly invisible) whenever dark mode was
+  // on. Flip it here rather than in stored state, so the owner's light-mode
+  // text color choice survives toggling dark mode on and off.
+  const effectiveTheme = darkMode ? { ...theme, text: '#f4f4f5' } : theme;
 
   return (
-    <ThemeContext.Provider value={{ theme, updateTheme, resetTheme, darkMode, toggleDarkMode, lang, setLang }}>
+    <ThemeContext.Provider value={{
+      theme: effectiveTheme, updateTheme, resetTheme, darkMode, toggleDarkMode, lang, setLang,
+      saveThemeToServer, themeSaving, themeSavedAt,
+    }}>
       {children}
     </ThemeContext.Provider>
   );

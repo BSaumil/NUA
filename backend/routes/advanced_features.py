@@ -1,8 +1,9 @@
 from fastapi import APIRouter, HTTPException, Request, Depends
 from deps import get_user, require_owner, require_owner_or_manager
 from database import db
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import uuid
+import json
 
 import os
 
@@ -20,6 +21,26 @@ async def save_business_settings(data: dict):
     data["key"] = "main"
     await db.business_settings.update_one({"key": "main"}, {"$set": data}, upsert=True)
     return {"message": "Business settings saved"}
+
+
+# Brand theme (colors) — shared across every terminal/device for the business,
+# not just the browser that changed it. The Settings color pickers still give
+# an instant local preview as you drag/type; "Save" is what makes it apply
+# everywhere else too.
+@router.get("/business/theme")
+async def get_business_theme():
+    doc = await db.settings.find_one({"key": "business_theme"}, {"_id": 0})
+    return doc.get("value") if doc else None
+
+
+@router.post("/business/theme")
+async def save_business_theme(data: dict, _: dict = Depends(require_owner_or_manager)):
+    allowed = {"primary", "secondary", "accent", "background", "text", "sidebar"}
+    theme = {k: v for k, v in data.items() if k in allowed and isinstance(v, str)}
+    await db.settings.update_one(
+        {"key": "business_theme"}, {"$set": {"key": "business_theme", "value": theme}}, upsert=True
+    )
+    return theme
 
 
 # ============ TIP MANAGEMENT (Toast-style) ============
@@ -160,12 +181,17 @@ async def get_end_of_day_report( period: str = "today", start_date: str = None, 
             h = ts.hour
             by_hour[h] = by_hour.get(h, 0) + t.get("total", 0)
 
-    # By category
+    # By category — categories marked "reports under" another category roll
+    # their sales up into that category's label (e.g. an "Iced Coffee"
+    # sub-category reporting as "Coffee"), resolved from the current
+    # category setup at report time.
+    from routes.items_system import build_reporting_map
+    reporting_map = await build_reporting_map()
     by_category = {}
     product_sales = {}
     for t in txns:
         for item in t.get("items", []):
-            cat = item.get("category", "Uncategorized")
+            cat = reporting_map.get(item.get("category", "Uncategorized"), item.get("category", "Uncategorized"))
             pid = item.get("productId", "")
             qty = item.get("quantity", 0)
             rev = item.get("price", 0) * qty
@@ -238,6 +264,142 @@ async def get_end_of_day_report( period: str = "today", start_date: str = None, 
     }
 
 # ============ EMAIL MARKETING CAMPAIGNS ============
+# Predrafted starting points the owner can pick instead of writing from
+# scratch. {business_name}/{tier} are filled in server-side; {first_name}
+# is left as a token so send_campaign can personalize per recipient.
+PREDRAFTED_TEMPLATES = [
+    {"key": "win_back", "label": "We miss you (win-back)", "category": "Win-back", "targetTier": "",
+     "subject": "It's been a while, {first_name} — come back to {business_name}",
+     "body": "Hi {first_name},\n\nWe haven't seen you in a bit and wanted to say we miss you! "
+             "Come back and treat yourself — we'd love to host you again soon.\n\n"
+             "See you soon,\nThe {business_name} Team"},
+    {"key": "new_menu", "label": "New menu launch", "category": "Launch", "targetTier": "",
+     "subject": "Something new is cooking at {business_name}",
+     "body": "Hi {first_name},\n\nOur kitchen has been busy — we just launched a brand new menu "
+             "and we think you're going to love it. Come try it this week!\n\n"
+             "See you soon,\nThe {business_name} Team"},
+    {"key": "happy_hour", "label": "Happy hour push", "category": "Recurring", "targetTier": "",
+     "subject": "Happy Hour is calling your name",
+     "body": "Hi {first_name},\n\nJoin us for Happy Hour — great drinks, great food, great company. "
+             "Grab your table before it fills up!\n\nCheers,\nThe {business_name} Team"},
+    {"key": "birthday", "label": "Birthday treat", "category": "Occasion", "targetTier": "",
+     "subject": "Happy Birthday from {business_name}!",
+     "body": "Hi {first_name},\n\nHappy Birthday! We'd love to help you celebrate — swing by any "
+             "time this month and let us spoil you a little.\n\nWarmly,\nThe {business_name} Team"},
+    {"key": "weekend_special", "label": "Weekend special", "category": "Recurring", "targetTier": "",
+     "subject": "This weekend only at {business_name}",
+     "body": "Hi {first_name},\n\nWe've got something special planned this weekend and didn't want "
+             "you to miss it. Book your table now — spots go fast.\n\nSee you there,\nThe {business_name} Team"},
+    {"key": "tier_perk", "label": "Loyalty tier perk", "category": "Loyalty", "targetTier": "Gold",
+     "subject": "A perk just for our {tier} members",
+     "body": "Hi {first_name},\n\nAs one of our valued {tier} members, we wanted to give you first "
+             "access to something special. Come in and enjoy it on us.\n\n"
+             "Thank you for being with us,\nThe {business_name} Team"},
+]
+
+
+async def _business_name() -> str:
+    biz = await db.business_settings.find_one({"key": "main"}, {"_id": 0})
+    return (biz or {}).get("name") or "us"
+
+
+def _fill_template(text: str, *, business_name: str, tier: str = "") -> str:
+    return (text.replace("{business_name}", business_name)
+                .replace("{tier}", tier or "member"))
+
+
+@router.get("/marketing/campaigns/templates")
+async def get_campaign_templates(_: dict = Depends(require_owner_or_manager)):
+    business_name = await _business_name()
+    return [
+        {**t, "subject": _fill_template(t["subject"], business_name=business_name, tier=t.get("targetTier", "")),
+         "body": _fill_template(t["body"], business_name=business_name, tier=t.get("targetTier", ""))}
+        for t in PREDRAFTED_TEMPLATES
+    ]
+
+
+@router.post("/marketing/campaigns/draft")
+async def draft_campaign(data: dict, _: dict = Depends(require_owner_or_manager)):
+    """AI-predrafted email: start from a template and/or a plain-English brief
+    ('promote our new summer menu to Gold members') and return a ready-to-edit
+    {name, subject, body}. Falls back to the raw template / a plain heuristic
+    draft when no LLM key is configured."""
+    business_name = await _business_name()
+    brief = (data.get("brief") or "").strip()
+    target_tier = data.get("targetTier") or ""
+    template = next((t for t in PREDRAFTED_TEMPLATES if t["key"] == data.get("templateKey")), None)
+
+    from routes.v26_commerce import _llm_json
+    sys_msg = (
+        "You are NUA's email marketing copywriter for an independent restaurant/bar. "
+        "Draft ONE promotional email. Keep the body under 160 words, warm and concrete "
+        "(no generic filler), explain the offer clearly, and end with one specific "
+        "call-to-action that drives a visit or booking. Keep the literal token "
+        "{first_name} exactly as written wherever you'd personalize a greeting — it is "
+        "filled in per recipient at send time. Return STRICT JSON: "
+        '{"name":"internal campaign name","subject":"...","body":"..."}'
+    )
+    user_text = json.dumps({
+        "businessName": business_name, "brief": brief or None, "targetTier": target_tier or None,
+        "startingTemplate": template,
+    })
+    draft = await _llm_json(f"campaign-draft-{uuid.uuid4().hex[:6]}", sys_msg, user_text)
+
+    if not draft or not draft.get("body"):
+        if template:
+            draft = {
+                "name": template["label"],
+                "subject": _fill_template(template["subject"], business_name=business_name, tier=target_tier),
+                "body": _fill_template(template["body"], business_name=business_name, tier=target_tier),
+            }
+        else:
+            headline = brief or "something special"
+            draft = {
+                "name": (brief[:40] if brief else "New campaign"),
+                "subject": f"{business_name}: {headline}",
+                "body": (f"Hi {{first_name}},\n\nWe wanted to let you know about {headline} at "
+                         f"{business_name}. Come in and check it out — we'd love to see you.\n\n"
+                         f"See you soon,\nThe {business_name} Team"),
+            }
+    return draft
+
+
+@router.post("/marketing/campaigns/improve")
+async def improve_campaign_copy(data: dict, _: dict = Depends(require_owner_or_manager)):
+    """AI-rewrite an in-progress subject/body for clearer wording, a better
+    explanation of the offer, and a stronger call-to-action aimed at turning
+    the read into a visit (a lead). Preserves {first_name}/voucher tokens."""
+    subject = (data.get("subject") or "").strip()
+    body = (data.get("body") or "").strip()
+    if not body:
+        raise HTTPException(status_code=400, detail="Nothing to improve yet — write a draft first")
+    goal = (data.get("goal") or "").strip()
+
+    from routes.v26_commerce import _llm_json
+    sys_msg = (
+        "You are an expert hospitality email copywriter. Rewrite the given subject and "
+        "body: tighten the wording, make the offer's value obvious, and close with one "
+        "compelling call-to-action that turns the reader into a booking/visit (a lead). "
+        "Preserve any {first_name} or voucher-code tokens/placeholders exactly as given — "
+        "never remove or rename them. Keep roughly the same length. Return STRICT JSON: "
+        '{"subject":"...","body":"..."}'
+    )
+    user_text = json.dumps({"subject": subject, "body": body, "goal": goal or None})
+    improved = await _llm_json(f"campaign-improve-{uuid.uuid4().hex[:6]}", sys_msg, user_text)
+
+    if not improved or not improved.get("body"):
+        cta_markers = ("book", "visit", "come in", "order", "reserve", "redeem", "see you")
+        new_body = body
+        if not any(m in body.lower() for m in cta_markers):
+            new_body = body.rstrip() + "\n\nBook your table today — we can't wait to see you!"
+        improved = {"subject": subject or "A little something for you", "body": new_body}
+    return improved
+
+
+def _split_first_name(full_name: str) -> str:
+    return (full_name or "").strip().split(" ")[0] or "there"
+
+
 @router.post("/marketing/campaigns")
 async def create_campaign(data: dict, user: dict = Depends(require_owner_or_manager)):
 
@@ -253,11 +415,52 @@ async def create_campaign(data: dict, user: dict = Depends(require_owner_or_mana
         "sentAt": None,
         "recipientCount": 0,
         "openCount": 0,
+        "voucherId": None,
+        "voucherCode": None,
     }
+
+    # Optional: attach one shared voucher code every recipient of this
+    # campaign can redeem at the venue (POS already knows how to apply
+    # any v26 commerce_vouchers code, so cashiers need no new workflow).
+    voucher_req = data.get("voucher") or {}
+    if voucher_req.get("enabled"):
+        from routes.v26_commerce import _new_code, _uid, _now as _v26_now, _iso as _v26_iso
+        codes = _new_code("PROMO")
+        expires_in_days = int(voucher_req.get("expiresInDays") or 30)
+        voucher_doc = {
+            "id": _uid("VCH"),
+            "name": f"Campaign: {campaign['name'] or campaign['id']}",
+            "kind": "marketing",
+            "discountType": voucher_req.get("valueType", "percent"),
+            "value": float(voucher_req.get("value") or 10),
+            "appliesTo": "cart",
+            "category": None, "productIds": [],
+            "minSpend": float(voucher_req.get("minSpend") or 0),
+            "maxUses": int(voucher_req.get("maxUses") or 0),  # 0 = unlimited
+            "usedCount": 0,
+            "validFrom": None,
+            "validTo": _v26_iso(_v26_now() + timedelta(days=expires_in_days)),
+            "termsAndConditions": "Issued via email campaign; one redemption per visit unless stated otherwise.",
+            "active": True,
+            **codes,
+            "createdAt": _v26_iso(_v26_now()),
+            "createdBy": user["id"],
+            "campaignId": campaign["id"],
+        }
+        await db.commerce_vouchers.insert_one(dict(voucher_doc))
+        campaign["voucherId"] = voucher_doc["id"]
+        campaign["voucherCode"] = voucher_doc["manualCode"]
+        redeem_blurb = (f"\n\n---\nShow this code at the venue to redeem: {voucher_doc['manualCode']}"
+                        f" ({voucher_doc['value']:.0f}{'%' if voucher_doc['discountType'] == 'percent' else '$'} off"
+                        f"{', min spend $' + str(voucher_doc['minSpend']) if voucher_doc['minSpend'] else ''}, "
+                        f"valid until {voucher_doc['validTo'][:10]}).")
+        if voucher_doc["manualCode"] not in campaign["body"]:
+            campaign["body"] = (campaign["body"] or "") + redeem_blurb
+
     # Count target recipients
     query = {} if not campaign["targetTier"] else {"tier": campaign["targetTier"]}
     campaign["recipientCount"] = await db.members.count_documents(query)
-    await db.campaigns.insert_one(campaign)
+    await db.campaigns.insert_one(dict(campaign))
     campaign.pop("_id", None)
     return campaign
 
@@ -276,21 +479,39 @@ async def send_campaign(campaign_id: str, _: dict = Depends(require_owner_or_man
     query = {} if not campaign.get("targetTier") else {"tier": campaign["targetTier"]}
     members = await db.members.find(query, {"_id": 0, "password_hash": 0}).to_list(10000)
 
-    # Store campaign send record (email delivery would be via SendGrid/SES in production)
-    await db.campaigns.update_one(
-        {"id": campaign_id},
-        {"$set": {"status": "sent", "sentAt": datetime.now(timezone.utc).isoformat(), "recipientCount": len(members)}}
-    )
+    from utils.notifications import send_email
 
-    # Log each recipient
+    # Log + best-effort send each recipient. A delivery failure on one
+    # member never blocks the rest — same resilience pattern as the rest
+    # of the notification layer.
+    delivered_count = 0
     for m in members:
+        personalized_body = (campaign["body"] or "").replace(
+            "{first_name}", _split_first_name(m.get("name", ""))
+        )
+        receipt = {"channel": "email", "delivered": False, "reason": "unknown"}
+        try:
+            receipt = await send_email(m.get("email"), campaign["subject"], personalized_body)
+        except Exception as e:
+            receipt = {"channel": "email", "delivered": False, "reason": str(e)[:120]}
+        if receipt.get("delivered"):
+            delivered_count += 1
         await db.campaign_sends.insert_one({
             "campaignId": campaign_id, "memberId": m["id"],
-            "email": m["email"], "status": "queued",
+            "email": m.get("email"), "status": "sent" if receipt.get("delivered") else "queued",
+            "deliveryReason": receipt.get("reason"),
             "sentAt": datetime.now(timezone.utc).isoformat(),
         })
 
-    return {"message": f"Campaign sent to {len(members)} members", "recipientCount": len(members)}
+    await db.campaigns.update_one(
+        {"id": campaign_id},
+        {"$set": {"status": "sent", "sentAt": datetime.now(timezone.utc).isoformat(),
+                   "recipientCount": len(members), "deliveredCount": delivered_count}}
+    )
+
+    return {"message": f"Campaign sent to {len(members)} members ({delivered_count} delivered via SendGrid, "
+                        f"rest queued — configure SENDGRID_API_KEY to send live)",
+            "recipientCount": len(members), "deliveredCount": delivered_count}
 
 @router.delete("/marketing/campaigns/{campaign_id}")
 async def delete_campaign(campaign_id: str, _: dict = Depends(require_owner_or_manager)):

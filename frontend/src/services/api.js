@@ -370,11 +370,16 @@ export const advancedAPI = {
   getTrainingMode: () => api.get('/settings/training-mode'),
   setTrainingMode: (enabled) => api.post('/settings/training-mode', { enabled }),
   getEndOfDayReport: (params) => api.get('/reports/end-of-day', { params }),
+  getTheme: () => api.get('/business/theme'),
+  saveTheme: (data) => api.post('/business/theme', data),
   getAIInsights: (data) => api.post('/reports/ai-insights', data),
   getCampaigns: () => api.get('/marketing/campaigns'),
   createCampaign: (data) => api.post('/marketing/campaigns', data),
   sendCampaign: (id) => api.post(`/marketing/campaigns/${id}/send`),
   deleteCampaign: (id) => api.delete(`/marketing/campaigns/${id}`),
+  getCampaignTemplates: () => api.get('/marketing/campaigns/templates'),
+  draftCampaign: (data) => api.post('/marketing/campaigns/draft', data),
+  improveCampaignCopy: (data) => api.post('/marketing/campaigns/improve', data),
 };
 
 // Staff Management — PIN, Timecards, Roster, Payrun
@@ -494,6 +499,7 @@ export const itemsSystemAPI = {
   createCategory: (data) => api.post('/categories', data),
   updateCategory: (id, data) => api.put(`/categories/${id}`, data),
   deleteCategory: (id) => api.delete(`/categories/${id}`),
+  mergeCategory: (sourceId, targetId) => api.post(`/categories/${sourceId}/merge/${targetId}`),
   cleanupLegacyCategories: () => api.post('/categories/cleanup-legacy'),
   getModifiers: () => api.get('/modifiers'),
   createModifier: (data) => api.post('/modifiers', data),

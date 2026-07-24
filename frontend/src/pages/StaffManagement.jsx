@@ -12,6 +12,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import axios from 'axios';
+import { effectiveHourlyRate, salaryTypeSuffix } from '../lib/staffPay';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
@@ -29,7 +30,7 @@ export default function StaffManagement() {
   const [staff, setStaff] = useState([]);
   const [laborReport, setLaborReport] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState({ name: '', email: '', password: 'Staff2026!', role: 'cashier', payRate: 25 });
+  const [form, setForm] = useState({ name: '', email: '', password: 'Staff2026!', role: 'cashier', payRate: 25, salaryType: 'hourly' });
   const [tab, setTab] = useState('staff');
 
   useEffect(() => { fetchData(); }, []);
@@ -47,10 +48,13 @@ export default function StaffManagement() {
 
   const handleAddStaff = async () => {
     try {
-      await axios.post(`${API}/api/auth/register`, form, { headers: authHeader() });
+      // /auth/staff/add (owner-authenticated) rather than the public /auth/register:
+      // register() is meant for self-signup and caps the role at cashier/kitchen, so a
+      // Manager added through this dialog would otherwise get silently downgraded.
+      await axios.post(`${API}/api/auth/staff/add`, form, { headers: authHeader() });
       toast.success('Staff member added');
       setShowAdd(false);
-      setForm({ name: '', email: '', password: 'Staff2026!', role: 'cashier', payRate: 25 });
+      setForm({ name: '', email: '', password: 'Staff2026!', role: 'cashier', payRate: 25, salaryType: 'hourly' });
       fetchData();
     } catch (e) { toast.error(e.response?.data?.detail || 'Failed to add staff'); }
   };
@@ -102,7 +106,8 @@ export default function StaffManagement() {
                 </div>
                 {user?.role === 'owner' && s.payRate !== undefined && (
                   <p className="text-sm text-gray-500 mb-3">
-                    <DollarSign size={14} className="inline" /> ${s.payRate}/hr &middot; ~${(s.payRate * 38).toFixed(0)}/week
+                    <DollarSign size={14} className="inline" /> ${s.payRate}{salaryTypeSuffix(s.salaryType)}
+                    {' '}&middot; ~${(effectiveHourlyRate(s.payRate, s.salaryType) * 38).toFixed(0)}/week
                   </p>
                 )}
                 <div className="flex items-center justify-between">
@@ -152,7 +157,7 @@ export default function StaffManagement() {
               {laborReport.staff.map((s, i) => (
                 <div key={i} className="flex items-center justify-between py-2 border-b last:border-0">
                   <div><p className="font-medium">{s.name}</p><p className="text-xs text-gray-400">{s.role}</p></div>
-                  <div className="text-right"><p className="font-bold">${s.payRate}/hr</p><p className="text-xs text-gray-400">~${s.weeklyEstimate}/week</p></div>
+                  <div className="text-right"><p className="font-bold">${s.payRate}{salaryTypeSuffix(s.salaryType)}</p><p className="text-xs text-gray-400">~${s.weeklyEstimate}/week</p></div>
                 </div>
               ))}
             </div>
@@ -173,7 +178,14 @@ export default function StaffManagement() {
               <option value="kitchen">Kitchen</option>
               <option value="manager">Manager</option>
             </select>
-            <Input type="number" placeholder="Pay rate ($/hr)" value={form.payRate} onChange={e => setForm({ ...form, payRate: parseFloat(e.target.value) || 0 })} data-testid="staff-payrate" />
+            <div className="grid grid-cols-2 gap-2">
+              <select className="p-2 border rounded-md" value={form.salaryType} onChange={e => setForm({ ...form, salaryType: e.target.value })} data-testid="staff-salary-type">
+                <option value="hourly">Hourly</option>
+                <option value="weekly">Weekly</option>
+                <option value="annually">Annually</option>
+              </select>
+              <Input type="number" placeholder={`Pay rate ($${salaryTypeSuffix(form.salaryType)})`} value={form.payRate} onChange={e => setForm({ ...form, payRate: parseFloat(e.target.value) || 0 })} data-testid="staff-payrate" />
+            </div>
             <Button className="w-full" style={{ backgroundColor: theme.primary }} onClick={handleAddStaff} data-testid="confirm-add-staff">
               Add Staff
             </Button>

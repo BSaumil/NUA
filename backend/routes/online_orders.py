@@ -186,9 +186,11 @@ async def place_order(data: dict):
         raise HTTPException(status_code=400, detail="Customer name required")
     if channel == "delivery" and not customer["address"]:
         raise HTTPException(status_code=400, detail="Delivery requires an address")
+    # Menu prices are GST-inclusive — the listed price is what the customer
+    # pays, GST is disclosed as the component within it, not added on top.
     subtotal = sum(float(i.get("price", 0)) * int(i.get("quantity", 1)) for i in items)
-    gst = round(subtotal * 0.1, 2)
-    total = round(subtotal + gst, 2)
+    total = round(subtotal, 2)
+    gst = round(total / 11, 2)
     code = _uid("ORD")
     load = await _kitchen_load()
     eta = await _compute_eta(items, channel, load)

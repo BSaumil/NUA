@@ -65,7 +65,7 @@ export default function NotificationBell() {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="fixed bottom-5 right-24 z-40 h-12 w-12 rounded-full bg-white shadow-lg border flex items-center justify-center hover:bg-slate-50 transition"
+        className="fixed bottom-20 right-24 z-40 h-12 w-12 rounded-full bg-white shadow-lg border flex items-center justify-center hover:bg-slate-50 transition"
         data-testid="notification-bell"
         aria-label="Notifications"
       >
