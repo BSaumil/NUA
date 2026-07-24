@@ -208,6 +208,11 @@ async def create_roster_shift(data: dict, _: dict = Depends(require_owner_or_man
     }
     await db.roster_shifts.insert_one(shift)
     shift.pop("_id", None)
+    try:
+        from services import realtime
+        await realtime.broadcast({"type": "roster.updated", "shiftId": shift["id"], "staffId": shift["staffId"]})
+    except Exception:
+        pass
     return shift
 
 @router.put("/staff/roster/{shift_id}")
@@ -227,6 +232,11 @@ async def update_roster_shift(shift_id: str, data: dict, _: dict = Depends(requi
     update["blackoutOverrideReason"] = conflict
     result = await db.roster_shifts.find_one_and_update({"id": shift_id}, {"$set": update}, return_document=True)
     result.pop("_id", None)
+    try:
+        from services import realtime
+        await realtime.broadcast({"type": "roster.updated", "shiftId": shift_id, "staffId": result.get("staffId")})
+    except Exception:
+        pass
     return result
 
 @router.delete("/staff/roster/{shift_id}")

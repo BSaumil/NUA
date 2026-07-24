@@ -12,6 +12,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { analyticsAPI, nuaAPI } from '../services/api';
 import { toast } from 'sonner';
+import useLiveFeed from '../hooks/useLiveFeed';
 
 const SEVERITY_STYLE = {
   critical: { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', Icon: AlertOctagon },
@@ -62,9 +63,15 @@ export default function OwnerDashboardApp() {
 
   useEffect(() => {
     load();
-    const id = setInterval(load, 60000);
+    const id = setInterval(load, 60000); // fallback poll — never depend on the socket alone
     return () => clearInterval(id);
   }, [load]);
+
+  // Live sync: a completed sale or roster change refreshes the pulse tiles
+  // right away instead of waiting up to 60s for the next poll.
+  const { connected: liveConnected } = useLiveFeed(useCallback((event) => {
+    if (event.type === 'sale.completed' || event.type === 'roster.updated') load();
+  }, [load]));
 
   const handleRegenerateBriefing = async () => {
     setRegenerating(true);
@@ -88,6 +95,11 @@ export default function OwnerDashboardApp() {
           <span className="text-sm text-gray-400">Owner Dashboard</span>
         </div>
         <div className="flex items-center gap-3">
+          {liveConnected && (
+            <span className="flex items-center gap-1 text-[11px] text-emerald-600" title="Live sync connected" data-testid="owner-dashboard-live-indicator">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live
+            </span>
+          )}
           {health && <Badge className={TIER_COLOR[health.tier] || TIER_COLOR.watch} data-testid="owner-dashboard-health">{health.overall} · {health.tier.replace('_', ' ')}</Badge>}
           <button onClick={load} className="text-gray-400 hover:text-gray-600" data-testid="owner-dashboard-refresh"><RefreshCw size={16} className={loading ? 'animate-spin' : ''} /></button>
           <button onClick={toggleDarkMode} className="text-gray-400 hover:text-gray-600">{darkMode ? <Sun size={18} /> : <Moon size={18} />}</button>

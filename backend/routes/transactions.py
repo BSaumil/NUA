@@ -218,6 +218,18 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
     except Exception:
         pass
 
+    # Live-sync: push the sale to any connected Dashboard app instantly.
+    # Best-effort only — the Dashboard's own polling is the real source of
+    # truth, this just makes the common case feel instant.
+    try:
+        from services import realtime
+        await realtime.broadcast({
+            "type": "sale.completed", "id": txn_dict["id"], "total": txn_dict["total"],
+            "paymentMethod": txn_dict["paymentMethod"], "location": txn_dict.get("location"),
+        })
+    except Exception:
+        pass
+
     # Update stock + deduct recipe ingredients via the central helper.
     from routes.inventory_accounting import deduct_recipe_stock
     from services import measured_inventory_service as _mi
