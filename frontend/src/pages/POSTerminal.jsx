@@ -23,11 +23,15 @@ import ModifierSheet from '../components/pos/ModifierSheet';
 import POSHeaderBar from '../components/pos/POSHeaderBar';
 import ScanVoucherButton from '../components/pos/ScanVoucherButton';
 import { CategoryIcon } from './Categories';
+import { createTransactionResilient } from '../lib/offlineQueue';
+import useOfflineQueue from '../hooks/useOfflineQueue';
+import { WifiOff } from 'lucide-react';
 
 // SwipeableCartItem and CustomerCombobox now live in components/pos/.
 
 const POSTerminal = () => {
   const { theme } = useTheme();
+  const { queuedCount, refresh: refreshOfflineQueue } = useOfflineQueue();
   const { user } = useAuth();
   const { cart, addToCart, removeFromCart, updateQuantity, clearCart, calculateTotal, selectedCustomer, setSelectedCustomer, currentUser, currentLocation, appliedDiscounts, addDiscount, removeDiscount, appliedGiftCards, addGiftCard, removeGiftCard, pendingGiftActivations, storeCreditApplied, setStoreCreditApplied } = usePOS();
   const { toast } = useToast();
@@ -407,35 +411,45 @@ const POSTerminal = () => {
     }
     setLoading(true);
     try {
-      const res = await transactionsAPI.create({
+      const res = await createTransactionResilient({
         items: cart.map(item => toTxItem(item, true)),
         paymentMethod, customerId: selectedCustomer?.id || null, location: currentLocation, cashier: currentUser.name,
         orderType, tableNumber: orderType === 'dine-in' ? tableNumber : null, walkInName: orderType === 'takeaway' ? walkInName : null,
         ...buildDiscountPayload(),
       });
+      const queuedOffline = !!res.data?.queuedOffline;
       setLastTxnId(res.data?.id || null);
-      // Loyalty: redeem first (if applicable), then earn on net spend
-      if (selectedCustomer && pointsToRedeem >= (loyaltyCfg.minRedeem || 10)) {
-        try { await loyaltyEngineAPI.redeem({ customerId: selectedCustomer.id, points: pointsToRedeem, transactionId: res.data?.id }); } catch {}
+      if (queuedOffline) {
+        // No connectivity right now — the sale is saved locally and will
+        // sync automatically. Skip loyalty/printer/gift-card side-effects
+        // (they need the server) and let the background flush handle them
+        // once this transaction actually lands.
+        toast({ title: "Saved offline", description: `$${totals.total} sale queued — will sync when back online.` });
+        refreshOfflineQueue();
+      } else {
+        // Loyalty: redeem first (if applicable), then earn on net spend
+        if (selectedCustomer && pointsToRedeem >= (loyaltyCfg.minRedeem || 10)) {
+          try { await loyaltyEngineAPI.redeem({ customerId: selectedCustomer.id, points: pointsToRedeem, transactionId: res.data?.id }); } catch {}
+        }
+        if (selectedCustomer) {
+          try {
+            await loyaltyEngineAPI.earn({
+              customerId: selectedCustomer.id,
+              transactionId: res.data?.id,
+              items: cart.map(i => ({ category: i.category || 'Other', price: i.price, quantity: i.quantity })),
+            });
+          } catch {}
+        }
+        toast({ title: "Transaction Complete!", description: `Payment of $${totals.total} via ${paymentMethod}` });
+        // Auto-route items to category printers
+        try { await gamificationAPI.sendToPrinters({ items: cart.map(i => ({ productName: i.name, category: i.category, quantity: i.quantity })), orderId: res.data?.id }); } catch {}
+        // Settle gift cards: activate any pending-sold cards + redeem applied tenders.
+        await settleGiftCards(res.data?.id);
       }
-      if (selectedCustomer) {
-        try {
-          await loyaltyEngineAPI.earn({
-            customerId: selectedCustomer.id,
-            transactionId: res.data?.id,
-            items: cart.map(i => ({ category: i.category || 'Other', price: i.price, quantity: i.quantity })),
-          });
-        } catch {}
-      }
-      toast({ title: "Transaction Complete!", description: `Payment of $${totals.total} via ${paymentMethod}` });
-      // Auto-route items to category printers
-      try { await gamificationAPI.sendToPrinters({ items: cart.map(i => ({ productName: i.name, category: i.category, quantity: i.quantity })), orderId: res.data?.id }); } catch {}
-      // Settle gift cards: activate any pending-sold cards + redeem applied tenders.
-      await settleGiftCards(res.data?.id);
       resetPayment();
       clearCart();
       setPointsToRedeem(0);
-      const r = await productsAPI.getAll(); setProducts(r.data);
+      try { const r = await productsAPI.getAll(); setProducts(r.data); } catch {}
     } catch (error) {
       toast({ title: "Error", description: "Transaction failed.", variant: "destructive" });
     } finally { setLoading(false); }
@@ -670,6 +684,12 @@ const POSTerminal = () => {
           <div onDoubleClick={() => { if (user?.role === 'owner') setShowGhost(true); }} data-testid="pos-title">
             <POSHeaderBar themeColor={theme.primary} />
           </div>
+          {queuedCount > 0 && (
+            <div className="mb-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-xs font-medium" data-testid="offline-queue-banner">
+              <WifiOff size={14} />
+              {queuedCount} sale{queuedCount === 1 ? '' : 's'} saved offline — syncing when back online…
+            </div>
+          )}
           <div className="relative mb-3 flex gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={16} />
