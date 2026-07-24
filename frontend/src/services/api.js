@@ -930,4 +930,15 @@ export const finalizeAPI = {
   reloadGift: (voucherId, amount) => api.post(`/gift-cards/${voucherId}/reload`, { amount }),
 };
 
+// NUA — daily briefing, insights, agent chat (AI surface reused by the Owner Dashboard app)
+export const nuaAPI = {
+  getBriefing: (force) => api.get('/nua/briefing', { params: force ? { force: true } : {} }),
+  regenerateBriefing: () => api.post('/nua/briefing/regenerate'),
+  getInsights: (limit = 50) => api.get(`/nua/insights?limit=${limit}`),
+  getInsightsSummary: () => api.get('/nua/insights/summary'),
+  dismissInsight: (id) => api.post(`/nua/insights/${id}/dismiss`),
+  getHealthScore: () => api.get('/nua/health-score'),
+  chat: (data) => api.post('/nua/chat', data),
+};
+
 export default api;

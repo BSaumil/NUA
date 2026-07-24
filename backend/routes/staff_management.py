@@ -180,10 +180,14 @@ async def edit_timecard(timecard_id: str, data: dict, user: dict = Depends(requi
 
 # ============ STAFF ROSTER ============
 @router.get("/staff/roster")
-async def get_roster( week_start: str = None, _: dict = Depends(require_owner_or_manager)):
+async def get_roster( week_start: str = None, user: dict = Depends(get_user)):
+    # Owner/manager see the full roster; everyone else only sees their own
+    # shifts — same scoping rule GET /staff/timecards already uses.
     query = {}
     if week_start:
         query["weekStart"] = week_start
+    if user["role"] not in ("owner", "manager"):
+        query["staffId"] = user["id"]
     shifts = await db.roster_shifts.find(query, {"_id": 0}).sort("date", 1).to_list(5000)
     return shifts
 
