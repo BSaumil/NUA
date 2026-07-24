@@ -1,11 +1,53 @@
 from fastapi import APIRouter, HTTPException, Request, Depends
+from pydantic import BaseModel
+from typing import Optional
 from deps import get_user, require_owner, require_owner_or_manager
 from database import db
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date as _date_cls
 from utils.au_payroll import effective_hourly_rate
 import uuid
 
 router = APIRouter()
+
+_WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+
+
+def _resolve_shift_date(day_name: str, week_start: Optional[str]) -> str:
+    """Roster shifts store a weekday name (e.g. 'Monday') + a reference weekStart
+    (ISO Monday). Resolve the actual calendar date so it can be checked against
+    blackout ranges / approved leave, mirroring v15_features.py's auto-roster logic."""
+    try:
+        base = _date_cls.fromisoformat(week_start) if week_start else _date_cls.today()
+        offset = _WEEKDAYS.index(day_name)
+        return (base + timedelta(days=offset)).isoformat()
+    except Exception:
+        return ""
+
+
+async def _blackout_conflict(staff_id: Optional[str], day_name: Optional[str], week_start: Optional[str]) -> Optional[str]:
+    """Reason string if staff_id can't work this roster slot (weekly availability,
+    an explicit blackout range, or approved time off) — None if it's clear."""
+    if not staff_id or not day_name:
+        return None
+    date_iso = _resolve_shift_date(day_name, week_start)
+    avail = await db.staff_availability.find_one({"staffId": staff_id}, {"_id": 0})
+    if avail:
+        weekly = avail.get("weeklyAvailable") or []
+        if weekly and day_name[:3] not in weekly and day_name not in weekly:
+            return f"{day_name} is outside this staff member's weekly availability"
+        if date_iso:
+            for b in (avail.get("blackoutDates") or []):
+                f, t = b.get("from") or "", b.get("to") or b.get("from") or ""
+                if f and t and f <= date_iso <= t:
+                    return b.get("reason") or "Staff member has a blackout period on this date"
+    if date_iso:
+        leave = await db.time_off_requests.find_one({
+            "userId": staff_id, "status": "approved",
+            "startDate": {"$lte": date_iso}, "endDate": {"$gte": date_iso},
+        })
+        if leave:
+            return f"Staff member has approved time off covering {date_iso}"
+    return None
 
 # ============ STAFF PIN LOGIN ============
 @router.post("/auth/pin-login")
@@ -93,6 +135,49 @@ async def get_timecards( staff_id: str = None, period: str = "week", user: dict 
     cards = await db.timecards.find(query, {"_id": 0}).sort("clockIn", -1).to_list(5000)
     return cards
 
+@router.put("/staff/timecards/{timecard_id}")
+async def edit_timecard(timecard_id: str, data: dict, user: dict = Depends(require_owner_or_manager)):
+    """Owner/manager fix-up for a clocked timecard — a missed clock-out, wrong
+    break, etc. Self-service clock-in/out never lets this happen automatically,
+    so this is the only path to correct it after the fact. Keeps the original
+    values + who/when it was edited for audit."""
+    existing = await db.timecards.find_one({"id": timecard_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Timecard not found")
+
+    update = {}
+    if "clockIn" in data:
+        update["clockIn"] = data["clockIn"]
+    if "clockOut" in data:
+        update["clockOut"] = data["clockOut"]
+    if "breakMinutes" in data:
+        update["breakMinutes"] = int(data["breakMinutes"])
+
+    clock_in = update.get("clockIn", existing.get("clockIn"))
+    clock_out = update.get("clockOut", existing.get("clockOut"))
+    break_mins = update.get("breakMinutes", existing.get("breakMinutes", 0))
+    if clock_in and clock_out:
+        start = datetime.fromisoformat(clock_in)
+        end = datetime.fromisoformat(clock_out)
+        if end <= start:
+            raise HTTPException(status_code=400, detail="Clock-out must be after clock-in")
+        hours = (end - start).total_seconds() / 3600 - (break_mins / 60)
+        update["hoursWorked"] = round(max(hours, 0), 2)
+
+    update["editedBy"] = user["name"]
+    update["editedAt"] = datetime.now(timezone.utc).isoformat()
+    update.setdefault("originalValues", {
+        "clockIn": existing.get("clockIn"), "clockOut": existing.get("clockOut"),
+        "breakMinutes": existing.get("breakMinutes"), "hoursWorked": existing.get("hoursWorked"),
+    })
+    # Don't clobber originalValues on a second edit — keep the FIRST pre-edit state.
+    if existing.get("originalValues"):
+        update["originalValues"] = existing["originalValues"]
+
+    result = await db.timecards.find_one_and_update({"id": timecard_id}, {"$set": update}, return_document=True)
+    result.pop("_id", None)
+    return result
+
 # ============ STAFF ROSTER ============
 @router.get("/staff/roster")
 async def get_roster( week_start: str = None, _: dict = Depends(require_owner_or_manager)):
@@ -104,6 +189,9 @@ async def get_roster( week_start: str = None, _: dict = Depends(require_owner_or
 
 @router.post("/staff/roster")
 async def create_roster_shift(data: dict, _: dict = Depends(require_owner_or_manager)):
+    conflict = await _blackout_conflict(data.get("staffId"), data.get("date"), data.get("weekStart"))
+    if conflict and not data.get("overrideBlackout"):
+        raise HTTPException(status_code=409, detail=conflict)
     shift = {
         "id": f"SHIFT-{str(uuid.uuid4())[:8].upper()}",
         "staffId": data.get("staffId"), "staffName": data.get("staffName"),
@@ -111,6 +199,8 @@ async def create_roster_shift(data: dict, _: dict = Depends(require_owner_or_man
         "startTime": data.get("startTime", "09:00"), "endTime": data.get("endTime", "17:00"),
         "role": data.get("role", ""), "notes": data.get("notes", ""),
         "createdAt": datetime.now(timezone.utc).isoformat(),
+        "blackoutOverridden": bool(conflict),
+        "blackoutOverrideReason": conflict,
     }
     await db.roster_shifts.insert_one(shift)
     shift.pop("_id", None)
@@ -118,11 +208,20 @@ async def create_roster_shift(data: dict, _: dict = Depends(require_owner_or_man
 
 @router.put("/staff/roster/{shift_id}")
 async def update_roster_shift(shift_id: str, data: dict, _: dict = Depends(require_owner_or_manager)):
+    existing = await db.roster_shifts.find_one({"id": shift_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Shift not found")
+    staff_id = data.get("staffId", existing.get("staffId"))
+    day = data.get("date", existing.get("date"))
+    week_start = data.get("weekStart", existing.get("weekStart"))
+    conflict = await _blackout_conflict(staff_id, day, week_start)
+    if conflict and not data.get("overrideBlackout"):
+        raise HTTPException(status_code=409, detail=conflict)
     allowed = {"date", "startTime", "endTime", "role", "notes", "staffId", "staffName", "weekStart"}
     update = {k: v for k, v in data.items() if k in allowed}
+    update["blackoutOverridden"] = bool(conflict)
+    update["blackoutOverrideReason"] = conflict
     result = await db.roster_shifts.find_one_and_update({"id": shift_id}, {"$set": update}, return_document=True)
-    if not result:
-        raise HTTPException(status_code=404, detail="Shift not found")
     result.pop("_id", None)
     return result
 
@@ -130,6 +229,85 @@ async def update_roster_shift(shift_id: str, data: dict, _: dict = Depends(requi
 async def delete_roster_shift(shift_id: str, _: dict = Depends(require_owner_or_manager)):
     await db.roster_shifts.delete_one({"id": shift_id})
     return {"message": "Shift deleted"}
+
+# ============ TIME OFF / LEAVE REQUESTS ============
+class TimeOffRequestCreate(BaseModel):
+    startDate: str  # YYYY-MM-DD
+    endDate: str    # YYYY-MM-DD
+    reason: str
+    staffId: Optional[str] = None  # owner/manager filing on someone else's behalf
+
+@router.post("/staff/time-off")
+async def request_time_off(data: TimeOffRequestCreate, user: dict = Depends(get_user)):
+    if data.endDate < data.startDate:
+        raise HTTPException(status_code=400, detail="End date must be on or after start date")
+    target_id = data.staffId if (data.staffId and user["role"] in ("owner", "manager")) else user["id"]
+    target = user if target_id == user["id"] else await db.auth_users.find_one({"id": target_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Staff member not found")
+    doc = {
+        "id": f"TOFF-{str(uuid.uuid4())[:8].upper()}",
+        "userId": target_id, "userName": target.get("name", ""),
+        "startDate": data.startDate, "endDate": data.endDate, "reason": data.reason,
+        "status": "pending", "approvedBy": None, "notes": None,
+        "createdAt": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.time_off_requests.insert_one(dict(doc))
+    doc.pop("_id", None)
+    return doc
+
+@router.get("/staff/time-off")
+async def list_time_off(staff_id: str = None, status: str = None, user: dict = Depends(get_user)):
+    query = {}
+    if user["role"] not in ("owner", "manager"):
+        query["userId"] = user["id"]
+    elif staff_id:
+        query["userId"] = staff_id
+    if status:
+        query["status"] = status
+    rows = await db.time_off_requests.find(query, {"_id": 0}).sort("createdAt", -1).to_list(2000)
+    return rows
+
+@router.post("/staff/time-off/{request_id}/approve")
+async def approve_time_off(request_id: str, user: dict = Depends(require_owner_or_manager)):
+    result = await db.time_off_requests.find_one_and_update(
+        {"id": request_id}, {"$set": {"status": "approved", "approvedBy": user["name"]}}, return_document=True)
+    if not result:
+        raise HTTPException(status_code=404, detail="Request not found")
+    result.pop("_id", None)
+    # Surface any already-scheduled shifts that now conflict with the leave —
+    # approving doesn't auto-remove them, the owner/manager decides.
+    conflicts = []
+    async for shift in db.roster_shifts.find({"staffId": result["userId"]}, {"_id": 0}):
+        shift_date = _resolve_shift_date(shift.get("date", ""), shift.get("weekStart"))
+        if shift_date and result["startDate"] <= shift_date <= result["endDate"]:
+            conflicts.append(shift)
+    result["conflictingShifts"] = conflicts
+    return result
+
+@router.post("/staff/time-off/{request_id}/reject")
+async def reject_time_off(request_id: str, data: dict, user: dict = Depends(require_owner_or_manager)):
+    result = await db.time_off_requests.find_one_and_update(
+        {"id": request_id},
+        {"$set": {"status": "denied", "approvedBy": user["name"], "notes": data.get("notes")}},
+        return_document=True)
+    if not result:
+        raise HTTPException(status_code=404, detail="Request not found")
+    result.pop("_id", None)
+    return result
+
+@router.delete("/staff/time-off/{request_id}")
+async def cancel_time_off(request_id: str, user: dict = Depends(get_user)):
+    existing = await db.time_off_requests.find_one({"id": request_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Request not found")
+    is_owner_of_request = existing["userId"] == user["id"]
+    if not is_owner_of_request and user["role"] not in ("owner", "manager"):
+        raise HTTPException(status_code=403, detail="Not your request")
+    if existing["status"] != "pending" and user["role"] not in ("owner", "manager"):
+        raise HTTPException(status_code=400, detail="Only pending requests can be cancelled")
+    await db.time_off_requests.delete_one({"id": request_id})
+    return {"message": "Request cancelled"}
 
 # ============ PAYRUN ============
 @router.get("/payrun/calculate")

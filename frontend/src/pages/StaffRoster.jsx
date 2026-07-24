@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import {
   Clock, LogIn, LogOut, Calendar, DollarSign, Users, FileText,
-  Plus, Trash2, BarChart3, Printer, GripVertical, Move, Brain
+  Plus, Trash2, BarChart3, Printer, GripVertical, Move, Brain,
+  CalendarOff, Check, X, Pencil
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -86,6 +87,13 @@ export default function StaffRoster() {
   // Week roster form
   const [showWeekRoster, setShowWeekRoster] = useState(false);
   const [weekForm, setWeekForm] = useState({ staffId: '', position: 'Floor', weekStart: '', shifts: {} });
+  // Time off / leave requests
+  const [timeOff, setTimeOff] = useState([]);
+  const [showTimeOffDialog, setShowTimeOffDialog] = useState(false);
+  const [timeOffForm, setTimeOffForm] = useState({ startDate: '', endDate: '', reason: '' });
+  // Timecard edit (owner/manager fix-up)
+  const [editingTimecard, setEditingTimecard] = useState(null);
+  const [timecardEditForm, setTimecardEditForm] = useState({ clockOut: '', breakMinutes: '0' });
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor)
@@ -108,6 +116,7 @@ export default function StaffRoster() {
     if (isOwner) {
       try { const h = await staffMgmtAPI.getPayrunHistory(); setPayHistory(h.data); } catch {}
     }
+    try { const t = await staffMgmtAPI.listTimeOff(); setTimeOff(t.data); } catch {}
   };
 
   const fetchReports = async () => {
@@ -119,6 +128,76 @@ export default function StaffRoster() {
   const handleClockIn = async () => { try { await staffMgmtAPI.clockIn(); toast.success('Clocked in!'); fetchAll(); } catch (e) { toast.error(e.response?.data?.detail || 'Failed'); } };
   const handleClockOut = async () => { try { await staffMgmtAPI.clockOut({ breakMinutes: parseInt(breakMins) || 0 }); toast.success('Clocked out!'); fetchAll(); } catch (e) { toast.error(e.response?.data?.detail || 'Failed'); } };
   const handleDeleteShift = async (id) => { try { await staffMgmtAPI.deleteRosterShift(id); toast.success('Shift removed'); fetchAll(); } catch {} };
+
+  // Blackout/approved-leave conflicts come back as a 409 with a human reason.
+  // Offer an explicit override rather than silently failing or silently blocking.
+  const createShiftWithOverride = async (payload) => {
+    try {
+      await staffMgmtAPI.createRosterShift(payload);
+      return true;
+    } catch (e) {
+      if (e.response?.status === 409) {
+        const reason = e.response.data?.detail || 'This staff member is unavailable on that day';
+        if (window.confirm(`${reason}. Schedule them anyway?`)) {
+          await staffMgmtAPI.createRosterShift({ ...payload, overrideBlackout: true });
+          return true;
+        }
+        return false;
+      }
+      throw e;
+    }
+  };
+
+  // ===== Time Off / Leave Requests =====
+  const handleRequestTimeOff = async () => {
+    if (!timeOffForm.startDate || !timeOffForm.endDate || !timeOffForm.reason) {
+      toast.error('Fill in the dates and a reason'); return;
+    }
+    try {
+      await staffMgmtAPI.requestTimeOff(timeOffForm);
+      toast.success('Time off requested');
+      setShowTimeOffDialog(false);
+      setTimeOffForm({ startDate: '', endDate: '', reason: '' });
+      fetchAll();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to submit request'); }
+  };
+  const handleApproveTimeOff = async (id) => {
+    try {
+      const r = await staffMgmtAPI.approveTimeOff(id);
+      const conflicts = r.data?.conflictingShifts || [];
+      toast.success(conflicts.length ? `Approved — ${conflicts.length} scheduled shift(s) now conflict, check the roster` : 'Approved');
+      fetchAll();
+    } catch { toast.error('Failed to approve'); }
+  };
+  const handleRejectTimeOff = async (id) => {
+    try { await staffMgmtAPI.rejectTimeOff(id); toast.success('Request declined'); fetchAll(); }
+    catch { toast.error('Failed to decline'); }
+  };
+  const handleCancelTimeOff = async (id) => {
+    try { await staffMgmtAPI.cancelTimeOff(id); toast.success('Request cancelled'); fetchAll(); }
+    catch { toast.error('Failed to cancel'); }
+  };
+
+  // ===== Timecard edit (owner/manager fix-up) =====
+  const openTimecardEdit = (tc) => {
+    setEditingTimecard(tc);
+    setTimecardEditForm({
+      clockOut: tc.clockOut ? tc.clockOut.slice(0, 16) : '',
+      breakMinutes: String(tc.breakMinutes || 0),
+    });
+  };
+  const handleSaveTimecardEdit = async () => {
+    if (!editingTimecard) return;
+    try {
+      await staffMgmtAPI.editTimecard(editingTimecard.id, {
+        clockOut: timecardEditForm.clockOut ? new Date(timecardEditForm.clockOut).toISOString() : undefined,
+        breakMinutes: parseInt(timecardEditForm.breakMinutes) || 0,
+      });
+      toast.success('Timecard updated');
+      setEditingTimecard(null);
+      fetchAll();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to update timecard'); }
+  };
 
   // ===== Drag-and-Drop Handlers =====
   const handleDragStart = (event) => { setActiveDrag(event.active.data.current); };
@@ -134,8 +213,19 @@ export default function StaffRoster() {
     try {
       await staffMgmtAPI.updateRosterShift(shift.id, { date: newDay });
       toast.success(`${shift.staffName} moved to ${newDay}`);
-    } catch {
-      toast.error('Failed to move shift');
+    } catch (e) {
+      if (e.response?.status === 409) {
+        const reason = e.response.data?.detail || 'This staff member is unavailable on that day';
+        if (window.confirm(`${reason}. Move them anyway?`)) {
+          try {
+            await staffMgmtAPI.updateRosterShift(shift.id, { date: newDay, overrideBlackout: true });
+            toast.success(`${shift.staffName} moved to ${newDay} (override)`);
+            return;
+          } catch { /* fall through to rollback below */ }
+        }
+      } else {
+        toast.error('Failed to move shift');
+      }
       fetchAll(); // rollback
     }
   };
@@ -153,19 +243,19 @@ export default function StaffRoster() {
     const activeDays = Object.entries(weekForm.shifts).filter(([_, v]) => v.enabled);
     if (activeDays.length === 0) { toast.error('Select at least one day'); return; }
 
-    let created = 0;
+    let created = 0, skipped = 0;
     for (const [day, shift] of activeDays) {
       try {
-        await staffMgmtAPI.createRosterShift({
+        const ok = await createShiftWithOverride({
           staffId: weekForm.staffId, staffName: staffMember.name,
           date: day, weekStart: weekForm.weekStart,
           startTime: shift.startTime, endTime: shift.endTime,
           role: weekForm.position, notes: weekForm.position,
         });
-        created++;
-      } catch {}
+        if (ok) created++; else skipped++;
+      } catch { skipped++; }
     }
-    toast.success(`${created} shifts added for ${staffMember.name}`);
+    toast.success(`${created} shift(s) added for ${staffMember.name}` + (skipped ? ` (${skipped} skipped)` : ''));
     setShowWeekRoster(false);
     setWeekForm({ staffId: '', position: 'Floor', weekStart: '', shifts: {} });
     fetchAll();
@@ -251,6 +341,11 @@ export default function StaffRoster() {
         <TabsList>
           <TabsTrigger value="roster">Roster</TabsTrigger>
           <TabsTrigger value="timecards">Timecards</TabsTrigger>
+          <TabsTrigger value="timeoff" data-testid="tab-timeoff">
+            Time Off {canManage && timeOff.filter(t => t.status === 'pending').length > 0 && (
+              <Badge className="ml-1.5 bg-amber-100 text-amber-700 text-[10px] px-1.5">{timeOff.filter(t => t.status === 'pending').length}</Badge>
+            )}
+          </TabsTrigger>
           {isOwner && <TabsTrigger value="payrun">Payrun</TabsTrigger>}
           {canManage && <TabsTrigger value="reports">Reports</TabsTrigger>}
         </TabsList>
@@ -367,23 +462,73 @@ export default function StaffRoster() {
                 <th className="text-right p-3 font-medium text-gray-500">Break</th>
                 <th className="text-right p-3 font-medium text-gray-500">Hours</th>
                 {canManage && <th className="text-right p-3 font-medium text-gray-500">Cost</th>}
+                {canManage && <th className="text-right p-3 font-medium text-gray-500">Edit</th>}
               </tr></thead>
               <tbody>
                 {timecards.map(tc => (
-                  <tr key={tc.id} className="border-t hover:bg-gray-50">
+                  <tr key={tc.id} className="border-t hover:bg-gray-50" data-testid={`timecard-row-${tc.id}`}>
                     <td className="p-3 font-medium">{tc.staffName}</td>
                     <td className="p-3"><Badge variant="outline" className="capitalize text-xs">{tc.role}</Badge></td>
                     <td className="p-3 text-xs">{new Date(tc.clockIn).toLocaleString()}</td>
-                    <td className="p-3 text-xs">{tc.clockOut ? new Date(tc.clockOut).toLocaleString() : <Badge className="bg-green-100 text-green-700 text-xs">Active</Badge>}</td>
+                    <td className="p-3 text-xs">{tc.clockOut ? new Date(tc.clockOut).toLocaleString() : <Badge className="bg-green-100 text-green-700 text-xs">Active</Badge>}
+                      {tc.editedBy && <span className="block text-[10px] text-gray-400 mt-0.5">edited by {tc.editedBy}</span>}
+                    </td>
                     <td className="p-3 text-right">{tc.breakMinutes}m</td>
                     <td className="p-3 text-right font-bold">{tc.hoursWorked}h</td>
                     {canManage && <td className="p-3 text-right font-mono" style={{ color: theme.primary }}>${(tc.hoursWorked * effectiveHourlyRate(tc.payRate, tc.salaryType)).toFixed(2)}</td>}
+                    {canManage && <td className="p-3 text-right">
+                      <button onClick={() => openTimecardEdit(tc)} className="text-gray-400 hover:text-gray-700" data-testid={`edit-timecard-${tc.id}`}><Pencil size={14} /></button>
+                    </td>}
                   </tr>
                 ))}
               </tbody>
             </table>
             {timecards.length === 0 && <p className="text-center text-gray-400 py-8">No timecards yet. Clock in to start.</p>}
           </div></CardContent></Card>
+        </TabsContent>
+
+        {/* TIME OFF / LEAVE REQUESTS */}
+        <TabsContent value="timeoff" className="mt-4 space-y-3">
+          <div className="flex justify-between items-center">
+            <h3 className="font-semibold">{canManage ? 'Time Off Requests' : 'My Time Off'}</h3>
+            <Button size="sm" style={{ backgroundColor: theme.primary }} onClick={() => setShowTimeOffDialog(true)} data-testid="request-time-off-btn">
+              <CalendarOff size={14} className="mr-1" /> Request Time Off
+            </Button>
+          </div>
+          <div className="space-y-2">
+            {timeOff.map(t => (
+              <Card key={t.id} data-testid={`timeoff-row-${t.id}`}>
+                <CardContent className="p-4 flex items-center justify-between gap-3">
+                  <div>
+                    {canManage && <p className="font-semibold text-sm">{t.userName}</p>}
+                    <p className="text-sm text-gray-700">{t.startDate} → {t.endDate}</p>
+                    <p className="text-xs text-gray-500">{t.reason}</p>
+                    {t.notes && <p className="text-xs text-red-500 mt-0.5">Note: {t.notes}</p>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge className={
+                      t.status === 'approved' ? 'bg-green-100 text-green-700' :
+                      t.status === 'denied' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                    }>{t.status}</Badge>
+                    {canManage && t.status === 'pending' && (
+                      <>
+                        <Button size="sm" variant="outline" className="h-8 text-emerald-700 border-emerald-300" onClick={() => handleApproveTimeOff(t.id)} data-testid={`approve-timeoff-${t.id}`}><Check size={14} /></Button>
+                        <Button size="sm" variant="outline" className="h-8 text-red-600 border-red-300" onClick={() => handleRejectTimeOff(t.id)} data-testid={`reject-timeoff-${t.id}`}><X size={14} /></Button>
+                      </>
+                    )}
+                    {t.status === 'pending' && (!canManage || t.userId === user?.id) && (
+                      <button onClick={() => handleCancelTimeOff(t.id)} className="text-gray-400 hover:text-red-600" data-testid={`cancel-timeoff-${t.id}`}><Trash2 size={14} /></button>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+            {timeOff.length === 0 && (
+              <Card className="border-dashed"><CardContent className="p-8 text-center text-gray-400">
+                No time off requests {canManage ? 'from any staff' : 'yet'}.
+              </CardContent></Card>
+            )}
+          </div>
         </TabsContent>
 
         {/* PAYRUN */}
@@ -496,6 +641,43 @@ export default function StaffRoster() {
             })()}
 
             <Button className="w-full" style={{ backgroundColor: theme.primary }} onClick={handleAddWeekRoster} data-testid="save-week-roster-btn">Add Week Roster</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Request Time Off Dialog */}
+      <Dialog open={showTimeOffDialog} onOpenChange={setShowTimeOffDialog}>
+        <DialogContent className="max-w-sm" data-testid="time-off-dialog">
+          <DialogHeader><DialogTitle>Request Time Off</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="grid grid-cols-2 gap-2">
+              <div><label className="text-xs font-medium text-gray-500 mb-1 block">Start date</label>
+                <Input type="date" value={timeOffForm.startDate} onChange={e => setTimeOffForm({ ...timeOffForm, startDate: e.target.value })} data-testid="timeoff-start" />
+              </div>
+              <div><label className="text-xs font-medium text-gray-500 mb-1 block">End date</label>
+                <Input type="date" value={timeOffForm.endDate} onChange={e => setTimeOffForm({ ...timeOffForm, endDate: e.target.value })} data-testid="timeoff-end" />
+              </div>
+            </div>
+            <textarea className="w-full min-h-[80px] p-2 border rounded-md text-sm resize-none" placeholder="Reason (e.g. family trip, appointment)"
+              value={timeOffForm.reason} onChange={e => setTimeOffForm({ ...timeOffForm, reason: e.target.value })} data-testid="timeoff-reason" />
+            <Button className="w-full" style={{ backgroundColor: theme.primary }} onClick={handleRequestTimeOff} data-testid="submit-timeoff-btn">Submit Request</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Timecard Dialog (owner/manager fix-up) */}
+      <Dialog open={!!editingTimecard} onOpenChange={(o) => !o && setEditingTimecard(null)}>
+        <DialogContent className="max-w-sm" data-testid="edit-timecard-dialog">
+          <DialogHeader><DialogTitle>Edit Timecard — {editingTimecard?.staffName}</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-xs text-gray-500">Clocked in: {editingTimecard ? new Date(editingTimecard.clockIn).toLocaleString() : ''}</p>
+            <div><label className="text-xs font-medium text-gray-500 mb-1 block">Clock out</label>
+              <Input type="datetime-local" value={timecardEditForm.clockOut} onChange={e => setTimecardEditForm({ ...timecardEditForm, clockOut: e.target.value })} data-testid="edit-timecard-clockout" />
+            </div>
+            <div><label className="text-xs font-medium text-gray-500 mb-1 block">Break (minutes)</label>
+              <Input type="number" value={timecardEditForm.breakMinutes} onChange={e => setTimecardEditForm({ ...timecardEditForm, breakMinutes: e.target.value })} data-testid="edit-timecard-break" />
+            </div>
+            <Button className="w-full" style={{ backgroundColor: theme.primary }} onClick={handleSaveTimecardEdit} data-testid="save-timecard-edit-btn">Save</Button>
           </div>
         </DialogContent>
       </Dialog>
