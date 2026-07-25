@@ -37,6 +37,8 @@ export default function StaffApp() {
   const [timeOffForm, setTimeOffForm] = useState({ startDate: '', endDate: '', reason: '' });
   const [loading, setLoading] = useState(true);
 
+  useEffect(() => { document.title = 'NUA Crew'; }, []);
+
   const load = useCallback(async () => {
     try {
       const [status, tc, ros, off, avail] = await Promise.allSettled([
@@ -90,7 +92,7 @@ export default function StaffApp() {
         style={{ background: darkMode ? 'rgba(11,11,15,0.85)' : 'rgba(255,255,255,0.85)', borderColor: darkMode ? '#1f1f28' : '#e5e7eb' }}>
         <div className="flex items-center gap-2">
           <span className="font-bold" style={{ color: theme.primary }}>NUA</span>
-          <span className="text-sm text-gray-400">Staff</span>
+          <span className="text-sm text-gray-400">Crew</span>
         </div>
         <div className="flex items-center gap-3">
           <button onClick={toggleDarkMode} className="text-gray-400 hover:text-gray-600" data-testid="staff-app-theme-toggle">

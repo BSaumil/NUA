@@ -48,6 +48,8 @@ export default function OwnerDashboardApp() {
   const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
 
+  useEffect(() => { document.title = 'NUA Pulse'; }, []);
+
   const load = useCallback(async () => {
     try {
       const [p, b, i, h] = await Promise.allSettled([
@@ -92,7 +94,7 @@ export default function OwnerDashboardApp() {
         style={{ background: darkMode ? 'rgba(11,11,15,0.85)' : 'rgba(255,255,255,0.85)', borderColor: darkMode ? '#1f1f28' : '#e5e7eb' }}>
         <div className="flex items-center gap-2">
           <span className="font-bold" style={{ color: theme.primary }}>NUA</span>
-          <span className="text-sm text-gray-400">Owner Dashboard</span>
+          <span className="text-sm text-gray-400">Pulse</span>
         </div>
         <div className="flex items-center gap-3">
           {liveConnected && (
