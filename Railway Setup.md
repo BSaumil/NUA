@@ -128,6 +128,48 @@ Then update `FRONTEND_URL` in the backend service again to your custom domain.
 
 ---
 
+## 👥 Step 8 — Add the Crew (staff) and Pulse (owner) apps (optional)
+
+Nua ships two extra front doors to the *same* frontend build: **NUA Crew** (a
+narrow, mobile-first app for clock-in/roster/time-off) and **NUA Pulse**
+(an AI-forward owner dashboard). Neither is a separate deploy — they're
+routes (`/staff-app`, `/owner-dashboard`) in the app you already built in
+Step 5, switched on by which hostname loaded the page
+(`frontend/src/lib/appShell.js`). So this step is *only* two more custom
+domains on the **same frontend service**, plus one backend variable update.
+
+### On Railway:
+1. **Frontend service → Settings → Networking → Custom Domain** → add
+   `staff.nua-eatery.com` → **Add Domain**. Repeat for `owner.nua-eatery.com`.
+   (Same service both times — you're adding domains #2 and #3 to the
+   frontend you already have, not creating new services.)
+2. Railway shows a CNAME for each — same target as your main domain's CNAME.
+
+### On your domain registrar:
+- Add a CNAME record: `staff` → *(the CNAME target Railway gave you)*
+- Add a CNAME record: `owner` → *(same)*
+
+Wait 5–30 minutes for certs, same as Step 7.
+
+### Back on Railway — the one variable that actually makes it work:
+**Backend service → Variables → `FRONTEND_URL`** — this has to list *all
+three* origins, comma-separated, or the browser's CORS check silently
+blocks `staff.`/`owner.` even once DNS resolves fine:
+
+```
+https://nua-eatery.com,https://staff.nua-eatery.com,https://owner.nua-eatery.com
+```
+
+Save → Railway auto-redeploys the backend (~1 minute).
+
+### Verify:
+Open `staff.nua-eatery.com` and `owner.nua-eatery.com` — each should log in
+and show real data (Crew / Pulse respectively), not just the shell with
+blank tiles. Blank/failing data after DNS resolves means `FRONTEND_URL`
+above is missing an origin or has a typo (no trailing slash, exact scheme).
+
+---
+
 ## 💸 Cost breakdown
 
 | What | Free tier | Real cost |
@@ -177,6 +219,8 @@ That's the whole secret sauce — git push = live in production.
 - [ ] Logged in successfully as `owner@nuva.com`
 - [ ] Updated backend's `FRONTEND_URL` to the real frontend URL
 - [ ] (Optional) Custom domain + HTTPS certificate
+- [ ] (Optional) Crew + Pulse: `staff.` and `owner.` custom domains added to the frontend service
+- [ ] (Optional) `FRONTEND_URL` updated to the comma-separated list of all three origins
 
 ---
 

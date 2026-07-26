@@ -26,6 +26,7 @@ from routes.ai_pantry import router as ai_pantry_router
 from routes.members import router as members_router
 from routes.multi_tenant import router as multi_tenant_router, seed_default_business
 from routes.advanced_features import router as advanced_features_router
+from routes.realtime import router as realtime_router
 from routes.staff_management import router as staff_mgmt_router
 from routes.awards import router as awards_router
 from routes.bookings_inbox import router as bookings_inbox_router
@@ -87,6 +88,7 @@ api_router.include_router(integrations_router)
 api_router.include_router(ai_pantry_router)
 api_router.include_router(members_router)
 api_router.include_router(advanced_features_router)  # Must be before multi_tenant to avoid /business/settings conflict
+api_router.include_router(realtime_router)
 api_router.include_router(staff_mgmt_router)
 api_router.include_router(awards_router)
 api_router.include_router(bookings_inbox_router)
@@ -142,8 +144,33 @@ from time import time
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
+def _rate_limit_identity(request) -> str:
+    """Prefer the authenticated user (from the Bearer token or session cookie)
+    over raw IP — several client apps (POS, Staff app, Dashboard app) can
+    legitimately share one venue's NAT'd IP, and keying on IP alone would let
+    them starve each other's bucket. Falls back to IP for unauthenticated
+    requests (e.g. login itself)."""
+    token = None
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header[7:].strip()
+    if not token:
+        token = request.cookies.get("access_token")
+    if token:
+        try:
+            import jwt, os
+            payload = jwt.decode(token, os.environ["JWT_SECRET"], algorithms=["HS256"])
+            sub = payload.get("sub")
+            if sub:
+                return f"user:{sub}"
+        except Exception:
+            pass
+    ip = request.client.host if request.client else "?"
+    return f"ip:{ip}"
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """120 req/min per (tenant, IP). Excludes static & public booking."""
+    """120 req/min per (tenant, identity). Excludes static & public booking."""
     def __init__(self, app):
         super().__init__(app)
         self.buckets = defaultdict(list)
@@ -156,8 +183,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if not path.startswith("/api/") or path.startswith("/api/public") or path.startswith("/api/table"):
             return await call_next(request)
         tenant = request.headers.get("X-Tenant-Id", "default")
-        ip = request.client.host if request.client else "?"
-        key = f"{tenant}:{ip}"
+        identity = _rate_limit_identity(request)
+        key = f"{tenant}:{identity}"
         now = time()
         # Evict idle clients every 5 min so the bucket dict can't grow unbounded
         if now - self._last_evict > 300:

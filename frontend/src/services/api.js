@@ -394,6 +394,12 @@ export const staffMgmtAPI = {
   createRosterShift: (data) => api.post('/staff/roster', data),
   updateRosterShift: (id, data) => api.put(`/staff/roster/${id}`, data),
   deleteRosterShift: (id) => api.delete(`/staff/roster/${id}`),
+  editTimecard: (id, data) => api.put(`/staff/timecards/${id}`, data),
+  requestTimeOff: (data) => api.post('/staff/time-off', data),
+  listTimeOff: (params) => api.get('/staff/time-off', { params }),
+  approveTimeOff: (id) => api.post(`/staff/time-off/${id}/approve`),
+  rejectTimeOff: (id, data) => api.post(`/staff/time-off/${id}/reject`, data || {}),
+  cancelTimeOff: (id) => api.delete(`/staff/time-off/${id}`),
   calculatePayrun: (params) => api.get('/payrun/calculate', { params }),
   processPayrun: (data) => api.post('/payrun/process', data),
   getPayrunHistory: () => api.get('/payrun/history'),
@@ -922,6 +928,17 @@ export const finalizeAPI = {
   // Gift Card 2.0
   scheduleGift: (data) => api.post('/gift-cards/schedule', data),
   reloadGift: (voucherId, amount) => api.post(`/gift-cards/${voucherId}/reload`, { amount }),
+};
+
+// NUA — daily briefing, insights, agent chat (AI surface reused by the Owner Dashboard app)
+export const nuaAPI = {
+  getBriefing: (force) => api.get('/nua/briefing', { params: force ? { force: true } : {} }),
+  regenerateBriefing: () => api.post('/nua/briefing/regenerate'),
+  getInsights: (limit = 50) => api.get(`/nua/insights?limit=${limit}`),
+  getInsightsSummary: () => api.get('/nua/insights/summary'),
+  dismissInsight: (id) => api.post(`/nua/insights/${id}/dismiss`),
+  getHealthScore: () => api.get('/nua/health-score'),
+  chat: (data) => api.post('/nua/chat', data),
 };
 
 export default api;
