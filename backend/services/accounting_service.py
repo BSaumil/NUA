@@ -55,6 +55,7 @@ SEED_COA: List[Dict[str, Any]] = [
     {"code": "4010", "name": "Beverage Sales",           "type": "revenue",   "subType": "operating_revenue"},
     {"code": "4020", "name": "Retail Sales",             "type": "revenue",   "subType": "operating_revenue"},
     {"code": "4030", "name": "Function / Catering",      "type": "revenue",   "subType": "operating_revenue"},
+    {"code": "4040", "name": "Surcharge Revenue",        "type": "revenue",   "subType": "operating_revenue"},
     {"code": "4090", "name": "Sales Discounts",          "type": "revenue",   "subType": "contra_revenue"},
     {"code": "4100", "name": "Gift Card Breakage",       "type": "revenue",   "subType": "other_revenue"},
 
@@ -474,21 +475,41 @@ async def general_ledger(account_code: str, from_date: Optional[str] = None, to_
 # Auto-posting hooks — called from other modules
 # ═════════════════════════════════════════════════════════════════════════
 async def auto_post_pos_sale(txn: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """POS transaction (cash/card) → Bank DR, Sales CR, GST CR."""
+    """POS transaction (cash/card) → Bank DR, Sales CR, Surcharge CR, GST CR.
+
+    `total` is GST-inclusive (menu prices already include GST) and already
+    contains any auto-surcharge. `gst` is the 1/11th component within
+    `total`, not an amount added on top of it — so the non-GST portion of
+    `total` (`total - gst`) is split between Sales and Surcharge revenue in
+    proportion to each one's share of the pre-GST net, and the discount is
+    grossed back onto Sales at its GST-exclusive value.
+    """
     total = float(txn.get("total") or 0)
     if total <= 0:
         return None
     gst = float(txn.get("gst") or 0)
-    subtotal = round(total - gst, 2)
+    discount = float(txn.get("discountAmount") or 0)
+    surcharge = float(txn.get("surchargeAmount") or 0)
+
+    net_of_gst_total = round(total - gst, 2)
+    surcharge_share = (surcharge / total) if total > 0 else 0
+    surcharge_net = round(net_of_gst_total * surcharge_share, 2)
+    sales_net = round(net_of_gst_total - surcharge_net, 2)  # remainder — keeps the entry exactly balanced
+    gross_sales = round(sales_net + discount, 2)
+
     method = (txn.get("paymentMethod") or "").lower()
     bank_code = "1010" if "cash" in method else "1000"
 
     lines = [
         {"accountCode": bank_code, "debit": total, "credit": 0.0, "description": f"POS sale #{txn.get('id')}"},
-        {"accountCode": "4000",    "debit": 0.0, "credit": subtotal, "description": "Sales revenue"},
     ]
+    if discount > 0:
+        lines.append({"accountCode": "4090", "debit": discount, "credit": 0.0, "description": "Sales discounts (vouchers/loyalty)"})
+    lines.append({"accountCode": "4000", "debit": 0.0, "credit": gross_sales, "description": "Sales revenue"})
+    if surcharge_net > 0:
+        lines.append({"accountCode": "4040", "debit": 0.0, "credit": surcharge_net, "description": txn.get("surchargeReason") or "Surcharge revenue"})
     if gst > 0:
-        lines.append({"accountCode": "2100", "debit": 0.0, "credit": gst, "description": "GST on sales"})
+        lines.append({"accountCode": "2100", "debit": 0.0, "credit": gst, "description": "GST on sales (incl.)"})
     return await post_entry(
         lines,
         entry_date=(txn.get("timestamp") or datetime.now(timezone.utc).isoformat())[:10],

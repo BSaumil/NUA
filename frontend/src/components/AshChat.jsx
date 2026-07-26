@@ -4,6 +4,7 @@ import { Sparkles, Send, X, Minus, Brain, Crown, Calculator, Package, Users, Meg
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Badge } from './ui/badge';
+import { useAuth } from '../contexts/AuthContext';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
@@ -59,6 +60,7 @@ const SUGGESTIONS_BY_PERSONA = {
 };
 
 export default function AshChat() {
+  const { user, hasPermission } = useAuth();
   const [open, setOpen] = useState(false);
   const [minimized, setMinimized] = useState(false);
   const [msgs, setMsgs] = useState(() => JSON.parse(localStorage.getItem(MSGS_KEY()) || '[]'));
@@ -128,12 +130,17 @@ export default function AshChat() {
 
   const suggestions = SUGGESTIONS_BY_PERSONA[persona] || SUGGESTIONS_BY_PERSONA.executive;
 
+  // Owner-only by default — a manager or staff member only sees this once
+  // the owner grants the 'ash' permission (Settings > Permissions), same
+  // gate the backend enforces on /nua/chat and /nua/agent.
+  if (!user || !hasPermission('ash')) return null;
+
   // FAB when closed
   if (!open) {
     return (
       <button
         onClick={() => { setOpen(true); setMinimized(false); }}
-        className="fixed bottom-5 right-5 z-50 h-14 w-14 rounded-full text-white shadow-xl flex items-center justify-center transition-all hover:scale-105"
+        className="fixed bottom-20 right-5 z-50 h-14 w-14 rounded-full text-white shadow-xl flex items-center justify-center transition-all hover:scale-105"
         style={{ background: currentPersona.color }}
         data-testid="ash-chat-fab"
         aria-label="Ask NUA"

@@ -149,6 +149,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.buckets = defaultdict(list)
         self.limit = 120
         self.window = 60
+        self._last_evict = time()
 
     async def dispatch(self, request, call_next):
         path = request.url.path
@@ -158,6 +159,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         ip = request.client.host if request.client else "?"
         key = f"{tenant}:{ip}"
         now = time()
+        # Evict idle clients every 5 min so the bucket dict can't grow unbounded
+        if now - self._last_evict > 300:
+            self._last_evict = now
+            stale = [k for k, ts in self.buckets.items() if not ts or now - ts[-1] > self.window]
+            for k in stale:
+                del self.buckets[k]
         self.buckets[key] = [t for t in self.buckets[key] if now - t < self.window]
         if len(self.buckets[key]) >= self.limit:
             return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded — 120 req/min per tenant"})
@@ -186,11 +193,22 @@ class NuaAliasMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(NuaAliasMiddleware)
 
-frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+# CORS: set FRONTEND_URL (comma-separated for multiple origins) in production.
+# With explicit origins we allow credentialed (cookie) requests; without it we
+# fall back to a wildcard WITHOUT credentials — Bearer-token auth still works,
+# but any-origin-with-cookies (a CSRF vector) does not.
+frontend_url = os.environ.get("FRONTEND_URL", "").strip()
+if frontend_url:
+    cors_origins = [o.strip().rstrip("/") for o in frontend_url.split(",") if o.strip()]
+    cors_origins += ["http://localhost:3000", "http://127.0.0.1:3000"]
+    cors_credentials = True
+else:
+    cors_origins = ["*"]
+    cors_credentials = False
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=["*"],
+    allow_credentials=cors_credentials,
+    allow_origins=cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
     # Custom headers the SPA reads (e.g. AI fallback flag on booking inbox).

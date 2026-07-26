@@ -19,6 +19,7 @@ from utils.au_payroll import (
     payg_for_period, super_guarantee, sg_rate_for, super_due_date_for_quarter,
     assemble_payslip_row, build_stp2_pay_event, roster_compliance_issues,
     DEFAULT_PENALTY_MATRIX, ANNUAL_LEAVE_HOURS_PER_ORDINARY_HOUR,
+    effective_hourly_rate,
 )
 import uuid
 
@@ -84,7 +85,7 @@ async def calculate_payrun(body: PayrunCalcIn, user: dict = Depends(get_user)):
     for s in staff:
         cards = [tc for tc in timecards if tc.get("staffId") == s["id"]]
         total_hours = sum(tc.get("hoursWorked", 0) for tc in cards)
-        base_rate = float(s.get("payRate") or 0)
+        base_rate = effective_hourly_rate(s.get("payRate"), s.get("salaryType"))
         if base_rate <= 0 or total_hours <= 0:
             continue
         emp_type = (s.get("employmentType") or "casual").lower()

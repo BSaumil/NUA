@@ -9,6 +9,8 @@ import { Toaster } from './components/ui/sonner';
 import BottomDock from './components/BottomDock';
 import LicensePage, { LicenseLockScreen, LicenseBanner } from './pages/LicensePage';
 import Login from './pages/Login';
+import Today from './pages/Today';
+import CommandBar from './components/CommandBar';
 import Dashboard from './pages/Dashboard';
 import POSTerminal from './pages/POSTerminal';
 import Products from './pages/Products';
@@ -124,6 +126,7 @@ function StaffLayout({ children }) {
       <BottomDock />
       <AshChat />
       <NotificationBell />
+      <CommandBar />
     </div>
   );
 }
@@ -133,12 +136,15 @@ function ProtectedRoutes() {
   if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="animate-pulse text-gray-500 text-lg">Loading...</div></div>;
   if (!user) return <Login />;
 
-  // ALL staff (including owner) land on POS by default. Use "More" dock to access dashboard / other pages.
+  // Role-based landing: owners/managers get the Today pulse, cashiers the
+  // POS, kitchen staff the KDS. Same data everywhere — different front door.
+  const home = user.role === 'cashier' ? '/pos' : user.role === 'kitchen' ? '/kitchen' : '/today';
   return (
     <LicenseProvider>
     <StaffLayout>
       <Routes>
-        <Route path="/" element={<Navigate to="/pos" replace />} />
+        <Route path="/" element={<Navigate to={home} replace />} />
+        <Route path="/today" element={<Today />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/pre-shift" element={<PreShift />} />
         <Route path="/command-center" element={<CommandCenter />} />

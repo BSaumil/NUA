@@ -22,7 +22,7 @@ export default function Login() {
     setError(''); setLoading(true);
     try {
       await login(email, password);
-      navigate('/pos', { replace: true });
+      navigate('/', { replace: true }); // role-based landing (Today / POS / Kitchen)
     } catch (err) {
       setError(err.response?.data?.detail || 'Invalid credentials');
     }
@@ -35,7 +35,7 @@ export default function Login() {
     try {
       const res = await staffMgmtAPI.pinLogin(pin);
       localStorage.setItem('nuva_token', res.data.token);
-      window.location.assign('/pos');
+      window.location.assign('/'); // role-based landing (Today / POS / Kitchen)
     } catch (err) {
       setError(err.response?.data?.detail || 'Invalid PIN');
     }

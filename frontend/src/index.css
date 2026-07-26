@@ -45,31 +45,35 @@ code {
         --chart-5: 27 87% 67%;
         --radius: 0.5rem;
     }
+    /* Matches the dark theme on the NUA marketing site (nua.com) — same
+       brand orange as --primary in both modes, a blue-black surface instead
+       of flat gray, and card/popover raised a step above the page so
+       elevation actually reads in dark mode. */
     .dark {
-        --background: 0 0% 3.9%;
-        --foreground: 0 0% 98%;
-        --card: 0 0% 3.9%;
-        --card-foreground: 0 0% 98%;
-        --popover: 0 0% 3.9%;
-        --popover-foreground: 0 0% 98%;
-        --primary: 0 0% 98%;
-        --primary-foreground: 0 0% 9%;
-        --secondary: 0 0% 14.9%;
-        --secondary-foreground: 0 0% 98%;
-        --muted: 0 0% 14.9%;
-        --muted-foreground: 0 0% 63.9%;
-        --accent: 0 0% 14.9%;
-        --accent-foreground: 0 0% 98%;
-        --destructive: 0 62.8% 30.6%;
+        --background: 240 10% 5%;
+        --foreground: 0 0% 92%;
+        --card: 240 10% 8%;
+        --card-foreground: 0 0% 92%;
+        --popover: 240 10% 8%;
+        --popover-foreground: 0 0% 92%;
+        --primary: 24 91% 52%;
+        --primary-foreground: 0 0% 100%;
+        --secondary: 240 6% 12%;
+        --secondary-foreground: 0 0% 92%;
+        --muted: 240 6% 12%;
+        --muted-foreground: 240 5% 65%;
+        --accent: 240 6% 12%;
+        --accent-foreground: 0 0% 92%;
+        --destructive: 0 62% 30%;
         --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 14.9%;
-        --input: 0 0% 14.9%;
-        --ring: 0 0% 83.1%;
+        --border: 0 0% 100% / 0.06;
+        --input: 240 6% 14%;
+        --ring: 24 91% 52%;
         --chart-1: 220 70% 50%;
-        --chart-2: 160 60% 45%;
-        --chart-3: 30 80% 55%;
-        --chart-4: 280 65% 60%;
-        --chart-5: 340 75% 55%;
+        --chart-2: 142 71% 45%;
+        --chart-3: 258 90% 66%;
+        --chart-4: 330 81% 60%;
+        --chart-5: 43 96% 56%;
     }
 }
 
@@ -112,4 +116,39 @@ code {
         border-top-color: inherit;
         border-bottom-color: inherit;
     }
+}
+
+/* Dark-mode retrofit for pages written with hardcoded light-only Tailwind
+ * classes (bg-white, text-gray-500, etc.) instead of the semantic
+ * bg-card/text-muted-foreground tokens above. Rather than touching every
+ * page individually, route the common light-only utilities to the same
+ * CSS variables in dark mode — same intent (card surface / muted text /
+ * primary text / border), just wired up. Only low-numbered gray shades are
+ * remapped; bg-gray-700/800/900 etc. are left alone since those are already
+ * deliberately-dark elements in some pages (e.g. dark hero sections) that
+ * should look the same in both modes. Higher specificity than the plain
+ * Tailwind utility (two classes vs one) means no !important needed, and
+ * everything here is scoped under .dark so light mode is untouched. */
+@layer base {
+    .dark .bg-white { background-color: hsl(var(--card)); }
+    .dark .bg-gray-50 { background-color: hsl(var(--muted)); }
+    .dark .bg-gray-100 { background-color: hsl(var(--muted)); }
+    .dark .bg-gray-200 { background-color: hsl(var(--secondary)); }
+    .dark .hover\:bg-gray-50:hover { background-color: hsl(var(--accent)); }
+    .dark .hover\:bg-gray-100:hover { background-color: hsl(var(--accent)); }
+    .dark .hover\:bg-gray-200:hover { background-color: hsl(var(--accent)); }
+
+    .dark .text-gray-300,
+    .dark .text-gray-400,
+    .dark .text-gray-500,
+    .dark .text-gray-600 { color: hsl(var(--muted-foreground)); }
+
+    .dark .text-gray-700,
+    .dark .text-gray-800,
+    .dark .text-gray-900 { color: hsl(var(--foreground)); }
+
+    .dark .border-gray-100,
+    .dark .border-gray-200,
+    .dark .border-gray-300,
+    .dark .border-gray-400 { border-color: hsl(var(--border)); }
 }

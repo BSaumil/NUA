@@ -23,7 +23,7 @@ ROLE_PERMISSIONS = {
     "kitchen": ["kitchen", "pre-shift"],
 }
 
-async def _effective_permissions(user: dict) -> list:
+async def effective_permissions(user: dict) -> list:
     """Return the effective permission list for a user:
       1. custom overrides if present on the user doc
       2. else DB-persisted role defaults (`db.role_permissions`)
@@ -48,7 +48,14 @@ def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    # PIN-only staff are stored with an empty hash; bcrypt raises on malformed
+    # hashes, which would turn a bad login into a 500.
+    if not hashed:
+        return False
+    try:
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    except ValueError:
+        return False
 
 def create_access_token(user_id: str, email: str, role: str) -> str:
     payload = {"sub": user_id, "email": email, "role": role,
@@ -90,9 +97,15 @@ def require_role(*roles):
         return user
     return checker
 
+# Set COOKIE_SECURE=true in any HTTPS deployment so auth cookies are never
+# sent over plain HTTP. Defaults to false for local development.
+def _cookie_secure() -> bool:
+    return os.environ.get("COOKIE_SECURE", "false").lower() in ("1", "true", "yes")
+
 def _set_tokens(response: Response, access: str, refresh: str):
-    response.set_cookie("access_token", access, httponly=True, secure=False, samesite="lax", max_age=28800, path="/")
-    response.set_cookie("refresh_token", refresh, httponly=True, secure=False, samesite="lax", max_age=604800, path="/")
+    secure = _cookie_secure()
+    response.set_cookie("access_token", access, httponly=True, secure=secure, samesite="lax", max_age=28800, path="/")
+    response.set_cookie("refresh_token", refresh, httponly=True, secure=secure, samesite="lax", max_age=604800, path="/")
 
 # Models
 class LoginRequest(BaseModel):
@@ -123,6 +136,9 @@ async def login(req: LoginRequest, request: Request, response: Response):
     attempts = await db.login_attempts.find_one({"identifier": identifier})
     if attempts and attempts.get("count", 0) >= 5:
         locked_until = attempts.get("locked_until")
+        # Mongo returns naive UTC datetimes; normalize before comparing
+        if locked_until and locked_until.tzinfo is None:
+            locked_until = locked_until.replace(tzinfo=timezone.utc)
         if locked_until and datetime.now(timezone.utc) < locked_until:
             raise HTTPException(status_code=429, detail="Account locked. Try again in 15 minutes.")
         else:
@@ -144,7 +160,7 @@ async def login(req: LoginRequest, request: Request, response: Response):
     user.pop("_id", None)
     user.pop("password_hash", None)
     # Add effective permissions (custom > role DB override > code default)
-    user["permissions"] = await _effective_permissions(user)
+    user["permissions"] = await effective_permissions(user)
     return {"user": user, "token": access}
 
 @router.post("/register")
@@ -153,6 +169,15 @@ async def register(req: RegisterRequest, response: Response):
     existing = await db.auth_users.find_one({"email": email})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
+    # Public registration must not mint privileged accounts. "owner" is only
+    # allowed on first-run setup (no owner exists yet); anything else that
+    # isn't a known non-privileged role falls back to cashier.
+    if req.role == "owner":
+        owner_exists = await db.auth_users.find_one({"role": "owner"})
+        if owner_exists:
+            raise HTTPException(status_code=403, detail="An owner account already exists")
+    elif req.role not in ("cashier", "kitchen"):
+        req.role = "cashier"
     import uuid
     user_doc = {
         "id": str(uuid.uuid4()),
@@ -174,7 +199,7 @@ async def register(req: RegisterRequest, response: Response):
 @router.get("/me")
 async def me(request: Request):
     user = await get_current_user(request)
-    user["permissions"] = await _effective_permissions(user)
+    user["permissions"] = await effective_permissions(user)
     return user
 
 @router.post("/logout")
@@ -196,7 +221,7 @@ async def refresh_token(request: Request, response: Response):
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
         access = create_access_token(user["id"], user["email"], user["role"])
-        response.set_cookie("access_token", access, httponly=True, secure=False, samesite="lax", max_age=28800, path="/")
+        response.set_cookie("access_token", access, httponly=True, secure=_cookie_secure(), samesite="lax", max_age=28800, path="/")
         return {"message": "Token refreshed"}
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
@@ -290,6 +315,7 @@ async def delete_staff(staff_id: str, request: Request):
 # --- Owner-Only Reports ---
 @router.get("/reports/labor-cost")
 async def get_labor_cost_report(request: Request):
+    from utils.au_payroll import effective_hourly_rate, STANDARD_WEEKLY_HOURS
     user = await get_current_user(request)
     if user["role"] != "owner":
         raise HTTPException(status_code=403, detail="Owner access only")
@@ -299,9 +325,16 @@ async def get_labor_cost_report(request: Request):
     expenses = await db.expenses.find({}, {"_id": 0}).to_list(10000)
     total_expenses = sum(e.get("amount", 0) for e in expenses)
     total_cogs = sum(e.get("amount", 0) for e in expenses if e.get("category") in ("Ingredients", "Food Supplies", "Beverages"))
-    roster_cost = sum(s.get("payRate", 0) * 38 for s in staff)  # 38 hrs/week estimate
+    # payRate is stored in whatever unit salaryType names — convert to an
+    # hourly-equivalent before the *38 standard-week estimate, or a flat
+    # hourly rate (like a casual on $30/hr) gets treated as if it were an
+    # annual salary of $30/year and vice versa.
+    rates = {s["id"]: effective_hourly_rate(s.get("payRate", 0), s.get("salaryType")) for s in staff}
+    roster_cost = sum(rates[s["id"]] * STANDARD_WEEKLY_HOURS for s in staff)
     return {
-        "staff": [{"name": s["name"], "role": s["role"], "payRate": s.get("payRate", 0), "weeklyEstimate": s.get("payRate", 0) * 38} for s in staff],
+        "staff": [{"name": s["name"], "role": s["role"], "payRate": s.get("payRate", 0),
+                   "salaryType": s.get("salaryType", "hourly"),
+                   "weeklyEstimate": round(rates[s["id"]] * STANDARD_WEEKLY_HOURS, 2)} for s in staff],
         "totalRosterCost": round(roster_cost, 2),
         "totalRevenue": round(total_revenue, 2),
         "cogs": round(total_cogs, 2),

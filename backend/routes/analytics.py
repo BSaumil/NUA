@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from deps import get_user, require_owner_or_manager
 from typing import List, Optional
 from datetime import datetime
 from database import db
@@ -664,3 +665,131 @@ async def link_order_to_customer(transaction_id: str, customer_id: str, points_e
     if points_earned > 0:
         await db.customers.update_one({"id": customer_id}, {"$inc": {"points": points_earned, "visits": 1}})
     return {"message": "Order linked and points awarded", "pointsEarned": points_earned}
+
+
+# ============ TODAY PULSE — one call that answers "is anything wrong right now?" ============
+@router.get("/analytics/today-pulse")
+async def get_today_pulse(_user: dict = Depends(get_user)):
+    """Single feed for the Today home screen: sales vs target, labor %,
+    and exception alerts (refund spikes, voids, stockouts, low stock).
+    Alerts carry a severity and a deep-link so problems tap the manager
+    on the shoulder instead of hiding in reports."""
+    from datetime import timezone as _tz
+    now = datetime.now(_tz.utc)
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_iso = now.date().isoformat()
+
+    # --- Sales today ---
+    txns = await db.transactions.find(
+        {"timestamp": {"$gte": day_start.replace(tzinfo=None)}}, {"_id": 0}
+    ).to_list(5000)
+    sales_today = round(sum(t.get("total", 0) for t in txns), 2)
+    txn_count = len(txns)
+    avg_ticket = round(sales_today / txn_count, 2) if txn_count else 0
+
+    # --- Settings-driven thresholds ---
+    s = await db.settings.find_one({"key": "today_targets"}, {"_id": 0})
+    cfg = {"dailySalesTarget": 0, "laborPctThreshold": 32, "refundRateThreshold": 5}
+    if s and isinstance(s.get("value"), dict):
+        cfg.update({k: v for k, v in s["value"].items() if v is not None})
+
+    # --- Labor: rostered cost today vs sales ---
+    shifts = await db.roster_shifts.find({"date": today_iso}, {"_id": 0}).to_list(500)
+    staff = await db.auth_users.find({}, {"_id": 0, "id": 1, "name": 1, "payRate": 1}).to_list(1000)
+    rate_by_id = {u["id"]: u.get("payRate", 0) for u in staff}
+    labor_cost = 0.0
+    for sh in shifts:
+        try:
+            sh_start = datetime.strptime(sh.get("startTime", "09:00"), "%H:%M")
+            sh_end = datetime.strptime(sh.get("endTime", "17:00"), "%H:%M")
+            hours = max((sh_end - sh_start).total_seconds() / 3600, 0)
+        except ValueError:
+            hours = 8
+        labor_cost += hours * float(rate_by_id.get(sh.get("staffId"), 0) or 0)
+    labor_cost = round(labor_cost, 2)
+    labor_pct = round((labor_cost / sales_today) * 100, 1) if sales_today > 0 else None
+
+    # --- Exceptions ---
+    refunds = await db.refunds.find({}, {"_id": 0}).sort("timestamp", -1).to_list(200)
+    refunds_today = [r for r in refunds
+                     if str(r.get("timestamp", ""))[:10] == today_iso]
+    refund_total = round(sum(r.get("amount", 0) for r in refunds_today), 2)
+    refund_rate = round((refund_total / sales_today) * 100, 1) if sales_today > 0 else 0
+
+    voids_today = await db.comp_voids.count_documents(
+        {"processedAt": {"$regex": f"^{today_iso}"}})
+
+    low_stock = await db.products.find(
+        {"active": {"$ne": False}, "stock": {"$gt": 0, "$lte": 5}},
+        {"_id": 0, "id": 1, "name": 1, "stock": 1}).to_list(50)
+    stockouts = await db.products.find(
+        {"active": {"$ne": False}, "stock": {"$lte": 0}},
+        {"_id": 0, "id": 1, "name": 1, "stock": 1}).to_list(50)
+
+    bookings_tonight = await db.reservations.count_documents({"date": today_iso})
+    open_kitchen = await db.kitchen_orders.count_documents(
+        {"status": {"$in": ["pending", "in_progress"]}})
+
+    # --- Assemble alerts, most severe first ---
+    alerts = []
+    if stockouts:
+        names = ", ".join(p["name"] for p in stockouts[:3])
+        alerts.append({"severity": "critical", "kind": "stockout", "link": "/inventory",
+                       "message": f"{len(stockouts)} item(s) out of stock: {names}"
+                                  + ("…" if len(stockouts) > 3 else "")})
+    if labor_pct is not None and labor_pct > cfg["laborPctThreshold"]:
+        alerts.append({"severity": "warning", "kind": "labor", "link": "/staff-roster",
+                       "message": f"Labor at {labor_pct}% of sales (threshold {cfg['laborPctThreshold']}%)"})
+    if refund_rate > cfg["refundRateThreshold"]:
+        alerts.append({"severity": "warning", "kind": "refunds", "link": "/accounting",
+                       "message": f"Refunds at {refund_rate}% of today's sales (${refund_total})"})
+    if voids_today >= 5:
+        alerts.append({"severity": "warning", "kind": "voids", "link": "/comp-void",
+                       "message": f"{voids_today} comps/voids today — worth a look"})
+    if low_stock:
+        alerts.append({"severity": "info", "kind": "low_stock", "link": "/inventory",
+                       "message": f"{len(low_stock)} item(s) running low"})
+    if open_kitchen >= 12:
+        alerts.append({"severity": "info", "kind": "kitchen_load", "link": "/kitchen",
+                       "message": f"{open_kitchen} open kitchen tickets — kitchen under load"})
+
+    return {
+        "date": today_iso,
+        "sales": {"today": sales_today, "target": cfg["dailySalesTarget"],
+                  "txnCount": txn_count, "avgTicket": avg_ticket,
+                  "pctOfTarget": round((sales_today / cfg["dailySalesTarget"]) * 100, 1)
+                                 if cfg["dailySalesTarget"] else None},
+        "labor": {"costToday": labor_cost, "pct": labor_pct,
+                  "threshold": cfg["laborPctThreshold"], "shiftsToday": len(shifts)},
+        "exceptions": {"refundTotal": refund_total, "refundRate": refund_rate,
+                       "voidsToday": voids_today, "lowStock": low_stock[:10],
+                       "stockouts": stockouts[:10]},
+        "service": {"bookingsTonight": bookings_tonight, "openKitchenTickets": open_kitchen},
+        "alerts": alerts,
+    }
+
+
+# ============ TODAY TARGETS (config for the Today home screen) ============
+TODAY_TARGETS_DEFAULTS = {"dailySalesTarget": 0, "laborPctThreshold": 32, "refundRateThreshold": 5}
+
+
+@router.get("/analytics/today-targets")
+async def get_today_targets(_user: dict = Depends(get_user)):
+    s = await db.settings.find_one({"key": "today_targets"}, {"_id": 0})
+    cfg = dict(TODAY_TARGETS_DEFAULTS)
+    if s and isinstance(s.get("value"), dict):
+        cfg.update({k: v for k, v in s["value"].items() if v is not None})
+    return cfg
+
+
+@router.post("/analytics/today-targets")
+async def save_today_targets(data: dict, _user: dict = Depends(require_owner_or_manager)):
+    cfg = {
+        "dailySalesTarget": max(float(data.get("dailySalesTarget", 0) or 0), 0),
+        "laborPctThreshold": max(float(data.get("laborPctThreshold", 32) or 0), 1),
+        "refundRateThreshold": max(float(data.get("refundRateThreshold", 5) or 0), 0),
+    }
+    await db.settings.update_one(
+        {"key": "today_targets"}, {"$set": {"key": "today_targets", "value": cfg}}, upsert=True
+    )
+    return cfg

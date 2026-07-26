@@ -8,7 +8,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 from database import db
-from deps import get_user, require_owner_or_manager
+from deps import get_user, require_owner_or_manager, require_owner, require_permission
 from services import nua_intelligence
 
 logger = logging.getLogger(__name__)
@@ -128,7 +128,7 @@ from datetime import datetime, timezone
 
 
 @router.post("/chat")
-async def chat(body: dict, user: dict = Depends(get_user)):
+async def chat(body: dict, user: dict = Depends(require_permission("ash"))):
     """Conversational surface. Grounded on live audit events + Ash insights.
 
     Body: { message, sessionId?, context? }
@@ -204,7 +204,7 @@ OPEN INSIGHTS:
 
 
 @router.get("/chat/history/{session_id}")
-async def chat_history(session_id: str, limit: int = 40, _: dict = Depends(get_user)):
+async def chat_history(session_id: str, limit: int = 40, _: dict = Depends(require_permission("ash"))):
     rows = await db.ash_chat_log.find({"sessionId": session_id}, {"_id": 0}).sort("ts", 1).limit(limit).to_list(limit)
     return rows
 
@@ -420,7 +420,7 @@ async def draft_campaign(body: dict, user: dict = Depends(require_owner_or_manag
 
 
 @router.post("/agent")
-async def agent(body: dict, user: dict = Depends(get_user)):
+async def agent(body: dict, user: dict = Depends(require_permission("ash"))):
     """The Ash v3 tool-calling agent. Accepts { message, sessionId?, persona? } and may
     invoke up to 4 tool-calls before returning a final reply.
     """
@@ -458,10 +458,22 @@ async def agent(body: dict, user: dict = Depends(get_user)):
 @router.get("/tools")
 async def tool_catalog(_: dict = Depends(get_user)):
     """Enumerate available agent tools with current effective permissions."""
+    from services import nua_trust
     catalog = nua_tools.catalog()
     overrides = {c["toolName"]: c for c in await db.ash_tool_config.find({}, {"_id": 0}).to_list(200)}
+    trust_settings = await nua_trust.get_settings()
     for t in catalog:
-        t["effectivePermission"] = (overrides.get(t["name"]) or {}).get("permission") or t["defaultPermission"]
+        cfg = overrides.get(t["name"]) or {}
+        t["effectivePermission"] = cfg.get("permission") or t["defaultPermission"]
+        t["promotedBy"] = cfg.get("promotedBy")
+        trust = cfg.get("trust") or {}
+        t["trust"] = {
+            "consecutiveApproved": trust.get("consecutiveApproved", 0),
+            "minStreak": trust_settings["minStreak"],
+            "eligibleSince": trust.get("eligibleSince"),
+            "totalApproved": trust.get("totalApproved", 0),
+            "totalRejected": trust.get("totalRejected", 0),
+        } if t["risk"] in ("low", "medium") else None
     return catalog
 
 
@@ -488,6 +500,44 @@ async def set_tool_permission(tool_name: str, body: dict, _: dict = Depends(requ
     return {"toolName": tool_name, "permission": perm}
 
 
+# ═════════════════════════════════════════════════════════════════════════
+# Graduated Trust — tools earn their way from approval-gated to auto
+# ═════════════════════════════════════════════════════════════════════════
+from services import nua_trust
+
+
+@router.get("/trust/suggestions")
+async def trust_suggestions(_: dict = Depends(get_user)):
+    """Tools currently eligible for promotion but not yet promoted."""
+    return await nua_trust.list_suggestions()
+
+
+@router.get("/trust/settings")
+async def get_trust_settings(_: dict = Depends(get_user)):
+    return await nua_trust.get_settings()
+
+
+@router.post("/trust/settings")
+async def save_trust_settings(body: dict, _: dict = Depends(require_owner)):
+    return await nua_trust.save_settings(body)
+
+
+@router.get("/tools/{tool_name}/trust")
+async def tool_trust(tool_name: str, _: dict = Depends(get_user)):
+    return await nua_trust.get_tool_trust(tool_name)
+
+
+@router.post("/tools/{tool_name}/promote")
+async def promote_tool(tool_name: str, user: dict = Depends(require_owner)):
+    """Owner-only: confirm a suggested promotion to auto. Promoting to full
+    autonomy is a bigger call than the routine owner-or-manager permission
+    toggle, so this is intentionally gated tighter."""
+    try:
+        return await nua_trust.promote(tool_name, actor=user.get("email") or "owner")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @router.get("/health-score")
 async def get_health_score(_: dict = Depends(get_user)):
     return await health_score.compute_health()
@@ -510,6 +560,6 @@ async def regenerate_briefing(_: dict = Depends(require_owner_or_manager)):
 
 
 @router.get("/agent/trace/{session_id}")
-async def get_agent_trace(session_id: str, limit: int = 50, _: dict = Depends(get_user)):
+async def get_agent_trace(session_id: str, limit: int = 50, _: dict = Depends(require_permission("ash"))):
     rows = await db.ash_agent_traces.find({"sessionId": session_id}, {"_id": 0}).sort("ts", 1).limit(limit).to_list(limit)
     return rows

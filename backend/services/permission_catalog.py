@@ -68,6 +68,7 @@ PERMISSION_CATALOG: List[Dict[str, Any]] = [
         ("leaderboard", "Staff Leaderboard"),
     ]},
     {"section": "Analytics & Insights", "icon": "BarChart3", "features": [
+        ("today", "Today (Home)"),
         ("dashboard", "Dashboard"),
         ("command-center", "Command Center"),
         ("hq", "HQ Dashboard"),
@@ -142,6 +143,7 @@ def catalog_for_ui() -> List[Dict[str, Any]]:
 DEFAULT_ROLE_PERMISSIONS: Dict[str, List[str]] = {
     "owner": ["*"],
     "manager": [
+        "today",
         "pos", "tables", "comp-void", "payment-links", "tip-management",
         "reservations", "bookings-inbox", "waitlist", "floor-plan", "table-layout",
         "booking-settings", "booking-analytics", "booking-heatmap",
@@ -156,7 +158,12 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, List[str]] = {
         "end-of-day",
         "staff", "staff-roster", "shift-swaps", "shift-manager", "labor-forecast",
         "automation", "automation-triggers",
-        "ash", "ash-plans", "ash-memory",
+        # "ash" (Ask NUA / the agent chat) is deliberately NOT a manager
+        # default — it's owner-only until the owner explicitly grants it via
+        # Settings > Permissions, either for the manager role or a specific
+        # staff member. ash-plans/ash-memory (viewing plan + memory history)
+        # stay on since those are read-only, not "ask NUA anything".
+        "ash-plans", "ash-memory",
         "approvals", "audit", "audit-log", "exceptions",
         "hardware-health", "integrations",
     ],
