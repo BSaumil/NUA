@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime
 import uuid
 
@@ -37,6 +37,11 @@ class Product(BaseModel):
     onlineChannels: List[str] = []  # uber_eats, doordash, website, etc.
     seoDescription: str = ""
     description: str = ""
+    # Optional per-language name/description overrides for customer-facing
+    # menus (kiosk, QR table order, online storefront), e.g.
+    # {"it": {"name": "Margherita", "description": "Pomodoro, mozzarella, basilico"}}.
+    # Falls back to name/description when a language has no entry.
+    translations: Dict[str, Dict[str, str]] = {}
     # 86 (out-of-stock) flag set by /api/v25/products/{id}/86
     active: bool = True
     eightySixed: bool = False
@@ -61,6 +66,7 @@ class ProductCreate(BaseModel):
     onlineChannels: List[str] = []
     seoDescription: str = ""
     description: str = ""
+    translations: Dict[str, Dict[str, str]] = {}
 
 class ProductUpdate(BaseModel):
     name: Optional[str] = None
@@ -78,3 +84,4 @@ class ProductUpdate(BaseModel):
     onlineChannels: Optional[List[str]] = None
     seoDescription: Optional[str] = None
     description: Optional[str] = None
+    translations: Optional[Dict[str, Dict[str, str]]] = None
