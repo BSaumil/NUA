@@ -2,10 +2,12 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, Edit, Trash2, Tag, Package, ImageIcon } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
+import { Textarea } from '../components/ui/textarea';
 import { Card, CardContent } from '../components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { productsAPI, promotionsAPI, categoriesAPI, modifiersAPI, aiPantryAPI, productsBulkAPI } from '../services/api';
+import { LANGUAGES } from '../i18n/translations';
 import ImageLibrary from '../components/ImageLibrary';
 import { ProductsToolbar } from '../components/products/ProductsToolbar';
 import { ProductTable } from '../components/products/ProductTable';
@@ -46,6 +48,9 @@ const Products = () => {
   const [insights, setInsights] = useState({});
   const [showProductDialog, setShowProductDialog] = useState(false);
   const [showPromoDialog, setShowPromoDialog] = useState(false);
+  const [showTranslateDialog, setShowTranslateDialog] = useState(false);
+  const [translatingProduct, setTranslatingProduct] = useState(null);
+  const [translationForm, setTranslationForm] = useState({});
   const [editingProduct, setEditingProduct] = useState(null);
   const [editingPromo, setEditingPromo] = useState(null);
   const [productForm, setProductForm] = useState(makeEmptyProduct);
@@ -140,6 +145,27 @@ const Products = () => {
   const deleteProduct = async (id) => {
     if (!window.confirm('Delete this product?')) return;
     try { await productsAPI.delete(id); toast.success('Product deleted'); fetchData(); } catch { toast.error('Failed to delete'); }
+  };
+
+  const openTranslateProduct = (p) => {
+    setTranslatingProduct(p);
+    setTranslationForm(p.translations || {});
+    setShowTranslateDialog(true);
+  };
+  const setTranslationField = (langCode, field, value) => {
+    setTranslationForm(prev => ({ ...prev, [langCode]: { ...prev[langCode], [field]: value } }));
+  };
+  const saveTranslations = async () => {
+    // Drop languages left fully blank so we don't store empty overrides.
+    const cleaned = Object.fromEntries(
+      Object.entries(translationForm).filter(([, v]) => v?.name?.trim() || v?.description?.trim())
+    );
+    try {
+      await productsAPI.update(translatingProduct.id, { translations: cleaned });
+      toast.success('Translations saved');
+      setShowTranslateDialog(false);
+      fetchData();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to save translations'); }
   };
 
   const toggleModifierForProduct = (mid) => {
@@ -510,6 +536,7 @@ const Products = () => {
                 toggleEightySix={toggleEightySix}
                 openEditProduct={openEditProduct}
                 deleteProduct={deleteProduct}
+                openTranslateProduct={openTranslateProduct}
               />
             </div>
           </div>
@@ -680,6 +707,44 @@ const Products = () => {
               {editingProduct ? 'Update Product' : 'Create Product'}
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Menu Translations Dialog — per-language name/description overrides shown
+          on the kiosk, QR table order, and online storefront customer surfaces. */}
+      <Dialog open={showTranslateDialog} onOpenChange={setShowTranslateDialog}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto" data-testid="translate-dialog">
+          <DialogHeader>
+            <DialogTitle>Menu Translations{translatingProduct ? ` — ${translatingProduct.name}` : ''}</DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-gray-500 -mt-2">
+            Leave a language blank to show the English name/description on customer-facing menus.
+          </p>
+          <div className="space-y-4">
+            {LANGUAGES.filter(l => l.code !== 'en').map(l => (
+              <div key={l.code} className="border rounded-lg p-3 space-y-2">
+                <p className="text-xs font-semibold text-gray-500">{l.label}</p>
+                <Input
+                  placeholder={translatingProduct?.name || 'Name'}
+                  value={translationForm[l.code]?.name || ''}
+                  onChange={e => setTranslationField(l.code, 'name', e.target.value)}
+                  dir={l.dir}
+                  data-testid={`translate-name-${l.code}`}
+                />
+                <Textarea
+                  rows={2}
+                  placeholder={translatingProduct?.description || 'Description'}
+                  value={translationForm[l.code]?.description || ''}
+                  onChange={e => setTranslationField(l.code, 'description', e.target.value)}
+                  dir={l.dir}
+                  data-testid={`translate-desc-${l.code}`}
+                />
+              </div>
+            ))}
+          </div>
+          <Button className="w-full mt-2" style={{ backgroundColor: theme.primary }} onClick={saveTranslations} data-testid="save-translations-btn">
+            Save Translations
+          </Button>
         </DialogContent>
       </Dialog>
 

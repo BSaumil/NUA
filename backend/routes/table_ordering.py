@@ -24,6 +24,7 @@ async def get_table_menu(table_id: str):
             "image": p.get("image", ""),
             "dietary": p.get("dietary", []),
             "allergens": p.get("allergens", []),
+            "translations": p.get("translations", {}),
         })
     # Get table info
     table_info = None
