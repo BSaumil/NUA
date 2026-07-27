@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from database import db
 from datetime import datetime, timezone
 import uuid
-from deps import require_owner, require_owner_or_manager
+from deps import require_owner, require_owner_or_manager, require_permission
 
 router = APIRouter()
 
@@ -433,7 +433,11 @@ async def delete_discount(disc_id: str, _: dict = Depends(require_owner)):
 
 # ============ COMP / VOID ============
 @router.post("/comp-void")
-async def create_comp_void(data: dict, user: dict = Depends(require_owner_or_manager)):
+async def create_comp_void(data: dict, user: dict = Depends(require_permission("comp-void"))):
+    """Recording a comp/void was hard-coded to owner/manager only, which
+    silently ignored the 'comp-void' permission catalog entry (and the fact
+    cashiers get it by default) — the granular permission system now
+    actually governs this, same as everywhere else it's used."""
     record = {
         "id": f"CV-{str(uuid.uuid4())[:8].upper()}",
         "type": data.get("type", "comp"),  # comp or void
@@ -443,6 +447,7 @@ async def create_comp_void(data: dict, user: dict = Depends(require_owner_or_man
         "amount": data.get("amount", 0),
         "printVoid": data.get("printVoid", False),
         "processedBy": user["id"],
+        "processedByName": user.get("name") or user.get("email"),
         "processedAt": datetime.now(timezone.utc).isoformat(),
     }
     await db.comp_voids.insert_one(record)

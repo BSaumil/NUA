@@ -263,6 +263,7 @@ export const kitchenAPI = {
   setPriority: (id, priority) => api.post(`/kitchen/orders/${id}/priority`, null, { params: { priority } }),
   getPrepList: () => api.get('/kitchen/prep-list'),
   getAvgOrderTime: () => api.get('/kitchen/avg-order-time'),
+  getNextOrderETA: () => api.get('/kitchen/next-order-eta'),
   getDocketConfig: () => api.get('/kitchen/docket-config'),
   updateDocketConfig: (data) => api.put('/kitchen/docket-config', data),
 };
@@ -755,6 +756,9 @@ export const v15API = {
   getTabs: () => api.get('/pos/tabs'),
   createTab: (data) => api.post('/pos/tabs', data),
   deleteTab: (id) => api.delete(`/pos/tabs/${id}`),
+  updateTab: (id, data) => api.put(`/pos/tabs/${id}`, data),
+  mergeTabs: (id, otherTabId) => api.post(`/pos/tabs/${id}/merge`, { otherTabId }),
+  splitTab: (id, ways, tableNumbers) => api.post(`/pos/tabs/${id}/split`, { ways, tableNumbers }),
   // Favorites
   getFavorites: () => api.get('/pos/favorites'),
   saveFavorites: (productIds) => api.post('/pos/favorites', { productIds }),

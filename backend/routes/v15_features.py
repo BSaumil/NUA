@@ -75,6 +75,86 @@ async def delete_tab(tab_id: str, _: dict = Depends(get_user)):
     return {"message": "Tab closed"}
 
 
+@router.put("/pos/tabs/{tab_id}")
+async def update_tab(tab_id: str, data: dict, _: dict = Depends(get_user)):
+    """Move Table — relabel an open tab to a different table without
+    touching its held cart/customer."""
+    allowed = {"tableId", "tableNumber", "name", "note", "serverId"}
+    patch = {k: v for k, v in data.items() if k in allowed}
+    if not patch:
+        raise HTTPException(status_code=400, detail="No updatable fields provided")
+    result = await db.pos_tabs.find_one_and_update(
+        {"id": tab_id}, {"$set": patch}, return_document=True,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Tab not found")
+    result.pop("_id", None)
+    return result
+
+
+@router.post("/pos/tabs/{tab_id}/merge")
+async def merge_tabs(tab_id: str, data: dict, _: dict = Depends(get_user)):
+    """Merge Table — combine another open tab's held items into this one
+    (e.g. two tables joined into a single check), then close the other tab."""
+    other_id = data.get("otherTabId")
+    if not other_id or other_id == tab_id:
+        raise HTTPException(status_code=400, detail="A different otherTabId is required")
+    primary = await db.pos_tabs.find_one({"id": tab_id}, {"_id": 0})
+    other = await db.pos_tabs.find_one({"id": other_id}, {"_id": 0})
+    if not primary or not other:
+        raise HTTPException(status_code=404, detail="Tab not found")
+    merged_cart = (primary.get("cart") or []) + (other.get("cart") or [])
+    await db.pos_tabs.update_one({"id": tab_id}, {"$set": {"cart": merged_cart}})
+    await db.pos_tabs.delete_one({"id": other_id})
+    result = await db.pos_tabs.find_one({"id": tab_id}, {"_id": 0})
+    return result
+
+
+@router.post("/pos/tabs/{tab_id}/split")
+async def split_tab(tab_id: str, data: dict, user: dict = Depends(get_user)):
+    """Split Table / Check — divide this tab's held items round-robin across
+    `ways` new tabs (2-6), then close the original. Optional `tableNumbers`
+    lets each split land on a different table; otherwise they all keep the
+    original table number (splitting the CHECK, not the seating)."""
+    ways = int(data.get("ways", 2))
+    if ways < 2 or ways > 6:
+        raise HTTPException(status_code=400, detail="ways must be between 2 and 6")
+    tab = await db.pos_tabs.find_one({"id": tab_id}, {"_id": 0})
+    if not tab:
+        raise HTTPException(status_code=404, detail="Tab not found")
+    cart = tab.get("cart") or []
+    if not cart:
+        raise HTTPException(status_code=400, detail="Tab has no items to split")
+    table_numbers = data.get("tableNumbers") or []
+    buckets = [[] for _ in range(ways)]
+    for i, item in enumerate(cart):
+        buckets[i % ways].append(item)
+    new_tabs = []
+    for i, bucket in enumerate(buckets):
+        if not bucket:
+            continue
+        new_tab = {
+            "id": f"TAB-{str(uuid.uuid4())[:8].upper()}",
+            "name": f"{tab.get('name', 'Tab')} (Split {i + 1}/{ways})",
+            "cart": bucket,
+            "selectedCustomer": tab.get("selectedCustomer"),
+            "tableId": tab.get("tableId"),
+            "tableNumber": table_numbers[i] if i < len(table_numbers) else tab.get("tableNumber"),
+            "serverId": tab.get("serverId"),
+            "note": tab.get("note"),
+            "status": "open",
+            "createdBy": user["id"],
+            "createdByName": user["name"],
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "splitFrom": tab_id,
+        }
+        await db.pos_tabs.insert_one(new_tab)
+        new_tab.pop("_id", None)
+        new_tabs.append(new_tab)
+    await db.pos_tabs.delete_one({"id": tab_id})
+    return {"tabs": new_tabs}
+
+
 # =============================================================================
 # FAVORITES (Quick Keys)
 # =============================================================================

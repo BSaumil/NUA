@@ -51,10 +51,7 @@ async def get_kitchen_orders(status: Optional[str] = None):
     return orders
 
 
-@router.get("/kitchen/avg-order-time")
-async def get_avg_order_time(_: dict = Depends(get_user)):
-    """Average minutes from order fired to ready, across today's completed
-    tickets — a rough live gauge for the chef to judge pace mid-service."""
+async def _avg_order_minutes_today() -> tuple[float, int]:
     today = _today_str()
     orders = await db.kitchen_orders.find(
         {"createdAt": {"$gte": today}, "readyAt": {"$ne": None}},
@@ -71,7 +68,32 @@ async def get_avg_order_time(_: dict = Depends(get_user)):
         except (ValueError, TypeError, KeyError):
             continue
     avg = round(sum(durations) / len(durations), 1) if durations else 0
-    return {"avgOrderMinutes": avg, "ordersCompletedToday": len(durations)}
+    return avg, len(durations)
+
+
+@router.get("/kitchen/avg-order-time")
+async def get_avg_order_time(_: dict = Depends(get_user)):
+    """Average minutes from order fired to ready, across today's completed
+    tickets — a rough live gauge for the chef to judge pace mid-service."""
+    avg, count = await _avg_order_minutes_today()
+    return {"avgOrderMinutes": avg, "ordersCompletedToday": count}
+
+
+@router.get("/kitchen/next-order-eta")
+async def get_next_order_eta(_: dict = Depends(get_user)):
+    """A quick, honest ballpark for "how long for a takeaway right now?" when
+    a customer asks at the counter — today's average ticket time, plus a
+    couple of minutes for every order already ahead of it in the queue.
+    Not a precise promise, just a fast answer for the person at the till."""
+    avg, completed_count = await _avg_order_minutes_today()
+    queue_depth = await db.kitchen_orders.count_documents({"status": {"$in": ["new", "preparing"]}})
+    baseline = avg if completed_count > 0 else 12.0  # no data yet today — a sane starting guess
+    minutes_per_order_ahead = 2.5
+    estimated = round(baseline + queue_depth * minutes_per_order_ahead, 1)
+    return {
+        "avgOrderMinutes": avg, "ordersCompletedToday": completed_count,
+        "queueDepth": queue_depth, "estimatedWaitMinutes": estimated,
+    }
 
 
 @router.post("/kitchen/orders")
