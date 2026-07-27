@@ -262,6 +262,7 @@ export const kitchenAPI = {
   serveCourse: (id, course) => api.post(`/kitchen/orders/${id}/serve-course/${course}`),
   setPriority: (id, priority) => api.post(`/kitchen/orders/${id}/priority`, null, { params: { priority } }),
   getPrepList: () => api.get('/kitchen/prep-list'),
+  getAvgOrderTime: () => api.get('/kitchen/avg-order-time'),
   getDocketConfig: () => api.get('/kitchen/docket-config'),
   updateDocketConfig: (data) => api.put('/kitchen/docket-config', data),
 };
@@ -315,6 +316,7 @@ export const forecastAPI = {
   getDemand: () => api.get('/analytics/demand-forecast'),
   getTableTurns: () => api.get('/analytics/table-turns'),
   getSmartRoster: () => api.get('/staff/smart-roster'),
+  getSuggestions: () => api.get('/analytics/forecast-suggestions'),
 };
 
 // QR Menu
@@ -762,6 +764,8 @@ export const v15API = {
   bulkImport: (rows) => api.post('/items/bulk-import', { rows }),
   // Voice POS
   voiceOrder: (audioBase64, mime) => api.post('/pos/voice-order', { audioBase64, mime }),
+  openDrawer: (data) => api.post('/pos/open-drawer', data),
+  getDrawerEvents: () => api.get('/pos/drawer-events'),
   // Ask NUA
   askNua: (question) => api.post('/ai/ask-nua', { question }),
   // Item image gen
@@ -771,6 +775,8 @@ export const v15API = {
   // Auto-roster
   autoRoster: (weekStart) => api.post('/staff/auto-roster', { weekStart }),
   commitAutoRoster: (shifts) => api.post('/staff/roster/commit-auto', { shifts }),
+  getRosteringSettings: () => api.get('/staff/rostering-settings'),
+  updateRosteringSettings: (data) => api.put('/staff/rostering-settings', data),
   // Shift swap
   getSwaps: () => api.get('/staff/shift-swaps'),
   createSwap: (data) => api.post('/staff/shift-swaps', data),

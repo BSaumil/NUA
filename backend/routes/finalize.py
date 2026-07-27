@@ -9,7 +9,7 @@ we don't scatter tiny router files everywhere. Groups covered:
   • Marketing analytics       (bookings source attribution + promo QR)
   • Channel controls          (pause/resume/schedule per channel)
   • Guest digital wallet      (QR/barcode payload + AI-driven CRM ping)
-  • PDF exports               (low-stock, AI-pantry, generic reports)
+  • PDF/Excel exports         (low-stock, AI-pantry, generic reports)
   • Automation triggers       (user-defined + AI-suggested actions)
   • Store locations extended  (logo, website, timings, gmb)
 
@@ -557,6 +557,52 @@ async def low_stock_pdf(_: dict = Depends(get_user)):
                           meta={"Items below threshold": len(low)})
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="low-stock-{date.today().isoformat()}.pdf"'})
+
+
+@router.get("/inventory/low-stock/xlsx")
+async def low_stock_xlsx(_: dict = Depends(get_user)):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+
+    prods = await db.products.find({}, {"_id": 0}).to_list(2000)
+    low = [p for p in prods
+           if p.get("stock") is not None
+           and p["stock"] <= (p.get("lowStockThreshold") or p.get("parLevel") or 5)]
+    low.sort(key=lambda p: p.get("stock", 0))
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Low Stock"
+    headers = ["Product", "SKU", "Category", "Stock", "Threshold", "Cost", "Reorder Value"]
+    ws.append(headers)
+    header_fill = PatternFill(start_color="FFF3E0", end_color="FFF3E0", fill_type="solid")
+    for col in range(1, len(headers) + 1):
+        cell = ws.cell(row=1, column=col)
+        cell.font = Font(bold=True)
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="left")
+
+    for p in low:
+        threshold = p.get("lowStockThreshold") or p.get("parLevel") or 5
+        cost = float(p.get("cost", 0) or 0)
+        stock = float(p.get("stock", 0) or 0)
+        reorder_units = max(threshold * 2 - stock, 0)
+        ws.append([
+            p.get("name", ""), p.get("sku", ""), p.get("category", "—"),
+            stock, threshold, round(cost, 2), round(reorder_units * cost, 2),
+        ])
+
+    for col, width in zip("ABCDEFG", [32, 14, 18, 10, 12, 10, 14]):
+        ws.column_dimensions[col].width = width
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="low-stock-{date.today().isoformat()}.xlsx"'},
+    )
 
 
 @router.get("/ai-pantry/order-sheet/pdf")

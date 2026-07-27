@@ -18,6 +18,7 @@ PERMISSION_CATALOG: List[Dict[str, Any]] = [
         ("comp-void", "Comp / Void"),
         ("payment-links", "Payment Links"),
         ("tip-management", "Tip Management"),
+        ("cash-drawer", "Open Cash Drawer (no-sale)"),
     ]},
     {"section": "Bookings", "icon": "CalendarDays", "features": [
         ("reservations", "Reservations"),

@@ -617,6 +617,133 @@ async def get_smart_roster():
         })
     return {"roster": roster, "generatedAt": today.isoformat()}
 
+
+# ============ FORECASTING SUGGESTIONS — revenue & cost actions ============
+@router.get("/analytics/forecast-suggestions")
+async def get_forecast_suggestions():
+    """Turns the raw demand/table-turn/cost numbers already computed
+    elsewhere into concrete, ranked "do this" suggestions — one list to grow
+    revenue, one to cut cost — instead of leaving the owner to read the
+    charts and work out the implications themselves."""
+    demand = await get_demand_forecast()
+    turns = await get_table_turn_analytics()
+
+    revenue: List[dict] = []
+    cost: List[dict] = []
+
+    # --- Revenue: quiet-day promotion ---
+    forecast_days = demand.get("forecast", [])
+    if forecast_days:
+        quietest = min(forecast_days, key=lambda d: d["totalEstimatedCovers"])
+        busiest = max(forecast_days, key=lambda d: d["totalEstimatedCovers"])
+        if quietest["totalEstimatedCovers"] < busiest["totalEstimatedCovers"] * 0.6:
+            gap = busiest["totalEstimatedCovers"] - quietest["totalEstimatedCovers"]
+            est_uplift = round(gap * 0.25 * 35, 2)  # recovering ~25% of the gap at avg $35/cover
+            revenue.append({
+                "title": f"Fill {quietest['dayOfWeek']} — your quietest day",
+                "message": f"{quietest['dayOfWeek']} is forecast at {quietest['totalEstimatedCovers']} covers vs "
+                           f"{busiest['totalEstimatedCovers']} on {busiest['dayOfWeek']}. A happy-hour or set-menu push "
+                           f"that day could recover some of that gap.",
+                "estImpact": est_uplift, "impactLabel": f"~${est_uplift:.0f}/week if it works",
+            })
+
+    # --- Revenue: table turn-time opportunity ---
+    opp = turns.get("optimization", {})
+    if opp.get("potentialExtraCovers", 0) > 0:
+        revenue.append({
+            "title": "Speed up table turns at peak",
+            "message": f"Average turn is {turns.get('avgTurnTime')}m vs an achievable {opp.get('optimalTurnTime')}m. "
+                       f"Tightening bussing/POS handoff at peak could seat {opp.get('potentialExtraCovers')} more covers/night.",
+            "estImpact": opp.get("revenueOpportunity", 0), "impactLabel": f"~${opp.get('revenueOpportunity', 0):.0f}/night",
+        })
+
+    # --- Revenue: promote the highest-margin popular item ---
+    all_txns = await db.transactions.find({}, {"_id": 0}).to_list(10000)
+    products = await db.products.find({}, {"_id": 0}).to_list(2000)
+    product_map = {p["id"]: p for p in products}
+    product_sales: dict = {}
+    total_revenue = 0.0
+    for t in all_txns:
+        total_revenue += t.get("total", 0)
+        for item in t.get("items", []):
+            pid = item.get("productId", "")
+            prod = product_map.get(pid, {})
+            row = product_sales.setdefault(pid, {
+                "name": item.get("productName") or prod.get("name") or "Item", "revenue": 0.0, "qty": 0,
+                "cost": prod.get("cost", 0), "price": prod.get("price", item.get("price", 0)),
+            })
+            row["revenue"] += item.get("price", 0) * item.get("quantity", 0)
+            row["qty"] += item.get("quantity", 0)
+    for row in product_sales.values():
+        row["totalCost"] = row["cost"] * row["qty"]
+        row["margin"] = ((row["revenue"] - row["totalCost"]) / row["revenue"] * 100) if row["revenue"] > 0 else 0
+    sellable = [r for r in product_sales.values() if r["qty"] > 0]
+    # Require a real, non-zero cost — an item with no cost recorded trivially
+    # reports 100% margin, which is a data gap, not a genuine signal — and
+    # require it to actually be popular (top half by units sold), so this
+    # isn't just surfacing whatever happens to have the fewest recorded costs.
+    median_qty = sorted((r["qty"] for r in sellable), reverse=True)[len(sellable) // 2] if sellable else 0
+    popular_priced = [r for r in sellable if r["cost"] > 0 and r["qty"] >= median_qty]
+    high_margin_popular = sorted(popular_priced, key=lambda r: (r["margin"], r["revenue"]), reverse=True)
+    if high_margin_popular and high_margin_popular[0]["margin"] > 50:
+        top = high_margin_popular[0]
+        revenue.append({
+            "title": f'Upsell "{top["name"]}" harder',
+            "message": f'"{top["name"]}" runs a {top["margin"]:.0f}% margin and already sells well — a server prompt '
+                       f"or menu callout pushes more covers toward your most profitable dish instead of a thinner one.",
+            "estImpact": None, "impactLabel": f"{top['margin']:.0f}% margin item",
+        })
+
+    # --- Cost: food cost % ---
+    total_cogs = sum(r["totalCost"] for r in product_sales.values())
+    food_cost_pct = (total_cogs / total_revenue * 100) if total_revenue > 0 else 0
+    if food_cost_pct > 32:
+        target_pct = 30
+        est_saving = round(max(total_cogs - (total_revenue * target_pct / 100), 0), 2)
+        cost.append({
+            "title": f"Food cost is running at {food_cost_pct:.1f}%",
+            "message": f"Industry target is 28–32% of revenue. Check portion sizes and supplier pricing on your "
+                       f"highest-volume ingredients first — that's where a small % shift moves the most dollars.",
+            "estImpact": est_saving, "impactLabel": f"~${est_saving:.0f} back at {target_pct}%",
+        })
+
+    # --- Cost: lowest-margin item worth re-pricing or cutting ---
+    low_performers = sorted([r for r in sellable if r["revenue"] > 0], key=lambda r: r["margin"])[:1]
+    if low_performers and low_performers[0]["margin"] < 15:
+        worst = low_performers[0]
+        cost.append({
+            "title": f'"{worst["name"]}" is barely profitable',
+            "message": f'Only a {worst["margin"]:.0f}% margin after {worst["qty"]} sold. Either reprice it, shrink the '
+                       f"portion, or swap a costly ingredient — right now it's taking up menu space without paying for itself.",
+            "estImpact": None, "impactLabel": f"{worst['margin']:.0f}% margin",
+        })
+
+    # --- Cost: overstaffed vs forecast demand ---
+    roster = await get_smart_roster()
+    roster_days = {d["date"]: d for d in roster.get("roster", [])}
+    for d in forecast_days:
+        r = roster_days.get(d["date"])
+        if not r:
+            continue
+        # crude check: >1 staff per 10 covers suggests slack in the roster that day
+        if d["totalEstimatedCovers"] > 0 and r["totalStaffNeeded"] / d["totalEstimatedCovers"] > 0.12:
+            est_saving = round((r["totalStaffNeeded"] - max(3, d["totalEstimatedCovers"] // 15)) * 4 * 25, 2)
+            if est_saving > 0:
+                cost.append({
+                    "title": f"Possible overstaffing on {d['dayOfWeek']}",
+                    "message": f"{r['totalStaffNeeded']} staff rostered against a forecast of only "
+                               f"{d['totalEstimatedCovers']} covers. Worth a second look before confirming that shift.",
+                    "estImpact": est_saving, "impactLabel": f"~${est_saving:.0f} if trimmed by one shift",
+                })
+            break  # one example is enough — this is a nudge, not a full audit
+
+    return {
+        "generatedAt": datetime.utcnow().isoformat(),
+        "revenue": revenue,
+        "cost": cost,
+    }
+
+
 # ============ PREDICTIVE CUSTOMER MATCHING ============
 @router.post("/orders/predict-customer")
 async def predict_customer_for_order(order_items: List[dict]):

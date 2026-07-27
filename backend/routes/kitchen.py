@@ -12,9 +12,36 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _today_str() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+async def _clear_overnight_tickets() -> int:
+    """A ticket left in new/preparing/ready from a previous day (chef forgot
+    to mark it served, or it was superseded by close of service) shouldn't
+    carry over and clutter tomorrow's board. Runs on every board read rather
+    than a scheduled job, so it's correct even if the server restarted
+    overnight or the scheduler missed a beat — the board self-heals the
+    moment anyone opens it."""
+    today = _today_str()
+    stale = await db.kitchen_orders.find(
+        {"status": {"$in": ["new", "preparing", "ready"]}},
+        {"_id": 0, "id": 1, "createdAt": 1},
+    ).to_list(500)
+    stale_ids = [o["id"] for o in stale if (o.get("createdAt") or "")[:10] < today]
+    if stale_ids:
+        await db.kitchen_orders.update_many(
+            {"id": {"$in": stale_ids}},
+            {"$set": {"status": "cancelled", "cancelledAt": _now(),
+                      "autoCleared": True, "notes": "Auto-cleared overnight — not served by close of previous day"}},
+        )
+    return len(stale_ids)
+
+
 # ============ KITCHEN DISPLAY (KDS) API ============
 @router.get("/kitchen/orders")
 async def get_kitchen_orders(status: Optional[str] = None):
+    await _clear_overnight_tickets()
     query = {}
     if status:
         query["status"] = status
@@ -22,6 +49,29 @@ async def get_kitchen_orders(status: Optional[str] = None):
         query["status"] = {"$in": ["new", "preparing", "ready"]}
     orders = await db.kitchen_orders.find(query, {"_id": 0}).sort("createdAt", 1).to_list(100)
     return orders
+
+
+@router.get("/kitchen/avg-order-time")
+async def get_avg_order_time(_: dict = Depends(get_user)):
+    """Average minutes from order fired to ready, across today's completed
+    tickets — a rough live gauge for the chef to judge pace mid-service."""
+    today = _today_str()
+    orders = await db.kitchen_orders.find(
+        {"createdAt": {"$gte": today}, "readyAt": {"$ne": None}},
+        {"_id": 0, "createdAt": 1, "readyAt": 1},
+    ).to_list(1000)
+    durations = []
+    for o in orders:
+        try:
+            created = datetime.fromisoformat(o["createdAt"])
+            ready = datetime.fromisoformat(o["readyAt"])
+            mins = (ready - created).total_seconds() / 60
+            if mins >= 0:
+                durations.append(mins)
+        except (ValueError, TypeError, KeyError):
+            continue
+    avg = round(sum(durations) / len(durations), 1) if durations else 0
+    return {"avgOrderMinutes": avg, "ordersCompletedToday": len(durations)}
 
 
 @router.post("/kitchen/orders")
