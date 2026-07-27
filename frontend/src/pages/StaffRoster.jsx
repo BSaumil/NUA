@@ -112,22 +112,22 @@ export default function StaffRoster() {
       setTimecards(tc.data);
       setRoster(ros.data);
       setStaff(st.data.filter(s => s.role !== 'owner'));
-    } catch {}
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to load roster data — check your connection and reload'); }
     if (isOwner) {
-      try { const h = await staffMgmtAPI.getPayrunHistory(); setPayHistory(h.data); } catch {}
+      try { const h = await staffMgmtAPI.getPayrunHistory(); setPayHistory(h.data); } catch { toast.error('Failed to load payrun history'); }
     }
-    try { const t = await staffMgmtAPI.listTimeOff(); setTimeOff(t.data); } catch {}
+    try { const t = await staffMgmtAPI.listTimeOff(); setTimeOff(t.data); } catch { toast.error('Failed to load time-off requests'); }
   };
 
   const fetchReports = async () => {
     if (canManage) {
-      try { const r = await staffMgmtAPI.getStaffReports({ period: reportPeriod }); setStaffReports(r.data); } catch {}
+      try { const r = await staffMgmtAPI.getStaffReports({ period: reportPeriod }); setStaffReports(r.data); } catch { toast.error('Failed to load staff reports'); }
     }
   };
 
   const handleClockIn = async () => { try { await staffMgmtAPI.clockIn(); toast.success('Clocked in!'); fetchAll(); } catch (e) { toast.error(e.response?.data?.detail || 'Failed'); } };
   const handleClockOut = async () => { try { await staffMgmtAPI.clockOut({ breakMinutes: parseInt(breakMins) || 0 }); toast.success('Clocked out!'); fetchAll(); } catch (e) { toast.error(e.response?.data?.detail || 'Failed'); } };
-  const handleDeleteShift = async (id) => { try { await staffMgmtAPI.deleteRosterShift(id); toast.success('Shift removed'); fetchAll(); } catch {} };
+  const handleDeleteShift = async (id) => { try { await staffMgmtAPI.deleteRosterShift(id); toast.success('Shift removed'); fetchAll(); } catch (e) { toast.error(e.response?.data?.detail || 'Failed to remove shift'); } };
 
   // Blackout/approved-leave conflicts come back as a 409 with a human reason.
   // Offer an explicit override rather than silently failing or silently blocking.
@@ -534,6 +534,12 @@ export default function StaffRoster() {
         {/* PAYRUN */}
         {isOwner && (
           <TabsContent value="payrun" className="mt-4">
+            <p className="text-xs text-gray-500 mb-3">
+              Quick estimate only (flat tax/super approximation) — for STP-ready,
+              ATO-compliant pay runs with leave accrual, use the{' '}
+              <a href="/payroll" className="underline font-medium" style={{ color: theme.primary }}>full Payroll page</a>.
+              These are two separate systems; a run committed on either page won't show up on the other's history.
+            </p>
             <div className="flex items-center gap-3 mb-4">
               <select className="p-2 border rounded-md text-sm" value={payPeriod} onChange={e => setPayPeriod(e.target.value)} data-testid="payrun-period">
                 <option value="week">This Week</option><option value="fortnight">Fortnight</option><option value="month">This Month</option><option value="quarter">This Quarter</option><option value="year">This Year</option>

@@ -107,7 +107,7 @@ import {
   Reputation, Franchise, FraudDetection, MarginGuardrails, StationReadiness,
   KioskMode, CFD, ChurnRisk, RecipeCosting, DynamicPricing, Subscriptions
 } from './pages/V25Pages';
-import { VoucherManager, EventsManager, StaffAvailability, GiftCardSale, MarketingEmails } from './pages/V26Pages';
+import { EventsManager, StaffAvailability, MarketingEmails } from './pages/V26Pages';
 import OnlineOrders from './pages/OnlineOrders';
 import OrderOnline from './pages/OrderOnline';
 import TrackOrder from './pages/TrackOrder';
@@ -282,10 +282,13 @@ function ProtectedRoutes() {
         <Route path="/dynamic-pricing-rules" element={<DynamicPricing />} />
         <Route path="/subscriptions" element={<Subscriptions />} />
         {/* v26 commerce */}
-        <Route path="/vouchers" element={<VoucherManager />} />
+        {/* /vouchers is already routed above to the Universal Voucher Engine
+            (Vouchers.jsx) — VoucherManager (marketing/coupon codes) lives at
+            /marketing?tab=vouchers instead, so this used to be an unreachable
+            duplicate <Route path="/vouchers">. */}
         <Route path="/events" element={<EventsManager />} />
         <Route path="/staff-availability" element={<StaffAvailability />} />
-        <Route path="/gift-card-sale" element={<GiftCardSale />} />
+        <Route path="/gift-card-sale" element={<Navigate to="/gift-cards" replace />} />
         <Route path="/marketing-emails" element={<MarketingEmails />} />
         <Route path="/online-orders" element={<OnlineOrders />} />
         <Route path="/license" element={<LicensePage />} />

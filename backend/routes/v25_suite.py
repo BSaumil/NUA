@@ -866,49 +866,12 @@ async def cancel_sub_member(sub_id: str, user: dict = Depends(get_user)):
     return {"cancelled": True}
 
 
-# ============================================================================
-# TIER 2 — Smart Gift Cards
-# ============================================================================
-@router.get("/gift-cards")
-async def list_gift_cards(_: dict = Depends(get_user)):
-    rows = await db.gift_cards.find({}, {"_id": 0}).sort("createdAt", -1).to_list(200)
-    return rows
-
-
-@router.post("/gift-cards")
-async def issue_gift_card(data: dict, user: dict = Depends(get_user)):
-    if user["role"] not in ("owner", "manager"): raise HTTPException(status_code=403, detail="Owner/Manager only")
-    card = {
-        "id": _uid("GC"),
-        "code": uuid.uuid4().hex[:12].upper(),
-        "amount": float(data.get("amount", 0)),
-        "bonus": float(data.get("bonus", 0)),
-        "occasion": data.get("occasion", "general"),
-        "recipientName": data.get("recipientName", ""),
-        "recipientEmail": data.get("recipientEmail", ""),
-        "status": "active", "createdAt": _now(), "createdBy": user["id"],
-    }
-    await db.gift_cards.insert_one(card); card.pop("_id", None)
-    return card
-
-
-@router.post("/gift-cards/{code}/redeem")
-async def redeem_gift_card(code: str, data: dict):
-    amount = float(data.get("amount", 0))
-    if amount <= 0: raise HTTPException(status_code=400, detail="amount > 0 required")
-    # Atomic redeem — only deduct if balance is sufficient
-    res = await db.gift_cards.find_one_and_update(
-        {"code": code, "status": "active", "amount": {"$gte": amount}},
-        {"$inc": {"amount": -amount}},
-        return_document=False,
-    )
-    if not res:
-        # Either not found, inactive, or insufficient balance
-        exists = await db.gift_cards.find_one({"code": code}, {"_id": 0})
-        if not exists: raise HTTPException(status_code=404, detail="Card not found")
-        if exists.get("status") != "active": raise HTTPException(status_code=400, detail="Card not active")
-        raise HTTPException(status_code=400, detail="Insufficient balance")
-    return {"redeemed": amount, "code": code}
+# Gift cards live under /v26/gift-cards (routes/v26_commerce.py) — that's the
+# schema the POS register and the owner's gift-card management page actually
+# use. This tier used to duplicate it with a second, incompatible schema
+# (decrementing `amount` instead of `currentBalance`) against the *same*
+# `gift_cards` collection, which silently desynced balances between the two.
+# Removed rather than fixed, since nothing calls it anymore.
 
 
 # ============================================================================

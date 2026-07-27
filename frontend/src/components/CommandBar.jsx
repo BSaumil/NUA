@@ -38,7 +38,7 @@ const DESTINATIONS = [
   { label: 'Super', path: '/super', keywords: 'superannuation', roles: ['owner'] },
   { label: 'End of Day', path: '/end-of-day', keywords: 'close till z-report settle', roles: ['owner', 'manager'] },
   { label: 'Online Orders', path: '/online-orders', keywords: 'delivery pickup web', roles: ['owner', 'manager'] },
-  { label: 'Gift Cards', path: '/gift-card-sale', keywords: 'sell voucher card', roles: ['owner', 'manager', 'cashier'] },
+  { label: 'Gift Cards', path: '/gift-cards', keywords: 'sell voucher card barcode reload stop resend', roles: ['owner', 'manager', 'cashier'] },
   { label: 'Pre-Shift Briefing', path: '/pre-shift', keywords: 'briefing vips 86', roles: ['owner', 'manager', 'kitchen'] },
   { label: 'NUA Intelligence', path: '/ash', keywords: 'ai assistant ash brain', roles: ['owner', 'manager'] },
   { label: 'Automation Engine', path: '/automation', keywords: 'rules triggers', roles: ['owner', 'manager'] },

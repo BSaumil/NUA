@@ -91,6 +91,7 @@ PERMISSION_CATALOG: List[Dict[str, Any]] = [
         ("shift-manager", "Shift Manager"),
         ("labor-forecast", "Labor Forecast"),
         ("quarterly-review", "Quarterly Review"),
+        ("staff-availability", "Staff Availability"),
     ]},
     {"section": "Automation & AI", "icon": "Sparkles", "features": [
         ("automation", "Automations"),
