@@ -781,7 +781,11 @@ const POSTerminal = () => {
   };
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4 h-[calc(100vh-7rem)]" data-testid="pos-terminal">
+    <div
+      className="flex flex-col lg:flex-row gap-4 h-[calc(100vh-7rem)] -m-6 p-4 transition-colors"
+      style={{ backgroundColor: theme.background }}
+      data-testid="pos-terminal"
+    >
       {/* Training Mode Banner */}
       {trainingMode && (
         <div className="fixed top-0 left-0 right-0 z-40 bg-amber-500 text-white text-center py-2 text-sm font-semibold"
