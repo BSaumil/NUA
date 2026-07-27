@@ -146,7 +146,7 @@ const ALL_FEATURES = [
     { path: '/vouchers', label: 'Vouchers & Codes', icon: Tag, access: ['owner', 'manager'] },
     { path: '/events', label: 'Events & Experiences', icon: Trophy, access: ['owner', 'manager'] },
     { path: '/staff-availability', label: 'Staff Availability', icon: Users, access: ['owner', 'manager'] },
-    { path: '/gift-card-sale', label: 'Sell Gift Card', icon: Tag, access: ['owner', 'manager', 'cashier'] },
+    { path: '/gift-cards', label: 'Sell Gift Card', icon: Tag, access: ['owner', 'manager', 'cashier'] },
     { path: '/marketing-emails', label: 'AI Marketing Emails', icon: Sparkles, access: ['owner', 'manager'] },
     { path: '/online-orders', label: 'Online Orders', icon: ShoppingBag, access: ['owner', 'manager', 'cashier', 'kitchen'] },
     { path: '/inventory-accounting', label: 'Inventory & BAS', icon: Receipt, access: ['owner', 'manager'] },

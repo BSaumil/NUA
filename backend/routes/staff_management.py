@@ -394,7 +394,7 @@ async def process_payrun(data: dict, user: dict = Depends(require_owner)):
         "status": "processed",
         "processedAt": datetime.now(timezone.utc).isoformat(),
     }
-    await db.payruns.insert_one(payrun)
+    await db.payruns_simple.insert_one(payrun)
     payrun.pop("_id", None)
 
     # Create expense record for Accounting
@@ -422,7 +422,7 @@ async def process_payrun(data: dict, user: dict = Depends(require_owner)):
 
 @router.get("/payrun/history")
 async def get_payrun_history(_: dict = Depends(require_owner)):
-    runs = await db.payruns.find({}, {"_id": 0}).sort("processedAt", -1).to_list(100)
+    runs = await db.payruns_simple.find({}, {"_id": 0}).sort("processedAt", -1).to_list(100)
     return runs
 
 # ============ STAFF REPORTS ============
@@ -431,7 +431,7 @@ async def get_staff_reports( period: str = "week", _: dict = Depends(require_own
 
     staff = await db.auth_users.find({"status": "active"}, {"_id": 0, "password_hash": 0}).to_list(100)
     timecards = await db.timecards.find({}, {"_id": 0}).to_list(50000)
-    payruns = await db.payruns.find({}, {"_id": 0}).to_list(100)
+    payruns = await db.payruns_simple.find({}, {"_id": 0}).to_list(100)
 
     staff_stats = []
     for s in staff:

@@ -372,20 +372,31 @@ const POSTerminal = () => {
 
   // Settle gift cards after a successful payment: activate sold-cards, redeem tenders.
   const settleGiftCards = async (txId) => {
+    // The sale is already recorded complete by the time this runs — a failure
+    // here can no longer be rolled back automatically, so every failure is
+    // surfaced loudly (not console.warn'd away) for manual reconciliation.
+    const failures = [];
     for (const card of (pendingGiftActivations || [])) {
       try { await v26API.activateGift(card.code, { transactionId: txId }); }
-      catch (e) { console.warn('Gift activation failed', card.code, e); }
+      catch (e) { failures.push(`Card ${card.code} did not activate (${e?.response?.data?.detail || 'network error'})`); }
     }
     for (const gc of (appliedGiftCards || [])) {
       try {
         if (gc.amount > 0) await v26API.redeemGiftPartial(gc.code, gc.amount, txId);
-      } catch (e) { console.warn('Gift redeem failed', gc.code, e); }
+      } catch (e) { failures.push(`Card ${gc.code} was not debited $${gc.amount.toFixed(2)} (${e?.response?.data?.detail || 'network error'})`); }
     }
     // Store credit tender — settle after the sale has actually gone through,
     // same as gift cards, so a failed payment never touches the balance.
     if (storeCreditApplied > 0 && selectedCustomer?.id) {
       try { await customersAPI.redeemStoreCredit(selectedCustomer.id, storeCreditApplied); }
-      catch (e) { console.warn('Store credit redeem failed', e); }
+      catch (e) { failures.push(`Store credit of $${storeCreditApplied.toFixed(2)} was not deducted (${e?.response?.data?.detail || 'network error'})`); }
+    }
+    if (failures.length > 0) {
+      toast({
+        title: `Sale completed, but ${failures.length} tender${failures.length === 1 ? '' : 's'} need manual reconciliation`,
+        description: failures.join(' · '),
+        variant: 'destructive',
+      });
     }
   };
 

@@ -66,7 +66,7 @@ async def get_tips(_: dict = Depends(require_owner_or_manager)):
     return tips
 
 @router.get("/tips/summary")
-async def get_tips_summary(_: dict = Depends(require_owner)):
+async def get_tips_summary(_: dict = Depends(require_owner_or_manager)):
     tips = await db.tips.find({}, {"_id": 0}).to_list(10000)
     total = sum(t.get("amount", 0) for t in tips)
     by_staff = {}

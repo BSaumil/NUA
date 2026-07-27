@@ -663,9 +663,7 @@ export const v25API = {
   subMembers: () => api.get('/v25/subscriptions/members'),
   updateSubMember: (id, data) => api.patch(`/v25/subscriptions/members/${id}`, data),
   cancelSubMember: (id) => api.delete(`/v25/subscriptions/members/${id}`),
-  giftCards: () => api.get('/v25/gift-cards'),
-  issueGift: (data) => api.post('/v25/gift-cards', data),
-  redeemGift: (code, amount) => api.post(`/v25/gift-cards/${code}/redeem`, { amount }),
+  // Gift cards live under v26API now — see below.
   // Tier 3
   recipes: () => api.get('/v25/recipes/list'),
   upsertRecipe: (data) => api.post('/v25/recipes/upsert', data),
@@ -722,6 +720,11 @@ export const v26API = {
   activateGift: (code, data) => api.post(`/v26/gift-cards/${code}/activate`, data || {}),
   redeemGiftPartial: (code, amount, transactionId) => api.post(`/v26/gift-cards/${code}/redeem`, { amount, transactionId }),
   giftTransactions: (code) => api.get(`/v26/gift-cards/${code}/transactions`),
+  editGiftCard: (code, data) => api.patch(`/v26/gift-cards/${code}`, data),
+  reloadGiftCard: (code, amount, reason) => api.post(`/v26/gift-cards/${code}/reload`, { amount, reason }),
+  stopGiftCard: (code, reason) => api.post(`/v26/gift-cards/${code}/stop`, { reason }),
+  reactivateGiftCard: (code) => api.post(`/v26/gift-cards/${code}/reactivate`),
+  resendGiftCard: (code, email) => api.post(`/v26/gift-cards/${code}/resend`, email ? { email } : {}),
   // Marketing emails
   generateMarketingEmail: (data) => api.post('/v26/marketing/email/generate', data),
   listMarketingEmails: () => api.get('/v26/marketing/emails'),
