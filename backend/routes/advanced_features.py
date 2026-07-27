@@ -143,25 +143,28 @@ async def get_end_of_day_report( period: str = "today", start_date: str = None, 
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         end = now
 
-    # Get all transactions (filter by date if they have datetime timestamps)
+    # Get all transactions (filter by date). Timestamps land in Mongo both as
+    # native datetimes (the live POS checkout path) and as ISO strings (some
+    # seed/demo data) — str also has a .replace() method (substring
+    # replacement), so a naive hasattr(ts, 'replace') check treats both the
+    # same and crashes on ts.tzinfo for strings. Normalize explicitly instead.
+    def _parse_ts(ts):
+        if isinstance(ts, datetime):
+            return ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts
+        if isinstance(ts, str):
+            try:
+                parsed = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
+            except ValueError:
+                return None
+        return None
+
     all_txns = await db.transactions.find({}, {"_id": 0}).to_list(50000)
     txns = []
     for t in all_txns:
-        ts = t.get("timestamp")
-        if ts:
-            if hasattr(ts, 'replace'):
-                if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=timezone.utc)
-                if start <= ts <= end:
-                    txns.append(t)
-            else:
-                txns.append(t)
-        else:
+        parsed = _parse_ts(t.get("timestamp"))
+        if parsed is None or start <= parsed <= end:
             txns.append(t)
-
-    # If no date filtering worked (all timestamps are strings etc), use all
-    if len(txns) == 0 and len(all_txns) > 0:
-        txns = all_txns
 
     total_sales = sum(t.get("total", 0) for t in txns)
     total_txns = len(txns)
@@ -176,10 +179,9 @@ async def get_end_of_day_report( period: str = "today", start_date: str = None, 
     # By hour
     by_hour = {}
     for t in txns:
-        ts = t.get("timestamp")
-        if ts and hasattr(ts, 'hour'):
-            h = ts.hour
-            by_hour[h] = by_hour.get(h, 0) + t.get("total", 0)
+        parsed = _parse_ts(t.get("timestamp"))
+        if parsed is not None:
+            by_hour[parsed.hour] = by_hour.get(parsed.hour, 0) + t.get("total", 0)
 
     # By category — categories marked "reports under" another category roll
     # their sales up into that category's label (e.g. an "Iced Coffee"

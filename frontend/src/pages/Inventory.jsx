@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Package, AlertTriangle, TrendingDown, Search, Plus, Minus } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Package, AlertTriangle, TrendingDown, Search, Plus, Minus, ArrowUp, ArrowDown, ArrowUpDown, FileSpreadsheet, FileText } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent } from '../components/ui/card';
@@ -16,6 +16,8 @@ const Inventory = () => {
   const [adjustProduct, setAdjustProduct] = useState(null);
   const [adjustment, setAdjustment] = useState('');
   const [reason, setReason] = useState('Manual count');
+  const [sortBy, setSortBy] = useState('name');
+  const [sortDir, setSortDir] = useState('asc');
 
   useEffect(() => { fetchProducts(); }, []);
 
@@ -35,13 +37,35 @@ const Inventory = () => {
     } catch (e) { toast.error(e.response?.data?.detail || 'Failed to adjust stock'); }
   };
 
-  const lowStockProducts = products.filter(p => p.stock < 100);
+  // Same threshold the backend's low-stock PDF/Excel exports and NUA's own
+  // alerts use (lowStockThreshold, falling back to parLevel, then 5) — this
+  // used to be a hardcoded "< 100" here, which flagged almost every product
+  // as low stock and had nothing to do with what got exported.
+  const isLowStock = (p) => p.stock <= (p.lowStockThreshold ?? p.parLevel ?? 5);
+  const lowStockProducts = products.filter(isLowStock);
   const totalValue = products.reduce((sum, p) => sum + (p.cost * p.stock), 0);
   const totalUnits = products.reduce((sum, p) => sum + p.stock, 0);
 
-  const filteredProducts = products.filter(p =>
-    p.name.toLowerCase().includes(searchTerm.toLowerCase()) || (p.sku && p.sku.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const toggleSort = (column) => {
+    if (sortBy === column) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+    else { setSortBy(column); setSortDir('asc'); }
+  };
+  const SortIcon = ({ column }) => {
+    if (sortBy !== column) return <ArrowUpDown size={12} className="opacity-30" />;
+    return sortDir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />;
+  };
+
+  const filteredProducts = useMemo(() => {
+    const filtered = products.filter(p =>
+      p.name.toLowerCase().includes(searchTerm.toLowerCase()) || (p.sku && p.sku.toLowerCase().includes(searchTerm.toLowerCase()))
+    );
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      if (sortBy === 'stock') return (a.stock - b.stock) * dir;
+      if (sortBy === 'category') return (a.category || '').localeCompare(b.category || '') * dir || a.name.localeCompare(b.name);
+      return a.name.localeCompare(b.name) * dir;
+    });
+  }, [products, searchTerm, sortBy, sortDir]);
 
   return (
     <div className="space-y-6" data-testid="inventory-page">
@@ -64,15 +88,26 @@ const Inventory = () => {
           <div className="flex items-center gap-2 mb-1">
             <AlertTriangle size={20} className="text-orange-600" />
             <h3 className="font-semibold text-orange-900">Low Stock Alert</h3>
-            <a
-              href={`${process.env.REACT_APP_BACKEND_URL}/api/inventory/low-stock/pdf`}
-              target="_blank"
-              rel="noreferrer"
-              className="ml-auto text-xs text-blue-600 underline hover:no-underline"
-              data-testid="low-stock-pdf-btn"
-            >
-              Download PDF for owner
-            </a>
+            <div className="ml-auto flex items-center gap-3">
+              <a
+                href={`${process.env.REACT_APP_BACKEND_URL}/api/inventory/low-stock/pdf`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1 text-xs text-blue-600 underline hover:no-underline"
+                data-testid="low-stock-pdf-btn"
+              >
+                <FileText size={12} /> PDF
+              </a>
+              <a
+                href={`${process.env.REACT_APP_BACKEND_URL}/api/inventory/low-stock/xlsx`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1 text-xs text-blue-600 underline hover:no-underline"
+                data-testid="low-stock-xlsx-btn"
+              >
+                <FileSpreadsheet size={12} /> Excel
+              </a>
+            </div>
           </div>
           <p className="text-sm text-orange-700">{lowStockProducts.map(p => p.name).join(', ')} — consider reordering.</p>
         </CardContent></Card>
@@ -86,10 +121,22 @@ const Inventory = () => {
       <Card><CardContent className="p-0"><div className="overflow-x-auto">
         <table className="w-full" data-testid="inventory-table">
           <thead className="bg-gray-50"><tr>
-            <th className="text-left p-4 text-sm font-medium text-gray-500">Product</th>
+            <th className="text-left p-4 text-sm font-medium text-gray-500">
+              <button className="flex items-center gap-1 hover:text-gray-800" onClick={() => toggleSort('name')} data-testid="sort-product">
+                Product <SortIcon column="name" />
+              </button>
+            </th>
             <th className="text-left p-4 text-sm font-medium text-gray-500">SKU</th>
-            <th className="text-left p-4 text-sm font-medium text-gray-500">Category</th>
-            <th className="text-right p-4 text-sm font-medium text-gray-500">Stock</th>
+            <th className="text-left p-4 text-sm font-medium text-gray-500">
+              <button className="flex items-center gap-1 hover:text-gray-800" onClick={() => toggleSort('category')} data-testid="sort-category">
+                Category <SortIcon column="category" />
+              </button>
+            </th>
+            <th className="text-right p-4 text-sm font-medium text-gray-500">
+              <button className="flex items-center gap-1 ml-auto hover:text-gray-800" onClick={() => toggleSort('stock')} data-testid="sort-stock">
+                Stock <SortIcon column="stock" />
+              </button>
+            </th>
             <th className="text-right p-4 text-sm font-medium text-gray-500">Cost</th>
             <th className="text-right p-4 text-sm font-medium text-gray-500">Value</th>
             <th className="text-center p-4 text-sm font-medium text-gray-500">Status</th>
@@ -98,7 +145,7 @@ const Inventory = () => {
           <tbody>
             {filteredProducts.map(product => {
               const stockValue = product.cost * product.stock;
-              const isLow = product.stock < 100;
+              const isLow = isLowStock(product);
               return (
                 <tr key={product.id} className="border-t hover:bg-gray-50" data-testid={`inventory-row-${product.id}`}>
                   <td className="p-4"><div className="flex items-center gap-3">

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Search, Plus, Minus, Trash2, User, CreditCard, Banknote, Smartphone,
-  ShoppingCart, QrCode, SplitSquareHorizontal, X, Check, ChevronLeft, Copy
+  ShoppingCart, QrCode, SplitSquareHorizontal, X, Check, ChevronLeft, Copy, DollarSign
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -32,7 +32,7 @@ import { WifiOff } from 'lucide-react';
 const POSTerminal = () => {
   const { theme } = useTheme();
   const { queuedCount, refresh: refreshOfflineQueue } = useOfflineQueue();
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const { cart, addToCart, removeFromCart, updateQuantity, clearCart, calculateTotal, selectedCustomer, setSelectedCustomer, currentUser, currentLocation, appliedDiscounts, addDiscount, removeDiscount, appliedGiftCards, addGiftCard, removeGiftCard, pendingGiftActivations, storeCreditApplied, setStoreCreditApplied } = usePOS();
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
@@ -42,6 +42,13 @@ const POSTerminal = () => {
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [trainingMode, setTrainingMode] = useState(false);
+  // Cart / Individual side-panel tabs — "Individual" surfaces the logged-in
+  // staff member's own quick actions (currently: no-sale drawer open).
+  const [cartTab, setCartTab] = useState('cart');
+  const [drawerReason, setDrawerReason] = useState('change');
+  const [drawerNote, setDrawerNote] = useState('');
+  const [drawerBusy, setDrawerBusy] = useState(false);
+  const [drawerHistory, setDrawerHistory] = useState([]);
 
   // Payment flow state
   const [paymentView, setPaymentView] = useState('methods'); // methods | qr | upi | split | processing
@@ -234,6 +241,11 @@ const POSTerminal = () => {
     v26API.listVouchers().then(r => setAvailableVouchers(r.data || [])).catch(() => {});
   }, [showDiscountPicker]);
 
+  useEffect(() => {
+    if (cartTab !== 'individual') return;
+    loadDrawerHistory();
+  }, [cartTab]);
+
   const applyManualCode = async (codeOverride) => {
     const code = (codeOverride ?? voucherCode ?? '').trim().toUpperCase();
     if (!code) return;
@@ -398,6 +410,26 @@ const POSTerminal = () => {
         variant: 'destructive',
       });
     }
+  };
+
+  const canOpenDrawer = user?.role === 'owner' || hasPermission?.('cash-drawer');
+
+  const loadDrawerHistory = async () => {
+    if (!canOpenDrawer) return;
+    try { const r = await v15API.getDrawerEvents(); setDrawerHistory(r.data || []); }
+    catch { /* history is a nice-to-have, not critical */ }
+  };
+
+  const handleOpenDrawer = async () => {
+    setDrawerBusy(true);
+    try {
+      await v15API.openDrawer({ reason: drawerReason, note: drawerNote, location: currentLocation });
+      toast({ title: 'Drawer opened', description: 'Logged for the owner — reason: ' + drawerReason.replace('_', ' ') });
+      setDrawerNote('');
+      loadDrawerHistory();
+    } catch (e) {
+      toast({ title: 'Could not open drawer', description: e?.response?.data?.detail || 'Failed', variant: 'destructive' });
+    } finally { setDrawerBusy(false); }
   };
 
   // Discounts applied on screen, in the shape POST /transactions records
@@ -928,7 +960,72 @@ const POSTerminal = () => {
       {/* Same min-h-0 fix as the products column — the cart-items list below
           uses flex-1 overflow-y-auto and needs this to actually scroll. */}
       <div className="w-full lg:w-[440px] flex-shrink-0 flex flex-col min-h-0 border bg-white rounded-xl shadow-sm p-4" data-testid="pos-cart-panel">
-        <h2 className="text-xl font-bold mb-3" style={{ color: theme.text }}>{labels.cart || 'Current Order'}</h2>
+        {/* Cart / Individual tabs — Individual surfaces the logged-in
+            staff member's own quick actions (e.g. no-sale drawer open). */}
+        <div className="flex gap-1 mb-3 border-b">
+          <button
+            className="px-3 py-1.5 text-sm font-semibold rounded-t transition-colors"
+            style={cartTab === 'cart' ? { color: theme.primary, borderBottom: `2px solid ${theme.primary}` } : { color: '#6B7280' }}
+            onClick={() => setCartTab('cart')} data-testid="cart-tab-cart">
+            {labels.cart || 'Current Order'}
+          </button>
+          <button
+            className="px-3 py-1.5 text-sm font-semibold rounded-t transition-colors flex items-center gap-1.5"
+            style={cartTab === 'individual' ? { color: theme.primary, borderBottom: `2px solid ${theme.primary}` } : { color: '#6B7280' }}
+            onClick={() => setCartTab('individual')} data-testid="cart-tab-individual">
+            <User size={14} /> Individual
+          </button>
+        </div>
+        {cartTab === 'individual' ? (
+          <div className="flex-1 overflow-y-auto space-y-4" data-testid="individual-panel">
+            <Card><CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-lg" style={{ background: theme.primary }}>
+                  {(user?.name || currentUser?.name || '?').charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <p className="font-bold" data-testid="individual-name">{user?.name || currentUser?.name || 'Staff'}</p>
+                  <p className="text-xs text-gray-500 capitalize">{user?.role} · {currentLocation}</p>
+                </div>
+              </div>
+            </CardContent></Card>
+
+            <Card><CardContent className="p-4">
+              <h3 className="font-semibold text-sm mb-3 flex items-center gap-2"><DollarSign size={16} style={{ color: theme.primary }} /> Cash Drawer</h3>
+              {canOpenDrawer ? (
+                <div className="space-y-2">
+                  <select className="w-full p-2 border rounded-md text-sm" value={drawerReason} onChange={e => setDrawerReason(e.target.value)} data-testid="drawer-reason">
+                    <option value="change">Making change</option>
+                    <option value="note_to_coin">Exchange notes for coins</option>
+                    <option value="float_check">Float check</option>
+                    <option value="other">Other</option>
+                  </select>
+                  <Input placeholder="Note (optional)" value={drawerNote} onChange={e => setDrawerNote(e.target.value)} data-testid="drawer-note" />
+                  <Button className="w-full" style={{ background: theme.primary }} onClick={handleOpenDrawer} disabled={drawerBusy} data-testid="open-drawer-btn">
+                    {drawerBusy ? 'Opening…' : 'Open Drawer'}
+                  </Button>
+                  <p className="text-[11px] text-gray-400">Every open is logged with your name, time, and reason for the owner to review.</p>
+                  {drawerHistory.length > 0 && (
+                    <div className="mt-3 border-t pt-2 space-y-1.5 max-h-40 overflow-y-auto" data-testid="drawer-history">
+                      <p className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold">Recent opens</p>
+                      {drawerHistory.slice(0, 10).map(ev => (
+                        <div key={ev.id} className="text-xs flex justify-between text-gray-600">
+                          <span>{ev.staffName} · {ev.reason.replace('_', ' ')}</span>
+                          <span className="text-gray-400">{new Date(ev.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-400">
+                  You don't have access to open the cash drawer yet — ask the owner to grant it in Settings &gt; Permissions.
+                </p>
+              )}
+            </CardContent></Card>
+          </div>
+        ) : (
+        <>
         {/* Customer Selection */}
         <Card className="mb-4"><CardContent className="p-4">
           <div className="flex items-center gap-2 mb-2">
@@ -1345,6 +1442,8 @@ const POSTerminal = () => {
               </div>
             )}
           </div>
+        )}
+        </>
         )}
       </div>
 

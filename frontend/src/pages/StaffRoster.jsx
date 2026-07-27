@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Clock, LogIn, LogOut, Calendar, DollarSign, Users, FileText,
   Plus, Trash2, BarChart3, Printer, GripVertical, Move, Brain,
-  CalendarOff, Check, X, Pencil
+  CalendarOff, Check, X, Pencil, Settings2
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -94,6 +94,10 @@ export default function StaffRoster() {
   // Timecard edit (owner/manager fix-up)
   const [editingTimecard, setEditingTimecard] = useState(null);
   const [timecardEditForm, setTimecardEditForm] = useState({ clockOut: '', breakMinutes: '0' });
+  // Smart Rostering settings — owner-only full control over the industry-
+  // standard shift rules and cost/revenue targets auto-roster generates against.
+  const [showRosterSettings, setShowRosterSettings] = useState(false);
+  const [rosterSettings, setRosterSettings] = useState(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor)
@@ -197,6 +201,24 @@ export default function StaffRoster() {
       setEditingTimecard(null);
       fetchAll();
     } catch (e) { toast.error(e.response?.data?.detail || 'Failed to update timecard'); }
+  };
+
+  // ===== Smart Rostering settings (owner-only) =====
+  const openRosterSettings = async () => {
+    try {
+      const { v15API } = await import('../services/api');
+      const r = await v15API.getRosteringSettings();
+      setRosterSettings(r.data);
+      setShowRosterSettings(true);
+    } catch { toast.error('Failed to load rostering settings'); }
+  };
+  const saveRosterSettings = async () => {
+    try {
+      const { v15API } = await import('../services/api');
+      await v15API.updateRosteringSettings(rosterSettings);
+      toast.success('Rostering settings saved');
+      setShowRosterSettings(false);
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to save'); }
   };
 
   // ===== Drag-and-Drop Handlers =====
@@ -393,6 +415,9 @@ export default function StaffRoster() {
                   }
                 } catch { toast.error('AI roster failed'); }
               }} data-testid="auto-roster-btn"><Brain size={14} className="mr-1" /> AI Auto-Roster</Button>}
+              {isOwner && <Button size="sm" variant="outline" onClick={openRosterSettings} data-testid="roster-settings-btn">
+                <Settings2 size={14} className="mr-1" /> Rostering Settings
+              </Button>}
               {canManage && <Button size="sm" style={{ backgroundColor: theme.primary }} onClick={() => setShowWeekRoster(true)} data-testid="add-week-roster-btn"><Plus size={14} className="mr-1" /> Add Week Roster</Button>}
             </div>
           </div>
@@ -685,6 +710,68 @@ export default function StaffRoster() {
             </div>
             <Button className="w-full" style={{ backgroundColor: theme.primary }} onClick={handleSaveTimecardEdit} data-testid="save-timecard-edit-btn">Save</Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Smart Rostering settings — owner-only full control */}
+      <Dialog open={showRosterSettings} onOpenChange={setShowRosterSettings}>
+        <DialogContent className="max-w-lg" data-testid="roster-settings-dialog">
+          <DialogHeader><DialogTitle>Smart Rostering Settings</DialogTitle></DialogHeader>
+          {rosterSettings && (
+            <div className="space-y-3 py-2 text-sm">
+              <p className="text-xs text-gray-500">
+                Controls what AI Auto-Roster generates — shift lengths, staffing floors, and the
+                cost/revenue balance it targets.
+              </p>
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">
+                  Minimum engagement (hours) — industry minimum a called-in casual must be paid for
+                </label>
+                <Input type="number" step="0.5" value={rosterSettings.minEngagementHours}
+                  onChange={e => setRosterSettings({ ...rosterSettings, minEngagementHours: parseFloat(e.target.value) || 0 })}
+                  data-testid="settings-min-engagement" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="text-xs font-medium text-gray-500 mb-1 block">Weekday staff floor</label>
+                  <Input type="number" value={rosterSettings.weekdayStaffTarget}
+                    onChange={e => setRosterSettings({ ...rosterSettings, weekdayStaffTarget: parseInt(e.target.value) || 0 })}
+                    data-testid="settings-weekday-target" /></div>
+                <div><label className="text-xs font-medium text-gray-500 mb-1 block">Weekend staff floor</label>
+                  <Input type="number" value={rosterSettings.weekendStaffTarget}
+                    onChange={e => setRosterSettings({ ...rosterSettings, weekendStaffTarget: parseInt(e.target.value) || 0 })}
+                    data-testid="settings-weekend-target" /></div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="text-xs font-medium text-gray-500 mb-1 block">Weekday shift</label>
+                  <div className="flex gap-1">
+                    <Input value={rosterSettings.weekdayShift.start} onChange={e => setRosterSettings({ ...rosterSettings, weekdayShift: { ...rosterSettings.weekdayShift, start: e.target.value } })} data-testid="settings-weekday-start" />
+                    <Input value={rosterSettings.weekdayShift.end} onChange={e => setRosterSettings({ ...rosterSettings, weekdayShift: { ...rosterSettings.weekdayShift, end: e.target.value } })} data-testid="settings-weekday-end" />
+                  </div></div>
+                <div><label className="text-xs font-medium text-gray-500 mb-1 block">Weekend shift</label>
+                  <div className="flex gap-1">
+                    <Input value={rosterSettings.weekendShift.start} onChange={e => setRosterSettings({ ...rosterSettings, weekendShift: { ...rosterSettings.weekendShift, start: e.target.value } })} data-testid="settings-weekend-start" />
+                    <Input value={rosterSettings.weekendShift.end} onChange={e => setRosterSettings({ ...rosterSettings, weekendShift: { ...rosterSettings.weekendShift, end: e.target.value } })} data-testid="settings-weekend-end" />
+                  </div></div>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div><label className="text-xs font-medium text-gray-500 mb-1 block">Covers per staff</label>
+                  <Input type="number" value={rosterSettings.coversPerStaff}
+                    onChange={e => setRosterSettings({ ...rosterSettings, coversPerStaff: parseInt(e.target.value) || 1 })}
+                    data-testid="settings-covers-per-staff" /></div>
+                <div><label className="text-xs font-medium text-gray-500 mb-1 block">Target labor %</label>
+                  <Input type="number" value={rosterSettings.targetLaborPct}
+                    onChange={e => setRosterSettings({ ...rosterSettings, targetLaborPct: parseFloat(e.target.value) || 0 })}
+                    data-testid="settings-target-labor-pct" /></div>
+                <div><label className="text-xs font-medium text-gray-500 mb-1 block">Avg hourly rate $</label>
+                  <Input type="number" value={rosterSettings.avgHourlyRate}
+                    onChange={e => setRosterSettings({ ...rosterSettings, avgHourlyRate: parseFloat(e.target.value) || 0 })}
+                    data-testid="settings-avg-rate" /></div>
+              </div>
+              <Button className="w-full" style={{ backgroundColor: theme.primary }} onClick={saveRosterSettings} data-testid="save-roster-settings-btn">
+                Save Settings
+              </Button>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

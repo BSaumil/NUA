@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { TrendingUp, Calendar, Users, DollarSign, BarChart3, Clock, Lightbulb, ArrowUpRight } from 'lucide-react';
+import { TrendingUp, Calendar, Users, DollarSign, BarChart3, Clock, Lightbulb, ArrowUpRight, TrendingDown, Sparkles } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
@@ -14,11 +14,13 @@ export default function Forecasting() {
   const [demand, setDemand] = useState(null);
   const [tableTurns, setTableTurns] = useState(null);
   const [roster, setRoster] = useState(null);
+  const [suggestions, setSuggestions] = useState(null);
 
   useEffect(() => {
     forecastAPI.getDemand().then(r => setDemand(r.data)).catch(() => {});
     forecastAPI.getTableTurns().then(r => setTableTurns(r.data)).catch(() => {});
     forecastAPI.getSmartRoster().then(r => setRoster(r.data)).catch(() => {});
+    forecastAPI.getSuggestions().then(r => setSuggestions(r.data)).catch(() => {});
   }, []);
 
   return (
@@ -38,6 +40,9 @@ export default function Forecasting() {
           <TabsTrigger value="demand" data-testid="tab-demand">7-Day Forecast</TabsTrigger>
           <TabsTrigger value="turns" data-testid="tab-turns">Table Turn-Time</TabsTrigger>
           <TabsTrigger value="roster" data-testid="tab-roster">Smart Rostering</TabsTrigger>
+          <TabsTrigger value="suggestions" data-testid="tab-suggestions">
+            <Sparkles size={13} className="mr-1" /> Suggestions
+          </TabsTrigger>
         </TabsList>
 
         {/* ===== DEMAND FORECAST ===== */}
@@ -187,6 +192,60 @@ export default function Forecasting() {
                 </div>
               </CardContent>
             </Card>
+          )}
+        </TabsContent>
+
+        {/* ===== SUGGESTIONS ===== */}
+        <TabsContent value="suggestions" className="mt-4">
+          {!suggestions ? <p className="text-gray-400 text-center py-8">Loading suggestions...</p> : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <h3 className="font-semibold flex items-center gap-2 mb-3" style={{ color: theme.text }}>
+                  <TrendingUp size={16} className="text-emerald-600" /> Grow Revenue
+                </h3>
+                <div className="space-y-3">
+                  {(suggestions.revenue || []).map((s, i) => (
+                    <Card key={i} className="border-0 shadow-sm border-l-4" style={{ borderLeftColor: '#10B981' }} data-testid={`revenue-suggestion-${i}`}>
+                      <CardContent className="p-4">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="font-medium text-sm" style={{ color: theme.text }}>{s.title}</p>
+                          {s.impactLabel && (
+                            <Badge className="text-[10px] whitespace-nowrap bg-emerald-100 text-emerald-700">{s.impactLabel}</Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1.5">{s.message}</p>
+                      </CardContent>
+                    </Card>
+                  ))}
+                  {(suggestions.revenue || []).length === 0 && (
+                    <p className="text-sm text-gray-400 text-center py-8">Nothing stands out yet — check back once more sales data comes in.</p>
+                  )}
+                </div>
+              </div>
+              <div>
+                <h3 className="font-semibold flex items-center gap-2 mb-3" style={{ color: theme.text }}>
+                  <TrendingDown size={16} className="text-amber-600" /> Reduce Cost
+                </h3>
+                <div className="space-y-3">
+                  {(suggestions.cost || []).map((s, i) => (
+                    <Card key={i} className="border-0 shadow-sm border-l-4" style={{ borderLeftColor: '#F59E0B' }} data-testid={`cost-suggestion-${i}`}>
+                      <CardContent className="p-4">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="font-medium text-sm" style={{ color: theme.text }}>{s.title}</p>
+                          {s.impactLabel && (
+                            <Badge className="text-[10px] whitespace-nowrap bg-amber-100 text-amber-700">{s.impactLabel}</Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1.5">{s.message}</p>
+                      </CardContent>
+                    </Card>
+                  ))}
+                  {(suggestions.cost || []).length === 0 && (
+                    <p className="text-sm text-gray-400 text-center py-8">Costs look healthy — nothing needs attention right now.</p>
+                  )}
+                </div>
+              </div>
+            </div>
           )}
         </TabsContent>
       </Tabs>
