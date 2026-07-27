@@ -10,10 +10,15 @@ import { toast } from 'sonner';
 export default function QuarterlyReview() {
   const { theme } = useTheme();
   const [data, setData] = useState(null);
+  const [error, setError] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
 
-  useEffect(() => { gamificationAPI.getQuarterlyReview().then(r => setData(r.data)).catch(() => {}); }, []);
+  const load = () => {
+    setError(false);
+    gamificationAPI.getQuarterlyReview().then(r => setData(r.data)).catch(() => setError(true));
+  };
+  useEffect(load, []);
 
   const generateAlternatives = async () => {
     if (!data?.underperformers?.length && !data?.worstSellers?.length) { toast.info('No underperforming items'); return; }
@@ -26,6 +31,12 @@ export default function QuarterlyReview() {
     setAiLoading(false);
   };
 
+  if (error) return (
+    <div className="flex flex-col items-center gap-3 py-12">
+      <p className="text-gray-400">Couldn't load the quarterly review.</p>
+      <Button variant="outline" onClick={load} data-testid="quarterly-review-retry">Retry</Button>
+    </div>
+  );
   if (!data) return <div className="flex justify-center py-12"><div className="animate-pulse text-gray-400">Loading quarterly review...</div></div>;
 
   return (

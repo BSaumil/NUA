@@ -12,9 +12,14 @@ const MEDALS = ['', '#FFD700', '#C0C0C0', '#CD7F32'];
 export default function StaffLeaderboard() {
   const { theme } = useTheme();
   const [data, setData] = useState(null);
+  const [error, setError] = useState(false);
   const [distributing, setDistributing] = useState(false);
 
-  useEffect(() => { gamificationAPI.getLeaderboard().then(r => setData(r.data)).catch(() => {}); }, []);
+  const load = () => {
+    setError(false);
+    gamificationAPI.getLeaderboard().then(r => setData(r.data)).catch(() => setError(true));
+  };
+  useEffect(load, []);
 
   const handleSmartDistribute = async () => {
     setDistributing(true);
@@ -29,6 +34,12 @@ export default function StaffLeaderboard() {
     setDistributing(false);
   };
 
+  if (error) return (
+    <div className="flex flex-col items-center gap-3 py-12">
+      <p className="text-gray-400">Couldn't load the leaderboard.</p>
+      <Button variant="outline" onClick={load} data-testid="leaderboard-retry">Retry</Button>
+    </div>
+  );
   if (!data) return <div className="flex justify-center py-12"><div className="animate-pulse text-gray-400">Loading leaderboard...</div></div>;
 
   return (

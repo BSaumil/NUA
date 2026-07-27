@@ -3,7 +3,7 @@ Nano Banana image gen, anomaly detection, auto-rostering, audit log, variants, C
 cohort retention, booking heatmap, 2FA, GDPR.
 """
 from fastapi import APIRouter, HTTPException, Request, Depends
-from deps import get_user, require_owner, require_owner_or_manager
+from deps import get_user, require_owner, require_owner_or_manager, require_permission
 from database import db
 from datetime import datetime, timezone, timedelta
 import uuid
@@ -75,6 +75,86 @@ async def delete_tab(tab_id: str, _: dict = Depends(get_user)):
     return {"message": "Tab closed"}
 
 
+@router.put("/pos/tabs/{tab_id}")
+async def update_tab(tab_id: str, data: dict, _: dict = Depends(get_user)):
+    """Move Table — relabel an open tab to a different table without
+    touching its held cart/customer."""
+    allowed = {"tableId", "tableNumber", "name", "note", "serverId"}
+    patch = {k: v for k, v in data.items() if k in allowed}
+    if not patch:
+        raise HTTPException(status_code=400, detail="No updatable fields provided")
+    result = await db.pos_tabs.find_one_and_update(
+        {"id": tab_id}, {"$set": patch}, return_document=True,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Tab not found")
+    result.pop("_id", None)
+    return result
+
+
+@router.post("/pos/tabs/{tab_id}/merge")
+async def merge_tabs(tab_id: str, data: dict, _: dict = Depends(get_user)):
+    """Merge Table — combine another open tab's held items into this one
+    (e.g. two tables joined into a single check), then close the other tab."""
+    other_id = data.get("otherTabId")
+    if not other_id or other_id == tab_id:
+        raise HTTPException(status_code=400, detail="A different otherTabId is required")
+    primary = await db.pos_tabs.find_one({"id": tab_id}, {"_id": 0})
+    other = await db.pos_tabs.find_one({"id": other_id}, {"_id": 0})
+    if not primary or not other:
+        raise HTTPException(status_code=404, detail="Tab not found")
+    merged_cart = (primary.get("cart") or []) + (other.get("cart") or [])
+    await db.pos_tabs.update_one({"id": tab_id}, {"$set": {"cart": merged_cart}})
+    await db.pos_tabs.delete_one({"id": other_id})
+    result = await db.pos_tabs.find_one({"id": tab_id}, {"_id": 0})
+    return result
+
+
+@router.post("/pos/tabs/{tab_id}/split")
+async def split_tab(tab_id: str, data: dict, user: dict = Depends(get_user)):
+    """Split Table / Check — divide this tab's held items round-robin across
+    `ways` new tabs (2-6), then close the original. Optional `tableNumbers`
+    lets each split land on a different table; otherwise they all keep the
+    original table number (splitting the CHECK, not the seating)."""
+    ways = int(data.get("ways", 2))
+    if ways < 2 or ways > 6:
+        raise HTTPException(status_code=400, detail="ways must be between 2 and 6")
+    tab = await db.pos_tabs.find_one({"id": tab_id}, {"_id": 0})
+    if not tab:
+        raise HTTPException(status_code=404, detail="Tab not found")
+    cart = tab.get("cart") or []
+    if not cart:
+        raise HTTPException(status_code=400, detail="Tab has no items to split")
+    table_numbers = data.get("tableNumbers") or []
+    buckets = [[] for _ in range(ways)]
+    for i, item in enumerate(cart):
+        buckets[i % ways].append(item)
+    new_tabs = []
+    for i, bucket in enumerate(buckets):
+        if not bucket:
+            continue
+        new_tab = {
+            "id": f"TAB-{str(uuid.uuid4())[:8].upper()}",
+            "name": f"{tab.get('name', 'Tab')} (Split {i + 1}/{ways})",
+            "cart": bucket,
+            "selectedCustomer": tab.get("selectedCustomer"),
+            "tableId": tab.get("tableId"),
+            "tableNumber": table_numbers[i] if i < len(table_numbers) else tab.get("tableNumber"),
+            "serverId": tab.get("serverId"),
+            "note": tab.get("note"),
+            "status": "open",
+            "createdBy": user["id"],
+            "createdByName": user["name"],
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "splitFrom": tab_id,
+        }
+        await db.pos_tabs.insert_one(new_tab)
+        new_tab.pop("_id", None)
+        new_tabs.append(new_tab)
+    await db.pos_tabs.delete_one({"id": tab_id})
+    return {"tabs": new_tabs}
+
+
 # =============================================================================
 # FAVORITES (Quick Keys)
 # =============================================================================
@@ -92,6 +172,45 @@ async def save_favorites(data: dict, user: dict = Depends(get_user)):
         upsert=True,
     )
     return {"productIds": product_ids}
+
+
+# ─── Cash drawer (no-sale open) — owner-grantable, always audited ─────────
+DRAWER_REASONS = ("change", "note_to_coin", "float_check", "other")
+
+
+@router.post("/pos/open-drawer")
+async def open_cash_drawer(data: dict, user: dict = Depends(require_permission("cash-drawer"))):
+    """Logs a no-sale drawer open (making change, exchanging notes for
+    coins, float check, etc). There's no physical drawer to signal in this
+    environment — the audit trail is the actual control: every open is
+    tied to exactly who did it, when, and why, for the owner to review."""
+    reason = data.get("reason", "other")
+    if reason not in DRAWER_REASONS:
+        reason = "other"
+    note = (data.get("note") or "").strip()[:200]
+    event = {
+        "id": str(uuid.uuid4()), "staffId": user["id"], "staffName": user.get("name") or user.get("email"),
+        "role": user.get("role"), "reason": reason, "note": note,
+        "location": data.get("location", "Main"),
+        "openedAt": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.drawer_events.insert_one(event)
+    event.pop("_id", None)
+    try:
+        from services.audit_service import log_event
+        await log_event(entity_type="cash_drawer", entity_id=event["id"], action="executed",
+                        after=event, memo=f"No-sale drawer open — {reason}" + (f" ({note})" if note else ""),
+                        severity="notice")
+    except Exception:
+        pass
+    return event
+
+
+@router.get("/pos/drawer-events")
+async def list_drawer_events(_: dict = Depends(require_owner_or_manager)):
+    """Owner/manager oversight — every no-sale drawer open, who and why."""
+    rows = await db.drawer_events.find({}, {"_id": 0}).sort("openedAt", -1).to_list(200)
+    return rows
 
 
 # =============================================================================
@@ -276,10 +395,75 @@ async def inventory_anomalies(_: dict = Depends(require_owner_or_manager)):
 # =============================================================================
 # AUTO-ROSTERING AI
 # =============================================================================
+DEFAULT_ROSTERING_SETTINGS = {
+    # Industry-standard minimum engagement — under the Hospitality Industry
+    # (General) Award, a casual called in for a shift must be paid for at
+    # least this many hours regardless of how short the actual work is.
+    # 3.0 is the common Australian hospitality minimum; owners running under
+    # a different award/agreement can adjust it here.
+    "minEngagementHours": 3.0,
+    "weekdayStaffTarget": 3,
+    "weekendStaffTarget": 5,
+    "coversPerStaff": 15,          # roughly how many covers one staff member can handle
+    "weekdayShift": {"start": "12:00", "end": "20:00"},
+    "weekendShift": {"start": "11:00", "end": "21:00"},
+    "targetLaborPct": 28.0,        # healthy labor cost as a % of forecast revenue
+    "avgHourlyRate": 28.0,         # fallback rate used for the cost-vs-revenue estimate
+    "revenuePerCover": 35.0,
+}
+
+
+@router.get("/staff/rostering-settings")
+async def get_rostering_settings(_: dict = Depends(get_user)):
+    row = await db.rostering_settings.find_one({"_id": "singleton"}, {"_id": 0})
+    if not row:
+        row = dict(DEFAULT_ROSTERING_SETTINGS)
+        await db.rostering_settings.insert_one({"_id": "singleton", **row})
+    return row
+
+
+@router.put("/staff/rostering-settings")
+async def update_rostering_settings(body: dict, user: dict = Depends(require_owner)):
+    """Owner-only — full control over the shift/cost rules Smart Rostering
+    generates against."""
+    allowed = set(DEFAULT_ROSTERING_SETTINGS.keys())
+    patch = {k: v for k, v in body.items() if k in allowed}
+    patch["updatedAt"] = datetime.now(timezone.utc).isoformat()
+    patch["updatedBy"] = user.get("email")
+    await db.rostering_settings.update_one(
+        {"_id": "singleton"}, {"$set": {"_id": "singleton", **patch}}, upsert=True,
+    )
+    row = await db.rostering_settings.find_one({"_id": "singleton"}, {"_id": 0})
+    return row
+
+
+def _clamp_to_min_engagement(start: str, end: str, min_hours: float) -> str:
+    """If a shift is shorter than the minimum engagement, push the end time
+    out so the shift itself is never below what the award requires. Capped
+    at 23:59 rather than wrapping into the next calendar day — nothing else
+    in the roster model (shift docs, hour calculations) supports an
+    overnight shift spanning two dates, so wrapping would silently produce
+    a shift that reads as negative-length everywhere else it's used."""
+    try:
+        sh, sm = map(int, start.split(":"))
+        eh, em = map(int, end.split(":"))
+        duration = (eh * 60 + em) - (sh * 60 + sm)
+        min_minutes = round(min_hours * 60)
+        if duration < min_minutes:
+            new_total = min(sh * 60 + sm + min_minutes, 23 * 60 + 59)
+            eh, em = divmod(new_total, 60)
+            return f"{eh:02d}:{em:02d}"
+        return end
+    except (ValueError, AttributeError):
+        return end
+
+
 @router.post("/staff/auto-roster")
 async def auto_roster(data: dict, _: dict = Depends(require_owner_or_manager)):
     week_start = data.get("weekStart")
-    # Get demand forecast — use existing data or simple heuristic
+    settings_row = await db.rostering_settings.find_one({"_id": "singleton"}, {"_id": 0})
+    settings = {**DEFAULT_ROSTERING_SETTINGS, **(settings_row or {})}
+
     staff = await db.auth_users.find({"role": {"$ne": "owner"}, "status": "active"}, {"_id": 0}).to_list(100)
     # Load availability/blackouts so we don't schedule unavailable staff.
     avail_rows = await db.staff_availability.find(
@@ -314,12 +498,51 @@ async def auto_roster(data: dict, _: dict = Depends(require_owner_or_manager)):
                 return True, b.get("reason", "blackout")
         return False, ""
 
+    # Reservations already booked this week give a real demand signal on top
+    # of the flat weekday/weekend floor — the same "covers per staff" ratio
+    # the read-only demand forecast uses, kept consistent on purpose.
+    async def _forecast_covers(day_name: str, is_weekend: bool) -> int:
+        date_iso = _date_for(day_name)
+        if not date_iso:
+            return 0
+        res = await db.reservations.find({"date": date_iso}, {"_id": 0, "partySize": 1}).to_list(200)
+        booked = sum(r.get("partySize", 0) for r in res)
+        base_walkins = 40 if is_weekend else 20
+        return booked + base_walkins
+
     DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
     suggestions = []
     excluded = []
+    day_summaries = []
+    min_hours = float(settings["minEngagementHours"])
+
     for day in DAYS:
-        is_weekend = day in ('Friday','Saturday','Sunday')
-        target = 5 if is_weekend else 3
+        is_weekend = day in ('Friday', 'Saturday', 'Sunday')
+        floor_target = settings["weekendStaffTarget"] if is_weekend else settings["weekdayStaffTarget"]
+        shift_cfg = settings["weekendShift"] if is_weekend else settings["weekdayShift"]
+        start_time = shift_cfg["start"]
+        end_time = _clamp_to_min_engagement(shift_cfg["start"], shift_cfg["end"], min_hours)
+        shift_hours = (
+            (int(end_time.split(":")[0]) * 60 + int(end_time.split(":")[1]))
+            - (int(start_time.split(":")[0]) * 60 + int(start_time.split(":")[1]))
+        ) / 60
+
+        covers = await _forecast_covers(day, is_weekend)
+        demand_target = max(floor_target, covers // settings["coversPerStaff"])
+
+        # Cost vs revenue: if staffing to demand would push labor above the
+        # owner's target %, trim back toward the floor rather than the
+        # forecast — cost discipline wins over pure demand-matching, but
+        # never below the floor (that's the minimum viable cover for the day).
+        est_revenue = covers * settings["revenuePerCover"]
+        est_labor_at_demand = demand_target * shift_hours * settings["avgHourlyRate"]
+        labor_pct_at_demand = (est_labor_at_demand / est_revenue * 100) if est_revenue > 0 else 0
+        target = demand_target
+        trimmed_for_cost = False
+        if est_revenue > 0 and labor_pct_at_demand > settings["targetLaborPct"] and demand_target > floor_target:
+            target = max(floor_target, demand_target - 1)
+            trimmed_for_cost = True
+
         # Filter out blacked-out staff for this day
         pool = []
         for s in staff:
@@ -329,20 +552,43 @@ async def auto_roster(data: dict, _: dict = Depends(require_owner_or_manager)):
                 continue
             pool.append(s)
             if len(pool) >= target: break
+
         for s in pool:
             suggestions.append({
                 "staffId": s["id"], "staffName": s["name"],
                 "date": day, "weekStart": week_start,
-                "startTime": "11:00" if is_weekend else "12:00",
-                "endTime": "21:00" if is_weekend else "20:00",
+                "startTime": start_time, "endTime": end_time,
                 "role": s.get("role", "Floor").capitalize(),
                 "notes": s.get("role", "Floor").capitalize(),
                 "aiGenerated": True,
             })
+
+        est_labor_final = len(pool) * shift_hours * settings["avgHourlyRate"]
+        day_summaries.append({
+            "date": day, "forecastCovers": covers, "staffed": len(pool),
+            "shiftHours": round(shift_hours, 1),
+            "estRevenue": round(est_revenue, 2), "estLaborCost": round(est_labor_final, 2),
+            "laborPct": round((est_labor_final / est_revenue * 100), 1) if est_revenue > 0 else None,
+            "trimmedForCost": trimmed_for_cost,
+        })
+
+    total_labor = sum(d["estLaborCost"] for d in day_summaries)
+    total_revenue = sum(d["estRevenue"] for d in day_summaries)
+    week_labor_pct = round((total_labor / total_revenue * 100), 1) if total_revenue > 0 else None
+
     return {
         "suggestions": suggestions,
         "excluded": excluded,
-        "reasoning": f"Generated {len(suggestions)} shifts across {len(DAYS)} days. {len(excluded)} blackout exclusions honoured. Weekend cover 5/day, weekday 3/day.",
+        "daySummaries": day_summaries,
+        "weekEstimate": {"estLaborCost": round(total_labor, 2), "estRevenue": round(total_revenue, 2), "laborPct": week_labor_pct},
+        "settingsUsed": settings,
+        "reasoning": (
+            f"Generated {len(suggestions)} shifts across {len(DAYS)} days, sized to forecast demand "
+            f"(floor {settings['weekdayStaffTarget']}/weekday, {settings['weekendStaffTarget']}/weekend), "
+            f"every shift honouring the {min_hours:.1f}h minimum engagement. "
+            f"{len(excluded)} blackout exclusions honoured. "
+            f"Estimated week labor cost ${round(total_labor, 2):,.2f} ({week_labor_pct}% of forecast revenue, target {settings['targetLaborPct']}%)."
+        ),
     }
 
 

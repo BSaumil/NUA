@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Search, Plus, Minus, Trash2, User, CreditCard, Banknote, Smartphone,
-  ShoppingCart, QrCode, SplitSquareHorizontal, X, Check, ChevronLeft, Copy
+  ShoppingCart, QrCode, SplitSquareHorizontal, X, Check, ChevronLeft, Copy, DollarSign,
+  Percent, Ban, Gift, ArrowRightLeft, Combine, Clock
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -12,7 +13,7 @@ import {
 } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { usePOS } from '../contexts/POSContext';
-import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API, v26API, floorPlansAPI, itemsSystemAPI } from '../services/api';
+import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API, v26API, floorPlansAPI, itemsSystemAPI, kitchenAPI } from '../services/api';
 import { useToast } from '../hooks/use-toast';
 import { useAuth } from '../contexts/AuthContext';
 import VoiceOrderButton from '../components/VoiceOrderButton';
@@ -23,12 +24,16 @@ import ModifierSheet from '../components/pos/ModifierSheet';
 import POSHeaderBar from '../components/pos/POSHeaderBar';
 import ScanVoucherButton from '../components/pos/ScanVoucherButton';
 import { CategoryIcon } from './Categories';
+import { createTransactionResilient } from '../lib/offlineQueue';
+import useOfflineQueue from '../hooks/useOfflineQueue';
+import { WifiOff } from 'lucide-react';
 
 // SwipeableCartItem and CustomerCombobox now live in components/pos/.
 
 const POSTerminal = () => {
   const { theme } = useTheme();
-  const { user } = useAuth();
+  const { queuedCount, refresh: refreshOfflineQueue } = useOfflineQueue();
+  const { user, hasPermission } = useAuth();
   const { cart, addToCart, removeFromCart, updateQuantity, clearCart, calculateTotal, selectedCustomer, setSelectedCustomer, currentUser, currentLocation, appliedDiscounts, addDiscount, removeDiscount, appliedGiftCards, addGiftCard, removeGiftCard, pendingGiftActivations, storeCreditApplied, setStoreCreditApplied } = usePOS();
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
@@ -38,6 +43,24 @@ const POSTerminal = () => {
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [trainingMode, setTrainingMode] = useState(false);
+  // Cart / staff side-panel tabs — the second tab surfaces the logged-in
+  // staff member's own quick actions: cash drawer, discounts, comp/void,
+  // move/merge/split table, and a quick kitchen-timing readout.
+  const [cartTab, setCartTab] = useState('cart');
+  const [drawerReason, setDrawerReason] = useState('change');
+  const [drawerNote, setDrawerNote] = useState('');
+  const [drawerBusy, setDrawerBusy] = useState(false);
+  const [drawerHistory, setDrawerHistory] = useState([]);
+  const [kitchenEta, setKitchenEta] = useState(null);
+  const [showCompVoidQuick, setShowCompVoidQuick] = useState(false);
+  const [compVoidForm, setCompVoidForm] = useState({ type: 'comp', reason: '', amount: '', printVoid: false });
+  const [compVoidBusy, setCompVoidBusy] = useState(false);
+  const [tablesDialogMode, setTablesDialogMode] = useState('view'); // view | move | merge | split
+  const [movingTab, setMovingTab] = useState(null);
+  const [moveTargetTable, setMoveTargetTable] = useState('');
+  const [mergeSelection, setMergeSelection] = useState([]);
+  const [splittingTab, setSplittingTab] = useState(null);
+  const [splitWays, setSplitWays] = useState(2);
 
   // Payment flow state
   const [paymentView, setPaymentView] = useState('methods'); // methods | qr | upi | split | processing
@@ -230,6 +253,12 @@ const POSTerminal = () => {
     v26API.listVouchers().then(r => setAvailableVouchers(r.data || [])).catch(() => {});
   }, [showDiscountPicker]);
 
+  useEffect(() => {
+    if (cartTab !== 'individual') return;
+    loadDrawerHistory();
+    loadKitchenEta();
+  }, [cartTab]);
+
   const applyManualCode = async (codeOverride) => {
     const code = (codeOverride ?? voucherCode ?? '').trim().toUpperCase();
     if (!code) return;
@@ -368,21 +397,112 @@ const POSTerminal = () => {
 
   // Settle gift cards after a successful payment: activate sold-cards, redeem tenders.
   const settleGiftCards = async (txId) => {
+    // The sale is already recorded complete by the time this runs — a failure
+    // here can no longer be rolled back automatically, so every failure is
+    // surfaced loudly (not console.warn'd away) for manual reconciliation.
+    const failures = [];
     for (const card of (pendingGiftActivations || [])) {
       try { await v26API.activateGift(card.code, { transactionId: txId }); }
-      catch (e) { console.warn('Gift activation failed', card.code, e); }
+      catch (e) { failures.push(`Card ${card.code} did not activate (${e?.response?.data?.detail || 'network error'})`); }
     }
     for (const gc of (appliedGiftCards || [])) {
       try {
         if (gc.amount > 0) await v26API.redeemGiftPartial(gc.code, gc.amount, txId);
-      } catch (e) { console.warn('Gift redeem failed', gc.code, e); }
+      } catch (e) { failures.push(`Card ${gc.code} was not debited $${gc.amount.toFixed(2)} (${e?.response?.data?.detail || 'network error'})`); }
     }
     // Store credit tender — settle after the sale has actually gone through,
     // same as gift cards, so a failed payment never touches the balance.
     if (storeCreditApplied > 0 && selectedCustomer?.id) {
       try { await customersAPI.redeemStoreCredit(selectedCustomer.id, storeCreditApplied); }
-      catch (e) { console.warn('Store credit redeem failed', e); }
+      catch (e) { failures.push(`Store credit of $${storeCreditApplied.toFixed(2)} was not deducted (${e?.response?.data?.detail || 'network error'})`); }
     }
+    if (failures.length > 0) {
+      toast({
+        title: `Sale completed, but ${failures.length} tender${failures.length === 1 ? '' : 's'} need manual reconciliation`,
+        description: failures.join(' · '),
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const canOpenDrawer = user?.role === 'owner' || hasPermission?.('cash-drawer');
+
+  const loadDrawerHistory = async () => {
+    if (!canOpenDrawer) return;
+    try { const r = await v15API.getDrawerEvents(); setDrawerHistory(r.data || []); }
+    catch { /* history is a nice-to-have, not critical */ }
+  };
+
+  const handleOpenDrawer = async () => {
+    setDrawerBusy(true);
+    try {
+      await v15API.openDrawer({ reason: drawerReason, note: drawerNote, location: currentLocation });
+      toast({ title: 'Drawer opened', description: 'Logged for the owner — reason: ' + drawerReason.replace('_', ' ') });
+      setDrawerNote('');
+      loadDrawerHistory();
+    } catch (e) {
+      toast({ title: 'Could not open drawer', description: e?.response?.data?.detail || 'Failed', variant: 'destructive' });
+    } finally { setDrawerBusy(false); }
+  };
+
+  const loadKitchenEta = async () => {
+    try { const r = await kitchenAPI.getNextOrderETA(); setKitchenEta(r.data); }
+    catch { /* rough gauge only, not critical */ }
+  };
+
+  const jumpToDiscounts = () => { setCartTab('cart'); setShowDiscountPicker(true); };
+
+  const handleQuickCompVoid = async () => {
+    if (!compVoidForm.reason.trim()) { toast({ title: 'Reason required', variant: 'destructive' }); return; }
+    if (!compVoidForm.amount || parseFloat(compVoidForm.amount) <= 0) { toast({ title: 'Amount must be greater than 0', variant: 'destructive' }); return; }
+    setCompVoidBusy(true);
+    try {
+      await itemsSystemAPI.createCompVoid({
+        ...compVoidForm, amount: parseFloat(compVoidForm.amount), transactionId: lastTxnId || undefined,
+      });
+      toast({ title: `${compVoidForm.type === 'comp' ? 'Comp' : 'Void'} recorded` });
+      setShowCompVoidQuick(false);
+      setCompVoidForm({ type: 'comp', reason: '', amount: '', printVoid: false });
+    } catch (e) {
+      toast({ title: 'Failed to record', description: e?.response?.data?.detail || 'Failed', variant: 'destructive' });
+    } finally { setCompVoidBusy(false); }
+  };
+
+  const openTablesDialog = async (mode) => {
+    setTablesDialogMode(mode);
+    setMovingTab(null); setMergeSelection([]); setSplittingTab(null); setSplitWays(2);
+    try { const r = await v15API.getTabs(); setOpenTabs(r.data || []); setShowTabsDialog(true); }
+    catch { toast({ title: 'Failed to load open tabs', variant: 'destructive' }); }
+  };
+
+  const handleMoveTable = async (tabId) => {
+    if (!moveTargetTable.trim()) { toast({ title: 'Enter a table number', variant: 'destructive' }); return; }
+    try {
+      await v15API.updateTab(tabId, { tableNumber: moveTargetTable.trim() });
+      toast({ title: `Moved to table ${moveTargetTable.trim()}` });
+      setMovingTab(null); setMoveTargetTable('');
+      const r = await v15API.getTabs(); setOpenTabs(r.data || []);
+    } catch (e) { toast({ title: 'Failed to move table', description: e?.response?.data?.detail, variant: 'destructive' }); }
+  };
+
+  const handleMergeTables = async () => {
+    if (mergeSelection.length < 2) { toast({ title: 'Select at least 2 tabs to merge', variant: 'destructive' }); return; }
+    const [primary, ...rest] = mergeSelection;
+    try {
+      for (const otherId of rest) { await v15API.mergeTabs(primary, otherId); }
+      toast({ title: `Merged ${mergeSelection.length} tables into one check` });
+      setMergeSelection([]);
+      const r = await v15API.getTabs(); setOpenTabs(r.data || []);
+    } catch (e) { toast({ title: 'Failed to merge tables', description: e?.response?.data?.detail, variant: 'destructive' }); }
+  };
+
+  const handleSplitTable = async (tabId) => {
+    try {
+      const r = await v15API.splitTab(tabId, splitWays);
+      toast({ title: `Split into ${r.data?.tabs?.length || splitWays} checks` });
+      setSplittingTab(null);
+      const r2 = await v15API.getTabs(); setOpenTabs(r2.data || []);
+    } catch (e) { toast({ title: 'Failed to split', description: e?.response?.data?.detail, variant: 'destructive' }); }
   };
 
   // Discounts applied on screen, in the shape POST /transactions records
@@ -407,35 +527,45 @@ const POSTerminal = () => {
     }
     setLoading(true);
     try {
-      const res = await transactionsAPI.create({
+      const res = await createTransactionResilient({
         items: cart.map(item => toTxItem(item, true)),
         paymentMethod, customerId: selectedCustomer?.id || null, location: currentLocation, cashier: currentUser.name,
         orderType, tableNumber: orderType === 'dine-in' ? tableNumber : null, walkInName: orderType === 'takeaway' ? walkInName : null,
         ...buildDiscountPayload(),
       });
+      const queuedOffline = !!res.data?.queuedOffline;
       setLastTxnId(res.data?.id || null);
-      // Loyalty: redeem first (if applicable), then earn on net spend
-      if (selectedCustomer && pointsToRedeem >= (loyaltyCfg.minRedeem || 10)) {
-        try { await loyaltyEngineAPI.redeem({ customerId: selectedCustomer.id, points: pointsToRedeem, transactionId: res.data?.id }); } catch {}
+      if (queuedOffline) {
+        // No connectivity right now — the sale is saved locally and will
+        // sync automatically. Skip loyalty/printer/gift-card side-effects
+        // (they need the server) and let the background flush handle them
+        // once this transaction actually lands.
+        toast({ title: "Saved offline", description: `$${totals.total} sale queued — will sync when back online.` });
+        refreshOfflineQueue();
+      } else {
+        // Loyalty: redeem first (if applicable), then earn on net spend
+        if (selectedCustomer && pointsToRedeem >= (loyaltyCfg.minRedeem || 10)) {
+          try { await loyaltyEngineAPI.redeem({ customerId: selectedCustomer.id, points: pointsToRedeem, transactionId: res.data?.id }); } catch {}
+        }
+        if (selectedCustomer) {
+          try {
+            await loyaltyEngineAPI.earn({
+              customerId: selectedCustomer.id,
+              transactionId: res.data?.id,
+              items: cart.map(i => ({ category: i.category || 'Other', price: i.price, quantity: i.quantity })),
+            });
+          } catch {}
+        }
+        toast({ title: "Transaction Complete!", description: `Payment of $${totals.total} via ${paymentMethod}` });
+        // Auto-route items to category printers
+        try { await gamificationAPI.sendToPrinters({ items: cart.map(i => ({ productName: i.name, category: i.category, quantity: i.quantity })), orderId: res.data?.id }); } catch {}
+        // Settle gift cards: activate any pending-sold cards + redeem applied tenders.
+        await settleGiftCards(res.data?.id);
       }
-      if (selectedCustomer) {
-        try {
-          await loyaltyEngineAPI.earn({
-            customerId: selectedCustomer.id,
-            transactionId: res.data?.id,
-            items: cart.map(i => ({ category: i.category || 'Other', price: i.price, quantity: i.quantity })),
-          });
-        } catch {}
-      }
-      toast({ title: "Transaction Complete!", description: `Payment of $${totals.total} via ${paymentMethod}` });
-      // Auto-route items to category printers
-      try { await gamificationAPI.sendToPrinters({ items: cart.map(i => ({ productName: i.name, category: i.category, quantity: i.quantity })), orderId: res.data?.id }); } catch {}
-      // Settle gift cards: activate any pending-sold cards + redeem applied tenders.
-      await settleGiftCards(res.data?.id);
       resetPayment();
       clearCart();
       setPointsToRedeem(0);
-      const r = await productsAPI.getAll(); setProducts(r.data);
+      try { const r = await productsAPI.getAll(); setProducts(r.data); } catch {}
     } catch (error) {
       toast({ title: "Error", description: "Transaction failed.", variant: "destructive" });
     } finally { setLoading(false); }
@@ -670,6 +800,12 @@ const POSTerminal = () => {
           <div onDoubleClick={() => { if (user?.role === 'owner') setShowGhost(true); }} data-testid="pos-title">
             <POSHeaderBar themeColor={theme.primary} />
           </div>
+          {queuedCount > 0 && (
+            <div className="mb-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-xs font-medium" data-testid="offline-queue-banner">
+              <WifiOff size={14} />
+              {queuedCount} sale{queuedCount === 1 ? '' : 's'} saved offline — syncing when back online…
+            </div>
+          )}
           <div className="relative mb-3 flex gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={16} />
@@ -698,7 +834,7 @@ const POSTerminal = () => {
               } catch { toast({ title: 'Hold failed', variant: 'destructive' }); }
             }} data-testid="hold-order-btn">Hold</Button>
             <Button variant="outline" className="h-9 px-3" onClick={async () => {
-              try { const r = await v15API.getTabs(); setOpenTabs(r.data || []); setShowTabsDialog(true); } catch {}
+              try { setTablesDialogMode('view'); const r = await v15API.getTabs(); setOpenTabs(r.data || []); setShowTabsDialog(true); } catch {}
             }} data-testid="recall-tab-btn">Tabs</Button>
           </div>
           {activePromos.length > 0 && (
@@ -897,7 +1033,111 @@ const POSTerminal = () => {
       {/* Same min-h-0 fix as the products column — the cart-items list below
           uses flex-1 overflow-y-auto and needs this to actually scroll. */}
       <div className="w-full lg:w-[440px] flex-shrink-0 flex flex-col min-h-0 border bg-white rounded-xl shadow-sm p-4" data-testid="pos-cart-panel">
-        <h2 className="text-xl font-bold mb-3" style={{ color: theme.text }}>{labels.cart || 'Current Order'}</h2>
+        {/* Cart / staff tabs — the second tab is named after whoever is
+            logged in and surfaces their own quick actions. */}
+        <div className="flex gap-1 mb-3 border-b">
+          <button
+            className="px-3 py-1.5 text-sm font-semibold rounded-t transition-colors"
+            style={cartTab === 'cart' ? { color: theme.primary, borderBottom: `2px solid ${theme.primary}` } : { color: '#6B7280' }}
+            onClick={() => setCartTab('cart')} data-testid="cart-tab-cart">
+            {labels.cart || 'Current Order'}
+          </button>
+          <button
+            className="px-3 py-1.5 text-sm font-semibold rounded-t transition-colors flex items-center gap-1.5"
+            style={cartTab === 'individual' ? { color: theme.primary, borderBottom: `2px solid ${theme.primary}` } : { color: '#6B7280' }}
+            onClick={() => setCartTab('individual')} data-testid="cart-tab-individual">
+            <User size={14} /> {user?.name || currentUser?.name || 'Staff'}
+          </button>
+        </div>
+        {cartTab === 'individual' ? (
+          <div className="flex-1 overflow-y-auto space-y-4" data-testid="individual-panel">
+            <Card><CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-lg" style={{ background: theme.primary }}>
+                  {(user?.name || currentUser?.name || '?').charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <p className="font-bold" data-testid="individual-name">{user?.name || currentUser?.name || 'Staff'}</p>
+                  <p className="text-xs text-gray-500 capitalize">{user?.role} · {currentLocation}</p>
+                </div>
+              </div>
+            </CardContent></Card>
+
+            {/* Quick kitchen-timing readout — for "how long for takeaway?" at the counter */}
+            <Card><CardContent className="p-4">
+              <h3 className="font-semibold text-sm mb-2 flex items-center gap-2"><Clock size={16} style={{ color: theme.primary }} /> Kitchen Timing</h3>
+              {kitchenEta ? (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-2xl font-bold" style={{ color: theme.primary }} data-testid="kitchen-eta-minutes">~{kitchenEta.estimatedWaitMinutes}m</p>
+                    <p className="text-[11px] text-gray-400">estimate for a new takeaway right now</p>
+                  </div>
+                  <div className="text-right text-xs text-gray-500">
+                    <p>{kitchenEta.queueDepth} order{kitchenEta.queueDepth === 1 ? '' : 's'} ahead</p>
+                    <p>{kitchenEta.ordersCompletedToday > 0 ? `${kitchenEta.avgOrderMinutes}m avg today` : 'no completions yet today'}</p>
+                  </div>
+                </div>
+              ) : <p className="text-sm text-gray-400">Loading…</p>}
+            </CardContent></Card>
+
+            {/* Quick options — the front-of-house actions a staff member reaches for most */}
+            <Card><CardContent className="p-4">
+              <h3 className="font-semibold text-sm mb-3">Quick Options</h3>
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="outline" className="justify-start" onClick={jumpToDiscounts} data-testid="quick-discounts-btn">
+                  <Percent size={14} className="mr-1.5" /> Discounts
+                </Button>
+                <Button variant="outline" className="justify-start" onClick={() => setShowCompVoidQuick(true)} data-testid="quick-compvoid-btn">
+                  <Ban size={14} className="mr-1.5" /> Void &amp; Comp
+                </Button>
+                <Button variant="outline" className="justify-start" onClick={() => openTablesDialog('move')} data-testid="quick-move-table-btn">
+                  <ArrowRightLeft size={14} className="mr-1.5" /> Move Table
+                </Button>
+                <Button variant="outline" className="justify-start" onClick={() => openTablesDialog('merge')} data-testid="quick-merge-table-btn">
+                  <Combine size={14} className="mr-1.5" /> Merge Table
+                </Button>
+                <Button variant="outline" className="justify-start col-span-2" onClick={() => openTablesDialog('split')} data-testid="quick-split-table-btn">
+                  <SplitSquareHorizontal size={14} className="mr-1.5" /> Split Table / Check
+                </Button>
+              </div>
+            </CardContent></Card>
+
+            <Card><CardContent className="p-4">
+              <h3 className="font-semibold text-sm mb-3 flex items-center gap-2"><DollarSign size={16} style={{ color: theme.primary }} /> Cash Drawer</h3>
+              {canOpenDrawer ? (
+                <div className="space-y-2">
+                  <select className="w-full p-2 border rounded-md text-sm" value={drawerReason} onChange={e => setDrawerReason(e.target.value)} data-testid="drawer-reason">
+                    <option value="change">Making change</option>
+                    <option value="note_to_coin">Exchange notes for coins</option>
+                    <option value="float_check">Float check</option>
+                    <option value="other">Other</option>
+                  </select>
+                  <Input placeholder="Note (optional)" value={drawerNote} onChange={e => setDrawerNote(e.target.value)} data-testid="drawer-note" />
+                  <Button className="w-full" style={{ background: theme.primary }} onClick={handleOpenDrawer} disabled={drawerBusy} data-testid="open-drawer-btn">
+                    {drawerBusy ? 'Opening…' : 'Open Drawer'}
+                  </Button>
+                  <p className="text-[11px] text-gray-400">Every open is logged with your name, time, and reason for the owner to review.</p>
+                  {drawerHistory.length > 0 && (
+                    <div className="mt-3 border-t pt-2 space-y-1.5 max-h-40 overflow-y-auto" data-testid="drawer-history">
+                      <p className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold">Recent opens</p>
+                      {drawerHistory.slice(0, 10).map(ev => (
+                        <div key={ev.id} className="text-xs flex justify-between text-gray-600">
+                          <span>{ev.staffName} · {ev.reason.replace('_', ' ')}</span>
+                          <span className="text-gray-400">{new Date(ev.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-400">
+                  You don't have access to open the cash drawer yet — ask the owner to grant it in Settings &gt; Permissions.
+                </p>
+              )}
+            </CardContent></Card>
+          </div>
+        ) : (
+        <>
         {/* Customer Selection */}
         <Card className="mb-4"><CardContent className="p-4">
           <div className="flex items-center gap-2 mb-2">
@@ -1315,6 +1555,8 @@ const POSTerminal = () => {
             )}
           </div>
         )}
+        </>
+        )}
       </div>
 
       {/* ========== Payment Dialogs (QR / UPI / Split) ========== */}
@@ -1441,34 +1683,105 @@ const POSTerminal = () => {
       </Dialog>
 
       {/* Open Tabs (Hold / Recall) */}
-      <Dialog open={showTabsDialog} onOpenChange={setShowTabsDialog}>
+      <Dialog open={showTabsDialog} onOpenChange={(o) => { setShowTabsDialog(o); if (!o) setTablesDialogMode('view'); }}>
         <DialogContent className="max-w-md" data-testid="tabs-dialog">
-          <DialogHeader><DialogTitle>Open Tabs ({openTabs.length})</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>
+              {tablesDialogMode === 'move' ? 'Move Table' : tablesDialogMode === 'merge' ? 'Merge Tables' : tablesDialogMode === 'split' ? 'Split Table / Check' : `Open Tabs (${openTabs.length})`}
+            </DialogTitle>
+          </DialogHeader>
+          {tablesDialogMode === 'merge' && (
+            <p className="text-xs text-gray-500 -mt-2">Select 2 or more tabs — their items merge into the first one selected, the rest close.</p>
+          )}
           <div className="space-y-2 max-h-[60vh] overflow-y-auto">
             {openTabs.map(t => (
               <Card key={t.id} data-testid={`tab-${t.id}`}>
                 <CardContent className="p-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-semibold text-sm">{t.name}</p>
-                      <p className="text-xs text-gray-500">{t.cart?.length || 0} items · {t.createdByName} · {new Date(t.createdAt).toLocaleTimeString()}</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {tablesDialogMode === 'merge' && (
+                        <input type="checkbox" checked={mergeSelection.includes(t.id)}
+                          onChange={e => setMergeSelection(sel => e.target.checked ? [...sel, t.id] : sel.filter(id => id !== t.id))}
+                          data-testid={`merge-select-${t.id}`} />
+                      )}
+                      <div className="min-w-0">
+                        <p className="font-semibold text-sm truncate">{t.name}</p>
+                        <p className="text-xs text-gray-500">{t.cart?.length || 0} items · table {t.tableNumber || '—'} · {t.createdByName}</p>
+                      </div>
                     </div>
-                    <div className="flex gap-1">
-                      <Button size="sm" onClick={async () => {
-                        clearCart();
-                        (t.cart || []).forEach(i => { for (let n = 0; n < i.quantity; n++) addToCart({ ...i }); });
-                        if (t.selectedCustomer) setSelectedCustomer(t.selectedCustomer);
-                        await v15API.deleteTab(t.id);
-                        setShowTabsDialog(false);
-                        toast({ title: 'Tab recalled' });
-                      }} style={{ backgroundColor: theme.primary }} data-testid={`recall-${t.id}`}>Recall</Button>
-                      <Button size="sm" variant="outline" className="text-red-500" onClick={async () => { await v15API.deleteTab(t.id); setOpenTabs(openTabs.filter(o => o.id !== t.id)); }}>×</Button>
-                    </div>
+
+                    {tablesDialogMode === 'view' && (
+                      <div className="flex gap-1 flex-shrink-0">
+                        <Button size="sm" onClick={async () => {
+                          clearCart();
+                          (t.cart || []).forEach(i => { for (let n = 0; n < i.quantity; n++) addToCart({ ...i }); });
+                          if (t.selectedCustomer) setSelectedCustomer(t.selectedCustomer);
+                          await v15API.deleteTab(t.id);
+                          setShowTabsDialog(false);
+                          toast({ title: 'Tab recalled' });
+                        }} style={{ backgroundColor: theme.primary }} data-testid={`recall-${t.id}`}>Recall</Button>
+                        <Button size="sm" variant="outline" className="text-red-500" onClick={async () => { await v15API.deleteTab(t.id); setOpenTabs(openTabs.filter(o => o.id !== t.id)); }}>×</Button>
+                      </div>
+                    )}
+                    {tablesDialogMode === 'move' && movingTab !== t.id && (
+                      <Button size="sm" variant="outline" className="flex-shrink-0" onClick={() => { setMovingTab(t.id); setMoveTargetTable(t.tableNumber || ''); }} data-testid={`start-move-${t.id}`}>Move</Button>
+                    )}
+                    {tablesDialogMode === 'split' && splittingTab !== t.id && (
+                      <Button size="sm" variant="outline" className="flex-shrink-0" onClick={() => setSplittingTab(t.id)} data-testid={`start-split-${t.id}`}>Split</Button>
+                    )}
                   </div>
+
+                  {tablesDialogMode === 'move' && movingTab === t.id && (
+                    <div className="flex gap-2 mt-2">
+                      <Input placeholder="New table #" value={moveTargetTable} onChange={e => setMoveTargetTable(e.target.value)} className="h-8 text-sm" data-testid="move-target-table" />
+                      <Button size="sm" style={{ backgroundColor: theme.primary }} onClick={() => handleMoveTable(t.id)} data-testid={`confirm-move-${t.id}`}>Go</Button>
+                      <Button size="sm" variant="ghost" onClick={() => setMovingTab(null)}>Cancel</Button>
+                    </div>
+                  )}
+                  {tablesDialogMode === 'split' && splittingTab === t.id && (
+                    <div className="flex items-center gap-2 mt-2">
+                      <select className="border rounded-md text-sm p-1.5" value={splitWays} onChange={e => setSplitWays(parseInt(e.target.value, 10))} data-testid="split-ways">
+                        <option value={2}>2 ways</option>
+                        <option value={3}>3 ways</option>
+                        <option value={4}>4 ways</option>
+                      </select>
+                      <Button size="sm" style={{ backgroundColor: theme.primary }} onClick={() => handleSplitTable(t.id)} data-testid={`confirm-split-${t.id}`}>Split</Button>
+                      <Button size="sm" variant="ghost" onClick={() => setSplittingTab(null)}>Cancel</Button>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             ))}
             {openTabs.length === 0 && <p className="text-center text-gray-400 py-8 text-sm">No tabs on hold</p>}
+          </div>
+          {tablesDialogMode === 'merge' && openTabs.length > 0 && (
+            <Button className="w-full mt-2" style={{ backgroundColor: theme.primary }} disabled={mergeSelection.length < 2} onClick={handleMergeTables} data-testid="confirm-merge-btn">
+              Merge {mergeSelection.length > 0 ? `${mergeSelection.length} tabs` : 'selected'}
+            </Button>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Quick Comp/Void — reachable from the staff tab without leaving the till */}
+      <Dialog open={showCompVoidQuick} onOpenChange={setShowCompVoidQuick}>
+        <DialogContent className="max-w-sm" data-testid="quick-compvoid-dialog">
+          <DialogHeader><DialogTitle>Record Comp or Void</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => setCompVoidForm(f => ({ ...f, type: 'comp' }))}
+                className={`p-3 rounded-lg border-2 text-sm font-medium transition-all ${compVoidForm.type === 'comp' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600'}`}
+                data-testid="quick-cv-type-comp"><Gift size={16} className="mx-auto mb-1" />Comp</button>
+              <button onClick={() => setCompVoidForm(f => ({ ...f, type: 'void' }))}
+                className={`p-3 rounded-lg border-2 text-sm font-medium transition-all ${compVoidForm.type === 'void' ? 'border-red-500 bg-red-50 text-red-700' : 'border-gray-200 text-gray-600'}`}
+                data-testid="quick-cv-type-void"><Ban size={16} className="mx-auto mb-1" />Void</button>
+            </div>
+            <Input placeholder="Reason (e.g. Wrong order, Customer complaint)" value={compVoidForm.reason} onChange={e => setCompVoidForm(f => ({ ...f, reason: e.target.value }))} data-testid="quick-cv-reason" />
+            <Input type="number" step="0.01" placeholder="Amount ($)" value={compVoidForm.amount} onChange={e => setCompVoidForm(f => ({ ...f, amount: e.target.value }))} data-testid="quick-cv-amount" />
+            {lastTxnId && <p className="text-[11px] text-gray-400">Linked to your last transaction: {lastTxnId}</p>}
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={compVoidForm.printVoid} onChange={e => setCompVoidForm(f => ({ ...f, printVoid: e.target.checked }))} /> Print void ticket to kitchen</label>
+            <Button className="w-full" style={{ backgroundColor: theme.primary }} onClick={handleQuickCompVoid} disabled={compVoidBusy} data-testid="quick-cv-save-btn">
+              {compVoidBusy ? 'Saving…' : `Record ${compVoidForm.type === 'comp' ? 'Comp' : 'Void'}`}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

@@ -5,7 +5,6 @@ from database import db
 from deps import get_user, require_owner_or_manager
 from models.promotion import Promotion, PromotionCreate
 from models.transaction import Transaction, TransactionCreate
-from models.gift_card import GiftCard, GiftCardCreate
 from models.refund import Refund, RefundCreate
 import uuid
 
@@ -218,6 +217,18 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
     except Exception:
         pass
 
+    # Live-sync: push the sale to any connected Dashboard app instantly.
+    # Best-effort only — the Dashboard's own polling is the real source of
+    # truth, this just makes the common case feel instant.
+    try:
+        from services import realtime
+        await realtime.broadcast({
+            "type": "sale.completed", "id": txn_dict["id"], "total": txn_dict["total"],
+            "paymentMethod": txn_dict["paymentMethod"], "location": txn_dict.get("location"),
+        })
+    except Exception:
+        pass
+
     # Update stock + deduct recipe ingredients via the central helper.
     from routes.inventory_accounting import deduct_recipe_stock
     from services import measured_inventory_service as _mi
@@ -287,51 +298,11 @@ async def get_transaction_detail(txn_id: str, _user: dict = Depends(get_user)):
     txn["refunds"] = refunds
     return txn
 
-# ============ GIFT CARDS API ============
-@router.get("/gift-cards")
-async def get_gift_cards(_user: dict = Depends(get_user)):
-    from utils.mongo_safe import safe_parse_list
-    cards = await db.gift_cards.find({}, {"_id": 0}).to_list(1000)
-    return safe_parse_list(cards, GiftCard, where="gift_cards")
-
-@router.post("/gift-cards", response_model=GiftCard)
-async def create_gift_card(card: GiftCardCreate, _user: dict = Depends(get_user)):
-    card_dict = card.dict()
-    card_dict["code"] = f"GC-{str(uuid.uuid4())[:8].upper()}"
-    card_dict["balance"] = card.amount
-    card_obj = GiftCard(**card_dict)
-    await db.gift_cards.insert_one(card_obj.dict())
-    # Auto-post gift card sale to ledger (Bank DR / Gift Card Liability CR)
-    try:
-        from services.accounting_service import auto_post_gift_card_sale
-        _d = card_obj.dict()
-        await auto_post_gift_card_sale({
-            "id": _d.get("id"),
-            "amount": _d.get("initialValue") or _d.get("balance") or 0,
-            "issuedAt": datetime.utcnow().isoformat(),
-        })
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(f"Gift card ledger auto-post skipped: {e}")
-    return card_obj
-
-@router.post("/gift-cards/{code}/redeem")
-async def redeem_gift_card(code: str, amount: float, _user: dict = Depends(get_user)):
-    if amount <= 0:
-        raise HTTPException(status_code=400, detail="Redemption amount must be positive")
-    # Atomic balance check + decrement: two terminals redeeming the same card
-    # concurrently must not both succeed off a stale read.
-    card = await db.gift_cards.find_one_and_update(
-        {"code": code, "balance": {"$gte": amount}},
-        {"$inc": {"balance": -amount}},
-        return_document=True,
-    )
-    if not card:
-        exists = await db.gift_cards.find_one({"code": code})
-        if not exists:
-            raise HTTPException(status_code=404, detail="Gift card not found")
-        raise HTTPException(status_code=400, detail="Insufficient balance")
-    return {"message": "Gift card redeemed", "remaining_balance": card["balance"]}
+# Gift cards live entirely under /v26/gift-cards (routes/v26_commerce.py) —
+# that's the schema the POS register and the owner's gift-card management
+# page actually read/write. This file used to shadow it with a second,
+# unreachable, incompatible schema (field `balance` instead of
+# `currentBalance`) — removed rather than fixed, since nothing called it.
 
 # ============ REFUNDS API ============
 @router.get("/refunds", response_model=List[Refund])

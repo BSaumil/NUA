@@ -13,6 +13,9 @@ import Today from './pages/Today';
 import CommandBar from './components/CommandBar';
 import Dashboard from './pages/Dashboard';
 import POSTerminal from './pages/POSTerminal';
+import StaffApp from './pages/StaffApp';
+import OwnerDashboardApp from './pages/OwnerDashboardApp';
+import { getAppShell } from './lib/appShell';
 import Products from './pages/Products';
 import Customers from './pages/Customers';
 import Inventory from './pages/Inventory';
@@ -104,7 +107,7 @@ import {
   Reputation, Franchise, FraudDetection, MarginGuardrails, StationReadiness,
   KioskMode, CFD, ChurnRisk, RecipeCosting, DynamicPricing, Subscriptions
 } from './pages/V25Pages';
-import { VoucherManager, EventsManager, StaffAvailability, GiftCardSale, MarketingEmails } from './pages/V26Pages';
+import { EventsManager, StaffAvailability, MarketingEmails } from './pages/V26Pages';
 import OnlineOrders from './pages/OnlineOrders';
 import OrderOnline from './pages/OrderOnline';
 import TrackOrder from './pages/TrackOrder';
@@ -133,18 +136,46 @@ function StaffLayout({ children }) {
 
 function ProtectedRoutes() {
   const { user, loading } = useAuth();
+  // Read (and persist) the shell BEFORE the login gate — a ?shell= query
+  // param only ever shows up on the very first, pre-login page load, so it
+  // must be captured into localStorage right away or it's lost the moment
+  // the login redirect drops the query string.
+  const shell = getAppShell();
   if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="animate-pulse text-gray-500 text-lg">Loading...</div></div>;
   if (!user) return <Login />;
 
-  // Role-based landing: owners/managers get the Today pulse, cashiers the
-  // POS, kitchen staff the KDS. Same data everywhere — different front door.
-  const home = user.role === 'cashier' ? '/pos' : user.role === 'kitchen' ? '/kitchen' : '/today';
+  // staff.nuapos.com.au — deliberately narrow (per the v1 scope): whatever
+  // path was hit, this is the Staff app and nothing else. Same backend, same
+  // login, same account — just a different, single-purpose front door with
+  // none of the admin chrome (no BottomDock, no CommandBar, no Ash FAB).
+  if (shell === 'staff') {
+    return (
+      <LicenseProvider>
+        <LicenseBanner />
+        <LicenseLockScreen />
+        <Routes>
+          <Route path="*" element={<StaffApp />} />
+        </Routes>
+      </LicenseProvider>
+    );
+  }
+
+  // Role-based landing: owner.nuapos.com.au always opens the Dashboard app;
+  // otherwise owners/managers get the Today pulse, cashiers the POS, kitchen
+  // staff the KDS. Same data everywhere — different front door. Unlike the
+  // staff shell, the owner shell keeps the full admin nav — the Dashboard
+  // app is the front door, not a cage, since owners need to reach every
+  // report and drill-down NUA POS has.
+  const home = shell === 'owner' ? '/owner-dashboard'
+    : user.role === 'cashier' ? '/pos' : user.role === 'kitchen' ? '/kitchen' : '/today';
   return (
     <LicenseProvider>
     <StaffLayout>
       <Routes>
         <Route path="/" element={<Navigate to={home} replace />} />
         <Route path="/today" element={<Today />} />
+        <Route path="/staff-app" element={<StaffApp />} />
+        <Route path="/owner-dashboard" element={<OwnerDashboardApp />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/pre-shift" element={<PreShift />} />
         <Route path="/command-center" element={<CommandCenter />} />
@@ -251,10 +282,13 @@ function ProtectedRoutes() {
         <Route path="/dynamic-pricing-rules" element={<DynamicPricing />} />
         <Route path="/subscriptions" element={<Subscriptions />} />
         {/* v26 commerce */}
-        <Route path="/vouchers" element={<VoucherManager />} />
+        {/* /vouchers is already routed above to the Universal Voucher Engine
+            (Vouchers.jsx) — VoucherManager (marketing/coupon codes) lives at
+            /marketing?tab=vouchers instead, so this used to be an unreachable
+            duplicate <Route path="/vouchers">. */}
         <Route path="/events" element={<EventsManager />} />
         <Route path="/staff-availability" element={<StaffAvailability />} />
-        <Route path="/gift-card-sale" element={<GiftCardSale />} />
+        <Route path="/gift-card-sale" element={<Navigate to="/gift-cards" replace />} />
         <Route path="/marketing-emails" element={<MarketingEmails />} />
         <Route path="/online-orders" element={<OnlineOrders />} />
         <Route path="/license" element={<LicensePage />} />

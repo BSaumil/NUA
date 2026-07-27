@@ -262,6 +262,8 @@ export const kitchenAPI = {
   serveCourse: (id, course) => api.post(`/kitchen/orders/${id}/serve-course/${course}`),
   setPriority: (id, priority) => api.post(`/kitchen/orders/${id}/priority`, null, { params: { priority } }),
   getPrepList: () => api.get('/kitchen/prep-list'),
+  getAvgOrderTime: () => api.get('/kitchen/avg-order-time'),
+  getNextOrderETA: () => api.get('/kitchen/next-order-eta'),
   getDocketConfig: () => api.get('/kitchen/docket-config'),
   updateDocketConfig: (data) => api.put('/kitchen/docket-config', data),
 };
@@ -315,6 +317,7 @@ export const forecastAPI = {
   getDemand: () => api.get('/analytics/demand-forecast'),
   getTableTurns: () => api.get('/analytics/table-turns'),
   getSmartRoster: () => api.get('/staff/smart-roster'),
+  getSuggestions: () => api.get('/analytics/forecast-suggestions'),
 };
 
 // QR Menu
@@ -394,6 +397,12 @@ export const staffMgmtAPI = {
   createRosterShift: (data) => api.post('/staff/roster', data),
   updateRosterShift: (id, data) => api.put(`/staff/roster/${id}`, data),
   deleteRosterShift: (id) => api.delete(`/staff/roster/${id}`),
+  editTimecard: (id, data) => api.put(`/staff/timecards/${id}`, data),
+  requestTimeOff: (data) => api.post('/staff/time-off', data),
+  listTimeOff: (params) => api.get('/staff/time-off', { params }),
+  approveTimeOff: (id) => api.post(`/staff/time-off/${id}/approve`),
+  rejectTimeOff: (id, data) => api.post(`/staff/time-off/${id}/reject`, data || {}),
+  cancelTimeOff: (id) => api.delete(`/staff/time-off/${id}`),
   calculatePayrun: (params) => api.get('/payrun/calculate', { params }),
   processPayrun: (data) => api.post('/payrun/process', data),
   getPayrunHistory: () => api.get('/payrun/history'),
@@ -657,9 +666,7 @@ export const v25API = {
   subMembers: () => api.get('/v25/subscriptions/members'),
   updateSubMember: (id, data) => api.patch(`/v25/subscriptions/members/${id}`, data),
   cancelSubMember: (id) => api.delete(`/v25/subscriptions/members/${id}`),
-  giftCards: () => api.get('/v25/gift-cards'),
-  issueGift: (data) => api.post('/v25/gift-cards', data),
-  redeemGift: (code, amount) => api.post(`/v25/gift-cards/${code}/redeem`, { amount }),
+  // Gift cards live under v26API now — see below.
   // Tier 3
   recipes: () => api.get('/v25/recipes/list'),
   upsertRecipe: (data) => api.post('/v25/recipes/upsert', data),
@@ -716,6 +723,11 @@ export const v26API = {
   activateGift: (code, data) => api.post(`/v26/gift-cards/${code}/activate`, data || {}),
   redeemGiftPartial: (code, amount, transactionId) => api.post(`/v26/gift-cards/${code}/redeem`, { amount, transactionId }),
   giftTransactions: (code) => api.get(`/v26/gift-cards/${code}/transactions`),
+  editGiftCard: (code, data) => api.patch(`/v26/gift-cards/${code}`, data),
+  reloadGiftCard: (code, amount, reason) => api.post(`/v26/gift-cards/${code}/reload`, { amount, reason }),
+  stopGiftCard: (code, reason) => api.post(`/v26/gift-cards/${code}/stop`, { reason }),
+  reactivateGiftCard: (code) => api.post(`/v26/gift-cards/${code}/reactivate`),
+  resendGiftCard: (code, email) => api.post(`/v26/gift-cards/${code}/resend`, email ? { email } : {}),
   // Marketing emails
   generateMarketingEmail: (data) => api.post('/v26/marketing/email/generate', data),
   listMarketingEmails: () => api.get('/v26/marketing/emails'),
@@ -744,6 +756,9 @@ export const v15API = {
   getTabs: () => api.get('/pos/tabs'),
   createTab: (data) => api.post('/pos/tabs', data),
   deleteTab: (id) => api.delete(`/pos/tabs/${id}`),
+  updateTab: (id, data) => api.put(`/pos/tabs/${id}`, data),
+  mergeTabs: (id, otherTabId) => api.post(`/pos/tabs/${id}/merge`, { otherTabId }),
+  splitTab: (id, ways, tableNumbers) => api.post(`/pos/tabs/${id}/split`, { ways, tableNumbers }),
   // Favorites
   getFavorites: () => api.get('/pos/favorites'),
   saveFavorites: (productIds) => api.post('/pos/favorites', { productIds }),
@@ -753,6 +768,8 @@ export const v15API = {
   bulkImport: (rows) => api.post('/items/bulk-import', { rows }),
   // Voice POS
   voiceOrder: (audioBase64, mime) => api.post('/pos/voice-order', { audioBase64, mime }),
+  openDrawer: (data) => api.post('/pos/open-drawer', data),
+  getDrawerEvents: () => api.get('/pos/drawer-events'),
   // Ask NUA
   askNua: (question) => api.post('/ai/ask-nua', { question }),
   // Item image gen
@@ -762,6 +779,8 @@ export const v15API = {
   // Auto-roster
   autoRoster: (weekStart) => api.post('/staff/auto-roster', { weekStart }),
   commitAutoRoster: (shifts) => api.post('/staff/roster/commit-auto', { shifts }),
+  getRosteringSettings: () => api.get('/staff/rostering-settings'),
+  updateRosteringSettings: (data) => api.put('/staff/rostering-settings', data),
   // Shift swap
   getSwaps: () => api.get('/staff/shift-swaps'),
   createSwap: (data) => api.post('/staff/shift-swaps', data),
@@ -922,6 +941,17 @@ export const finalizeAPI = {
   // Gift Card 2.0
   scheduleGift: (data) => api.post('/gift-cards/schedule', data),
   reloadGift: (voucherId, amount) => api.post(`/gift-cards/${voucherId}/reload`, { amount }),
+};
+
+// NUA — daily briefing, insights, agent chat (AI surface reused by the Owner Dashboard app)
+export const nuaAPI = {
+  getBriefing: (force) => api.get('/nua/briefing', { params: force ? { force: true } : {} }),
+  regenerateBriefing: () => api.post('/nua/briefing/regenerate'),
+  getInsights: (limit = 50) => api.get(`/nua/insights?limit=${limit}`),
+  getInsightsSummary: () => api.get('/nua/insights/summary'),
+  dismissInsight: (id) => api.post(`/nua/insights/${id}/dismiss`),
+  getHealthScore: () => api.get('/nua/health-score'),
+  chat: (data) => api.post('/nua/chat', data),
 };
 
 export default api;

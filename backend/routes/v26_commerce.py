@@ -10,6 +10,11 @@ ENDPOINTS
   /v26/subscriptions/plans   PATCH/DELETE            editable plans with rich perks/T&Cs/barcode
   /v26/gift-cards/sell       POST                    counter or online sale (name/email/payment/customer)
   /v26/gift-cards/assign     POST                    attach card to a customer post-issue
+  /v26/gift-cards/{code}     PATCH                   owner/manager: edit recipient/occasion/message
+  /v26/gift-cards/{code}/reload      POST            owner/manager: add extra credit
+  /v26/gift-cards/{code}/stop        POST            owner/manager: freeze (blocks redemption)
+  /v26/gift-cards/{code}/reactivate  POST            owner/manager: undo a stop
+  /v26/gift-cards/{code}/resend      POST            owner/manager: re-email the code/barcode
   /v26/events                GET/POST/PATCH/DELETE   events + experiences
   /v26/events/{id}/book      POST                    customer books an event slot
   /v26/events/ai-preview     POST                    AI suggests promo copy for a date/event
@@ -401,6 +406,11 @@ async def sell_gift_card(data: dict, user: dict = Depends(get_user)):
     if status == "active":
         await _record_gift_txn(card, "activate", starting, 0.0, starting,
                                user["id"], data.get("transactionId"))
+        # Counter sale — money changed hands right now (cash/card at till).
+        # Online 'pending_activation' cards post to the ledger on activation
+        # instead, once the payment that funds them has actually settled.
+        await _post_gift_card_sale_accounting(card)
+        await _emit_gift_card_sold(card)
     return card
 
 
@@ -450,7 +460,7 @@ async def _record_gift_txn(card: dict, txn_type: str, amount: float, balance_bef
         "id": _uid("GCT"),
         "giftCardId": card["id"],
         "giftCardCode": card.get("code"),
-        "type": txn_type,          # issue | activate | redeem | refund | adjust
+        "type": txn_type,          # issue | activate | redeem | refund | adjust | reload | stop | reactivate
         "amount": round(float(amount), 2),
         "balanceBefore": round(float(balance_before), 2),
         "balanceAfter": round(float(balance_after), 2),
@@ -491,6 +501,8 @@ async def activate_gift_card(code: str, data: dict, user: dict = Depends(get_use
     txn = await _record_gift_txn(card, "activate", starting, 0.0, starting,
                                  user["id"], data.get("transactionId"))
     card = await db.gift_cards.find_one({"id": card["id"]}, {"_id": 0})
+    await _post_gift_card_sale_accounting(card)
+    await _emit_gift_card_sold(card)
     return {"activated": True, "card": card, "transaction": txn}
 
 
@@ -525,7 +537,184 @@ async def redeem_gift_card_partial(code: str, data: dict, user: dict = Depends(g
     txn = await _record_gift_txn({"id": card["id"], "code": card.get("code")}, "redeem",
                                  amount, balance_before, balance_after,
                                  user["id"], data.get("transactionId"))
+    try:
+        from services.accounting_service import auto_post_voucher_redeem
+        await auto_post_voucher_redeem({"id": txn["id"], "amount": amount, "timestamp": txn["createdAt"]})
+    except Exception as e:
+        logger.warning("Gift card redeem ledger auto-post skipped: %s", e)
+    try:
+        from services.rules_engine import safe_emit
+        safe_emit("voucher.redeemed", {"voucherId": card["id"], "amount": amount, "customerId": card.get("customerId")})
+    except Exception:
+        pass
+    try:
+        from services import realtime
+        await realtime.broadcast({"type": "gift_card.redeemed", "id": card["id"], "amount": amount, "newBalance": balance_after})
+    except Exception:
+        pass
     return {"redeemed": amount, "newBalance": balance_after, "transaction": txn}
+
+
+async def _post_gift_card_sale_accounting(card: dict) -> None:
+    """Bank DR / Gift Card Liability CR — posted once, at the moment the card
+    actually becomes spendable (counter sale, or online sale on activation)."""
+    try:
+        from services.accounting_service import auto_post_gift_card_sale
+        await auto_post_gift_card_sale({
+            "id": card["id"],
+            "amount": card.get("currentBalance", 0),
+            "issuedAt": card.get("createdAt"),
+        })
+    except Exception as e:
+        logger.warning("Gift card sale ledger auto-post skipped: %s", e)
+
+
+async def _emit_gift_card_sold(card: dict) -> None:
+    try:
+        from services.rules_engine import safe_emit
+        safe_emit("gift_card.sold", {"id": card["id"], "amount": card.get("currentBalance", 0), "customerId": card.get("customerId")})
+    except Exception:
+        pass
+    try:
+        from services import realtime
+        await realtime.broadcast({"type": "gift_card.sold", "id": card["id"], "amount": card.get("currentBalance", 0), "code": card.get("code")})
+    except Exception:
+        pass
+
+
+@router.patch("/gift-cards/{code}")
+async def edit_gift_card(code: str, data: dict, user: dict = Depends(require_owner_or_manager)):
+    """Owner/manager edit of a gift card's non-financial details. Balance,
+    code, and status are never editable here — reload/stop/reactivate cover
+    those deliberately, each with its own audit trail."""
+    forbidden = {"id", "code", "barcode", "currentBalance", "initialBalance", "amount",
+                 "originalAmount", "status", "createdAt", "createdBy"}
+    update = {k: v for k, v in data.items() if k not in forbidden}
+    allowed = {"recipientName", "recipientEmail", "purchaserName", "purchaserEmail",
+               "occasion", "message", "customerId"}
+    update = {k: v for k, v in update.items() if k in allowed}
+    if not update:
+        raise HTTPException(status_code=400, detail="No editable fields provided")
+    update["updatedAt"] = _iso(_now())
+    update["updatedBy"] = user["id"]
+    r = await db.gift_cards.update_one(
+        {"$or": [{"code": code.upper()}, {"barcode": code.upper()}, {"id": code}]},
+        {"$set": update},
+    )
+    if r.matched_count == 0: raise HTTPException(status_code=404, detail="Card not found")
+    card = await db.gift_cards.find_one(
+        {"$or": [{"code": code.upper()}, {"barcode": code.upper()}, {"id": code}]}, {"_id": 0})
+    return card
+
+
+@router.post("/gift-cards/{code}/reload")
+async def reload_gift_card(code: str, data: dict, user: dict = Depends(require_owner_or_manager)):
+    """Owner/manager adds extra credit onto an existing card."""
+    amount = float(data.get("amount", 0))
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="amount must be > 0")
+    upper = code.upper()
+    card = await db.gift_cards.find_one_and_update(
+        {"$or": [{"code": upper}, {"barcode": upper}, {"id": code}],
+         "status": {"$in": ["active", "depleted"]}},
+        {"$inc": {"currentBalance": amount}, "$set": {"status": "active"}},
+        return_document=True,
+    )
+    if not card:
+        exists = await db.gift_cards.find_one(
+            {"$or": [{"code": upper}, {"barcode": upper}, {"id": code}]}, {"_id": 0})
+        if not exists: raise HTTPException(status_code=404, detail="Card not found")
+        raise HTTPException(status_code=400, detail=f"Card is {exists.get('status')} — cannot reload")
+    balance_before = float(card.get("currentBalance", amount)) - amount
+    balance_after = float(card.get("currentBalance", 0))
+    txn = await _record_gift_txn(card, "reload", amount, balance_before, balance_after,
+                                 user["id"], data.get("reason"))
+    try:
+        from services.accounting_service import auto_post_gift_card_sale
+        await auto_post_gift_card_sale({"id": card["id"], "amount": amount, "issuedAt": txn["createdAt"]})
+    except Exception as e:
+        logger.warning("Gift card reload ledger auto-post skipped: %s", e)
+    try:
+        from services import realtime
+        await realtime.broadcast({"type": "gift_card.reloaded", "id": card["id"], "amount": amount, "newBalance": balance_after})
+    except Exception:
+        pass
+    card.pop("_id", None)
+    return {"reloaded": amount, "newBalance": balance_after, "card": card, "transaction": txn}
+
+
+@router.post("/gift-cards/{code}/stop")
+async def stop_gift_card(code: str, data: dict, user: dict = Depends(require_owner_or_manager)):
+    """Owner/manager freezes a card — blocks all future redemption immediately
+    without touching its balance, so a lost/stolen/disputed card can be
+    stopped and later reactivated without losing the remaining value."""
+    upper = code.upper()
+    card = await db.gift_cards.find_one(
+        {"$or": [{"code": upper}, {"barcode": upper}, {"id": code}]}, {"_id": 0})
+    if not card: raise HTTPException(status_code=404, detail="Card not found")
+    if card.get("status") not in ("active", "pending_activation"):
+        raise HTTPException(status_code=400, detail=f"Card is already {card.get('status')}")
+    await db.gift_cards.update_one(
+        {"id": card["id"]},
+        {"$set": {"status": "stopped", "stoppedAt": _iso(_now()), "stoppedBy": user["id"],
+                  "stopReason": data.get("reason", ""), "statusBeforeStop": card.get("status")}},
+    )
+    await _record_gift_txn(card, "stop", 0, card.get("currentBalance", 0), card.get("currentBalance", 0),
+                           user["id"], data.get("reason"))
+    try:
+        from services import realtime
+        await realtime.broadcast({"type": "gift_card.stopped", "id": card["id"], "code": card.get("code")})
+    except Exception:
+        pass
+    return {"stopped": True}
+
+
+@router.post("/gift-cards/{code}/reactivate")
+async def reactivate_gift_card(code: str, user: dict = Depends(require_owner_or_manager)):
+    """Owner/manager undoes a stop, restoring the card's prior status."""
+    upper = code.upper()
+    card = await db.gift_cards.find_one(
+        {"$or": [{"code": upper}, {"barcode": upper}, {"id": code}]}, {"_id": 0})
+    if not card: raise HTTPException(status_code=404, detail="Card not found")
+    if card.get("status") != "stopped":
+        raise HTTPException(status_code=400, detail="Card is not stopped")
+    restored = card.get("statusBeforeStop") or "active"
+    await db.gift_cards.update_one(
+        {"id": card["id"]},
+        {"$set": {"status": restored, "reactivatedAt": _iso(_now()), "reactivatedBy": user["id"]}},
+    )
+    await _record_gift_txn(card, "reactivate", 0, card.get("currentBalance", 0), card.get("currentBalance", 0),
+                           user["id"], None)
+    return {"reactivated": True, "status": restored}
+
+
+@router.post("/gift-cards/{code}/resend")
+async def resend_gift_card(code: str, data: dict, user: dict = Depends(require_owner_or_manager)):
+    """Owner/manager re-sends the card's code/barcode by email — to the
+    recipient on file, or an explicit override address (e.g. the customer
+    lost the original email and wants it re-sent to a different inbox)."""
+    upper = code.upper()
+    card = await db.gift_cards.find_one(
+        {"$or": [{"code": upper}, {"barcode": upper}, {"id": code}]}, {"_id": 0})
+    if not card: raise HTTPException(status_code=404, detail="Card not found")
+    to = (data.get("email") or card.get("recipientEmail") or card.get("purchaserEmail") or "").strip()
+    if not to:
+        raise HTTPException(status_code=400, detail="No email on file for this card — provide one")
+    from utils.notifications import send_email
+    balance = card.get("currentBalance", card.get("amount", 0))
+    body = (
+        f"<p>Here's your NUA gift card{' for ' + card['recipientName'] if card.get('recipientName') else ''}.</p>"
+        f"<p style='font-size:22px;font-weight:bold'>{card['code']}</p>"
+        f"<p>Current balance: ${balance:.2f}</p>"
+        f"{'<p>' + card['message'] + '</p>' if card.get('message') else ''}"
+        f"<p style='color:#999;font-size:12px'>Show this code at the till, or read it out over the phone.</p>"
+    )
+    receipt = await send_email(to, "Your NUA gift card", body)
+    await db.gift_cards.update_one(
+        {"id": card["id"]},
+        {"$push": {"resendLog": {"to": to, "at": _iso(_now()), "by": user["id"], "delivered": receipt.get("delivered", False)}}},
+    )
+    return {"sent": receipt.get("delivered", False), "to": to, "reason": receipt.get("reason")}
 
 
 # ============================================================================

@@ -60,6 +60,7 @@ export default function Kitchen() {
   const [configDialog, setConfigDialog] = useState(false);
   const [configDraft, setConfigDraft] = useState({});
   const [role, setRole] = useState('cashier');
+  const [avgOrderTime, setAvgOrderTime] = useState(null);
   const [orderForm, setOrderForm] = useState({
     tableNumber: '', orderType: 'dine_in', items: [], notes: '', priority: 'normal',
     covers: '', deviceLabel: '',
@@ -90,11 +91,18 @@ export default function Kitchen() {
     } catch { /* ignore */ }
   }, []);
 
-  useEffect(() => { fetchOrders(); fetchConfig(); }, [fetchOrders, fetchConfig]);
+  const fetchAvgOrderTime = useCallback(async () => {
+    try {
+      const r = await kitchenAPI.getAvgOrderTime();
+      setAvgOrderTime(r.data);
+    } catch { /* ignore — this is a rough gauge, not critical */ }
+  }, []);
+
+  useEffect(() => { fetchOrders(); fetchConfig(); fetchAvgOrderTime(); }, [fetchOrders, fetchConfig, fetchAvgOrderTime]);
   useEffect(() => {
-    const interval = setInterval(fetchOrders, 10000);
+    const interval = setInterval(() => { fetchOrders(); fetchAvgOrderTime(); }, 10000);
     return () => clearInterval(interval);
-  }, [fetchOrders]);
+  }, [fetchOrders, fetchAvgOrderTime]);
 
   const fetchProducts = async () => {
     try { const res = await productsAPI.getAll(); setProducts(res.data); }
@@ -379,6 +387,23 @@ export default function Kitchen() {
 
   return (
     <div className="space-y-6" data-testid="kitchen-page">
+      {/* Average order time — a rough live gauge in the corner so the chef
+          can judge pace mid-service without digging into a report. */}
+      {avgOrderTime !== null && (
+        <div
+          className="fixed top-3 right-3 z-40 rounded-lg shadow-md px-3 py-2 flex items-center gap-2 bg-white border"
+          data-testid="avg-order-time-badge"
+          title={`Based on ${avgOrderTime.ordersCompletedToday} order(s) completed today`}
+        >
+          <Timer size={16} style={{ color: theme.primary }} />
+          <div className="leading-tight">
+            <p className="text-[9px] uppercase tracking-wide text-gray-400">Avg Order Time</p>
+            <p className="text-sm font-bold" style={{ color: theme.text }}>
+              {avgOrderTime.ordersCompletedToday > 0 ? `${avgOrderTime.avgOrderMinutes}m` : '—'}
+            </p>
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: `${theme.primary}15` }}>

@@ -25,9 +25,9 @@ export default function ShiftSwaps() {
   const [form, setForm] = useState({ shiftId: '', targetStaffId: '', reason: '' });
 
   const refresh = async () => {
-    try { const r = await v15API.getSwaps(); setSwaps(r.data || []); } catch {}
-    try { const r = await staffMgmtAPI.getRoster(); setShifts(r.data || []); } catch {}
-    try { const r = await axios.get(`${API}/api/auth/staff`, { headers: authHeader() }); setStaff(r.data || []); } catch {}
+    try { const r = await v15API.getSwaps(); setSwaps(r.data || []); } catch { toast.error('Failed to load shift swaps'); }
+    try { const r = await staffMgmtAPI.getRoster(); setShifts(r.data || []); } catch { toast.error('Failed to load roster shifts'); }
+    try { const r = await axios.get(`${API}/api/auth/staff`, { headers: authHeader() }); setStaff(r.data || []); } catch { toast.error('Failed to load staff list'); }
   };
   useEffect(() => { refresh(); }, []);
 

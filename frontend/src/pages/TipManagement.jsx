@@ -9,7 +9,7 @@ import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { toast } from 'sonner';
-import { advancedAPI } from '../services/api';
+import { advancedAPI, gamificationAPI } from '../services/api';
 
 export default function TipManagement() {
   const { theme } = useTheme();
@@ -22,14 +22,14 @@ export default function TipManagement() {
   useEffect(() => { fetchData(); }, []);
 
   const fetchData = async () => {
-    try {
-      const [tipsRes, sumRes] = await Promise.all([
-        advancedAPI.getTips(),
-        advancedAPI.getTipsSummary(),
-      ]);
-      setTips(tipsRes.data);
-      setSummary(sumRes.data);
-    } catch { /* silent */ }
+    const [tipsRes, sumRes] = await Promise.allSettled([
+      advancedAPI.getTips(),
+      advancedAPI.getTipsSummary(),
+    ]);
+    if (tipsRes.status === 'fulfilled') setTips(tipsRes.value.data);
+    else toast.error('Failed to load tips');
+    if (sumRes.status === 'fulfilled') setSummary(sumRes.value.data);
+    else toast.error('Failed to load tip summary');
   };
 
   const handleAdd = async () => {
