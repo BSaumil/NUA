@@ -9,16 +9,20 @@ import { Badge } from '../components/ui/badge';
 import { CategoryIcon } from './Categories';
 import { onlineAPI } from '../services/api';
 import { useToast } from '../hooks/use-toast';
+import { useLanguage } from '../i18n/useLanguage';
+import { LanguageSelector } from '../i18n/LanguageSelector';
 
-const CHANNELS = [
-  { key: 'pickup', label: 'Pickup', icon: Store, hint: 'Skip the queue' },
-  { key: 'delivery', label: 'Delivery', icon: Bike, hint: 'To your door' },
-  { key: 'dine-in', label: 'Dine-in', icon: ShoppingBag, hint: 'Order ahead' },
-];
+function productName(p, lang) { return p?.translations?.[lang]?.name || p.name; }
 
 export default function OrderOnline() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { lang, setLang, t, dir, languages } = useLanguage('nua_online_lang');
+  const CHANNELS = [
+    { key: 'pickup', label: t('orderOnline.channelPickup'), icon: Store, hint: t('orderOnline.channelPickupHint') },
+    { key: 'delivery', label: t('orderOnline.channelDelivery'), icon: Bike, hint: t('orderOnline.channelDeliveryHint') },
+    { key: 'dine-in', label: t('orderOnline.channelDineIn'), icon: ShoppingBag, hint: t('orderOnline.channelDineInHint') },
+  ];
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [selectedCat, setSelectedCat] = useState('All');
@@ -60,7 +64,7 @@ export default function OrderOnline() {
   const addItem = (p) => setCart(prev => {
     const ex = prev.find(x => x.id === p.id);
     if (ex) return prev.map(x => x.id === p.id ? { ...x, quantity: x.quantity + 1 } : x);
-    return [...prev, { id: p.id, name: p.name, price: p.price, quantity: 1, category: p.category, image: p.image }];
+    return [...prev, { id: p.id, name: p.name, price: p.price, quantity: 1, category: p.category, image: p.image, translations: p.translations }];
   });
   const updQty = (id, d) => setCart(prev =>
     prev.map(x => x.id === id ? { ...x, quantity: Math.max(0, x.quantity + d) } : x).filter(x => x.quantity > 0)
@@ -68,9 +72,9 @@ export default function OrderOnline() {
   const removeItem = (id) => setCart(prev => prev.filter(x => x.id !== id));
 
   const place = async () => {
-    if (!name) { toast({ title: 'Name required', variant: 'destructive' }); return; }
-    if (cart.length === 0) { toast({ title: 'Cart is empty', variant: 'destructive' }); return; }
-    if (channel === 'delivery' && !address) { toast({ title: 'Delivery address required', variant: 'destructive' }); return; }
+    if (!name) { toast({ title: t('orderOnline.toastNameRequired'), variant: 'destructive' }); return; }
+    if (cart.length === 0) { toast({ title: t('orderOnline.toastCartEmpty'), variant: 'destructive' }); return; }
+    if (channel === 'delivery' && !address) { toast({ title: t('orderOnline.toastAddressRequired'), variant: 'destructive' }); return; }
     setPlacing(true);
     try {
       const r = await onlineAPI.placeOrder({
@@ -79,22 +83,25 @@ export default function OrderOnline() {
         customerName: name, customerPhone: phone, customerEmail: email,
         address: channel === 'delivery' ? address : '', notes,
       });
-      toast({ title: 'Order placed!', description: `Tracking code: ${r.data.id}` });
+      toast({ title: t('orderOnline.toastOrderPlaced'), description: t('orderOnline.toastTrackingCode', { code: r.data.id }) });
       navigate(`/track/${r.data.id}`);
     } catch (e) {
-      toast({ title: 'Failed', description: e?.response?.data?.detail, variant: 'destructive' });
+      toast({ title: t('orderOnline.toastFailed'), description: e?.response?.data?.detail, variant: 'destructive' });
     } finally { setPlacing(false); }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50" data-testid="order-online-page">
+    <div className="min-h-screen bg-gray-50" dir={dir} data-testid="order-online-page">
       <div className="max-w-6xl mx-auto p-4 sm:p-6 space-y-5">
         <header className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold">NUA · Order Online</h1>
-            <p className="text-sm text-gray-500">Fresh food, real-time ETA</p>
+            <h1 className="text-3xl font-bold">{t('orderOnline.brandTitle')}</h1>
+            <p className="text-sm text-gray-500">{t('orderOnline.subtitle')}</p>
           </div>
-          <Button variant="ghost" onClick={() => navigate('/track')} className="text-sm">Track an order</Button>
+          <div className="flex items-center gap-3">
+            <LanguageSelector lang={lang} setLang={setLang} languages={languages} variant="light" label={t('common.language')} />
+            <Button variant="ghost" onClick={() => navigate('/track')} className="text-sm">{t('orderOnline.trackOrder')}</Button>
+          </div>
         </header>
 
         {/* Channel picker */}
@@ -122,7 +129,7 @@ export default function OrderOnline() {
             <div className="flex gap-2 overflow-x-auto pb-1">
               <button onClick={() => setSelectedCat('All')}
                 className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap ${selectedCat === 'All' ? 'bg-gray-900 text-white' : 'bg-white border'}`}
-                data-testid="online-cat-All">All</button>
+                data-testid="online-cat-All">{t('orderOnline.allCategory')}</button>
               {cats.map(c => (
                 <button key={c.id} onClick={() => setSelectedCat(c.name)}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap ${selectedCat === c.name ? 'text-white' : 'bg-white border'}`}
@@ -136,9 +143,9 @@ export default function OrderOnline() {
             <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(170px,1fr))]">
               {filteredProducts.map(p => (
                 <Card key={p.id} className="overflow-hidden cursor-pointer hover:shadow-md transition" onClick={() => addItem(p)} data-testid={`online-product-${p.id}`}>
-                  <img src={p.image || 'https://placehold.co/300x180/e5e7eb/9ca3af?text=NUA'} alt={p.name} className="w-full h-28 object-cover" />
+                  <img src={p.image || 'https://placehold.co/300x180/e5e7eb/9ca3af?text=NUA'} alt={productName(p, lang)} className="w-full h-28 object-cover" />
                   <CardContent className="p-2.5">
-                    <p className="font-medium text-sm truncate">{p.name}</p>
+                    <p className="font-medium text-sm truncate">{productName(p, lang)}</p>
                     <p className="text-[10px] text-gray-400 uppercase">{p.category}</p>
                     <div className="flex justify-between items-center mt-1">
                       <span className="font-bold text-sm">${p.price.toFixed(2)}</span>
@@ -154,18 +161,18 @@ export default function OrderOnline() {
           <Card className="lg:sticky lg:top-4 self-start">
             <CardContent className="p-4 space-y-3">
               <div className="flex items-center justify-between">
-                <h2 className="font-bold">Your Cart ({cart.length})</h2>
-                {cart.length > 0 && <span className="flex items-center gap-1 text-xs text-purple-700"><Clock size={12} /> ~{maxPrepMin}m prep</span>}
+                <h2 className="font-bold">{t('orderOnline.yourCart')} ({cart.length})</h2>
+                {cart.length > 0 && <span className="flex items-center gap-1 text-xs text-purple-700"><Clock size={12} /> ~{maxPrepMin}m {t('orderOnline.prepTime')}</span>}
               </div>
 
               {cart.length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-8">Add items to start your order</p>
+                <p className="text-sm text-gray-400 text-center py-8">{t('orderOnline.emptyCartPrompt')}</p>
               ) : (
                 <div className="space-y-2" data-testid="online-cart">
                   {cart.map(i => (
                     <div key={i.id} className="flex items-center gap-2">
                       <div className="flex-1">
-                        <p className="text-sm font-medium">{i.name}</p>
+                        <p className="text-sm font-medium">{productName(i, lang)}</p>
                         <p className="text-xs text-gray-400">${i.price.toFixed(2)} ea</p>
                       </div>
                       <div className="flex items-center gap-1">
@@ -178,25 +185,27 @@ export default function OrderOnline() {
                   ))}
 
                   <div className="pt-2 border-t text-sm space-y-1">
-                    <div className="flex justify-between font-bold"><span>Total</span><span>${total.toFixed(2)}</span></div>
-                    <div className="flex justify-between text-[11px] text-gray-400"><span>GST Included</span><span>${gst.toFixed(2)}</span></div>
-                    <p className="text-[10px] text-gray-400 text-center">Prices include GST</p>
+                    <div className="flex justify-between font-bold"><span>{t('common.total')}</span><span>${total.toFixed(2)}</span></div>
+                    <div className="flex justify-between text-[11px] text-gray-400"><span>{t('common.gstIncluded')}</span><span>${gst.toFixed(2)}</span></div>
+                    <p className="text-[10px] text-gray-400 text-center">{t('common.pricesIncludeGst')}</p>
                   </div>
 
                   <div className="pt-2 border-t space-y-2">
-                    <Input placeholder="Your name *" value={name} onChange={e => setName(e.target.value)} data-testid="online-name" />
-                    <Input placeholder="Phone" value={phone} onChange={e => setPhone(e.target.value)} data-testid="online-phone" />
-                    <Input placeholder="Email (optional)" value={email} onChange={e => setEmail(e.target.value)} />
+                    <Input placeholder={t('orderOnline.namePlaceholder')} value={name} onChange={e => setName(e.target.value)} data-testid="online-name" />
+                    <Input placeholder={t('orderOnline.phonePlaceholder')} value={phone} onChange={e => setPhone(e.target.value)} data-testid="online-phone" />
+                    <Input placeholder={t('orderOnline.emailPlaceholder')} value={email} onChange={e => setEmail(e.target.value)} />
                     {channel === 'delivery' && (
-                      <Textarea rows={2} placeholder="Delivery address *" value={address} onChange={e => setAddress(e.target.value)} data-testid="online-address" />
+                      <Textarea rows={2} placeholder={t('orderOnline.addressPlaceholder')} value={address} onChange={e => setAddress(e.target.value)} data-testid="online-address" />
                     )}
-                    <Textarea rows={2} placeholder="Special instructions (e.g. no onion)" value={notes} onChange={e => setNotes(e.target.value)} />
+                    <Textarea rows={2} placeholder={t('orderOnline.notesPlaceholder')} value={notes} onChange={e => setNotes(e.target.value)} />
                   </div>
 
                   <Button onClick={place} disabled={placing} className="w-full bg-gray-900 hover:bg-black text-white" data-testid="place-order-btn">
-                    {placing ? 'Placing…' : (<><ArrowRight size={14} className="mr-1" /> Place order · ${total.toFixed(2)}</>)}
+                    {placing ? t('orderOnline.placing') : (<><ArrowRight size={14} className="mr-1" /> {t('orderOnline.placeOrderBtn')} · ${total.toFixed(2)}</>)}
                   </Button>
-                  <p className="text-[10px] text-gray-400 text-center">Payment collected at {channel === 'delivery' ? 'delivery' : 'pickup'}</p>
+                  <p className="text-[10px] text-gray-400 text-center">
+                    {t('orderOnline.paymentCollectedAt', { location: channel === 'delivery' ? t('orderOnline.deliveryWord') : t('orderOnline.pickupWord') })}
+                  </p>
                 </div>
               )}
             </CardContent>

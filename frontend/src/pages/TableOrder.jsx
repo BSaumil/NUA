@@ -7,16 +7,21 @@ import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
 import { tableOrderAPI } from '../services/api';
 import { toast } from 'sonner';
+import { useLanguage } from '../i18n/useLanguage';
+import { LanguageSelector } from '../i18n/LanguageSelector';
 
-const STATUS_MAP = {
-  new: { label: 'Order Received', icon: Clock, color: 'bg-blue-500' },
-  preparing: { label: 'Preparing', icon: ChefHat, color: 'bg-amber-500' },
-  ready: { label: 'Ready to Serve', icon: Check, color: 'bg-green-500' },
-  served: { label: 'Served', icon: Utensils, color: 'bg-gray-400' },
-};
+function itemName(item, lang) { return item?.translations?.[lang]?.name || item.name; }
+function itemDescription(item, lang) { return item?.translations?.[lang]?.description || item.description; }
 
 export default function TableOrder() {
   const { tableId } = useParams();
+  const { lang, setLang, t, dir, languages } = useLanguage('nua_table_lang');
+  const STATUS_MAP = {
+    new: { label: t('tableOrder.statusNew'), icon: Clock, color: 'bg-blue-500' },
+    preparing: { label: t('tableOrder.statusPreparing'), icon: ChefHat, color: 'bg-amber-500' },
+    ready: { label: t('tableOrder.statusReady'), icon: Check, color: 'bg-green-500' },
+    served: { label: t('tableOrder.statusServed'), icon: Utensils, color: 'bg-gray-400' },
+  };
   const [menu, setMenu] = useState(null);
   const [cart, setCart] = useState([]);
   const [view, setView] = useState('menu'); // menu | cart | status
@@ -30,7 +35,7 @@ export default function TableOrder() {
     tableOrderAPI.getMenu(tableId).then(r => {
       setMenu(r.data);
       if (r.data.categories?.length) setSelectedCategory(r.data.categories[0].name);
-    }).catch(() => toast.error('Failed to load menu'));
+    }).catch(() => toast.error(t('tableOrder.menuLoadFailed')));
     pollOrders();
   }, [tableId]);
 
@@ -67,42 +72,43 @@ export default function TableOrder() {
         customerName: customerName || 'Guest',
         notes,
       });
-      toast.success(res.data.message || 'Order placed!');
+      toast.success(res.data.message || t('tableOrder.orderPlaced'));
       setCart([]);
       setNotes('');
       setView('status');
       pollOrders();
     } catch {
-      toast.error('Failed to place order');
+      toast.error(t('tableOrder.orderFailed'));
     } finally { setLoading(false); }
   };
 
   if (!menu) return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-      <div className="animate-pulse text-white text-lg">Loading menu...</div>
+      <div className="animate-pulse text-white text-lg">{t('tableOrder.loadingMenu')}</div>
     </div>
   );
 
   const currentCategory = menu.categories?.find(c => c.name === selectedCategory);
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white flex flex-col" data-testid="table-order-page">
+    <div className="min-h-screen bg-gray-950 text-white flex flex-col" dir={dir} data-testid="table-order-page">
       {/* Header */}
       <header className="sticky top-0 z-30 bg-gray-950/95 backdrop-blur border-b border-gray-800 px-4 py-3">
         <div className="max-w-lg mx-auto flex items-center justify-between">
           <div>
             <h1 className="text-lg font-bold">{menu.restaurantName}</h1>
             <p className="text-xs text-gray-400">
-              Table {menu.tableInfo?.number || tableId}
+              {t('tableOrder.tableLabel')} {menu.tableInfo?.number || tableId}
               {menu.tableInfo?.section && ` - ${menu.tableInfo.section}`}
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
+            <LanguageSelector lang={lang} setLang={setLang} languages={languages} variant="dark" label={t('common.language')} />
             {activeOrders.length > 0 && (
               <Button size="sm" variant={view === 'status' ? 'default' : 'outline'}
                 className="text-xs" onClick={() => setView('status')}
                 data-testid="view-orders-btn">
-                <Clock size={14} className="mr-1" /> Orders ({activeOrders.length})
+                <Clock size={14} className="mr-1" /> {t('tableOrder.ordersBtn')} ({activeOrders.length})
               </Button>
             )}
             <button onClick={() => setView(view === 'cart' ? 'menu' : 'cart')}
@@ -148,8 +154,8 @@ export default function TableOrder() {
                           <img src={item.image} alt={item.name} className="w-20 h-20 rounded-lg object-cover flex-shrink-0" />
                         )}
                         <div className="flex-1 min-w-0">
-                          <h3 className="font-semibold text-white">{item.name}</h3>
-                          {item.description && <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{item.description}</p>}
+                          <h3 className="font-semibold text-white">{itemName(item, lang)}</h3>
+                          {item.description && <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{itemDescription(item, lang)}</p>}
                           <div className="flex items-center justify-between mt-2">
                             <span className="text-lg font-bold text-emerald-400">${item.price.toFixed(2)}</span>
                             {inCart ? (
@@ -162,7 +168,7 @@ export default function TableOrder() {
                               <Button size="sm" onClick={() => addToCart(item)}
                                 className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 px-3 text-xs"
                                 data-testid={`add-${item.id}`}>
-                                <Plus size={14} className="mr-1" /> Add
+                                <Plus size={14} className="mr-1" /> {t('common.add')}
                               </Button>
                             )}
                           </div>
@@ -180,13 +186,13 @@ export default function TableOrder() {
         {view === 'cart' && (
           <div className="py-4 space-y-4" data-testid="cart-view">
             <button onClick={() => setView('menu')} className="flex items-center gap-1 text-sm text-gray-400 hover:text-white">
-              <ArrowLeft size={16} /> Back to Menu
+              <ArrowLeft size={16} /> {t('tableOrder.backToMenu')}
             </button>
-            <h2 className="text-xl font-bold">Your Order</h2>
+            <h2 className="text-xl font-bold">{t('tableOrder.yourOrder')}</h2>
             {cart.length === 0 ? (
               <div className="text-center py-12 text-gray-500">
                 <ShoppingCart size={48} className="mx-auto mb-3 opacity-30" />
-                <p>Your cart is empty</p>
+                <p>{t('tableOrder.cartEmpty')}</p>
               </div>
             ) : (
               <>
@@ -195,7 +201,7 @@ export default function TableOrder() {
                     <div key={item.id} className="flex items-center gap-3 bg-gray-900 rounded-lg p-3 border border-gray-800"
                       data-testid={`cart-item-${item.id}`}>
                       <div className="flex-1">
-                        <p className="font-medium text-sm">{item.name}</p>
+                        <p className="font-medium text-sm">{itemName(item, lang)}</p>
                         <p className="text-xs text-gray-400">${item.price.toFixed(2)} each</p>
                       </div>
                       <div className="flex items-center gap-2">
@@ -208,19 +214,19 @@ export default function TableOrder() {
                   ))}
                 </div>
                 <div className="space-y-3 pt-2">
-                  <Input placeholder="Your name (optional)" value={customerName}
+                  <Input placeholder={t('tableOrder.namePlaceholder')} value={customerName}
                     onChange={e => setCustomerName(e.target.value)}
                     className="bg-gray-900 border-gray-700 text-white" data-testid="customer-name-input" />
-                  <Input placeholder="Special requests or allergies..." value={notes}
+                  <Input placeholder={t('tableOrder.notesPlaceholder')} value={notes}
                     onChange={e => setNotes(e.target.value)}
                     className="bg-gray-900 border-gray-700 text-white" data-testid="order-notes-input" />
                 </div>
                 <div className="bg-gray-900 rounded-lg p-4 border border-gray-800 space-y-2">
                   <div className="flex justify-between font-bold text-lg">
-                    <span>Total</span><span className="text-emerald-400" data-testid="cart-total">${cartTotal.toFixed(2)}</span>
+                    <span>{t('common.total')}</span><span className="text-emerald-400" data-testid="cart-total">${cartTotal.toFixed(2)}</span>
                   </div>
-                  <div className="flex justify-between text-[11px] text-gray-500 pt-1 border-t border-gray-700"><span>GST Included</span><span>${(cartTotal / 11).toFixed(2)}</span></div>
-                  <p className="text-[10px] text-gray-500 text-center">Prices include GST</p>
+                  <div className="flex justify-between text-[11px] text-gray-500 pt-1 border-t border-gray-700"><span>{t('common.gstIncluded')}</span><span>${(cartTotal / 11).toFixed(2)}</span></div>
+                  <p className="text-[10px] text-gray-500 text-center">{t('common.pricesIncludeGst')}</p>
                 </div>
               </>
             )}
@@ -231,13 +237,13 @@ export default function TableOrder() {
         {view === 'status' && (
           <div className="py-4 space-y-4" data-testid="status-view">
             <button onClick={() => setView('menu')} className="flex items-center gap-1 text-sm text-gray-400 hover:text-white">
-              <ArrowLeft size={16} /> Back to Menu
+              <ArrowLeft size={16} /> {t('tableOrder.backToMenu')}
             </button>
-            <h2 className="text-xl font-bold">Your Orders</h2>
+            <h2 className="text-xl font-bold">{t('tableOrder.yourOrders')}</h2>
             {activeOrders.length === 0 ? (
               <div className="text-center py-12 text-gray-500">
-                <p>No active orders</p>
-                <Button className="mt-4" onClick={() => setView('menu')}>Browse Menu</Button>
+                <p>{t('tableOrder.noActiveOrders')}</p>
+                <Button className="mt-4" onClick={() => setView('menu')}>{t('tableOrder.browseMenu')}</Button>
               </div>
             ) : (
               <div className="space-y-4">
@@ -262,7 +268,7 @@ export default function TableOrder() {
                           ))}
                         </div>
                         <div className="flex justify-between font-bold mt-3 pt-2 border-t border-gray-700">
-                          <span>Total</span><span className="text-emerald-400">${order.total?.toFixed(2)}</span>
+                          <span>{t('common.total')}</span><span className="text-emerald-400">${order.total?.toFixed(2)}</span>
                         </div>
                       </CardContent>
                     </Card>
@@ -280,7 +286,7 @@ export default function TableOrder() {
           <div className="max-w-lg mx-auto">
             <Button className="w-full h-12 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-base"
               onClick={() => setView('cart')} data-testid="view-cart-btn">
-              <ShoppingCart size={18} className="mr-2" /> View Cart ({cartCount}) — ${cartTotal.toFixed(2)}
+              <ShoppingCart size={18} className="mr-2" /> {t('tableOrder.viewCart')} ({cartCount}) — ${cartTotal.toFixed(2)}
             </Button>
           </div>
         </div>
@@ -292,7 +298,7 @@ export default function TableOrder() {
           <div className="max-w-lg mx-auto">
             <Button className="w-full h-12 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-base"
               onClick={placeOrder} disabled={loading} data-testid="place-order-btn">
-              <Send size={18} className="mr-2" /> {loading ? 'Placing Order...' : `Place Order — $${cartTotal.toFixed(2)}`}
+              <Send size={18} className="mr-2" /> {loading ? t('tableOrder.placingOrder') : `${t('tableOrder.placeOrder')} — $${cartTotal.toFixed(2)}`}
             </Button>
           </div>
         </div>

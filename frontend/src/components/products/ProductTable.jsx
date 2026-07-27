@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Edit, Trash2, CheckSquare, Square, TrendingUp, TrendingDown } from 'lucide-react';
+import { Edit, Trash2, CheckSquare, Square, TrendingUp, TrendingDown, Languages } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Card, CardContent } from '../ui/card';
@@ -35,6 +35,7 @@ export const ProductTable = ({
   toggleEightySix,
   openEditProduct,
   deleteProduct,
+  openTranslateProduct,
 }) => {
   // ---- Drag-to-select state (grid view only) ----
   const gridRef = useRef(null);
@@ -274,6 +275,9 @@ export const ProductTable = ({
                   <Button variant="outline" size="sm" className="flex-1" onClick={() => openEditProduct(product)} data-testid={`edit-product-${product.id}`}>
                     <Edit size={14} className="mr-1" /> Edit
                   </Button>
+                  <Button variant="outline" size="sm" onClick={() => openTranslateProduct(product)} title="Menu translations" data-testid={`translate-product-${product.id}`}>
+                    <Languages size={14} />
+                  </Button>
                   <Button variant="outline" size="sm" className="text-red-500 hover:bg-red-50" onClick={() => deleteProduct(product.id)} data-testid={`delete-product-${product.id}`}>
                     <Trash2 size={14} />
                   </Button>
@@ -397,6 +401,7 @@ export const ProductTable = ({
                   <td className="px-3 py-2 text-right">
                     <div className="flex gap-1 justify-end">
                       <Button variant="ghost" size="sm" onClick={() => openEditProduct(product)} data-testid={`row-edit-${product.id}`}><Edit size={12} /></Button>
+                      <Button variant="ghost" size="sm" onClick={() => openTranslateProduct(product)} title="Menu translations" data-testid={`row-translate-${product.id}`}><Languages size={12} /></Button>
                       <Button variant="ghost" size="sm" className="text-red-500" onClick={() => deleteProduct(product.id)} data-testid={`row-del-${product.id}`}><Trash2 size={12} /></Button>
                     </div>
                   </td>
