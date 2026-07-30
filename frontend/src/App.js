@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { LicenseProvider } from './contexts/LicenseContext';
 import { Toaster } from './components/ui/sonner';
 import BottomDock from './components/BottomDock';
+import BackButton from './components/BackButton';
 import LicensePage, { LicenseLockScreen, LicenseBanner } from './pages/LicensePage';
 import Login from './pages/Login';
 import Today from './pages/Today';
@@ -125,7 +126,10 @@ function StaffLayout({ children }) {
     >
       <LicenseBanner />
       <LicenseLockScreen />
-      <div className="px-6 py-6 max-w-screen-2xl mx-auto">{children}</div>
+      <div className="px-6 py-6 max-w-screen-2xl mx-auto">
+        <BackButton />
+        {children}
+      </div>
       <BottomDock />
       <AshChat />
       <NotificationBell />

@@ -88,7 +88,7 @@ export default function CommandBar() {
       .slice(0, 6)
       .map(d => ({ type: 'page', ...d }));
     const prods = (products || [])
-      .filter(p => (p.name || '').toLowerCase().includes(q))
+      .filter(p => (p.name || '').toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q))
       .slice(0, 5)
       .map(p => ({ type: 'product', label: p.name, sub: `$${Number(p.price || 0).toFixed(2)} · ${p.category || ''}`, path: '/products' }));
     return [...pages, ...prods];

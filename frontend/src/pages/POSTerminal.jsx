@@ -368,10 +368,11 @@ const POSTerminal = () => {
     }
   };
 
-  const filteredProducts = products.filter(p =>
-    (selectedCategory === 'All' || p.category === selectedCategory) &&
-    p.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredProducts = products.filter(p => {
+    const term = searchTerm.toLowerCase();
+    return (selectedCategory === 'All' || p.category === selectedCategory) &&
+      (p.name.toLowerCase().includes(term) || (p.category || '').toLowerCase().includes(term));
+  });
 
   // Group products by category for "All" view (category-wise display)
   const groupedByCategory = React.useMemo(() => {
