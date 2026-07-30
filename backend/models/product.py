@@ -85,3 +85,4 @@ class ProductUpdate(BaseModel):
     seoDescription: Optional[str] = None
     description: Optional[str] = None
     translations: Optional[Dict[str, Dict[str, str]]] = None
+    eightySixed: Optional[bool] = None

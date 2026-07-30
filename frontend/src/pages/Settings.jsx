@@ -368,7 +368,7 @@ const Settings = () => {
             colors to every terminal — until then, they only apply to this browser.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {[{ key: 'primary', label: 'Primary Color' }, { key: 'secondary', label: 'Secondary Color' }, { key: 'accent', label: 'Accent Color' }, { key: 'sidebar', label: 'Sidebar Background' }].map(c => (
+            {[{ key: 'primary', label: 'Primary Color' }, { key: 'secondary', label: 'Secondary Color' }, { key: 'accent', label: 'Accent Color' }, { key: 'sidebar', label: 'Sidebar Background' }, { key: 'background', label: 'POS Background Color' }].map(c => (
               <div key={c.key} className="space-y-2">
                 <label className="font-medium text-sm">{c.label}</label>
                 <div className="flex items-center gap-3">

@@ -33,8 +33,7 @@ const makeEmptyPromo = () => ({
   activeDays: [], startTime: '', endTime: '',
 });
 const emptyBulkPatch = () => ({
-  categoryId: '', pricePercentDelta: '', cost: '', gstRate: '', image: '',
-  eightySixed: '', addModifierIds: [], removeModifierIds: [],
+  image: '', addModifierIds: [], removeModifierIds: [],
 });
 
 const Products = () => {
@@ -67,6 +66,9 @@ const Products = () => {
   const [imageLibraryOpen, setImageLibraryOpen] = useState(false);
   const [bulkImageLibraryOpen, setBulkImageLibraryOpen] = useState(false);
   const [bulkPatch, setBulkPatch] = useState(emptyBulkPatch);
+  // One editable row per selected product — each item's price/cost/GST/category/
+  // status is tweaked independently rather than one shared value stomping all of them.
+  const [bulkRows, setBulkRows] = useState([]);
   const [inlineEditCell, setInlineEditCell] = useState(null);
   const [inlineValue, setInlineValue] = useState('');
   // Optimistic edit-time map: product id -> ISO timestamp the client touched
@@ -222,7 +224,7 @@ const Products = () => {
   const filteredProducts = useMemo(() => {
     const term = searchTerm.toLowerCase();
     let list = products.filter(p => {
-      if (term && !(p.name?.toLowerCase().includes(term) || p.sku?.toLowerCase().includes(term))) return false;
+      if (term && !(p.name?.toLowerCase().includes(term) || p.sku?.toLowerCase().includes(term) || p.category?.toLowerCase().includes(term))) return false;
       if (filterCats.length > 0) {
         const matchById = p.categoryId && filterCats.includes(p.categoryId);
         const matchByName = !p.categoryId && filterCats.some(fc => {
@@ -275,32 +277,82 @@ const Products = () => {
   const clearSelection = () => setSelected(new Set());
   const allVisibleSelected = filteredProducts.length > 0 && filteredProducts.every(p => selected.has(p.id));
 
+  const openBulkEdit = () => {
+    const rows = Array.from(selected).map(id => {
+      const p = products.find(x => x.id === id) || {};
+      return {
+        id, name: p.name || id, sku: p.sku || '',
+        categoryId: p.categoryId || '', category: p.category || '',
+        price: p.price ?? 0, cost: p.cost ?? 0, gstRate: p.gstRate ?? 10,
+        eightySixed: !!p.eightySixed,
+      };
+    });
+    setBulkRows(rows);
+    setBulkOpen(true);
+  };
+  const updateBulkRow = (id, field, value) => {
+    setBulkRows(rows => rows.map(r => r.id === id ? { ...r, [field]: value } : r));
+  };
+  // Convenience fill-down — copies one value into every row so the owner
+  // isn't retyping the same price/cost/GST for 20 items, while still leaving
+  // every row individually editable afterward (unlike the old shared-patch flow).
+  const fillBulkRows = (field, value) => {
+    setBulkRows(rows => rows.map(r => ({ ...r, [field]: value })));
+  };
+
   const applyBulk = async () => {
     if (selected.size === 0) return toast.error('Pick at least one product');
-    const payload = { productIds: Array.from(selected) };
-    if (bulkPatch.categoryId) {
-      const c = categories.find(x => x.id === bulkPatch.categoryId);
-      payload.categoryId = bulkPatch.categoryId;
-      payload.category = c?.name || undefined;
+    const productIds = Array.from(selected);
+    const requests = [];
+
+    // Modifiers/image are genuinely bulk actions (assign the same modifier or
+    // photo to every selected item), so those still go through one call.
+    if (bulkPatch.image || bulkPatch.addModifierIds.length > 0 || bulkPatch.removeModifierIds.length > 0) {
+      const bulkOnlyPayload = { productIds };
+      if (bulkPatch.image) bulkOnlyPayload.image = bulkPatch.image;
+      if (bulkPatch.addModifierIds.length > 0) bulkOnlyPayload.addModifierIds = bulkPatch.addModifierIds;
+      if (bulkPatch.removeModifierIds.length > 0) bulkOnlyPayload.removeModifierIds = bulkPatch.removeModifierIds;
+      requests.push(productsBulkAPI.bulkEdit(bulkOnlyPayload));
     }
-    if (bulkPatch.pricePercentDelta !== '' && !isNaN(parseFloat(bulkPatch.pricePercentDelta))) {
-      payload.pricePercentDelta = parseFloat(bulkPatch.pricePercentDelta);
+
+    // Price/cost/GST/category/status are per-row — only push the fields that
+    // actually changed from that item's own original value.
+    let changedRows = 0;
+    for (const row of bulkRows) {
+      const original = products.find(p => p.id === row.id);
+      if (!original) continue;
+      const patch = {};
+      if (row.categoryId && row.categoryId !== (original.categoryId || '')) {
+        patch.categoryId = row.categoryId;
+        patch.category = categories.find(c => c.id === row.categoryId)?.name;
+      }
+      if (Number(row.price) !== Number(original.price ?? 0)) patch.price = Number(row.price);
+      if (Number(row.cost) !== Number(original.cost ?? 0)) patch.cost = Number(row.cost);
+      if (Number(row.gstRate) !== Number(original.gstRate ?? 10)) patch.gstRate = Number(row.gstRate);
+      if (!!row.eightySixed !== !!original.eightySixed) patch.eightySixed = !!row.eightySixed;
+      if (Object.keys(patch).length > 0) {
+        changedRows += 1;
+        requests.push(productsAPI.update(row.id, patch));
+      }
     }
-    if (bulkPatch.cost !== '' && !isNaN(parseFloat(bulkPatch.cost))) payload.cost = parseFloat(bulkPatch.cost);
-    if (bulkPatch.gstRate !== '' && !isNaN(parseFloat(bulkPatch.gstRate))) payload.gstRate = parseFloat(bulkPatch.gstRate);
-    if (bulkPatch.image) payload.image = bulkPatch.image;
-    if (bulkPatch.eightySixed === 'true') payload.eightySixed = true;
-    if (bulkPatch.eightySixed === 'false') payload.eightySixed = false;
-    if (bulkPatch.addModifierIds.length > 0) payload.addModifierIds = bulkPatch.addModifierIds;
-    if (bulkPatch.removeModifierIds.length > 0) payload.removeModifierIds = bulkPatch.removeModifierIds;
+
+    if (requests.length === 0) {
+      toast.error('No changes to apply');
+      return;
+    }
 
     try {
-      const r = await productsBulkAPI.bulkEdit(payload);
-      // Mark every touched product so they all bubble up in Recently Edited.
-      payload.productIds.forEach(markTouched);
-      toast.success(`Updated ${r.data?.updated || 0} products`);
+      await Promise.all(requests);
+      productIds.forEach(markTouched);
+      const parts = [];
+      if (changedRows > 0) parts.push(`${changedRows} item${changedRows !== 1 ? 's' : ''} individually`);
+      if (bulkPatch.image || bulkPatch.addModifierIds.length > 0 || bulkPatch.removeModifierIds.length > 0) {
+        parts.push(`modifiers/image on ${productIds.length}`);
+      }
+      toast.success(`Updated ${parts.join(' + ')}`);
       setBulkOpen(false);
       setBulkPatch(emptyBulkPatch());
+      setBulkRows([]);
       clearSelection();
       fetchData();
     } catch (e) {
@@ -502,7 +554,7 @@ const Products = () => {
             allVisibleSelected={allVisibleSelected}
             selectAllVisible={selectAllVisible}
             filteredProducts={filteredProducts}
-            onBulkEditOpen={() => setBulkOpen(true)}
+            onBulkEditOpen={openBulkEdit}
             onBulkDelete={bulkDelete}
           />
 
@@ -785,6 +837,9 @@ const Products = () => {
         selectedCount={selected.size}
         bulkPatch={bulkPatch}
         setBulkPatch={setBulkPatch}
+        bulkRows={bulkRows}
+        updateBulkRow={updateBulkRow}
+        fillBulkRows={fillBulkRows}
         categories={categories}
         modifiers={modifiers}
         onApply={applyBulk}
