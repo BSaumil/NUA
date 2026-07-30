@@ -270,6 +270,18 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
                 "$set": {"lastVisit": datetime.utcnow().isoformat()}
             }
         )
+        # Free base identity layer — a repeat contact match at POS checkout is
+        # an identity touchpoint (skipped automatically for base-only venues).
+        try:
+            from services.customer_identity import record_touchpoint
+            crm = await db.customers.find_one({"id": transaction.customerId}, {"_id": 0, "phone": 1, "email": 1, "name": 1})
+            if crm:
+                await record_touchpoint(
+                    phone=crm.get("phone"), email=crm.get("email"),
+                    name=crm.get("name"), source="pos_checkout",
+                )
+        except Exception:
+            pass
 
     return Transaction(**txn_dict)
 

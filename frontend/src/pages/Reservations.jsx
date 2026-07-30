@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   CalendarDays, Clock, Users, Plus, Search, Filter, ChevronLeft, ChevronRight,
   Phone, Mail, Edit2, Trash2, Check, X, UserCheck, AlertTriangle, MapPin
@@ -15,7 +15,7 @@ import {
 } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { useTheme } from '../contexts/ThemeContext';
-import { reservationsAPI, floorPlansAPI, aiWave2API, reservationsAIAPI } from '../services/api';
+import { reservationsAPI, floorPlansAPI, aiWave2API, reservationsAIAPI, customersAPI } from '../services/api';
 import { toast } from 'sonner';
 import BookingsInbox from './BookingsInbox';
 import BookingSourceStrip from '../components/reservations/BookingSourceStrip';
@@ -37,7 +37,7 @@ const STATUS_CONFIG = {
 };
 
 const emptyForm = {
-  guestName: '', guestPhone: '', guestEmail: '', partySize: 2,
+  guestName: '', guestPhone: '', guestEmail: '', customerId: '', partySize: 2,
   date: new Date().toISOString().split('T')[0], time: '19:00', duration: 90,
   tableId: '', section: '', specialRequests: '', notes: '', tags: [],
   depositRequired: 0, source: 'phone',
@@ -53,6 +53,12 @@ export default function Reservations() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editId, setEditId] = useState(null);
   const [form, setForm] = useState({ ...emptyForm });
+  // CRM guest lookup — matches on name, phone, or email so staff can pull up
+  // a returning guest's details instead of retyping them from scratch.
+  const [guestMatches, setGuestMatches] = useState([]);
+  const [guestSearchOpen, setGuestSearchOpen] = useState(false);
+  const [guestSearching, setGuestSearching] = useState(false);
+  const guestSearchTimer = useRef(null);
   const [view, setView] = useState('list'); // list | calendar | month
   const [mainTab, setMainTab] = useState('bookings'); // bookings | inbox
 
@@ -76,18 +82,49 @@ export default function Reservations() {
     (r.guestPhone && r.guestPhone.includes(search))
   );
 
-  const openNew = () => { setEditId(null); setForm({ ...emptyForm, date: selectedDate }); setDialogOpen(true); };
+  const openNew = () => { setEditId(null); setForm({ ...emptyForm, date: selectedDate }); setGuestMatches([]); setGuestSearchOpen(false); setDialogOpen(true); };
   const openEdit = (r) => {
     setEditId(r.id);
     setForm({
       guestName: r.guestName, guestPhone: r.guestPhone || '', guestEmail: r.guestEmail || '',
+      customerId: r.customerId || '',
       partySize: r.partySize, date: r.date, time: r.time, duration: r.duration,
       tableId: r.tableId || '', section: r.section || '', specialRequests: r.specialRequests || '',
       notes: r.notes || '', tags: r.tags || [], depositRequired: r.depositRequired || 0,
       source: r.source || 'phone',
     });
+    setGuestMatches([]); setGuestSearchOpen(false);
     setDialogOpen(true);
   };
+
+  // Debounced CRM lookup — fires off whichever of name/phone/email the staff
+  // is currently typing into; the /customers search endpoint already matches
+  // across all three fields in one query.
+  const searchGuests = (query) => {
+    if (guestSearchTimer.current) clearTimeout(guestSearchTimer.current);
+    const q = query.trim();
+    if (q.length < 2) { setGuestMatches([]); setGuestSearchOpen(false); return; }
+    guestSearchTimer.current = setTimeout(async () => {
+      setGuestSearching(true);
+      try {
+        const r = await customersAPI.getAll({ search: q });
+        setGuestMatches((r.data || []).slice(0, 6));
+        setGuestSearchOpen(true);
+      } catch { setGuestMatches([]); }
+      setGuestSearching(false);
+    }, 300);
+  };
+  const updateGuestField = (field, value) => {
+    // Any manual edit after a guest was picked means it may no longer match
+    // that CRM record, so drop the link rather than silently keep it stale.
+    setForm(f => ({ ...f, [field]: value, customerId: '' }));
+    searchGuests(value);
+  };
+  const selectGuestMatch = (c) => {
+    setForm(f => ({ ...f, guestName: c.name, guestPhone: c.phone || '', guestEmail: c.email || '', customerId: c.id }));
+    setGuestMatches([]); setGuestSearchOpen(false);
+  };
+  const unlinkGuest = () => setForm(f => ({ ...f, customerId: '' }));
 
   const handleSave = async () => {
     if (!form.guestName || !form.date || !form.time) {
@@ -453,17 +490,65 @@ export default function Reservations() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
+              <div className="col-span-2 relative">
                 <label className="text-xs font-medium text-gray-500 mb-1 block">Guest Name *</label>
-                <Input data-testid="guest-name-input" value={form.guestName} onChange={e => setForm(f => ({ ...f, guestName: e.target.value }))} placeholder="John Smith" />
+                <div className="relative">
+                  <Input
+                    data-testid="guest-name-input" value={form.guestName}
+                    onChange={e => updateGuestField('guestName', e.target.value)}
+                    onFocus={() => { if (guestMatches.length > 0) setGuestSearchOpen(true); }}
+                    onBlur={() => setTimeout(() => setGuestSearchOpen(false), 150)}
+                    placeholder="John Smith" autoComplete="off"
+                  />
+                  {guestSearching && (
+                    <Search size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-300 animate-pulse" />
+                  )}
+                </div>
+                {guestSearchOpen && guestMatches.length > 0 && (
+                  <div className="absolute z-20 left-0 right-0 mt-1 bg-white border rounded-lg shadow-lg max-h-56 overflow-y-auto" data-testid="guest-crm-matches">
+                    <p className="text-[10px] uppercase tracking-wide text-gray-400 px-3 pt-2 pb-1">From your customer list</p>
+                    {guestMatches.map(c => (
+                      <button
+                        key={c.id} type="button"
+                        onMouseDown={() => selectGuestMatch(c)}
+                        className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center justify-between gap-2 border-t first:border-t-0"
+                        data-testid={`guest-match-${c.id}`}
+                      >
+                        <span className="min-w-0">
+                          <span className="block text-sm font-medium truncate" style={{ color: theme.text }}>{c.name}</span>
+                          <span className="block text-xs text-gray-400 truncate">{[c.phone, c.email].filter(Boolean).join(' · ')}</span>
+                        </span>
+                        {c.isVip && <Badge className="bg-amber-100 text-amber-700 text-[10px] flex-shrink-0">VIP</Badge>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {form.customerId && (
+                  <p className="text-[11px] text-emerald-600 mt-1 flex items-center gap-1" data-testid="guest-linked-badge">
+                    <UserCheck size={12} /> Linked to guest profile
+                    <button type="button" onClick={unlinkGuest} className="text-gray-400 hover:text-red-500 underline ml-1" data-testid="unlink-guest-btn">unlink</button>
+                  </p>
+                )}
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 mb-1 block">Phone</label>
-                <Input data-testid="guest-phone-input" value={form.guestPhone} onChange={e => setForm(f => ({ ...f, guestPhone: e.target.value }))} placeholder="+61 400 000 000" />
+                <Input
+                  data-testid="guest-phone-input" value={form.guestPhone}
+                  onChange={e => updateGuestField('guestPhone', e.target.value)}
+                  onFocus={() => { if (guestMatches.length > 0) setGuestSearchOpen(true); }}
+                  onBlur={() => setTimeout(() => setGuestSearchOpen(false), 150)}
+                  placeholder="+61 400 000 000" autoComplete="off"
+                />
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 mb-1 block">Email</label>
-                <Input data-testid="guest-email-input" value={form.guestEmail} onChange={e => setForm(f => ({ ...f, guestEmail: e.target.value }))} placeholder="guest@email.com" />
+                <Input
+                  data-testid="guest-email-input" value={form.guestEmail}
+                  onChange={e => updateGuestField('guestEmail', e.target.value)}
+                  onFocus={() => { if (guestMatches.length > 0) setGuestSearchOpen(true); }}
+                  onBlur={() => setTimeout(() => setGuestSearchOpen(false), 150)}
+                  placeholder="guest@email.com" autoComplete="off"
+                />
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 mb-1 block">Date *</label>

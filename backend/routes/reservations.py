@@ -114,12 +114,38 @@ async def create_reservation(reservation: ReservationCreate):
         })
     except Exception:
         pass
+    # Mirror to the standalone Bookings platform (nua-native partner) — no-op
+    # unless the integration env vars are configured.
+    try:
+        from services.bookings_partner_client import mirror_reservation_created
+        mirror_reservation_created(res_obj.dict())
+    except Exception:
+        pass
+    # Free base identity layer: recognize this guest across modules.
+    try:
+        from services.customer_identity import record_touchpoint
+        await record_touchpoint(
+            phone=reservation.guestPhone, email=reservation.guestEmail,
+            name=reservation.guestName, source="booking",
+        )
+    except Exception:
+        pass
     return res_obj
 
 @router.put("/reservations/{reservation_id}", response_model=Reservation)
 async def update_reservation(reservation_id: str, update: ReservationUpdate):
+    existing = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Reservation not found")
     update_data = {k: v for k, v in update.dict().items() if v is not None}
     update_data["updatedAt"] = datetime.utcnow().isoformat()
+    # Newly linking (or re-linking) a CRM guest during an edit — same bookkeeping
+    # create_reservation does, so this reservation shows up on the guest's profile.
+    new_customer_id = update_data.get("customerId")
+    if new_customer_id and new_customer_id != existing.get("customerId"):
+        await db.customers.update_one(
+            {"id": new_customer_id}, {"$push": {"reservationIds": reservation_id}}
+        )
     result = await db.reservations.find_one_and_update(
         {"id": reservation_id}, {"$set": update_data}, return_document=True
     )
@@ -139,6 +165,11 @@ async def delete_reservation(reservation_id: str):
             {"$set": {"status": "available", "currentReservationId": None}}
         )
     await db.reservations.delete_one({"id": reservation_id})
+    try:
+        from services.bookings_partner_client import mirror_reservation_status
+        mirror_reservation_status(res, "cancelled")
+    except Exception:
+        pass
     return {"message": "Reservation deleted"}
 
 @router.post("/reservations/{reservation_id}/seat")

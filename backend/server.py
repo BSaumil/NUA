@@ -12,6 +12,7 @@ from database import db, client
 from routes.products import router as products_router
 from routes.transactions import router as transactions_router
 from routes.customers import router as customers_router
+from routes.identity import router as identity_router
 from routes.reservations import router as reservations_router
 from routes.kitchen import router as kitchen_router
 from routes.analytics import router as analytics_router
@@ -73,6 +74,7 @@ api_router.include_router(auth_router)
 api_router.include_router(products_router)
 api_router.include_router(transactions_router)
 api_router.include_router(customers_router)
+api_router.include_router(identity_router)
 api_router.include_router(reservations_router)
 api_router.include_router(kitchen_router)
 api_router.include_router(analytics_router)

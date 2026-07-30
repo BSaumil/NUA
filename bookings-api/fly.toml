@@ -1,0 +1,21 @@
+# Fly.io config for the NUA Bookings partner API.
+# Set secrets before first deploy:
+#   flyctl secrets set BOOKINGS_MONGO_URL=... BOOKINGS_DB_NAME=nua_bookings BOOKINGS_ADMIN_KEY=...
+app = "nua-bookings-api"
+primary_region = "syd"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8010
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 300
+    soft_limit = 200
