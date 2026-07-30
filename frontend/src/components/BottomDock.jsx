@@ -14,7 +14,7 @@ import {
 
 // Role-default quick actions (left → right) on the bottom dock.
 // 4 most-common items per role, then "More" splash button.
-const QUICK_ACTIONS = {
+export const QUICK_ACTIONS = {
   owner: [
     { path: '/today', label: 'Today', icon: Sunrise },
     { path: '/pos', label: 'POS', icon: ShoppingCart },
