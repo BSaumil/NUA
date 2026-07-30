@@ -118,8 +118,18 @@ async def create_reservation(reservation: ReservationCreate):
 
 @router.put("/reservations/{reservation_id}", response_model=Reservation)
 async def update_reservation(reservation_id: str, update: ReservationUpdate):
+    existing = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Reservation not found")
     update_data = {k: v for k, v in update.dict().items() if v is not None}
     update_data["updatedAt"] = datetime.utcnow().isoformat()
+    # Newly linking (or re-linking) a CRM guest during an edit — same bookkeeping
+    # create_reservation does, so this reservation shows up on the guest's profile.
+    new_customer_id = update_data.get("customerId")
+    if new_customer_id and new_customer_id != existing.get("customerId"):
+        await db.customers.update_one(
+            {"id": new_customer_id}, {"$push": {"reservationIds": reservation_id}}
+        )
     result = await db.reservations.find_one_and_update(
         {"id": reservation_id}, {"$set": update_data}, return_document=True
     )
