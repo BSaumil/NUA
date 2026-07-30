@@ -114,6 +114,22 @@ async def create_reservation(reservation: ReservationCreate):
         })
     except Exception:
         pass
+    # Mirror to the standalone Bookings platform (nua-native partner) — no-op
+    # unless the integration env vars are configured.
+    try:
+        from services.bookings_partner_client import mirror_reservation_created
+        mirror_reservation_created(res_obj.dict())
+    except Exception:
+        pass
+    # Free base identity layer: recognize this guest across modules.
+    try:
+        from services.customer_identity import record_touchpoint
+        await record_touchpoint(
+            phone=reservation.guestPhone, email=reservation.guestEmail,
+            name=reservation.guestName, source="booking",
+        )
+    except Exception:
+        pass
     return res_obj
 
 @router.put("/reservations/{reservation_id}", response_model=Reservation)
@@ -149,6 +165,11 @@ async def delete_reservation(reservation_id: str):
             {"$set": {"status": "available", "currentReservationId": None}}
         )
     await db.reservations.delete_one({"id": reservation_id})
+    try:
+        from services.bookings_partner_client import mirror_reservation_status
+        mirror_reservation_status(res, "cancelled")
+    except Exception:
+        pass
     return {"message": "Reservation deleted"}
 
 @router.post("/reservations/{reservation_id}/seat")
