@@ -288,6 +288,13 @@ async def send_to_printers(data: dict, _: dict = Depends(get_user)):
 
     # Create print jobs sorted by priority
     jobs = sorted(printer_jobs.values(), key=lambda x: x["priority"])
+
+    # Every docket carries the full list of sections this order fires from
+    # (e.g. BAR · KITCHEN · PIZZA), so each station — and the server picking
+    # up — can see at a glance what else belongs to the same order and where
+    # it's coming from.
+    order_stations = [j["printer"] for j in jobs]
+
     print_records = []
     for job in jobs:
         record = {
@@ -295,6 +302,7 @@ async def send_to_printers(data: dict, _: dict = Depends(get_user)):
             "orderId": order_id, "tableNumber": table_number,
             "printer": job["printer"], "priority": job["priority"],
             "items": job["items"], "status": "queued",
+            "orderStations": order_stations,
             "createdAt": datetime.now(timezone.utc).isoformat(),
         }
         await db.print_jobs.insert_one(record)
