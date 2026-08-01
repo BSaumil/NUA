@@ -738,10 +738,94 @@ async def auto_marketing(data: dict, user: dict = Depends(get_user)):
         "sms": out.get("sms", "Come back for 15% off this week!") if isinstance(out, dict) else None,
         "emailSubject": out.get("emailSubject", "We miss you") if isinstance(out, dict) else "We miss you",
         "emailBody": out.get("emailBody", "") if isinstance(out, dict) else "",
-        "status": "scheduled", "createdAt": _now(), "createdBy": user["id"],
+        # The redeemable side of the offer. Without this a campaign is just
+        # ad copy — nothing for the guest to present and nothing the venue
+        # can attribute a sale back to.
+        "offer": data.get("offer") or {"valueType": "percentage", "value": 15,
+                                       "label": "Midweek offer"},
+        "status": "draft", "createdAt": _now(), "createdBy": user["id"],
+        "sent": 0, "vouchersIssued": 0,
     }
     await db.marketing_campaigns.insert_one(campaign); campaign.pop("_id", None)
     return campaign
+
+
+@router.post("/marketing/auto/{campaign_id}/send")
+async def send_marketing(campaign_id: str, data: dict = None, user: dict = Depends(get_user)):
+    """Actually send the campaign: issue each targeted customer their own
+    voucher (code + scannable QR, saved to their wallet) and email it out.
+
+    Idempotent per customer — re-sending won't mint a second voucher for
+    someone who already has one for this campaign, so a retry after a
+    partial failure is safe.
+    """
+    if user["role"] not in ("owner", "manager"):
+        raise HTTPException(status_code=403, detail="Owner/Manager only")
+    campaign = await db.marketing_campaigns.find_one({"id": campaign_id}, {"_id": 0})
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    from services.campaign_offers import issue_campaign_voucher, render_offer_email
+    from utils.notifications import send_email
+
+    audience = campaign.get("audience", "all")
+    targets = await db.customers.find(
+        {} if audience == "all" else {"membershipTier": audience}, {"_id": 0}
+    ).to_list(2000)
+
+    issued, sent, skipped = 0, 0, 0
+    recipients = []
+    for c in targets:
+        if not (c.get("email") or "").strip():
+            skipped += 1
+            continue
+        existing = await db.vouchers.find_one(
+            {"customerId": c["id"], "sourceType": "campaign", "sourceRef": campaign_id},
+            {"_id": 0},
+        )
+        voucher = existing or await issue_campaign_voucher(c, campaign)
+        if not voucher:
+            skipped += 1
+            continue
+        if not existing:
+            issued += 1
+        receipt = await send_email(
+            c["email"], campaign.get("emailSubject") or "An offer for you",
+            render_offer_email(c, campaign, voucher),
+        )
+        if receipt.get("delivered"):
+            sent += 1
+        recipients.append({
+            "customerId": c["id"], "email": c["email"],
+            "voucherId": voucher["id"], "code": voucher["code"],
+            "delivered": bool(receipt.get("delivered")),
+        })
+
+    await db.marketing_campaigns.update_one({"id": campaign_id}, {"$set": {
+        "status": "sent", "sentAt": _now(),
+        "vouchersIssued": issued, "sent": sent, "skipped": skipped,
+        "recipientLog": recipients[:2000],
+    }})
+    return {"campaignId": campaign_id, "vouchersIssued": issued,
+            "emailsDelivered": sent, "skipped": skipped,
+            "recipients": len(recipients)}
+
+
+@router.get("/marketing/auto/{campaign_id}/performance")
+async def marketing_performance(campaign_id: str, _: dict = Depends(get_user)):
+    """Redemption attribution — which issued vouchers actually came back."""
+    vouchers = await db.vouchers.find(
+        {"sourceType": "campaign", "sourceRef": campaign_id}, {"_id": 0}
+    ).to_list(5000)
+    redeemed = [v for v in vouchers if v.get("status") == "redeemed"
+                or int(v.get("redemptionCount") or 0) > 0]
+    issued = len(vouchers)
+    return {
+        "campaignId": campaign_id,
+        "issued": issued,
+        "redeemed": len(redeemed),
+        "redemptionRate": round(len(redeemed) / issued * 100, 1) if issued else 0.0,
+    }
 
 
 @router.get("/marketing/auto")

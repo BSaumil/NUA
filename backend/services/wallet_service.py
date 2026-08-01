@@ -95,7 +95,20 @@ async def get_wallet(customer_id: str) -> Optional[dict]:
     await expire_stale_vouchers(customer_id)
     vouchers = await db.vouchers.find(
         {"customerId": customer_id, "status": "active"}, {"_id": 0}
-    ).sort("createdAt", -1).to_list(100)
+    ).to_list(100)
+    # Two kinds of voucher land in this collection: wallet ones written here
+    # (amount/createdAt) and Universal Voucher Engine ones from campaigns,
+    # refunds and promotions (value/issuedAt, plus a code + QR). Normalize so
+    # the wallet shows one consistent list — before this, engine vouchers
+    # displayed as $0 and sorted to the bottom for want of an `amount`.
+    for v in vouchers:
+        if v.get("amount") is None and v.get("value") is not None:
+            v["amount"] = float(v.get("value") or 0)
+        v.setdefault("createdAt", v.get("issuedAt"))
+    vouchers.sort(key=lambda v: str(v.get("createdAt") or ""), reverse=True)
+    # Percentage-off vouchers have no fixed dollar value, so they'd inflate a
+    # dollar total — count only the fixed-value ones.
+    fixed_value = [v for v in vouchers if v.get("valueType") != "percentage"]
     return {
         "customerId": customer_id,
         "name": customer.get("name"),
@@ -104,7 +117,7 @@ async def get_wallet(customer_id: str) -> Optional[dict]:
         "membershipTier": customer.get("membershipTier", "Bronze"),
         "vouchers": vouchers,
         "occasionOffers": [v for v in vouchers if v.get("occasion")],
-        "totalVoucherValue": round(sum(float(v.get("amount") or 0) for v in vouchers), 2),
+        "totalVoucherValue": round(sum(float(v.get("amount") or 0) for v in fixed_value), 2),
     }
 
 
