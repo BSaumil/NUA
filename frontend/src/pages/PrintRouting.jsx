@@ -7,7 +7,7 @@ import { Badge } from '../components/ui/badge';
 import { useTheme } from '../contexts/ThemeContext';
 import { gamificationAPI } from '../services/api';
 import { toast } from 'sonner';
-import { stationLabel, printDocket } from '../services/docket';
+import { stationLabel, printDocket, groupByCategory } from '../services/docket';
 
 export default function PrintRouting() {
   const { theme } = useTheme();
@@ -107,9 +107,15 @@ export default function PrintRouting() {
                   <Button size="sm" variant="outline" className="h-6 text-xs" onClick={() => completeJob(job.id)} data-testid={`complete-${job.id}`}><CheckCircle size={12} className="mr-1" /> Done</Button>
                 </div>
               </div>
+              {/* Own items, grouped by category — same order they print in. */}
               <div className="space-y-0.5">
-                {(job.items || []).map((item, i) => (
-                  <p key={i} className="text-xs text-gray-600">• {item.productName || item.name} x{item.quantity}</p>
+                {groupByCategory(job.items).map((g, gi) => (
+                  <div key={gi}>
+                    <p className="text-[9px] uppercase tracking-wider text-gray-400 mt-1">{g.category}</p>
+                    {g.items.map((item, i) => (
+                      <p key={i} className="text-xs text-gray-600">• {item.productName || item.name} x{item.quantity}</p>
+                    ))}
+                  </div>
                 ))}
               </div>
               {/* Every section this order fires from — own station highlighted,
