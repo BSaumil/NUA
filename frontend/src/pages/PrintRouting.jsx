@@ -7,6 +7,7 @@ import { Badge } from '../components/ui/badge';
 import { useTheme } from '../contexts/ThemeContext';
 import { gamificationAPI } from '../services/api';
 import { toast } from 'sonner';
+import { stationLabel, printDocket, groupByCategory } from '../services/docket';
 
 export default function PrintRouting() {
   const { theme } = useTheme();
@@ -102,14 +103,34 @@ export default function PrintRouting() {
                 </div>
                 <div className="flex items-center gap-2">
                   {job.tableNumber && <Badge variant="outline" className="text-[10px]">Table {job.tableNumber}</Badge>}
+                  <Button size="sm" variant="outline" className="h-6 text-xs" onClick={() => printDocket(job)} data-testid={`print-${job.id}`}><Printer size={12} className="mr-1" /> Print</Button>
                   <Button size="sm" variant="outline" className="h-6 text-xs" onClick={() => completeJob(job.id)} data-testid={`complete-${job.id}`}><CheckCircle size={12} className="mr-1" /> Done</Button>
                 </div>
               </div>
+              {/* Own items, grouped by category — same order they print in. */}
               <div className="space-y-0.5">
-                {(job.items || []).map((item, i) => (
-                  <p key={i} className="text-xs text-gray-600">• {item.productName || item.name} x{item.quantity}</p>
+                {groupByCategory(job.items).map((g, gi) => (
+                  <div key={gi}>
+                    <p className="text-[9px] uppercase tracking-wider text-gray-400 mt-1">{g.category}</p>
+                    {g.items.map((item, i) => (
+                      <p key={i} className="text-xs text-gray-600">• {item.productName || item.name} x{item.quantity}</p>
+                    ))}
+                  </div>
                 ))}
               </div>
+              {/* Every section this order fires from — own station highlighted,
+                  so each station sees what else is coming and from where. */}
+              {(job.orderStations || []).length > 0 && (
+                <div className="flex items-center gap-1 mt-2 pt-2 border-t border-dashed" data-testid={`sections-${job.id}`}>
+                  <span className="text-[9px] uppercase tracking-wider text-gray-400">Sections:</span>
+                  {job.orderStations.map((s, i) => (
+                    <span key={i}
+                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${stationLabel(s) === stationLabel(job.printer) ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-300'}`}>
+                      {stationLabel(s)}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </CardContent></Card>

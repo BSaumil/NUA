@@ -214,6 +214,10 @@ export const offlineAPI = {
 // Reservations API
 export const reservationsAPI = {
   getAll: (params) => api.get('/reservations', { params }),
+  // Guest lookup + 360 booking summary. Same endpoint serves staff typing a
+  // name/phone/email and the NUA phone agent resolving an inbound caller ID.
+  guestLookup: (params) => api.get('/reservations/guest-lookup', { params }),
+  guestIntel: (customerId) => api.get(`/reservations/guest-intel/${customerId}`),
   get: (id) => api.get(`/reservations/${id}`),
   create: (data) => api.post('/reservations', data),
   update: (id, data) => api.put(`/reservations/${id}`, data),

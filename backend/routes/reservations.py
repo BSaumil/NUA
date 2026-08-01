@@ -8,6 +8,37 @@ from models.waitlist import WaitlistEntry, WaitlistEntryCreate, WaitlistEntryUpd
 
 router = APIRouter()
 
+# ============ GUEST LOOKUP (booking desk + NUA phone agent) ============
+@router.get("/reservations/guest-lookup")
+async def guest_lookup(q: Optional[str] = None, phone: Optional[str] = None,
+                       email: Optional[str] = None, limit: int = 8,
+                       intel: bool = True):
+    """Resolve a caller/typed guest to CRM records, with the booking-desk
+    summary attached (last booking, last visit, what they had, what they
+    order most, standing requests).
+
+    Two front doors, one endpoint:
+      - staff typing a name/phone/email into the New Reservation dialog
+      - the NUA phone agent resolving an inbound caller ID (?phone=...)
+    """
+    from services.guest_intel import lookup
+    if not any([q, phone, email]):
+        return {"matches": []}
+    matches = await lookup(query=q or "", phone=phone or "", email=email or "",
+                           limit=max(1, min(limit, 25)), with_intel=intel)
+    return {"matches": matches}
+
+
+@router.get("/reservations/guest-intel/{customer_id}")
+async def guest_intel(customer_id: str):
+    """Full booking-desk summary for one known guest."""
+    from services.guest_intel import build_guest_intel
+    customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return await build_guest_intel(customer)
+
+
 # ============ RESERVATIONS API ============
 @router.get("/reservations", response_model=List[Reservation])
 async def get_reservations(date: Optional[str] = None, status: Optional[str] = None, section: Optional[str] = None):

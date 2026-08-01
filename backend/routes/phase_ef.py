@@ -232,10 +232,43 @@ async def simulate_call(data: dict, _: dict = Depends(get_user)):
         "startedAt": datetime.now(timezone.utc).isoformat(),
     }
 
+    # Resolve the caller ID against the CRM before doing anything else, so a
+    # regular is recognised on pickup — the agent can greet them by name, and
+    # any booking it takes lands on their existing profile instead of creating
+    # a nameless duplicate. Digit-normalized, so the caller ID format doesn't
+    # have to match how the number was saved.
+    known_guest = None
+    try:
+        from services.guest_intel import lookup as guest_lookup
+        found = await guest_lookup(phone=caller, limit=1, with_intel=True)
+        known_guest = found[0] if found else None
+    except Exception:
+        known_guest = None
+    if known_guest:
+        call["customerId"] = known_guest["customerId"]
+        call["guestName"] = known_guest["name"]
+        call["knownGuest"] = known_guest
+
     # Classify with LLM
     intent_result = {"intent": "unknown", "actions": []}
     try:
         from emergentintegrations.llm.chat import LlmChat, UserMessage
+        # Give the agent the caller's history so it doesn't ask a regular for
+        # details the restaurant already knows.
+        guest_context = ""
+        if known_guest:
+            bits = [f"The caller is {known_guest['name']}, a returning guest."]
+            if known_guest.get("lastVisit", {}) and known_guest["lastVisit"].get("date"):
+                bits.append(f"Last visited {known_guest['lastVisit']['date']}.")
+            if known_guest.get("topItems"):
+                bits.append("Usually orders: " + ", ".join(i["name"] for i in known_guest["topItems"][:3]) + ".")
+            if known_guest.get("frequentRequests"):
+                bits.append("Usual request: " + known_guest["frequentRequests"][0]["request"] + ".")
+            for p in known_guest.get("standingPreferences", []):
+                if p["type"] == "allergy":
+                    bits.append(f"ALLERGY: {p['value']}.")
+            bits.append("Use their name; default the booking name to it unless they give another.")
+            guest_context = " " + " ".join(bits)
         chat = LlmChat(
             api_key=os.environ.get("EMERGENT_LLM_KEY"),
             session_id=f"phone-{call['id']}",
@@ -243,6 +276,7 @@ async def simulate_call(data: dict, _: dict = Depends(get_user)):
                 "You are an AI phone agent for NUA restaurant. Given a caller transcript, return STRICT JSON: "
                 '{"intent":"reservation|order|inquiry|other","details":{"partySize":2,"date":"YYYY-MM-DD","time":"19:00","name":"...","items":[{"name":"...","qty":1}],"question":"..."}}. '
                 "Only fill details that match. Today is " + datetime.now().date().isoformat()
+                + guest_context
             ),
         )
         chat.with_model("openai", "gpt-5.2")
@@ -260,7 +294,9 @@ async def simulate_call(data: dict, _: dict = Depends(get_user)):
         if parsed.get("intent") == "reservation" and details.get("date"):
             r = {
                 "id": f"RES-{str(uuid.uuid4())[:8].upper()}",
-                "guestName": details.get("name") or caller,
+                # A recognised caller keeps their CRM name even if the
+                # transcript never spelled it out.
+                "guestName": details.get("name") or (known_guest or {}).get("name") or caller,
                 "guestPhone": caller,
                 "partySize": int(details.get("partySize", 2) or 2),
                 "date": details.get("date"),
@@ -269,8 +305,20 @@ async def simulate_call(data: dict, _: dict = Depends(get_user)):
                 "source": "ai_phone_agent",
                 "createdAt": datetime.now(timezone.utc).isoformat(),
             }
+            if known_guest:
+                # Link it to the profile so this booking joins their history.
+                r["customerId"] = known_guest["customerId"]
+                r["guestEmail"] = known_guest.get("email") or None
+                await db.customers.update_one(
+                    {"id": known_guest["customerId"]},
+                    {"$push": {"reservationIds": r["id"]}},
+                )
             await db.reservations.insert_one(r)
-            intent_result["actions"].append({"action": "reservation_created", "id": r["id"]})
+            intent_result["actions"].append({
+                "action": "reservation_created", "id": r["id"],
+                "customerId": r.get("customerId"),
+                "recognisedGuest": bool(known_guest),
+            })
             # Auto-confirm SMS
             await queue_sms(caller, r["guestName"], f"Booking confirmed: {r['date']} at {r['time']} for {r['partySize']} at NUA.", "phone_agent")
         elif parsed.get("intent") == "order":
