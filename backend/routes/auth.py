@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from deps import get_user
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 from datetime import datetime, timezone, timedelta
@@ -288,7 +289,7 @@ async def add_staff_simple(data: dict, request: Request):
 
 # Custom roles management
 @router.get("/roles")
-async def get_custom_roles():
+async def get_custom_roles(_: dict = Depends(get_user)):
     s = await db.settings.find_one({"key": "custom_roles"}, {"_id": 0})
     defaults = ["cashier", "kitchen", "manager", "barista", "bar", "floor", "host", "dishwasher"]
     return s.get("value", defaults) if s else defaults

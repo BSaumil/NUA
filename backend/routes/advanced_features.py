@@ -12,12 +12,12 @@ router = APIRouter()
 
 # ============ BUSINESS SETTINGS ============
 @router.get("/business/settings")
-async def get_business_settings():
+async def get_business_settings(_: dict = Depends(get_user)):
     biz = await db.business_settings.find_one({"key": "main"}, {"_id": 0})
     return biz or {"name": "NUA", "abn": "", "address": "", "phone": "", "email": "", "taxId": ""}
 
 @router.post("/business/settings")
-async def save_business_settings(data: dict):
+async def save_business_settings(data: dict, _: dict = Depends(require_owner_or_manager)):
     data["key"] = "main"
     await db.business_settings.update_one({"key": "main"}, {"$set": data}, upsert=True)
     return {"message": "Business settings saved"}

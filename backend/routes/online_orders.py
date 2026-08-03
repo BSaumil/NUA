@@ -159,7 +159,10 @@ async def public_products():
     allowed = {c["name"] for c in cats}
     products = await db.products.find(
         {"category": {"$in": list(allowed)}, "stock": {"$gt": 0}, "eightySixed": {"$ne": True}},
-        {"_id": 0},
+        # This is a storefront anyone on the internet can hit, so it hands back
+        # the menu and nothing behind it — no unit cost, no on-hand count, no
+        # SKU. Those are the same fields /products strips for guests.
+        {"_id": 0, "cost": 0, "stock": 0, "sku": 0},
     ).to_list(500)
     return products
 

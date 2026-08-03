@@ -173,6 +173,85 @@ def _rate_limit_identity(request) -> str:
     return f"ip:{ip}"
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Default-deny at the door.
+#
+# Auth used to be opt-in: an endpoint was protected only if whoever wrote it
+# remembered a `Depends`. With ~280 GET routes that is a losing game, and it
+# lost — a sweep found the customer list, the P&L, the command centre and the
+# business settings (writable!) all answering with no credential at all.
+#
+# So the default is inverted here. Anything under /api/ needs a valid token
+# unless it is on the list below, and the list is short because the genuinely
+# public surface is small: the booking portal, the QR table menu, the online
+# storefront, the member join page, login, and payment webhooks.
+#
+# This checks the token is *real* (signature, type, expiry) but not who it
+# belongs to — the per-route Depends still do the user lookup and the role and
+# permission checks. This layer only closes "no credential, or a forged one".
+# ═══════════════════════════════════════════════════════════════════════════
+PUBLIC_API_PREFIXES = (
+    "/api/public/",              # booking portal: menu, slots, book, waitlist, events
+    "/api/table/",               # QR table ordering: menu, place order, order status
+    "/api/online/orders/track/", # order tracking by code, from the SMS link
+    "/api/members/share-link/",  # member referral links
+    "/api/stripe/checkout/status/",
+)
+
+PUBLIC_API_PATHS = {
+    "/api/", "/api/health", "/api/healthz",
+    # Auth itself, plus the endpoints the login screen needs before there is a user
+    "/api/auth/login", "/api/auth/register", "/api/auth/logout", "/api/auth/refresh",
+    "/api/auth/me", "/api/auth/forgot-password", "/api/auth/reset-password",
+    "/api/business/theme",       # login-screen branding
+    # The menu, as guests see it. /products strips cost/stock/sku for guests.
+    "/api/products", "/api/categories", "/api/modifiers",
+    "/api/online/categories", "/api/online/products", "/api/online/orders",
+    # Member self-service signup
+    "/api/members/login", "/api/members/signup",
+    # Payment provider callbacks — signed by the provider, not by a user
+    "/api/webhook/stripe", "/api/stripe/webhook",
+}
+
+
+def _is_public_api(path: str) -> bool:
+    return path in PUBLIC_API_PATHS or path.startswith(PUBLIC_API_PREFIXES)
+
+
+class RequireAuthMiddleware(BaseHTTPMiddleware):
+    """Reject /api/ traffic that carries no valid token, before it reaches a route."""
+
+    async def dispatch(self, request, call_next):
+        path = request.url.path
+        if request.method == "OPTIONS" or not path.startswith("/api/"):
+            return await call_next(request)
+        if _is_public_api(path):
+            return await call_next(request)
+
+        token = None
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header[7:].strip()
+        if not token:
+            token = request.cookies.get("access_token")
+        if not token:
+            # EventSource cannot set headers, so the SSE stream passes its JWT
+            # as a query parameter. Same token, verified the same way here.
+            token = request.query_params.get("token")
+        if not token:
+            return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
+
+        try:
+            import jwt
+            payload = jwt.decode(token, os.environ["JWT_SECRET"], algorithms=["HS256"])
+        except Exception:
+            return JSONResponse(status_code=401, content={"detail": "Invalid or expired token"})
+        # A refresh token must not be usable as an access token.
+        if payload.get("type") not in (None, "access"):
+            return JSONResponse(status_code=401, content={"detail": "Invalid token type"})
+        return await call_next(request)
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """120 req/min per (tenant, identity). Excludes static & public booking."""
     def __init__(self, app):
@@ -202,6 +281,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.buckets[key].append(now)
         return await call_next(request)
 
+# Added before RateLimit so RateLimit ends up the outer of the two: an
+# unauthenticated flood is still rate-limited rather than each request paying
+# for a JWT verification.
+app.add_middleware(RequireAuthMiddleware)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(LicenseEnforcementMiddleware)
 app.add_middleware(ActorContextMiddleware)

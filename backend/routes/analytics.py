@@ -14,7 +14,7 @@ router = APIRouter()
 
 # ============ ACCOUNTING API ============
 @router.get("/accounting/summary")
-async def get_accounting_summary():
+async def get_accounting_summary(_: dict = Depends(require_owner_or_manager)):
     transactions = await db.transactions.find().to_list(10000)
     total_revenue = sum(t.get("total", 0) for t in transactions)
     total_gst_collected = sum(t.get("gst", 0) for t in transactions)
@@ -31,7 +31,7 @@ async def get_accounting_summary():
     }
 
 @router.get("/accounting/p-and-l")
-async def get_p_and_l():
+async def get_p_and_l(_: dict = Depends(require_owner_or_manager)):
     transactions = await db.transactions.find().to_list(10000)
     expenses = await db.expenses.find().to_list(10000)
     revenue = sum(t.get("total", 0) for t in transactions)
@@ -49,12 +49,12 @@ async def get_p_and_l():
 
 # ============ BAS/GST API ============
 @router.get("/bas-gst/reports", response_model=List[BASReport])
-async def get_bas_reports():
+async def get_bas_reports(_: dict = Depends(require_owner_or_manager)):
     reports = await db.bas_reports.find().to_list(1000)
     return [BASReport(**r) for r in reports]
 
 @router.post("/bas-gst/reports", response_model=BASReport)
-async def create_bas_report(report: BASReportCreate):
+async def create_bas_report(report: BASReportCreate, _: dict = Depends(require_owner_or_manager)):
     transactions = await db.transactions.find().to_list(10000)
     expenses = await db.expenses.find().to_list(10000)
     gst_collected = sum(t.get("gst", 0) for t in transactions)
@@ -206,7 +206,7 @@ async def bas_worksheet(period_start: str, period_end: str):
 
 # ============ EXPENSES API ============
 @router.get("/expenses", response_model=List[Expense])
-async def get_expenses(start_date: Optional[str] = None, end_date: Optional[str] = None, category: Optional[str] = None):
+async def get_expenses(start_date: Optional[str] = None, end_date: Optional[str] = None, category: Optional[str] = None, _: dict = Depends(require_owner_or_manager)):
     query = {}
     if category:
         query["category"] = category
@@ -216,19 +216,19 @@ async def get_expenses(start_date: Optional[str] = None, end_date: Optional[str]
     return [Expense(**e) for e in expenses]
 
 @router.post("/expenses", response_model=Expense)
-async def create_expense(expense: ExpenseCreate):
+async def create_expense(expense: ExpenseCreate, _: dict = Depends(require_owner_or_manager)):
     expense_obj = Expense(**expense.dict())
     await db.expenses.insert_one(expense_obj.dict())
     return expense_obj
 
 # ============ SUPPLIERS API ============
 @router.get("/suppliers", response_model=List[Supplier])
-async def get_suppliers():
+async def get_suppliers(_: dict = Depends(get_user)):
     suppliers = await db.suppliers.find().to_list(1000)
     return [Supplier(**s) for s in suppliers]
 
 @router.post("/suppliers", response_model=Supplier)
-async def create_supplier(supplier: SupplierCreate):
+async def create_supplier(supplier: SupplierCreate, _: dict = Depends(require_owner_or_manager)):
     supplier_obj = Supplier(**supplier.dict())
     await db.suppliers.insert_one(supplier_obj.dict())
     return supplier_obj
@@ -283,12 +283,12 @@ async def get_sales_summary(start_date: str, end_date: str, location: Optional[s
     }
 
 @router.get("/reports/export/csv")
-async def export_report_csv(report_type: str, start_date: str, end_date: str):
+async def export_report_csv(report_type: str, start_date: str, end_date: str, _: dict = Depends(require_owner_or_manager)):
     return {"message": "CSV export endpoint - implement with csv library"}
 
 # ============ PRE-SHIFT DASHBOARD API ============
 @router.get("/pre-shift/today")
-async def get_pre_shift_data():
+async def get_pre_shift_data(_: dict = Depends(get_user)):
     today = datetime.utcnow().strftime('%Y-%m-%d')
     reservations = await db.reservations.find({"date": today}, {"_id": 0}).sort("time", 1).to_list(100)
     vip_guests = []
@@ -332,7 +332,7 @@ async def get_pre_shift_data():
 
 # ============ AI COMMAND CENTER API ============
 @router.get("/analytics/command-center")
-async def get_command_center():
+async def get_command_center(_: dict = Depends(require_owner_or_manager)):
     all_txns = await db.transactions.find({}, {"_id": 0}).to_list(10000)
     total_revenue = sum(t.get("total", 0) for t in all_txns)
     total_txns = len(all_txns)
@@ -593,7 +593,7 @@ async def get_table_turn_analytics():
 
 # ============ SMART ROSTERING API ============
 @router.get("/staff/smart-roster")
-async def get_smart_roster():
+async def get_smart_roster(_: dict = Depends(require_owner_or_manager)):
     today = datetime.utcnow()
     roster = []
     for i in range(7):

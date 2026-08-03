@@ -53,7 +53,7 @@ async def _clear_overnight_tickets() -> int:
 
 # ============ KITCHEN DISPLAY (KDS) API ============
 @router.get("/kitchen/orders")
-async def get_kitchen_orders(status: Optional[str] = None):
+async def get_kitchen_orders(status: Optional[str] = None, _: dict = Depends(get_user)):
     await _clear_overnight_tickets()
     query = {}
     if status:
