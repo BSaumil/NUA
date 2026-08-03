@@ -421,6 +421,14 @@ async def startup():
         await ensure_observability_indexes()
     except Exception as exc:
         logger.warning("Observability indexes failed: %s", exc)
+    # Ephemeral collections (kiosk carts, notifications, login lockouts)
+    # expire on their own too — see services/retention.py for what's
+    # deliberately NOT on this list (transactions, audit, BAS/GST).
+    try:
+        from services.retention import ensure_indexes as ensure_retention_indexes
+        await ensure_retention_indexes()
+    except Exception as exc:
+        logger.warning("Retention indexes failed: %s", exc)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

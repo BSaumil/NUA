@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from database import db
 from deps import require_owner_or_manager
 from services.observability import check_health
+from services import retention
 
 router = APIRouter()
 
@@ -36,3 +37,18 @@ async def recent_errors(limit: int = 50, _: dict = Depends(require_owner_or_mana
         exp = r.get("expiresAt")
         r["expiresAt"] = exp.isoformat() if hasattr(exp, "isoformat") else exp
     return {"errors": rows, "count": len(rows)}
+
+
+@router.get("/ops/retention")
+async def retention_status(_: dict = Depends(require_owner_or_manager)):
+    """What gets auto-deleted, how long it's kept, and why — deliberately
+    limited to the ephemeral collections (kiosk carts, notifications, login
+    lockouts). Financial and audit records are never on this list."""
+    return {"policy": await retention.status()}
+
+
+@router.post("/ops/retention/purge")
+async def retention_purge(_: dict = Depends(require_owner_or_manager)):
+    """Run the purge immediately rather than waiting for Mongo's own TTL
+    sweep. Only ever removes what was already past its expiry."""
+    return {"deleted": await retention.purge_now()}
