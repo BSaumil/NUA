@@ -84,7 +84,34 @@ export function showCourseUI(orderType, config) {
   return !!config?.enabled && !isStraightFire(orderType, config, false);
 }
 
-/** Fire/hold state of a course on a live kitchen order. */
+/** Fire/hold/ready state of a course on a live kitchen order. */
 export function courseStatus(order, key) {
   return order?.courses?.[String(key)]?.status || 'queued';
+}
+
+/** Courses on this ticket that the kitchen has called ready at the pass. */
+export function readyCourses(order, config) {
+  if (!order?.courses) return [];
+  return Object.entries(order.courses)
+    .filter(([, v]) => v?.status === 'ready')
+    .map(([k]) => ({ key: Number(k), label: courseLabel(Number(k), config) }))
+    .sort((a, b) => a.key - b.key);
+}
+
+/** Seat numbers a server can pick from, when seat ordering is on. */
+export function seatOptions(config) {
+  const n = Math.max(1, Math.min(40, Number(config?.seatCount) || 8));
+  return Array.from({ length: n }, (_, i) => i + 1);
+}
+
+export function seatsEnabled(config) {
+  return !!config?.enabled && !!config?.useSeats;
+}
+
+/** A one-line summary of a timing rule, for the settings screen. */
+export function describeTimingRule(courseKey, rule, config) {
+  if (!rule) return 'fires when a server taps Fire';
+  const after = courseLabel(rule.afterCourse, config);
+  const verb = rule.afterEvent === 'served' ? 'served' : 'fired';
+  return `fires ${rule.minutes} min after ${after} is ${verb}`;
 }

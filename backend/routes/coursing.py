@@ -5,6 +5,7 @@ never created a kitchen order, so the KDS hold/fire buttons only ever applied
 to tickets a chef typed in by hand. Courses assigned on the POS now become a
 real kitchen order with real per-course state.
 """
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -16,6 +17,7 @@ from models.kitchen_order import KitchenOrder
 from services import coursing
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 
 def _now() -> str:
@@ -66,9 +68,21 @@ async def send_to_kitchen(body: dict, request: Request, user: dict = Depends(get
 
     config = await coursing.get_config()
     order_type = body.get("orderType") or "dine_in"
+
+    # A dine-in table that orders again mid-meal belongs on the ticket the
+    # kitchen already has, not on a second one the runner has to reconcile.
+    # `newTicket: true` forces a fresh one when that's genuinely wanted.
+    table_number = body.get("tableNumber")
+    if table_number and not body.get("newTicket") and str(order_type).replace("-", "_") == "dine_in":
+        existing = await db.kitchen_orders.find_one(
+            {"tableNumber": table_number, "status": {"$nin": ["served", "cancelled"]}},
+            {"_id": 0}, sort=[("createdAt", -1)],
+        )
+        if existing:
+            return await add_round(existing["id"], body, user)
     straight = coursing.is_straight_fire(order_type, config, bool(body.get("straightFire")))
 
-    priced = coursing.assign_courses(items, config)
+    priced = [{**it, "round": 1} for it in coursing.assign_courses(items, config)]
     now = _now()
     actor = user.get("name") or user.get("email")
 
@@ -97,14 +111,65 @@ async def send_to_kitchen(body: dict, request: Request, user: dict = Depends(get
     doc["straightFired"] = straight
     await db.kitchen_orders.insert_one(doc)
     doc.pop("_id", None)
+
+    # Courses fired at creation never pass through fire_course_internal, so
+    # their side effects have to run here too — otherwise the first course
+    # reaches the pass without printing a docket or moving the table's pacing.
+    fired_now = sorted(int(k) for k, v in (doc.get("courses") or {}).items()
+                       if v.get("status") == "fired")
+    for course in fired_now:
+        label = next((str(c.get("label")) for c in (config.get("courses") or [])
+                      if int(c.get("key")) == course), f"Course {course}")
+        try:
+            from services import print_routing
+            fired_items = [{**it, "courseLabel": label} for it in priced
+                           if int(it.get("course") or 1) == course]
+            if fired_items:
+                await print_routing.route_and_queue(
+                    fired_items, order_id=doc["id"], table_number=doc.get("tableNumber"),
+                    extra={"course": course, "courseLabel": label, "kitchenOrderId": doc["id"]},
+                )
+        except Exception as e:
+            log.warning("send-to-kitchen: docket print failed for %s: %s", doc["id"], e)
+    if fired_now:
+        try:
+            from services import table_pacing
+            # Only the last fired course matters for pacing — a straight-fired
+            # order shouldn't walk the table through every stage at once.
+            await table_pacing.advance_for_course(doc, fired_now[-1], config)
+        except Exception as e:
+            log.warning("send-to-kitchen: pacing sync failed for %s: %s", doc["id"], e)
     return doc
+
+
+async def _apply_due_auto_fires(order: dict, config: dict, actor: str = "auto") -> dict:
+    """Fire any held course whose timing rule has come due.
+
+    Evaluated lazily whenever the POS reads its ticket, so timing works
+    without depending on a background scheduler being alive.
+    """
+    due = coursing.due_auto_fires(order, config)
+    if not due:
+        return order
+    from routes.kitchen import fire_course_internal
+    for course in due:
+        try:
+            order = await fire_course_internal(order["id"], course, actor)
+        except Exception:
+            break
+    return order
 
 
 @router.get("/coursing/orders/open")
 async def open_kitchen_orders(tableNumber: Optional[str] = None,
                               transactionId: Optional[str] = None,
                               _: dict = Depends(get_user)):
-    """Kitchen orders the POS can still fire courses on."""
+    """Kitchen orders the POS can still fire courses on.
+
+    This is also how the POS re-attaches after a refresh, or how a second
+    tablet picks up a table someone else rang in — without it, fire/hold
+    only worked in the tab that happened to create the ticket.
+    """
     query: dict = {"status": {"$nin": ["served", "cancelled"]}}
     if tableNumber:
         query["tableNumber"] = tableNumber
@@ -112,4 +177,94 @@ async def open_kitchen_orders(tableNumber: Optional[str] = None,
         query["transactionId"] = transactionId
     rows = await db.kitchen_orders.find(query, {"_id": 0}).to_list(50)
     rows.sort(key=lambda r: r.get("createdAt") or "", reverse=True)
-    return rows
+
+    config = await coursing.get_config()
+    return [await _apply_due_auto_fires(r, config) for r in rows]
+
+
+@router.post("/coursing/orders/{order_id}/add-round")
+async def add_round(order_id: str, body: dict, user: dict = Depends(get_user)):
+    """Append a later order onto the table's existing ticket.
+
+    A table that orders dessert an hour after mains is still one ticket. The
+    new items land as the next round, and any course they introduce starts
+    held so the kitchen doesn't fire dessert the moment it's rung in.
+    """
+    items = body.get("items") or []
+    if not items:
+        raise HTTPException(status_code=400, detail="No items to add")
+
+    order = await db.kitchen_orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.get("status") in ("served", "cancelled"):
+        raise HTTPException(status_code=409, detail="Order is already closed")
+
+    config = await coursing.get_config()
+    now = _now()
+    actor = user.get("name") or user.get("email")
+    straight = coursing.is_straight_fire(order.get("orderType"), config, bool(body.get("straightFire")))
+
+    next_round = int(order.get("rounds") or 1) + 1
+    new_items = [
+        {**it, "round": next_round}
+        for it in coursing.assign_courses(items, config)
+    ]
+
+    courses = dict(order.get("courses") or {})
+    for it in new_items:
+        key = str(int(it.get("course") or 1))
+        if key in courses:
+            continue        # course already on the ticket — keep its state
+        if straight:
+            courses[key] = {"status": "fired", "heldAt": None, "firedAt": now,
+                            "firedBy": actor, "readyAt": None, "servedAt": None}
+        else:
+            courses[key] = {"status": "held", "heldAt": now, "firedAt": None,
+                            "firedBy": None, "readyAt": None, "servedAt": None}
+
+    updated = await db.kitchen_orders.find_one_and_update(
+        {"id": order_id},
+        {"$set": {"courses": courses, "rounds": next_round,
+                  "items": (order.get("items") or []) + new_items,
+                  # A closed-out ticket reopening for dessert is active again.
+                  "status": "new" if order.get("status") == "ready" else order.get("status", "new")}},
+        return_document=True,
+    )
+    updated.pop("_id", None)
+
+    # Straight-fired additions print immediately; held ones print when fired.
+    if straight:
+        try:
+            from services import print_routing
+            await print_routing.route_and_queue(
+                new_items, order_id=order_id, table_number=updated.get("tableNumber"),
+                extra={"kitchenOrderId": order_id, "round": next_round},
+            )
+        except Exception:
+            pass
+    return updated
+
+
+@router.post("/coursing/auto-fire/tick")
+async def auto_fire_tick(_: dict = Depends(get_user)):
+    """Evaluate timing rules across every open ticket.
+
+    The POS already evaluates its own ticket on read; this covers tables
+    nobody happens to be looking at.
+    """
+    config = await coursing.get_config()
+    if not config.get("enabled") or not config.get("autoFireTiming"):
+        return {"checked": 0, "fired": []}
+    rows = await db.kitchen_orders.find(
+        {"status": {"$nin": ["served", "cancelled"]}}, {"_id": 0}).to_list(200)
+    fired = []
+    for order in rows:
+        due = coursing.due_auto_fires(order, config)
+        if not due:
+            continue
+        from routes.kitchen import fire_course_internal
+        for course in due:
+            await fire_course_internal(order["id"], course, "auto")
+            fired.append({"orderId": order["id"], "course": course})
+    return {"checked": len(rows), "fired": fired}

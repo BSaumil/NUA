@@ -138,6 +138,9 @@ export default function Kitchen() {
     fire:    async (id, c) => { try { await kitchenAPI.fireCourse(id, c); toast.success(`${COURSE_LABEL[c] || 'C'+c} fired`); fetchOrders(); } catch { toast.error('Failed'); } },
     hold:    async (id, c) => { try { await kitchenAPI.holdCourse(id, c); toast(`${COURSE_LABEL[c] || 'C'+c} held`); fetchOrders(); } catch { toast.error('Failed'); } },
     serveC:  async (id, c) => { try { await kitchenAPI.serveCourse(id, c); toast.success(`${COURSE_LABEL[c] || 'C'+c} served`); fetchOrders(); } catch { toast.error('Failed'); } },
+    // Course-level ready — tells the server this course is up at the pass
+    // instead of making them watch it.
+    readyC:  async (id, c) => { try { await kitchenAPI.readyCourse(id, c); toast.success(`${COURSE_LABEL[c] || 'C'+c} ready — server notified`); fetchOrders(); } catch { toast.error('Failed'); } },
   };
 
   const addItemToOrder = () => {
@@ -198,7 +201,8 @@ export default function Kitchen() {
     const label = COURSE_LABEL[courseNum] || `Course ${courseNum}`;
     const canHold = meta.status === 'queued';
     const canFire = ['queued', 'held'].includes(meta.status);
-    const canServe = meta.status === 'fired';
+    const canReady = meta.status === 'fired';
+    const canServe = ['fired', 'ready'].includes(meta.status);
     return (
       <div key={courseNum} className="border rounded-lg overflow-hidden mb-2" data-testid={`course-block-${order.id}-${courseNum}`}>
         <div className={`flex items-center justify-between px-3 py-1.5 ${COURSE_STATUS_TONE[meta.status] || 'bg-slate-100'}`}>
@@ -230,6 +234,13 @@ export default function Kitchen() {
                 onClick={() => handle.fire(order.id, courseNum)}
                 data-testid={`fire-c${courseNum}-${order.id}`}>
                 <Flame size={10} /> Fire
+              </button>
+            )}
+            {canReady && (
+              <button className="text-[10px] px-2 py-0.5 bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-1"
+                onClick={() => handle.readyC(order.id, courseNum)}
+                data-testid={`ready-c${courseNum}-${order.id}`}>
+                <Check size={10} /> Ready
               </button>
             )}
             {canServe && (

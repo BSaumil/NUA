@@ -175,42 +175,8 @@ For each item, suggest ONE replacement with: name, suggested price, estimated fo
 # routing on the generic words "Beverages"/"Alcohol" alone silently sent every
 # Negroni to the kitchen printer. These are listed explicitly, and anything
 # else in a drinks category group falls back to the bar via _route_for_item.
-DEFAULT_PRINT_ROUTING = {
-    "enabled": True,
-    "routes": [
-        {"category": "Beverages", "printer": "Bar Printer", "priority": 1},
-        {"category": "Alcohol", "printer": "Bar Printer", "priority": 1},
-        {"category": "Beer", "printer": "Bar Printer", "priority": 1},
-        {"category": "Wine — Red", "printer": "Bar Printer", "priority": 1},
-        {"category": "Wine — White", "printer": "Bar Printer", "priority": 1},
-        {"category": "Wine — Sparkling", "printer": "Bar Printer", "priority": 1},
-        {"category": "Wine — Rosé", "printer": "Bar Printer", "priority": 1},
-        {"category": "Cocktails", "printer": "Bar Printer", "priority": 1},
-        {"category": "Spirits — Whisky", "printer": "Bar Printer", "priority": 1},
-        {"category": "Spirits — Gin", "printer": "Bar Printer", "priority": 1},
-        {"category": "Spirits — Vodka", "printer": "Bar Printer", "priority": 1},
-        {"category": "Spirits — Rum", "printer": "Bar Printer", "priority": 1},
-        {"category": "Spirits — Tequila", "printer": "Bar Printer", "priority": 1},
-        {"category": "Liqueurs", "printer": "Bar Printer", "priority": 1},
-        {"category": "Non-Alcoholic", "printer": "Bar Printer", "priority": 1},
-        {"category": "Coffee & Tea", "printer": "Bar Printer", "priority": 1},
-        {"category": "Food", "printer": "Kitchen Printer", "priority": 2},
-        {"category": "Mains", "printer": "Kitchen Printer", "priority": 2},
-        {"category": "Appetizers", "printer": "Kitchen Printer", "priority": 1},
-        {"category": "Bakery", "printer": "Kitchen Printer", "priority": 3},
-        {"category": "Desserts", "printer": "Kitchen Printer", "priority": 3},
-        {"category": "Pizza", "printer": "Pizza Station", "priority": 1},
-    ],
-    # Category groups (from the categories collection) used when no explicit
-    # category route matches — so a newly added drink category still goes to
-    # the bar instead of quietly landing on the kitchen printer.
-    "groupRoutes": [
-        {"group": "Alcohol", "printer": "Bar Printer", "priority": 1},
-        {"group": "Drinks", "printer": "Bar Printer", "priority": 1},
-    ],
-    "defaultPrinter": "Kitchen Printer",
-    "defaultPriority": 2,
-}
+# Routing defaults live with the routing logic so the two cannot drift.
+from services.print_routing import DEFAULT_PRINT_ROUTING
 
 
 @router.get("/print-routing/config")
@@ -272,88 +238,18 @@ async def save_print_routing(data: dict, _: dict = Depends(require_owner_or_mana
 
 @router.post("/print-routing/send")
 async def send_to_printers(data: dict, _: dict = Depends(get_user)):
-    """Route order items to appropriate printers based on category"""
+    """Route order items to station printers.
 
-    order_items = data.get("items", [])
-    order_id = data.get("orderId", f"ORD-{str(uuid.uuid4())[:8].upper()}")
-    table_number = data.get("tableNumber", None)
-
-    # Get routing config
-    import copy
-    s = await db.settings.find_one({"key": "print_routing"}, {"_id": 0})
-    config = s["value"] if (s and s.get("value")) else copy.deepcopy(DEFAULT_PRINT_ROUTING)
-    routes = config.get("routes", [])
-    group_routes = config.get("groupRoutes") or DEFAULT_PRINT_ROUTING["groupRoutes"]
-    default_printer = config.get("defaultPrinter", "Kitchen Printer")
-    default_priority = config.get("defaultPriority", 2)
-
-    # Category -> group lookup, so an unrouted drink category still finds the
-    # bar rather than defaulting onto the kitchen printer.
-    cat_docs = await db.categories.find({}, {"_id": 0, "name": 1, "group": 1}).to_list(500)
-    cat_group = {c.get("name", "").lower(): (c.get("group") or "") for c in cat_docs}
-
-    def _route_for(cat: str):
-        route = next((r for r in routes if str(r.get("category", "")).lower() == cat.lower()), None)
-        if route:
-            return route["printer"], route.get("priority", default_priority)
-        grp = cat_group.get(cat.lower(), "")
-        if grp:
-            g = next((r for r in group_routes if str(r.get("group", "")).lower() == grp.lower()), None)
-            if g:
-                return g["printer"], g.get("priority", default_priority)
-        return default_printer, default_priority
-
-    # Group items by printer, keeping same-category dishes adjacent so each
-    # station's docket reads category-wise rather than in raw cart order.
-    printer_jobs = {}
-    for item in order_items:
-        cat = item.get("category", "") or ""
-        printer_name, priority = _route_for(cat)
-
-        if printer_name not in printer_jobs:
-            printer_jobs[printer_name] = {"printer": printer_name, "items": [], "priority": priority}
-        printer_jobs[printer_name]["items"].append(item)
-        printer_jobs[printer_name]["priority"] = min(printer_jobs[printer_name]["priority"], priority)
-
-    for job in printer_jobs.values():
-        seen = []
-        for it in job["items"]:
-            c = (it.get("category") or "").lower()
-            if c not in seen:
-                seen.append(c)
-        job["items"].sort(key=lambda it: seen.index((it.get("category") or "").lower()))
-
-    # Create print jobs sorted by priority
-    jobs = sorted(printer_jobs.values(), key=lambda x: x["priority"])
-
-    # Every docket carries the full list of sections this order fires from
-    # (e.g. BAR · KITCHEN · PIZZA), so each station — and the server picking
-    # up — can see at a glance what else belongs to the same order and where
-    # it's coming from.
-    order_stations = [j["printer"] for j in jobs]
-
-    # Full per-section item detail rides on every docket too, so each station
-    # prints the WHOLE order: its own dishes first (grouped by category), then
-    # the other sections' items category-wise — pizza sees the skewers and the
-    # negronis that go out with its margheritas.
-    order_sections = [{"printer": j["printer"], "items": j["items"]} for j in jobs]
-
-    print_records = []
-    for job in jobs:
-        record = {
-            "id": f"PRINT-{str(uuid.uuid4())[:8].upper()}",
-            "orderId": order_id, "tableNumber": table_number,
-            "printer": job["printer"], "priority": job["priority"],
-            "items": job["items"], "status": "queued",
-            "orderStations": order_stations,
-            "orderSections": order_sections,
-            "createdAt": datetime.now(timezone.utc).isoformat(),
-        }
-        await db.print_jobs.insert_one(record)
-        record.pop("_id", None)
-        print_records.append(record)
-
-    return {"jobs": print_records, "totalPrinters": len(print_records)}
+    The routing itself lives in services/print_routing.py so that firing a
+    single course can queue dockets through exactly the same path.
+    """
+    from services import print_routing
+    records = await print_routing.route_and_queue(
+        data.get("items", []),
+        order_id=data.get("orderId"),
+        table_number=data.get("tableNumber"),
+    )
+    return {"jobs": records, "totalPrinters": len(records)}
 
 @router.get("/print-routing/queue")
 async def get_print_queue(request: Request, printer: str = None):

@@ -13,6 +13,7 @@ The whole feature is off by default. A takeaway-only venue should never see a
 course selector, so `enabled: False` means the POS renders exactly what it did
 before this existed.
 """
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from database import db
@@ -42,6 +43,28 @@ DEFAULT_COURSING_CONFIG: Dict[str, Any] = {
     # Order types that always straight-fire regardless of the above — a
     # takeaway coffee should never sit held behind a starter.
     "straightFireOrderTypes": ["takeaway", "delivery"],
+
+    # ── Course timing ────────────────────────────────────────────────────
+    # Auto-fire a held course a set time after the previous one reached a
+    # given state. Keyed by course: {"2": {"afterCourse": 1,
+    # "afterEvent": "served"|"fired", "minutes": 12}}. Nothing fires
+    # automatically unless `autoFireTiming` is on — a rule that fires food
+    # at an empty table is worse than a server having to tap.
+    "autoFireTiming": False,
+    "courseTiming": {},
+
+    # ── Seats ────────────────────────────────────────────────────────────
+    # Seat-level ordering, so runners know who had what without asking.
+    "useSeats": False,
+    "seatCount": 8,
+
+    # ── Table pacing ─────────────────────────────────────────────────────
+    # Firing a kitchen course advances the floor plan's pacing state for that
+    # table, so the dwell timers on the floor plan track what the kitchen is
+    # actually doing instead of drifting apart.
+    "syncTablePacing": True,
+    # Kitchen course key -> table_courses pacing key.
+    "tablePacingMap": {"1": "entree", "2": "main", "3": "dessert", "4": "coffee"},
 }
 
 
@@ -182,6 +205,33 @@ def sanitize_config(body: Dict[str, Any]) -> Dict[str, Any]:
                 patch[key] = 1
         elif key == "straightFireOrderTypes":
             patch[key] = [str(t) for t in (val or [])]
+        elif key == "seatCount":
+            try:
+                patch[key] = max(1, min(40, int(val)))
+            except (TypeError, ValueError):
+                patch[key] = 8
+        elif key == "courseTiming":
+            cleaned = {}
+            for course, rule in (val or {}).items():
+                if not isinstance(rule, dict):
+                    continue
+                try:
+                    cleaned[str(int(course))] = {
+                        "afterCourse": int(rule.get("afterCourse")),
+                        "afterEvent": ("served" if str(rule.get("afterEvent")) == "served" else "fired"),
+                        "minutes": max(0, int(rule.get("minutes") or 0)),
+                    }
+                except (TypeError, ValueError):
+                    continue
+            patch[key] = cleaned
+        elif key == "tablePacingMap":
+            cleaned = {}
+            for course, pacing in (val or {}).items():
+                try:
+                    cleaned[str(int(course))] = str(pacing)
+                except (TypeError, ValueError):
+                    continue
+            patch[key] = cleaned
         else:
             patch[key] = bool(val)
 
@@ -194,4 +244,55 @@ def sanitize_config(body: Dict[str, Any]) -> Dict[str, Any]:
             }
         if patch.get("defaultCourse") not in valid:
             patch["defaultCourse"] = min(valid)
+        if "courseTiming" in patch:
+            patch["courseTiming"] = {
+                k: r for k, r in patch["courseTiming"].items()
+                if int(k) in valid and r["afterCourse"] in valid and int(k) != r["afterCourse"]
+            }
+        if "tablePacingMap" in patch:
+            patch["tablePacingMap"] = {
+                k: v for k, v in patch["tablePacingMap"].items() if int(k) in valid
+            }
     return patch
+
+
+# ── Course timing ────────────────────────────────────────────────────────
+def _parse(ts: Optional[str]) -> Optional[datetime]:
+    if not ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(ts)
+    except (TypeError, ValueError):
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def due_auto_fires(order: Dict[str, Any], config: Dict[str, Any],
+                   now: Optional[datetime] = None) -> List[int]:
+    """Which held courses on this order are now due to fire automatically?
+
+    A rule only fires a course that is actually *held* — a course a server
+    deliberately fired early, or one already at the pass, is left alone.
+    """
+    if not config.get("enabled") or not config.get("autoFireTiming"):
+        return []
+    rules = config.get("courseTiming") or {}
+    if not rules:
+        return []
+    now = now or datetime.now(timezone.utc)
+    courses = order.get("courses") or {}
+    due: List[int] = []
+    for course_key, rule in rules.items():
+        state = courses.get(str(course_key))
+        if not state or state.get("status") != "held":
+            continue
+        prev = courses.get(str(rule.get("afterCourse")))
+        if not prev:
+            continue
+        event = rule.get("afterEvent") or "fired"
+        anchor = _parse(prev.get("servedAt") if event == "served" else prev.get("firedAt"))
+        if not anchor:
+            continue          # the previous course hasn't reached that state yet
+        if (now - anchor) >= timedelta(minutes=int(rule.get("minutes") or 0)):
+            due.append(int(course_key))
+    return sorted(due)

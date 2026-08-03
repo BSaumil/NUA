@@ -25,11 +25,24 @@ export function groupByCategory(items) {
   return groups;
 }
 
+// Group a section's items by course, in course order. Items without a course
+// collapse into a single unlabelled group, so a venue that doesn't use
+// coursing gets exactly the docket it got before.
+export function groupByCourse(items) {
+  const buckets = new Map();
+  (items || []).forEach(item => {
+    const key = item.course == null ? null : Number(item.course);
+    if (!buckets.has(key)) buckets.set(key, { key, label: item.courseLabel || null, items: [] });
+    buckets.get(key).items.push(item);
+  });
+  return [...buckets.values()].sort((a, b) => (a.key ?? 0) - (b.key ?? 0));
+}
+
 function itemRows(items, dim = false) {
   return (items || []).map(item => `
       <tr class="${dim ? 'dim' : ''}">
         <td class="qty">${item.quantity || 1}×</td>
-        <td class="name">${item.productName || item.name || ''}</td>
+        <td class="name">${item.seat ? `<span class="seat">S${item.seat}</span> ` : ''}${item.productName || item.name || ''}</td>
       </tr>
       ${item.notes ? `<tr class="${dim ? 'dim' : ''}"><td></td><td class="note">» ${item.notes}</td></tr>` : ''}
   `).join('');
@@ -39,6 +52,18 @@ function categoryBlocks(items, dim = false) {
   return groupByCategory(items).map(g => `
       <div class="cat${dim ? ' dim' : ''}">${g.category}</div>
       <table>${itemRows(g.items, dim)}</table>
+  `).join('');
+}
+
+// Courses outrank categories on a station docket: the station cooks a course
+// at a time, and within it wants its categories together.
+function courseBlocks(items, dim = false) {
+  const courses = groupByCourse(items);
+  const unlabelled = courses.length === 1 && courses[0].key == null;
+  if (unlabelled) return categoryBlocks(items, dim);
+  return courses.map(c => `
+      <div class="course${dim ? ' dim' : ''}">${c.label || (c.key == null ? 'ORDER' : `COURSE ${c.key}`)}</div>
+      ${categoryBlocks(c.items, dim)}
   `).join('');
 }
 
@@ -63,7 +88,7 @@ export function generateDocketHTML(job) {
 
   const othersHTML = otherSections.map(s => `
       <div class="other-station">${stationLabel(s.printer)}</div>
-      ${categoryBlocks(s.items, true)}
+      ${courseBlocks(s.items, true)}
   `).join('');
 
   const stationChips = stations.map(s =>
@@ -98,17 +123,24 @@ export function generateDocketHTML(job) {
         .sections .label { font-size: 10px; letter-spacing: 1px; }
         .chip { display: inline-block; border: 1px solid #000; padding: 1px 6px; margin: 2px 3px 0 0; font-size: 11px; font-weight: bold; }
         .chip.own { background: #000; color: #fff; }
+        /* Course banner — the station is cooking one course at a time */
+        .fired { text-align: center; font-size: 14px; font-weight: bold; letter-spacing: 2px; border: 1px solid #000; margin-top: 3px; padding: 2px 0; }
+        .course { font-size: 13px; font-weight: bold; letter-spacing: 2px; margin-top: 8px; border-bottom: 2px solid #000; }
+        .course.dim { font-weight: normal; border-bottom-width: 1px; }
+        /* Seat number so a runner knows who gets what without asking */
+        .seat { display: inline-block; border: 1px solid #000; padding: 0 3px; font-size: 11px; margin-right: 2px; }
       </style>
     </head>
     <body>
       <div class="station">${own}</div>
+      ${job.courseLabel ? `<div class="fired">FIRE: ${job.courseLabel}</div>` : ''}
       <div class="meta">
         <span>${job.tableNumber ? `TABLE ${job.tableNumber}` : (job.orderId || '')}</span>
         <span class="prio">P${job.priority || 2}${time ? ` · ${time}` : ''}</span>
       </div>
       ${job.tableNumber && job.orderId ? `<div class="meta"><span>${job.orderId}</span></div>` : ''}
       <div class="sep"></div>
-      ${categoryBlocks(ownSection.items)}
+      ${courseBlocks(ownSection.items)}
       ${otherSections.length > 0 ? `
         <div class="also">— ALSO ON THIS ORDER —</div>
         ${othersHTML}

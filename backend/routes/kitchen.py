@@ -1,15 +1,28 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import Optional
+import logging
 from datetime import datetime, timezone
 from database import db
 from deps import get_user
 from models.kitchen_order import KitchenOrder, KitchenOrderCreate
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _course_label(course: int, coursing_config: dict) -> str:
+    """The venue's own name for a course, falling back to a generic one."""
+    for c in (coursing_config or {}).get("courses") or []:
+        try:
+            if int(c.get("key")) == int(course):
+                return str(c.get("label") or f"Course {course}")
+        except (TypeError, ValueError):
+            continue
+    return {1: "Starter", 2: "Main", 3: "Dessert", 4: "Coffee"}.get(course, f"Course {course}")
 
 
 def _today_str() -> str:
@@ -211,11 +224,14 @@ async def hold_course(order_id: str, course: int, _: dict = Depends(get_user)):
     return result
 
 
-@router.post("/kitchen/orders/{order_id}/fire-course/{course}")
-async def fire_course(order_id: str, course: int, user: dict = Depends(get_user)):
-    """Fire a specific course — sets courseX.firedAt, courseX.firedBy and
-    updates the order's currentCourse pointer. Held courses can be fired
-    with this call too (the hold is lifted)."""
+async def fire_course_internal(order_id: str, course: int, actor: str) -> dict:
+    """Fire a course and run every side effect: print the station dockets for
+    that course, advance the table's pacing, notify the server.
+
+    Shared by the endpoint below and by the timing rules that fire a course
+    automatically, so an auto-fire behaves exactly like a server tapping Fire
+    rather than quietly skipping the printing.
+    """
     key = f"courses.{course}"
     result = await db.kitchen_orders.find_one_and_update(
         {"id": order_id},
@@ -223,7 +239,7 @@ async def fire_course(order_id: str, course: int, user: dict = Depends(get_user)
             "currentCourse": course,
             f"{key}.status": "fired",
             f"{key}.firedAt": _now(),
-            f"{key}.firedBy": user.get("name") or user.get("email"),
+            f"{key}.firedBy": actor,
             f"{key}.heldAt": None,
         }},
         return_document=True,
@@ -231,24 +247,99 @@ async def fire_course(order_id: str, course: int, user: dict = Depends(get_user)
     if not result:
         raise HTTPException(status_code=404, detail="Order not found")
     result.pop("_id", None)
+
+    from services import coursing as _coursing
+    cfg = await _coursing.get_config()
+    label = _course_label(course, cfg)
+
+    # A station prints when the course is fired, not when the order is rung
+    # up — that's the whole point of holding a course. Items carry their
+    # course so the docket can label the block.
+    try:
+        from services import print_routing
+        if cfg.get("enabled"):
+            fired_items = [
+                {**it, "course": course, "courseLabel": label}
+                for it in (result.get("items") or [])
+                if int(it.get("course") or 1) == int(course)
+            ]
+            if fired_items:
+                await print_routing.route_and_queue(
+                    fired_items,
+                    order_id=result.get("id"),
+                    table_number=result.get("tableNumber"),
+                    extra={"course": course, "courseLabel": label,
+                           "kitchenOrderId": result.get("id")},
+                )
+    except Exception as e:
+        log.warning("fire-course: docket print failed for %s: %s", order_id, e)
+
+    # Keep the floor plan's pacing in step with what the kitchen just did.
+    try:
+        from services import table_pacing
+        await table_pacing.advance_for_course(result, course, cfg)
+    except Exception as e:
+        log.warning("fire-course: pacing sync failed for %s: %s", order_id, e)
+
     try:
         from services import notification_service as ns
         server_email = result.get("serverId") or result.get("createdByEmail")
-        course_label = {1: "Starter", 2: "Main", 3: "Dessert", 4: "Coffee"}.get(course, f"Course {course}")
+        title = f"Table {result.get('tableNumber') or '?'} — {label} fired"
         if server_email:
-            await ns.send(email=server_email, kind="kitchen", severity="info",
-                            title=f"Table {result.get('tableNumber') or '?'} — {course_label} fired",
-                            body=f"Kitchen just fired {course_label} for your order.",
-                            link=f"/kitchen?order={order_id}",
-                            data={"orderId": order_id, "course": course})
+            await ns.send(email=server_email, kind="kitchen", severity="info", title=title,
+                          body=f"Kitchen just fired {label} for your order.",
+                          link=f"/kitchen?order={order_id}",
+                          data={"orderId": order_id, "course": course})
         else:
-            await ns.send(role="server", topic="kitchen.fire", kind="kitchen",
-                            title=f"Table {result.get('tableNumber') or '?'} — {course_label} fired",
-                            body=f"Kitchen just fired {course_label}.",
-                            link=f"/kitchen?order={order_id}",
-                            data={"orderId": order_id, "course": course})
+            await ns.send(role="server", topic="kitchen.fire", kind="kitchen", title=title,
+                          body=f"Kitchen just fired {label}.",
+                          link=f"/kitchen?order={order_id}",
+                          data={"orderId": order_id, "course": course})
     except Exception:
         pass
+    return result
+
+
+@router.post("/kitchen/orders/{order_id}/fire-course/{course}")
+async def fire_course(order_id: str, course: int, user: dict = Depends(get_user)):
+    """Fire a specific course — lifts any hold, prints that course's dockets,
+    and advances the table's pacing."""
+    return await fire_course_internal(order_id, course, user.get("name") or user.get("email"))
+
+
+@router.post("/kitchen/orders/{order_id}/ready-course/{course}")
+async def ready_course(order_id: str, course: int, user: dict = Depends(get_user)):
+    """Mark a single course ready at the pass.
+
+    Order-level `ready` already existed, but with coursing the server needs to
+    know that *this* course is up — otherwise they're back to watching the
+    pass, which is what coursing was supposed to stop.
+    """
+    key = f"courses.{course}"
+    result = await db.kitchen_orders.find_one_and_update(
+        {"id": order_id},
+        {"$set": {f"{key}.status": "ready", f"{key}.readyAt": _now()}},
+        return_document=True,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Order not found")
+    result.pop("_id", None)
+    try:
+        from services import coursing as _coursing, notification_service as ns
+        label = _course_label(course, await _coursing.get_config())
+        server_email = result.get("serverId") or result.get("createdByEmail")
+        title = f"Table {result.get('tableNumber') or '?'} — {label} ready"
+        body = f"{label} is up at the pass."
+        if server_email:
+            await ns.send(email=server_email, kind="kitchen", severity="info", title=title,
+                          body=body, link=f"/pos?order={order_id}",
+                          data={"orderId": order_id, "course": course, "event": "ready"})
+        else:
+            await ns.send(role="server", topic="kitchen.ready", kind="kitchen", title=title,
+                          body=body, link=f"/pos?order={order_id}",
+                          data={"orderId": order_id, "course": course, "event": "ready"})
+    except Exception as e:
+        log.warning("ready-course: notify failed for %s: %s", order_id, e)
     return result
 
 

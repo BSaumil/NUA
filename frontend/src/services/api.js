@@ -256,6 +256,8 @@ export const coursingAPI = {
   preview: (data) => api.post('/coursing/preview', data),
   sendToKitchen: (data) => api.post('/coursing/send-to-kitchen', data),
   openOrders: (params) => api.get('/coursing/orders/open', { params }),
+  addRound: (id, data) => api.post(`/coursing/orders/${id}/add-round`, data),
+  autoFireTick: () => api.post('/coursing/auto-fire/tick'),
 };
 
 // Waitlist API
@@ -278,6 +280,7 @@ export const kitchenAPI = {
   fireCourse: (id, course) => api.post(`/kitchen/orders/${id}/fire-course/${course}`),
   holdCourse: (id, course) => api.post(`/kitchen/orders/${id}/hold-course/${course}`),
   serveCourse: (id, course) => api.post(`/kitchen/orders/${id}/serve-course/${course}`),
+  readyCourse: (id, course) => api.post(`/kitchen/orders/${id}/ready-course/${course}`),
   setPriority: (id, priority) => api.post(`/kitchen/orders/${id}/priority`, null, { params: { priority } }),
   getPrepList: () => api.get('/kitchen/prep-list'),
   getAvgOrderTime: () => api.get('/kitchen/avg-order-time'),

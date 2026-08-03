@@ -24,9 +24,10 @@ import ModifierSheet from '../components/pos/ModifierSheet';
 import POSHeaderBar from '../components/pos/POSHeaderBar';
 import ScanVoucherButton from '../components/pos/ScanVoucherButton';
 import TableNumberField from '../components/pos/TableNumberField';
-import { CourseHeader, SendToKitchenBar } from '../components/pos/CourseControls';
+import { CourseHeader, SendToKitchenBar, ReadyBanner, SeatPicker } from '../components/pos/CourseControls';
 import { validateTable } from '../lib/tableNumber';
-import { groupCartByCourse, showCourseUI, courseKeys, courseLabel, lineCourse } from '../lib/coursing';
+import { groupCartByCourse, showCourseUI, courseKeys, courseLabel, lineCourse,
+         readyCourses, seatOptions, seatsEnabled } from '../lib/coursing';
 import { CategoryIcon } from './Categories';
 import { createTransactionResilient } from '../lib/offlineQueue';
 import useOfflineQueue from '../hooks/useOfflineQueue';
@@ -211,6 +212,12 @@ const POSTerminal = () => {
   const [kitchenOrder, setKitchenOrder] = useState(null);   // set once sent
   const [coursingBusy, setCoursingBusy] = useState(false);
   const [courseOverrides, setCourseOverrides] = useState({}); // lineId -> course
+  const [seatOverrides, setSeatOverrides] = useState({});     // lineId -> seat
+  // How much of each cart line has already gone to the kitchen, keyed by line
+  // id. Tracking the *quantity* rather than just "sent" matters: bumping a
+  // line from 1 to 3 after sending is two more dishes the kitchen never heard
+  // about, and only the difference should be added to the ticket.
+  const [sentQty, setSentQty] = useState({});
 
   useEffect(() => {
     coursingAPI.getConfig()
@@ -219,71 +226,126 @@ const POSTerminal = () => {
   }, []);
 
   const coursingOn = showCourseUI(orderType, coursingConfig);
-  // Apply any per-line course the server picked on top of the category default.
-  const cartWithCourses = cart.map(i => (
-    courseOverrides[i.id] != null ? { ...i, course: courseOverrides[i.id] } : i
-  ));
-  const courseGroups = coursingOn ? groupCartByCourse(cartWithCourses, coursingConfig) : [];
+  const useSeats = seatsEnabled(coursingConfig);
+  const seats = seatOptions(coursingConfig);
 
-  // A new cart is a new kitchen ticket — don't leave the previous order's
-  // fire state attached to it.
-  useEffect(() => { if (cart.length === 0) { setKitchenOrder(null); setCourseOverrides({}); } }, [cart.length]);
+  // Apply any per-line course/seat the server picked on top of the defaults.
+  const cartWithCourses = cart.map(i => ({
+    ...i,
+    ...(courseOverrides[i.id] != null ? { course: courseOverrides[i.id] } : {}),
+    ...(seatOverrides[i.id] != null ? { seat: seatOverrides[i.id] } : {}),
+  }));
+  const courseGroups = coursingOn ? groupCartByCourse(cartWithCourses, coursingConfig) : [];
+  // Only the un-sent portion of each line is outstanding.
+  const pendingLines = cartWithCourses
+    .map(i => ({ ...i, quantity: (i.quantity || 0) - (sentQty[i.id] || 0) }))
+    .filter(i => i.quantity > 0);
+  const pendingCount = pendingLines.reduce((n, i) => n + i.quantity, 0);
+  const ready = coursingOn ? readyCourses(kitchenOrder, coursingConfig) : [];
+
+  // An emptied cart drops the per-line state, but NOT the attached ticket:
+  // after a refresh the cart is empty while the table still has live courses,
+  // and clearing here would immediately undo the reattach below.
+  useEffect(() => {
+    if (cart.length === 0) { setCourseOverrides({}); setSeatOverrides({}); setSentQty({}); }
+  }, [cart.length]);
+
+  // Reattach to whatever ticket the kitchen already has for this table, so a
+  // refresh — or picking the table up on a second tablet — can still fire
+  // courses instead of being stranded without a ticket reference.
+  //
+  // Changing table drops the previous ticket first, in the same effect, so
+  // table 12's courses can't linger on screen while the server rings up 14.
+  useEffect(() => {
+    setKitchenOrder(null);
+    setSentQty({});
+    if (!coursingOn || tableCheck.status !== 'ok') return undefined;
+    let cancelled = false;
+    coursingAPI.openOrders({ tableNumber })
+      .then(r => { if (!cancelled) setKitchenOrder((r.data || [])[0] || null); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [coursingOn, tableNumber, orderType, tableCheck.status]);
+
+  // Poll the attached ticket so the cart learns when the kitchen calls a
+  // course ready, and so timing rules (evaluated server-side on read) land.
+  useEffect(() => {
+    if (!kitchenOrder?.id || !coursingOn) return;
+    const tick = setInterval(async () => {
+      try {
+        const r = await coursingAPI.openOrders({ tableNumber: kitchenOrder.tableNumber || undefined });
+        const fresh = (r.data || []).find(o => o.id === kitchenOrder.id);
+        if (fresh) setKitchenOrder(fresh);
+      } catch {}
+    }, 15000);
+    return () => clearInterval(tick);
+  }, [kitchenOrder?.id, kitchenOrder?.tableNumber, coursingOn]);
 
   const setLineCourse = (lineId, course) =>
     setCourseOverrides(prev => ({ ...prev, [lineId]: course }));
+  const setLineSeat = (lineId, seat) =>
+    setSeatOverrides(prev => ({ ...prev, [lineId]: seat }));
+
+  const toKitchenItem = (i) => ({
+    productId: i.productId || i.id, productName: i.name, quantity: i.quantity,
+    category: i.category, notes: i.notes || null,
+    modifiers: i.selectedModifiers || [],
+    course: lineCourse(i, coursingConfig),
+    seat: useSeats ? (i.seat ?? null) : null,
+  });
 
   const sendCartToKitchen = async (straightFire = false) => {
-    if (!cart.length || coursingBusy) return;
+    if (coursingBusy) return;
+    // Only the lines not already on the ticket go up — re-sending the whole
+    // cart would double every dish the kitchen is already cooking.
+    const outgoing = kitchenOrder ? pendingLines : cartWithCourses;
+    if (!outgoing.length) return;
     if (tableBlocked) {
       toast({ title: 'Unknown table', description: tableCheck.message, variant: 'destructive' });
       return;
     }
     setCoursingBusy(true);
     try {
-      const r = await coursingAPI.sendToKitchen({
-        items: cartWithCourses.map(i => ({
-          productId: i.productId || i.id, productName: i.name, quantity: i.quantity,
-          category: i.category, notes: i.notes || null,
-          modifiers: i.selectedModifiers || [],
-          course: lineCourse(i, coursingConfig),
-        })),
+      const payload = {
+        items: outgoing.map(toKitchenItem),
         orderType, straightFire,
         tableNumber: orderType === 'dine-in' ? tableNumber : null,
         guestName: orderType === 'takeaway' ? walkInName : (selectedCustomer?.name || null),
-      });
+      };
+      const r = kitchenOrder
+        ? await coursingAPI.addRound(kitchenOrder.id, payload)
+        : await coursingAPI.sendToKitchen(payload);
       setKitchenOrder(r.data);
+      setSentQty(prev => {
+        const next = { ...prev };
+        outgoing.forEach(i => { next[i.id] = (next[i.id] || 0) + i.quantity; });
+        return next;
+      });
       toast({
-        title: straightFire ? 'Fired to kitchen' : 'Sent to kitchen',
+        title: kitchenOrder ? `Added to ticket (round ${r.data?.rounds || 2})`
+             : straightFire ? 'Fired to kitchen' : 'Sent to kitchen',
         description: straightFire
           ? 'All courses fired at once.'
-          : 'First course fired — hold the rest until the table is ready.',
+          : 'Later courses are held until you fire them.',
       });
     } catch (err) {
       toast({ title: 'Could not send to kitchen', description: err.response?.data?.detail || 'Try again', variant: 'destructive' });
     } finally { setCoursingBusy(false); }
   };
 
-  const fireCourseFromCart = async (courseKey) => {
+  const courseAction = async (courseKey, fn, verb) => {
     if (!kitchenOrder) return;
     setCoursingBusy(true);
     try {
-      const r = await kitchenAPI.fireCourse(kitchenOrder.id, courseKey);
+      const r = await fn(kitchenOrder.id, courseKey);
       setKitchenOrder(r.data);
-      toast({ title: `${courseLabel(courseKey, coursingConfig)} fired` });
-    } catch { toast({ title: 'Fire failed', variant: 'destructive' }); }
+      toast({ title: `${courseLabel(courseKey, coursingConfig)} ${verb}` });
+    } catch { toast({ title: `${verb} failed`, variant: 'destructive' }); }
     finally { setCoursingBusy(false); }
   };
-
-  const holdCourseFromCart = async (courseKey) => {
-    if (!kitchenOrder) return;
-    setCoursingBusy(true);
-    try {
-      const r = await kitchenAPI.holdCourse(kitchenOrder.id, courseKey);
-      setKitchenOrder(r.data);
-      toast({ title: `${courseLabel(courseKey, coursingConfig)} held` });
-    } catch { toast({ title: 'Hold failed', variant: 'destructive' }); }
-    finally { setCoursingBusy(false); }
-  };
+  const fireCourseFromCart  = (k) => courseAction(k, kitchenAPI.fireCourse, 'fired');
+  const holdCourseFromCart  = (k) => courseAction(k, kitchenAPI.holdCourse, 'held');
+  const serveCourseFromCart = (k) => courseAction(k, kitchenAPI.serveCourse, 'served');
 
   // Wave 2 — Fetch AI upsell suggestions whenever the cart changes (debounced)
   useEffect(() => {
@@ -1395,6 +1457,11 @@ const POSTerminal = () => {
             </CardContent>
           </Card>
         )}
+        {/* A live ticket for this table outranks the cart being empty — after
+            a refresh the server has no cart but the food is still coming. */}
+        {coursingOn && kitchenOrder && (
+          <ReadyBanner courses={ready} onServe={serveCourseFromCart} busy={coursingBusy} />
+        )}
         <div className="flex-1 overflow-y-auto mb-4">
           {cart.length === 0 ? (
             <div className="text-center py-12 text-gray-400">
@@ -1412,6 +1479,7 @@ const POSTerminal = () => {
                     kitchenOrder={kitchenOrder}
                     onFire={fireCourseFromCart}
                     onHold={holdCourseFromCart}
+                    onServe={serveCourseFromCart}
                     busy={coursingBusy}
                   />
                   <div className="space-y-2 p-1.5">
@@ -1427,18 +1495,36 @@ const POSTerminal = () => {
                         {/* Move a single dish to another course — the kitchen
                             ticket is built from these, not from the category
                             default, once the server has overridden it. */}
-                        <div className="flex items-center gap-1 pl-1 pt-0.5">
-                          <span className="text-[9px] text-gray-400 uppercase tracking-wider">Course</span>
-                          <select
-                            className="text-[10px] border rounded px-1 py-0.5 bg-white"
-                            value={lineCourse(item, coursingConfig)}
-                            onChange={e => setLineCourse(item.id, parseInt(e.target.value, 10))}
-                            data-testid={`cart-course-select-${item.id}`}
-                          >
-                            {courseKeys(coursingConfig).map(k => (
-                              <option key={k} value={k}>{courseLabel(k, coursingConfig)}</option>
-                            ))}
-                          </select>
+                        <div className="flex items-center gap-2 pl-1 pt-0.5">
+                          <span className="flex items-center gap-1">
+                            <span className="text-[9px] text-gray-400 uppercase tracking-wider">Course</span>
+                            <select
+                              className="text-[10px] border rounded px-1 py-0.5 bg-white"
+                              value={lineCourse(item, coursingConfig)}
+                              onChange={e => setLineCourse(item.id, parseInt(e.target.value, 10))}
+                              data-testid={`cart-course-select-${item.id}`}
+                            >
+                              {courseKeys(coursingConfig).map(k => (
+                                <option key={k} value={k}>{courseLabel(k, coursingConfig)}</option>
+                              ))}
+                            </select>
+                          </span>
+                          {useSeats && (
+                            <span data-testid={`cart-seat-wrap-${item.id}`}>
+                              <SeatPicker
+                                value={item.seat ?? null}
+                                seats={seats}
+                                onChange={(s) => setLineSeat(item.id, s)}
+                              />
+                            </span>
+                          )}
+                          {(sentQty[item.id] || 0) > 0 && (
+                            <span className="text-[9px] text-emerald-600" data-testid={`cart-line-sent-${item.id}`}>
+                              {(sentQty[item.id] || 0) >= (item.quantity || 0)
+                                ? 'on ticket'
+                                : `${sentQty[item.id]} of ${item.quantity} on ticket`}
+                            </span>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -1471,6 +1557,8 @@ const POSTerminal = () => {
               sent={!!kitchenOrder}
               busy={coursingBusy}
               disabled={tableBlocked}
+              pendingItems={pendingCount}
+              rounds={kitchenOrder?.rounds || 1}
               onSend={() => sendCartToKitchen(false)}
               onStraightFire={() => sendCartToKitchen(true)}
             />

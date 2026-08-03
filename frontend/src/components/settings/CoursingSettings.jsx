@@ -3,9 +3,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
-import { Save, Plus, Trash2, Flame, Info } from 'lucide-react';
+import { Save, Plus, Trash2, Flame, Info, Timer, Users, LayoutGrid } from 'lucide-react';
 import { coursingAPI, categoriesAPI } from '../../services/api';
 import { toast } from 'sonner';
+
+// Stages the floor plan already paces tables through (table_courses).
+const PACING_STAGES = ['seated', 'drinks', 'entree', 'main', 'dessert', 'coffee', 'check'];
 
 const ORDER_TYPES = [
   { key: 'takeaway', label: 'Takeaway' },
@@ -25,6 +28,8 @@ export default function CoursingSettings({ theme, canEdit }) {
   const [categories, setCategories] = useState([]);
   const [saving, setSaving] = useState(false);
   const [newCourse, setNewCourse] = useState('');
+  // Half-built timing rules, kept out of the saved config until complete.
+  const [timingDraft, setTimingDraft] = useState({});
 
   useEffect(() => {
     coursingAPI.getConfig().then(r => setConfig(r.data)).catch(() => setConfig(null));
@@ -77,6 +82,50 @@ export default function CoursingSettings({ theme, canEdit }) {
     if (value === '') delete next[cat];
     else next[cat] = parseInt(value, 10);
     patch({ categoryCourses: next });
+  };
+
+  /**
+   * A timing rule needs both a delay and a course to count from, and the two
+   * get typed one at a time. `timingDraft` holds the half-built rule so the
+   * first field doesn't vanish while the second is being chosen; only a
+   * complete rule is written into the config that gets saved.
+   */
+  const setTimingRule = (courseKey, changes) => {
+    const key = String(courseKey);
+    const next = { afterEvent: 'served', ...(timingDraft[key] || config.courseTiming?.[key] || {}) };
+    if ('minutes' in changes) {
+      const n = parseInt(changes.minutes, 10);
+      next.minutes = changes.minutes === '' || Number.isNaN(n) ? '' : n;
+    }
+    if ('afterCourse' in changes) {
+      const n = parseInt(changes.afterCourse, 10);
+      next.afterCourse = changes.afterCourse === '' || Number.isNaN(n) ? '' : n;
+    }
+    if ('afterEvent' in changes) next.afterEvent = changes.afterEvent;
+
+    setTimingDraft({ ...timingDraft, [key]: next });
+
+    const timing = { ...(config.courseTiming || {}) };
+    if (next.minutes === '' || !next.afterCourse) delete timing[key];
+    else timing[key] = { minutes: next.minutes, afterCourse: next.afterCourse, afterEvent: next.afterEvent };
+    patch({ courseTiming: timing });
+  };
+
+  const clearTimingRule = (courseKey) => {
+    const key = String(courseKey);
+    const timing = { ...(config.courseTiming || {}) };
+    delete timing[key];
+    const draft = { ...timingDraft };
+    delete draft[key];
+    setTimingDraft(draft);
+    patch({ courseTiming: timing });
+  };
+
+  /** What a timing field should show: the half-typed draft, else the saved rule. */
+  const timingValue = (courseKey, field) => {
+    const key = String(courseKey);
+    const src = timingDraft[key] || config.courseTiming?.[key];
+    return src?.[field] ?? (field === 'afterEvent' ? 'served' : '');
   };
 
   const toggleStraightFireType = (key) => {
@@ -249,6 +298,155 @@ export default function CoursingSettings({ theme, canEdit }) {
                   These order types skip coursing entirely — no course UI, no holding.
                 </p>
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Course timing */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-1.5"><Timer size={14} /> Course timing</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" className="mt-0.5" disabled={disabled}
+                  checked={!!config.autoFireTiming}
+                  onChange={e => patch({ autoFireTiming: e.target.checked })}
+                  data-testid="coursing-auto-timing" />
+                <span className="text-xs">
+                  <strong>Fire held courses automatically on a timer</strong>
+                  <span className="block text-gray-500">
+                    Off by default. A rule that fires food at a table that isn't ready
+                    is worse than a server having to tap Fire.
+                  </span>
+                </span>
+              </label>
+
+              {config.autoFireTiming && (
+                <div className="space-y-2 pt-1 border-t">
+                  {config.courses.map(c => {
+                    const rule = config.courseTiming?.[String(c.key)];
+                    const earlier = config.courses.filter(o => Number(o.key) < Number(c.key));
+                    if (earlier.length === 0) {
+                      return (
+                        <p key={c.key} className="text-[10px] text-gray-400" data-testid={`timing-na-${c.key}`}>
+                          {c.label} — fires on send (nothing comes before it)
+                        </p>
+                      );
+                    }
+                    return (
+                      <div key={c.key} className="flex items-center gap-1.5 flex-wrap text-xs"
+                        data-testid={`timing-row-${c.key}`}>
+                        <span className="font-medium w-20 truncate" title={c.label}>{c.label}</span>
+                        <input type="number" min="0" max="240" className="w-14 h-7 text-xs border rounded px-1"
+                          disabled={disabled} value={timingValue(c.key, 'minutes')}
+                          placeholder="—"
+                          onChange={e => setTimingRule(c.key, { minutes: e.target.value })}
+                          data-testid={`timing-minutes-${c.key}`} />
+                        <span className="text-gray-500">min after</span>
+                        <select className="h-7 text-xs border rounded px-1 bg-white" disabled={disabled}
+                          value={timingValue(c.key, 'afterCourse')}
+                          onChange={e => setTimingRule(c.key, { afterCourse: e.target.value })}
+                          data-testid={`timing-after-${c.key}`}>
+                          <option value="">—</option>
+                          {earlier.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+                        </select>
+                        <select className="h-7 text-xs border rounded px-1 bg-white" disabled={disabled}
+                          value={timingValue(c.key, 'afterEvent')}
+                          onChange={e => setTimingRule(c.key, { afterEvent: e.target.value })}
+                          data-testid={`timing-event-${c.key}`}>
+                          <option value="served">is served</option>
+                          <option value="fired">is fired</option>
+                        </select>
+                        {rule && (
+                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-500" disabled={disabled}
+                            onClick={() => clearTimingRule(c.key)} data-testid={`timing-clear-${c.key}`}>
+                            <Trash2 size={11} />
+                          </Button>
+                        )}
+                      </div>
+                    );
+                  })}
+                  <p className="text-[10px] text-gray-500">
+                    Only a course that's still <em>held</em> auto-fires. One a server already
+                    fired by hand is left alone.
+                  </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Seats */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-1.5"><Users size={14} /> Seats</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" className="mt-0.5" disabled={disabled}
+                  checked={!!config.useSeats}
+                  onChange={e => patch({ useSeats: e.target.checked })}
+                  data-testid="coursing-use-seats" />
+                <span className="text-xs">
+                  <strong>Order by seat</strong>
+                  <span className="block text-gray-500">
+                    Adds a seat picker to each cart line and prints the seat on the
+                    docket, so runners don't have to ask who had the steak.
+                  </span>
+                </span>
+              </label>
+              {config.useSeats && (
+                <div className="flex items-center gap-2 pt-1">
+                  <span className="text-xs">Seats offered per table</span>
+                  <input type="number" min="1" max="40" className="w-16 h-7 text-xs border rounded px-1"
+                    disabled={disabled} value={config.seatCount ?? 8}
+                    onChange={e => patch({ seatCount: parseInt(e.target.value, 10) || 8 })}
+                    data-testid="coursing-seat-count" />
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Floor-plan pacing */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-1.5"><LayoutGrid size={14} /> Floor plan pacing</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" className="mt-0.5" disabled={disabled}
+                  checked={!!config.syncTablePacing}
+                  onChange={e => patch({ syncTablePacing: e.target.checked })}
+                  data-testid="coursing-sync-pacing" />
+                <span className="text-xs">
+                  <strong>Advance the table's pacing when a course fires</strong>
+                  <span className="block text-gray-500">
+                    The floor plan tracks tables through seated → drinks → entrée → main
+                    with dwell timers. Without this it drifts: the plan can show a table on
+                    "drinks" long after the kitchen fired their mains.
+                  </span>
+                </span>
+              </label>
+              {config.syncTablePacing && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t">
+                  {config.courses.map(c => (
+                    <div key={c.key} className="flex items-center gap-2" data-testid={`pacing-row-${c.key}`}>
+                      <span className="text-xs flex-1 truncate" title={c.label}>{c.label}</span>
+                      <select className="text-xs border rounded px-2 h-8 bg-white" disabled={disabled}
+                        value={config.tablePacingMap?.[String(c.key)] ?? ''}
+                        onChange={e => {
+                          const next = { ...(config.tablePacingMap || {}) };
+                          if (e.target.value === '') delete next[String(c.key)];
+                          else next[String(c.key)] = e.target.value;
+                          patch({ tablePacingMap: next });
+                        }}
+                        data-testid={`pacing-select-${c.key}`}>
+                        <option value="">— don't change —</option>
+                        {PACING_STAGES.map(p => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </>
