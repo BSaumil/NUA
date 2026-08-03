@@ -23,6 +23,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 from database import db
+from services.retention import notification_expiry
 import uuid
 import logging
 
@@ -62,6 +63,9 @@ async def send(
         "severity": severity,
         "readAt": None,
         "createdAt": _now(),
+        # 90 days by default (services/retention.py) — long enough to look
+        # back on a season, not a permanent record.
+        "expiresAt": notification_expiry(),
     }
     await db.notifications.insert_one(dict(doc))
     return doc

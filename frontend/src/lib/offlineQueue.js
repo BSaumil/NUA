@@ -12,8 +12,9 @@
 import { transactionsAPI } from '../services/api';
 
 const DB_NAME = 'nua-offline';
-const DB_VERSION = 2;   // v2 adds the coursing action store
+const DB_VERSION = 3;   // v2 added the coursing action store; v3 adds the read-side cache
 const STORE = 'pending_transactions';
+const CACHE_STORE = 'cached_reads';   // menu + open tickets, so the POS has something to render offline
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -26,6 +27,9 @@ function openDB() {
       }
       if (!db.objectStoreNames.contains('pending_course_actions')) {
         db.createObjectStore('pending_course_actions', { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(CACHE_STORE)) {
+        db.createObjectStore(CACHE_STORE, { keyPath: 'key' });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -76,8 +80,10 @@ export async function countQueued() {
 
 // A network-level failure (no response reached the client at all) vs. a
 // real server rejection (validation error, 409, etc.) — only the former
-// should be queued; the latter must still surface to the cashier.
-function isNetworkFailure(error) {
+// should be queued; the latter must still surface to the cashier. Exported
+// so a component can make the same call for reads (fall back to cache) that
+// this file already makes for writes (queue and retry).
+export function isNetworkFailure(error) {
   return !error.response && !!error.request;
 }
 
@@ -179,6 +185,100 @@ export async function flushCourseActions(onProgress) {
       // every later action behind one that can never succeed.
       await withCourseStore('readwrite', (store) => store.delete(row.id));
     }
+  }
+}
+
+// ── Read-side cache: menu and open tickets ─────────────────────────────────
+// The queue above only covers what a till *sends* while offline — it still
+// couldn't show a menu to sell from, or the floor's open tickets, the moment
+// it lost connectivity, because nothing cached what the server last said.
+// A regional drop-out mid-service used to mean a blank product grid, not
+// just a sale that queues quietly.
+async function withCacheStore(mode, fn) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(CACHE_STORE, mode);
+    const result = fn(tx.objectStore(CACHE_STORE));
+    tx.oncomplete = () => resolve(result);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function readCache(key) {
+  const db = await openDB();
+  return new Promise((resolve) => {
+    const tx = db.transaction(CACHE_STORE, 'readonly');
+    const req = tx.objectStore(CACHE_STORE).get(key);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => resolve(null);
+  });
+}
+
+async function writeCache(row) {
+  try { await withCacheStore('readwrite', (store) => store.put(row)); }
+  catch { /* best-effort — a cache write failing must never break the live path */ }
+}
+
+/**
+ * The two halves of the pattern above, exposed separately for call sites
+ * that already run their own parallel fetch (POSTerminal's initial load
+ * fires eight requests via Promise.allSettled) rather than wanting this
+ * module to make the network call itself: cache what succeeded, read back
+ * what's cached when it didn't.
+ */
+export async function cacheCatalogue(products, categories) {
+  await writeCache({ key: 'catalogue', products, categories, cachedAt: new Date().toISOString() });
+}
+
+export async function getCachedCatalogue() {
+  const cached = await readCache('catalogue');
+  return { products: cached?.products || [], categories: cached?.categories || [],
+          cachedAt: cached?.cachedAt || null };
+}
+
+/**
+ * Load the menu with an offline fallback. Tries the network first; on
+ * success, refreshes the cache so the next drop-out has something recent to
+ * fall back to. On a genuine network failure, returns whatever was cached
+ * last, tagged with how stale it is — a real rejection (e.g. a 401) is
+ * thrown through as-is rather than silently masked by stale data.
+ *
+ * For a call site that already runs its own fetch (see cacheCatalogue /
+ * getCachedCatalogue above); this is the convenience wrapper for a simpler
+ * caller that just wants "the menu, offline-safe" in one call.
+ */
+export async function loadCatalogueResilient(fetchProducts, fetchCategories) {
+  try {
+    const [products, categories] = await Promise.all([fetchProducts(), fetchCategories()]);
+    await writeCache({ key: 'catalogue', products, categories, cachedAt: new Date().toISOString() });
+    return { products, categories, offline: false, cachedAt: null };
+  } catch (error) {
+    if (!isNetworkFailure(error)) throw error;
+    const cached = await readCache('catalogue');
+    return {
+      products: cached?.products || [],
+      categories: cached?.categories || [],
+      offline: true,
+      cachedAt: cached?.cachedAt || null,
+    };
+  }
+}
+
+/**
+ * Same shape, for the floor's open tickets — so a table-side view or the
+ * kitchen board still shows the last-known state instead of going blank,
+ * even though nothing can be marked fired/served until the connection is
+ * back (those actions go through courseActionResilient's write queue).
+ */
+export async function loadOpenTicketsResilient(fetchTickets) {
+  try {
+    const tickets = await fetchTickets();
+    await writeCache({ key: 'tickets', tickets, cachedAt: new Date().toISOString() });
+    return { tickets, offline: false, cachedAt: null };
+  } catch (error) {
+    if (!isNetworkFailure(error)) throw error;
+    const cached = await readCache('tickets');
+    return { tickets: cached?.tickets || [], offline: true, cachedAt: cached?.cachedAt || null };
   }
 }
 

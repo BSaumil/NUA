@@ -339,8 +339,10 @@ async def add_quote(data: dict, user: dict = Depends(get_user)):
 # ============================================================================
 @router.post("/kiosk/session")
 async def kiosk_start(data: dict):
+    from services.retention import kiosk_session_expiry
     s = {"id": _uid("KSK"), "tableId": data.get("tableId"), "guests": int(data.get("guests", 1)),
-         "cart": [], "status": "active", "startedAt": _now()}
+         "cart": [], "status": "active", "startedAt": _now(),
+         "expiresAt": kiosk_session_expiry()}
     await db.kiosk_sessions.insert_one(s); s.pop("_id", None)
     return s
 

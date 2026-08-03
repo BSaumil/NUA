@@ -286,6 +286,24 @@ export const twoFactorAPI = {
   setPolicy: (required, roles) => api.post('/auth/2fa/policy', { required, roles }),
 };
 
+// Ops: health + recent unhandled-error visibility
+export const opsAPI = {
+  health: () => api.get('/health'),
+  recentErrors: (limit = 50) => api.get('/ops/errors', { params: { limit } }),
+};
+
+// Backup / restore
+export const backupAPI = {
+  download: () => api.get('/ops/backup', { responseType: 'blob' }),
+  runDrill: () => api.post('/ops/backup/drill'),
+};
+
+// POS layout — structured customization (cart side, tile density, quick actions)
+export const posLayoutAPI = {
+  get: () => api.get('/pos/layout'),
+  save: (data) => api.post('/pos/layout', data),
+};
+
 // Waitlist API
 export const waitlistAPI = {
   getAll: (params) => api.get('/waitlist', { params }),

@@ -13,7 +13,7 @@ import {
 } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { usePOS } from '../contexts/POSContext';
-import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API, v26API, floorPlansAPI, itemsSystemAPI, kitchenAPI, coursingAPI } from '../services/api';
+import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API, v26API, floorPlansAPI, itemsSystemAPI, kitchenAPI, coursingAPI, posLayoutAPI } from '../services/api';
 import { useToast } from '../hooks/use-toast';
 import { useAuth } from '../contexts/AuthContext';
 import VoiceOrderButton from '../components/VoiceOrderButton';
@@ -26,10 +26,11 @@ import ScanVoucherButton from '../components/pos/ScanVoucherButton';
 import TableNumberField from '../components/pos/TableNumberField';
 import { CourseHeader, SendToKitchenBar, ReadyBanner, SeatPicker } from '../components/pos/CourseControls';
 import { validateTable } from '../lib/tableNumber';
+import { readableTextColor } from '../lib/contrast';
 import { groupCartByCourse, showCourseUI, courseKeys, courseLabel, lineCourse,
          readyCourses, seatOptions, seatsEnabled } from '../lib/coursing';
 import { CategoryIcon } from './Categories';
-import { createTransactionResilient, courseActionResilient } from '../lib/offlineQueue';
+import { createTransactionResilient, courseActionResilient, cacheCatalogue, getCachedCatalogue, isNetworkFailure } from '../lib/offlineQueue';
 import { subscribeTickets, streamHealthy } from '../lib/ticketStream';
 import useOfflineQueue from '../hooks/useOfflineQueue';
 import { WifiOff } from 'lucide-react';
@@ -144,6 +145,15 @@ const POSTerminal = () => {
 
   // Categories with icons + colors (kept as full objects, not just names)
   const [categories, setCategories] = useState([{ id: 'all', name: 'All', icon: 'Sparkles', color: '#6366f1' }]);
+  // Set only when the menu currently on screen came from the offline cache
+  // rather than a live fetch — null the rest of the time.
+  const [offlineMenu, setOfflineMenu] = useState(null);
+  // Structured layout customization (Settings > POS Layout) — cart side,
+  // tile density, which quick actions show. Not free-form positioning: see
+  // components/settings/POSLayoutSettings.jsx for why.
+  const [posLayout, setPosLayout] = useState({
+    cartPosition: 'right', tileSize: 'comfortable', quickActions: { hold: true, tabs: true },
+  });
 
   // Modifier definitions (loaded once); ModifierSheet state for click-to-add flow
   const [modifiers, setModifiers] = useState([]);
@@ -186,6 +196,7 @@ const POSTerminal = () => {
   }, []);
 
   useEffect(() => { fetchData(); }, []);
+  useEffect(() => { posLayoutAPI.get().then(r => setPosLayout(r.data)).catch(() => {}); }, []);
 
   // Floor plan tables, loaded once up front so dine-in table entry can be
   // validated as the server types instead of only when they open the picker.
@@ -619,18 +630,40 @@ const POSTerminal = () => {
         v15API.getLabels(localStorage.getItem('nua_lang') || 'en'),
         advancedAPI.getTrainingMode(),
       ]);
+      const buildCategoryList = (raw) => {
+        const active = (raw || [])
+          .filter(c => c.active !== false)
+          .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99))
+          .map(c => ({ id: c.id, name: c.name, icon: c.icon || 'Tag', color: c.color || '#6366f1' }));
+        return [{ id: 'all', name: 'All', icon: 'Sparkles', color: '#6366f1' }, ...active];
+      };
+
       if (productsRes.status === 'fulfilled') setProducts(productsRes.value.data || []);
       if (promotionsRes.status === 'fulfilled') setPromotions(promotionsRes.value.data || []);
       if (customersRes.status === 'fulfilled') setCustomers(customersRes.value.data || []);
       if (catsRes.status === 'fulfilled' && Array.isArray(catsRes.value?.data)) {
-        const active = catsRes.value.data
-          .filter(c => c.active !== false)
-          .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99))
-          .map(c => ({ id: c.id, name: c.name, icon: c.icon || 'Tag', color: c.color || '#6366f1' }));
-        setCategories([{ id: 'all', name: 'All', icon: 'Sparkles', color: '#6366f1' }, ...active]);
+        setCategories(buildCategoryList(catsRes.value.data));
       } else if (catsRes.status === 'rejected') {
         console.error('Failed to load categories', catsRes.reason);
         toast({ title: 'Categories failed to load', description: 'Showing "All" only — check your connection and refresh.', variant: 'destructive' });
+      }
+
+      // The menu is the one thing the floor cannot work without. A dropped
+      // connection used to mean an empty product grid until it came back;
+      // now the last-known menu renders instead, with a banner rather than
+      // a silent substitution, and the actual re-fetch (not just the cache
+      // write) resumes the moment the network genuinely returns.
+      if (productsRes.status === 'fulfilled' && catsRes.status === 'fulfilled') {
+        cacheCatalogue(productsRes.value.data || [], catsRes.value.data || []).catch(() => {});
+        setOfflineMenu(null);
+      } else if (productsRes.status === 'rejected' && isNetworkFailure(productsRes.reason)) {
+        const cached = await getCachedCatalogue();
+        if (cached.products.length) {
+          setProducts(cached.products);
+          setCategories(buildCategoryList(cached.categories));
+          setOfflineMenu({ cachedAt: cached.cachedAt });
+          toast({ title: "You're offline", description: `Showing the menu as of ${cached.cachedAt ? new Date(cached.cachedAt).toLocaleTimeString() : 'last sync'}.`, variant: 'destructive' });
+        }
       }
       if (modsRes.status === 'fulfilled' && Array.isArray(modsRes.value?.data)) {
         setModifiers(modsRes.value.data);
@@ -1145,8 +1178,8 @@ const POSTerminal = () => {
 
   return (
     <div
-      className="flex flex-col lg:flex-row gap-4 h-[calc(100vh-7rem)] -m-6 p-4 transition-colors"
-      style={{ backgroundColor: theme.background }}
+      className={`flex flex-col ${posLayout.cartPosition === 'left' ? 'lg:flex-row-reverse' : 'lg:flex-row'} gap-4 h-[calc(100vh-7rem)] -m-6 p-4 transition-colors`}
+      style={{ backgroundColor: theme.background, '--pos-tile-min': posLayout.tileSize === 'compact' ? '96px' : posLayout.tileSize === 'large' ? '168px' : '130px' }}
       data-testid="pos-terminal"
     >
       {/* Training Mode Banner */}
@@ -1154,6 +1187,16 @@ const POSTerminal = () => {
         <div className="fixed top-0 left-0 right-0 z-40 bg-amber-500 text-white text-center py-2 text-sm font-semibold"
           data-testid="training-mode-banner">
           TRAINING MODE — Transactions are simulated, no real charges
+        </div>
+      )}
+      {/* Offline menu banner — light-on-dark-amber text, not white-on-amber,
+          for the same reason dark mode's --primary-foreground was fixed:
+          this is exactly the message someone needs to actually read. */}
+      {offlineMenu && (
+        <div className={`${trainingMode ? 'fixed top-9' : 'fixed top-0'} left-0 right-0 z-40 bg-amber-100 text-amber-900 text-center py-2 text-sm font-semibold`}
+          data-testid="offline-menu-banner">
+          You're offline — showing the menu as of{' '}
+          {offlineMenu.cachedAt ? new Date(offlineMenu.cachedAt).toLocaleTimeString() : 'last sync'}
         </div>
       )}
       {/* Products Grid — smaller cards, category-wise */}
@@ -1192,17 +1235,21 @@ const POSTerminal = () => {
                 }
               }}
             />
-            <Button variant="outline" className="h-9 px-3" onClick={async () => {
-              if (cart.length === 0) { toast({ title: 'Cart empty', variant: 'destructive' }); return; }
-              try {
-                await v15API.createTab({ name: `Tab ${new Date().toLocaleTimeString()}`, cart, selectedCustomer });
-                toast({ title: 'Order held', description: 'Recall from "Tabs" button' });
-                clearCart();
-              } catch { toast({ title: 'Hold failed', variant: 'destructive' }); }
-            }} data-testid="hold-order-btn">Hold</Button>
-            <Button variant="outline" className="h-9 px-3" onClick={async () => {
-              try { setTablesDialogMode('view'); const r = await v15API.getTabs(); setOpenTabs(r.data || []); setShowTabsDialog(true); } catch {}
-            }} data-testid="recall-tab-btn">Tabs</Button>
+            {posLayout.quickActions.hold && (
+              <Button variant="outline" className="h-9 px-3" onClick={async () => {
+                if (cart.length === 0) { toast({ title: 'Cart empty', variant: 'destructive' }); return; }
+                try {
+                  await v15API.createTab({ name: `Tab ${new Date().toLocaleTimeString()}`, cart, selectedCustomer });
+                  toast({ title: 'Order held', description: 'Recall from "Tabs" button' });
+                  clearCart();
+                } catch { toast({ title: 'Hold failed', variant: 'destructive' }); }
+              }} data-testid="hold-order-btn">Hold</Button>
+            )}
+            {posLayout.quickActions.tabs && (
+              <Button variant="outline" className="h-9 px-3" onClick={async () => {
+                try { setTablesDialogMode('view'); const r = await v15API.getTabs(); setOpenTabs(r.data || []); setShowTabsDialog(true); } catch {}
+              }} data-testid="recall-tab-btn">Tabs</Button>
+            )}
           </div>
           {activePromos.length > 0 && (
             <div className="flex gap-1.5 overflow-x-auto pb-1.5" data-testid="active-promos-strip">
@@ -1237,11 +1284,19 @@ const POSTerminal = () => {
             }
             const pill = (cat) => {
               const active = selectedCategory === cat.name;
+              const bg = cat.color || theme.primary;
               return (
                 <button key={cat.id || cat.name}
                   onClick={() => { setSelectedCategory(cat.name); setShowMoreCats(false); }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full whitespace-nowrap transition-all flex-shrink-0 text-xs font-semibold ${active ? 'text-white shadow-md' : 'bg-white text-gray-700 border hover:border-gray-400'}`}
-                  style={active ? { backgroundColor: cat.color || theme.primary } : { borderColor: `${cat.color || theme.primary}40` }}
+                  // min-h-11 (44px) — the WCAG/HIG floor for a touch target,
+                  // tapped a few hundred times a shift by hands that are
+                  // frequently wet or gloved. Text color is computed per
+                  // button rather than hardcoded white: category colors are
+                  // owner-configurable, so a fixed color would read fine on
+                  // some and vanish on others.
+                  className={`flex items-center gap-1.5 px-3.5 min-h-11 rounded-full whitespace-nowrap transition-all flex-shrink-0 text-xs font-semibold ${active ? 'shadow-md' : 'bg-white text-gray-700 border hover:border-gray-400'}`}
+                  style={active ? { backgroundColor: bg, color: readableTextColor(bg) }
+                                : { borderColor: `${bg}40` }}
                   data-testid={`pos-cat-${cat.name}`}>
                   <CategoryIcon name={cat.icon} size={14} />
                   {cat.name}
@@ -1255,8 +1310,8 @@ const POSTerminal = () => {
                   {visible.map(pill)}
                   {overflow.length > 0 && (
                     <button onClick={() => setShowMoreCats(v => !v)}
-                      className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold border flex-shrink-0 transition-all ${showMoreCats ? 'text-white' : 'bg-gray-50 text-gray-600 hover:border-gray-400'}`}
-                      style={showMoreCats ? { backgroundColor: theme.primary } : {}}
+                      className={`flex items-center gap-1 px-3.5 min-h-11 rounded-full text-xs font-semibold border flex-shrink-0 transition-all ${showMoreCats ? '' : 'bg-gray-50 text-gray-600 hover:border-gray-400'}`}
+                      style={showMoreCats ? { backgroundColor: theme.primary, color: readableTextColor(theme.primary) } : {}}
                       data-testid="pos-cat-more">
                       More · {overflow.length} {showMoreCats ? '▴' : '▾'}
                     </button>
@@ -1287,7 +1342,7 @@ const POSTerminal = () => {
           {selectedCategory === 'All' ? (
             products.length === 0 ? (
               // Skeleton loader while products fetch — fluid grid
-              <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(130px,1fr))]" data-testid="pos-skeleton">
+              <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(var(--pos-tile-min,130px),1fr))]" data-testid="pos-skeleton">
                 {[...Array(12)].map((_, i) => (
                   <div key={i} className="bg-white rounded-lg border overflow-hidden animate-pulse">
                     <div className="w-full h-20 bg-gray-200" />
@@ -1317,7 +1372,7 @@ const POSTerminal = () => {
                     <div className="flex-1 border-b border-dashed"></div>
                   </button>
                   {!collapsed && (
-                  <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(130px,1fr))]">
+                  <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(var(--pos-tile-min,130px),1fr))]">
                     {prods.map(product => (
                       <button key={product.id}
                         onClick={() => handleProductClick(product)}
@@ -1351,7 +1406,7 @@ const POSTerminal = () => {
             )
           ) : (
             // Single category compact grid — fluid
-            <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(130px,1fr))]">
+            <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(var(--pos-tile-min,130px),1fr))]">
               {filteredProducts.map(product => (
                 <button key={product.id}
                   onClick={() => handleProductClick(product)}
