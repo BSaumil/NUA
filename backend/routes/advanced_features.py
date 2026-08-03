@@ -43,6 +43,48 @@ async def save_business_theme(data: dict, _: dict = Depends(require_owner_or_man
     return theme
 
 
+# POS layout — the three regions (category bar, product grid, cart) stay
+# structurally fixed; what's configurable is what's *within* them. A POS is
+# touch/speed-critical, so free-form drag-and-drop positioning was
+# deliberately ruled out — a badly-arranged custom layout becomes a live-
+# service liability, not a convenience, and it would fight directly against
+# the touch-target and contrast work already in place. This is the
+# structured alternative: cart side, tile density, which quick actions show.
+POS_LAYOUT_DEFAULTS = {
+    "cartPosition": "right",     # "left" | "right"
+    "tileSize": "comfortable",   # "compact" | "comfortable" | "large"
+    "quickActions": {"hold": True, "tabs": True},
+}
+
+
+@router.get("/pos/layout")
+async def get_pos_layout(_: dict = Depends(get_user)):
+    """Any signed-in staff member can read this — the POS terminal itself
+    needs it to render, same as the theme."""
+    doc = await db.settings.find_one({"key": "pos_layout"}, {"_id": 0})
+    saved = doc.get("value") if doc else {}
+    return {**POS_LAYOUT_DEFAULTS, **(saved or {}),
+            "quickActions": {**POS_LAYOUT_DEFAULTS["quickActions"], **((saved or {}).get("quickActions") or {})}}
+
+
+@router.post("/pos/layout")
+async def save_pos_layout(data: dict, _: dict = Depends(require_owner_or_manager)):
+    cart_position = data.get("cartPosition")
+    if cart_position not in ("left", "right"):
+        cart_position = POS_LAYOUT_DEFAULTS["cartPosition"]
+    tile_size = data.get("tileSize")
+    if tile_size not in ("compact", "comfortable", "large"):
+        tile_size = POS_LAYOUT_DEFAULTS["tileSize"]
+    quick_in = data.get("quickActions") or {}
+    quick_actions = {"hold": bool(quick_in.get("hold", True)), "tabs": bool(quick_in.get("tabs", True))}
+
+    layout = {"cartPosition": cart_position, "tileSize": tile_size, "quickActions": quick_actions}
+    await db.settings.update_one(
+        {"key": "pos_layout"}, {"$set": {"key": "pos_layout", "value": layout}}, upsert=True
+    )
+    return layout
+
+
 # ============ TIP MANAGEMENT (Toast-style) ============
 @router.post("/tips/add")
 async def add_tip(data: dict):

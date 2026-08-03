@@ -298,6 +298,12 @@ export const backupAPI = {
   runDrill: () => api.post('/ops/backup/drill'),
 };
 
+// POS layout — structured customization (cart side, tile density, quick actions)
+export const posLayoutAPI = {
+  get: () => api.get('/pos/layout'),
+  save: (data) => api.post('/pos/layout', data),
+};
+
 // Waitlist API
 export const waitlistAPI = {
   getAll: (params) => api.get('/waitlist', { params }),

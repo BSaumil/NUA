@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Palette, MapPin, Users as UsersIcon, Building, GraduationCap, Plus, Edit, Trash2, Save, Receipt, Shield, ShieldCheck, Activity, DownloadCloud, Monitor, Zap, Printer, Globe, Clock, KeyRound, Target, Gift, Utensils } from 'lucide-react';
+import { Palette, MapPin, Users as UsersIcon, Building, GraduationCap, Plus, Edit, Trash2, Save, Receipt, Shield, ShieldCheck, Activity, DownloadCloud, Monitor, Zap, Printer, Globe, Clock, KeyRound, Target, Gift, Utensils, LayoutGrid } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -15,6 +15,7 @@ import PrinterHealthPanel from '../components/settings/PrinterHealthPanel';
 import SecurityPanel from '../components/settings/SecurityPanel';
 import OpsHealthPanel from '../components/settings/OpsHealthPanel';
 import BackupPanel from '../components/settings/BackupPanel';
+import POSLayoutSettings from '../components/settings/POSLayoutSettings';
 import { toast } from 'sonner';
 import axios from 'axios';
 import { salaryTypeSuffix } from '../lib/staffPay';
@@ -164,6 +165,7 @@ const Settings = () => {
     { id: 'receipt', label: 'Receipt', icon: Receipt },
     { id: 'print-routing', label: 'Print Routing', icon: Printer },
     { id: 'coursing', label: 'Courses & Firing', icon: Utensils },
+    { id: 'pos-layout', label: 'POS Layout', icon: LayoutGrid },
     { id: 'permissions', label: 'Permissions', icon: Shield },
     { id: 'security', label: 'Security', icon: ShieldCheck },
     { id: 'ops', label: 'System Health', icon: Activity },
@@ -579,6 +581,8 @@ const Settings = () => {
       {activeTab === 'ops' && <OpsHealthPanel />}
 
       {activeTab === 'backup' && <BackupPanel />}
+
+      {activeTab === 'pos-layout' && <POSLayoutSettings />}
 
       {activeTab === 'wallet' && (
         <WalletCredentialsPanel theme={theme} />

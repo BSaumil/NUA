@@ -13,7 +13,7 @@ import {
 } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { usePOS } from '../contexts/POSContext';
-import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API, v26API, floorPlansAPI, itemsSystemAPI, kitchenAPI, coursingAPI } from '../services/api';
+import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API, v26API, floorPlansAPI, itemsSystemAPI, kitchenAPI, coursingAPI, posLayoutAPI } from '../services/api';
 import { useToast } from '../hooks/use-toast';
 import { useAuth } from '../contexts/AuthContext';
 import VoiceOrderButton from '../components/VoiceOrderButton';
@@ -148,6 +148,12 @@ const POSTerminal = () => {
   // Set only when the menu currently on screen came from the offline cache
   // rather than a live fetch — null the rest of the time.
   const [offlineMenu, setOfflineMenu] = useState(null);
+  // Structured layout customization (Settings > POS Layout) — cart side,
+  // tile density, which quick actions show. Not free-form positioning: see
+  // components/settings/POSLayoutSettings.jsx for why.
+  const [posLayout, setPosLayout] = useState({
+    cartPosition: 'right', tileSize: 'comfortable', quickActions: { hold: true, tabs: true },
+  });
 
   // Modifier definitions (loaded once); ModifierSheet state for click-to-add flow
   const [modifiers, setModifiers] = useState([]);
@@ -190,6 +196,7 @@ const POSTerminal = () => {
   }, []);
 
   useEffect(() => { fetchData(); }, []);
+  useEffect(() => { posLayoutAPI.get().then(r => setPosLayout(r.data)).catch(() => {}); }, []);
 
   // Floor plan tables, loaded once up front so dine-in table entry can be
   // validated as the server types instead of only when they open the picker.
@@ -1171,8 +1178,8 @@ const POSTerminal = () => {
 
   return (
     <div
-      className="flex flex-col lg:flex-row gap-4 h-[calc(100vh-7rem)] -m-6 p-4 transition-colors"
-      style={{ backgroundColor: theme.background }}
+      className={`flex flex-col ${posLayout.cartPosition === 'left' ? 'lg:flex-row-reverse' : 'lg:flex-row'} gap-4 h-[calc(100vh-7rem)] -m-6 p-4 transition-colors`}
+      style={{ backgroundColor: theme.background, '--pos-tile-min': posLayout.tileSize === 'compact' ? '96px' : posLayout.tileSize === 'large' ? '168px' : '130px' }}
       data-testid="pos-terminal"
     >
       {/* Training Mode Banner */}
@@ -1228,17 +1235,21 @@ const POSTerminal = () => {
                 }
               }}
             />
-            <Button variant="outline" className="h-9 px-3" onClick={async () => {
-              if (cart.length === 0) { toast({ title: 'Cart empty', variant: 'destructive' }); return; }
-              try {
-                await v15API.createTab({ name: `Tab ${new Date().toLocaleTimeString()}`, cart, selectedCustomer });
-                toast({ title: 'Order held', description: 'Recall from "Tabs" button' });
-                clearCart();
-              } catch { toast({ title: 'Hold failed', variant: 'destructive' }); }
-            }} data-testid="hold-order-btn">Hold</Button>
-            <Button variant="outline" className="h-9 px-3" onClick={async () => {
-              try { setTablesDialogMode('view'); const r = await v15API.getTabs(); setOpenTabs(r.data || []); setShowTabsDialog(true); } catch {}
-            }} data-testid="recall-tab-btn">Tabs</Button>
+            {posLayout.quickActions.hold && (
+              <Button variant="outline" className="h-9 px-3" onClick={async () => {
+                if (cart.length === 0) { toast({ title: 'Cart empty', variant: 'destructive' }); return; }
+                try {
+                  await v15API.createTab({ name: `Tab ${new Date().toLocaleTimeString()}`, cart, selectedCustomer });
+                  toast({ title: 'Order held', description: 'Recall from "Tabs" button' });
+                  clearCart();
+                } catch { toast({ title: 'Hold failed', variant: 'destructive' }); }
+              }} data-testid="hold-order-btn">Hold</Button>
+            )}
+            {posLayout.quickActions.tabs && (
+              <Button variant="outline" className="h-9 px-3" onClick={async () => {
+                try { setTablesDialogMode('view'); const r = await v15API.getTabs(); setOpenTabs(r.data || []); setShowTabsDialog(true); } catch {}
+              }} data-testid="recall-tab-btn">Tabs</Button>
+            )}
           </div>
           {activePromos.length > 0 && (
             <div className="flex gap-1.5 overflow-x-auto pb-1.5" data-testid="active-promos-strip">
@@ -1331,7 +1342,7 @@ const POSTerminal = () => {
           {selectedCategory === 'All' ? (
             products.length === 0 ? (
               // Skeleton loader while products fetch — fluid grid
-              <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(130px,1fr))]" data-testid="pos-skeleton">
+              <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(var(--pos-tile-min,130px),1fr))]" data-testid="pos-skeleton">
                 {[...Array(12)].map((_, i) => (
                   <div key={i} className="bg-white rounded-lg border overflow-hidden animate-pulse">
                     <div className="w-full h-20 bg-gray-200" />
@@ -1361,7 +1372,7 @@ const POSTerminal = () => {
                     <div className="flex-1 border-b border-dashed"></div>
                   </button>
                   {!collapsed && (
-                  <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(130px,1fr))]">
+                  <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(var(--pos-tile-min,130px),1fr))]">
                     {prods.map(product => (
                       <button key={product.id}
                         onClick={() => handleProductClick(product)}
@@ -1395,7 +1406,7 @@ const POSTerminal = () => {
             )
           ) : (
             // Single category compact grid — fluid
-            <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(130px,1fr))]">
+            <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(var(--pos-tile-min,130px),1fr))]">
               {filteredProducts.map(product => (
                 <button key={product.id}
                   onClick={() => handleProductClick(product)}
