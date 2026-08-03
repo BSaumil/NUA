@@ -31,6 +31,7 @@ import Reservations from './pages/Reservations';
 import FloorPlan from './pages/FloorPlan';
 import WaitlistPage from './pages/Waitlist';
 import Kitchen from './pages/Kitchen';
+import CoursingAnalytics from './pages/CoursingAnalytics';
 import PreShift from './pages/PreShift';
 import CommandCenter from './pages/CommandCenter';
 import MenuEngineering from './pages/MenuEngineering';
@@ -197,6 +198,7 @@ function ProtectedRoutes() {
         <Route path="/clubmember" element={<Navigate to="/marketing?tab=club" replace />} />
         <Route path="/booking-analytics" element={<BookingAnalytics />} />
         <Route path="/kitchen" element={<Kitchen />} />
+        <Route path="/coursing-analytics" element={<CoursingAnalytics />} />
         <Route path="/menu-engineering" element={<MenuEngineering />} />
         <Route path="/what-if" element={<WhatIfSimulator />} />
         <Route path="/products" element={<Products />} />

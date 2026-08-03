@@ -92,47 +92,82 @@ async def get_avg_order_time(_: dict = Depends(get_user)):
     return {"avgOrderMinutes": avg, "ordersCompletedToday": count}
 
 
-async def _active_queue_depth() -> tuple[int, int]:
-    """(orders actually cooking, orders whose every course is held).
+async def _active_queue_depth() -> tuple[int, int, float]:
+    """(orders cooking, orders fully held, weighted work in the queue).
 
     A ticket sitting on held courses isn't work the kitchen is doing — a table
     holding its mains for another twenty minutes shouldn't inflate the wait
     quoted to someone at the counter. Tickets with no course map at all count
     as active, which keeps every pre-coursing ticket behaving as before.
+
+    The third number is the one the ETA should use. Counting tickets treats a
+    twenty-item delivery the same as a single coffee, which is how a counter
+    ends up quoting five minutes in front of an hour of work. Only the items
+    actually cooking count — a held course is not on the stove yet.
     """
     rows = await db.kitchen_orders.find(
-        {"status": {"$in": ["new", "preparing"]}}, {"_id": 0, "courses": 1}).to_list(500)
+        {"status": {"$in": ["new", "preparing"]}},
+        {"_id": 0, "courses": 1, "items": 1}).to_list(500)
     active = held = 0
+    work = 0.0
     for o in rows:
         courses = o.get("courses") or {}
+        items = o.get("items") or []
         if not courses:
             active += 1
+            work += _ticket_work(items)
             continue
         statuses = [(v or {}).get("status") for v in courses.values()]
         if any(s in ("queued", "fired", "ready") for s in statuses):
             active += 1
+            cooking = {int(k) for k, v in courses.items()
+                       if (v or {}).get("status") in ("queued", "fired", "ready")}
+            work += _ticket_work([i for i in items if int(i.get("course") or 1) in cooking])
         elif all(s == "held" for s in statuses):
             held += 1
-    return active, held
+    return active, held, round(work, 2)
+
+
+def _ticket_work(items: list) -> float:
+    """How much of the kitchen's attention a set of items represents.
+
+    Deliberately sublinear in quantity: three of the same dish is more work
+    than one, but nowhere near three times — they cook together. Any non-empty
+    set is worth at least one unit, because even a single coffee costs a trip
+    to the machine.
+    """
+    if not items:
+        return 0.0
+    units = 0.0
+    for i in items:
+        qty = max(1, int(i.get("quantity") or 1))
+        units += 1 + (qty - 1) * 0.4
+    return max(1.0, units)
 
 
 @router.get("/kitchen/next-order-eta")
 async def get_next_order_eta(_: dict = Depends(get_user)):
     """A quick, honest ballpark for "how long for a takeaway right now?" when
-    a customer asks at the counter — today's average ticket time, plus a
-    couple of minutes for every order already ahead of it in the queue.
-    Not a precise promise, just a fast answer for the person at the till."""
+    a customer asks at the counter.
+
+    Today's average ticket time, plus time for the work already ahead of it —
+    weighted by how much food that work actually is, not by how many tickets
+    it happens to be split across.
+    """
     avg, completed_count = await _avg_order_minutes_today()
-    queue_depth, held_depth = await _active_queue_depth()
+    queue_depth, held_depth, queue_work = await _active_queue_depth()
     baseline = avg if completed_count > 0 else 12.0  # no data yet today — a sane starting guess
-    minutes_per_order_ahead = 2.5
-    estimated = round(baseline + queue_depth * minutes_per_order_ahead, 1)
+    minutes_per_work_unit = 1.2
+    estimated = round(baseline + queue_work * minutes_per_work_unit, 1)
     return {
         "avgOrderMinutes": avg, "ordersCompletedToday": completed_count,
         "queueDepth": queue_depth,
         # Surfaced so the counter can see the difference between "the kitchen
         # is slammed" and "there are tables holding their mains".
         "heldOrders": held_depth,
+        # What the estimate is actually based on — two tickets can be very
+        # different amounts of work, and this is the number that says so.
+        "queueWorkUnits": queue_work,
         "estimatedWaitMinutes": estimated,
     }
 
