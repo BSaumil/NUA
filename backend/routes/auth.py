@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from deps import get_user
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 from datetime import datetime, timezone, timedelta
@@ -111,6 +112,10 @@ def _set_tokens(response: Response, access: str, refresh: str):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    # Terminals that were told to remember themselves send the trust token back
+    # here. Native/kiosk clients can't rely on cookies, so it's accepted in the
+    # body too — the cookie is checked either way.
+    deviceToken: Optional[str] = None
 
 class RegisterRequest(BaseModel):
     name: str
@@ -154,14 +159,123 @@ async def login(req: LoginRequest, request: Request, response: Response):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     await db.login_attempts.delete_one({"identifier": identifier})
-    access = create_access_token(user["id"], email, user["role"])
+
+    # ── Second factor ──────────────────────────────────────────────────────
+    # The password was right; that is not the same as being logged in. If this
+    # account carries a second factor, no access token is minted here — the
+    # caller gets a short-lived challenge token that is only good for
+    # /auth/2fa/challenge and nothing else.
+    from services import two_factor
+    if await two_factor.required_for(user):
+        device_token = req.deviceToken or request.cookies.get("device_token")
+        trusted = await two_factor.device_is_trusted(user, device_token, request)
+        if not trusted:
+            if not user.get("twoFactorEnabled"):
+                # Venue policy says this role needs a second factor and this
+                # person hasn't set one up. Let them in far enough to enrol and
+                # no further, rather than locking them out of their own venue.
+                setup = create_challenge_token(user["id"], purpose="enrol")
+                return {"twoFactorRequired": True, "enrolmentRequired": True,
+                        "challengeToken": setup,
+                        "message": "This venue requires a second factor for your role — set it up to continue"}
+            return {"twoFactorRequired": True,
+                    "challengeToken": create_challenge_token(user["id"]),
+                    "recoveryAvailable": await two_factor.recovery_codes_remaining(user["id"]) > 0,
+                    "message": "Enter the 6-digit code from your authenticator app"}
+
+    return await _complete_login(user, response)
+
+
+def create_challenge_token(user_id: str, purpose: str = "2fa") -> str:
+    """A token that proves the password step passed and buys nothing else.
+
+    Deliberately not type "access": the auth middleware and get_current_user
+    both refuse anything that isn't an access token, so this cannot be used to
+    read a single row of data. Five minutes is long enough to find your phone.
+    """
+    payload = {"sub": user_id, "type": "challenge", "purpose": purpose,
+               "exp": datetime.now(timezone.utc) + timedelta(minutes=5)}
+    return jwt.encode(payload, _secret(), algorithm=JWT_ALGORITHM)
+
+
+def read_challenge_token(token: str, purpose: str = "2fa") -> str:
+    try:
+        payload = jwt.decode(token, _secret(), algorithms=[JWT_ALGORITHM])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="That took too long — sign in again")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid sign-in session")
+    if payload.get("type") != "challenge" or payload.get("purpose") != purpose:
+        raise HTTPException(status_code=401, detail="Invalid sign-in session")
+    return payload["sub"]
+
+
+async def _complete_login(user: dict, response: Response) -> dict:
+    access = create_access_token(user["id"], user["email"], user["role"])
     refresh = create_refresh_token(user["id"])
     _set_tokens(response, access, refresh)
+    user = dict(user)
     user.pop("_id", None)
     user.pop("password_hash", None)
+    user.pop("twoFactorSecret", None)
+    user.pop("twoFactorSecretPending", None)
+    user.pop("recoveryCodes", None)
     # Add effective permissions (custom > role DB override > code default)
     user["permissions"] = await effective_permissions(user)
     return {"user": user, "token": access}
+
+
+class TwoFactorChallenge(BaseModel):
+    challengeToken: str
+    code: str
+    trustDevice: bool = False
+
+
+@router.post("/2fa/challenge")
+async def two_factor_challenge(req: TwoFactorChallenge, request: Request, response: Response):
+    """Second half of login: the code, and optionally remembering this terminal."""
+    from services import two_factor
+    user_id = read_challenge_token(req.challengeToken)
+
+    # The challenge itself is brute-forceable — a million codes is not many if
+    # you can try them all — so it gets the same lockout the password does.
+    identifier = f"2fa:{request.client.host}:{user_id}"
+    attempts = await db.login_attempts.find_one({"identifier": identifier})
+    if attempts and attempts.get("count", 0) >= 5:
+        locked_until = attempts.get("locked_until")
+        if locked_until and locked_until.tzinfo is None:
+            locked_until = locked_until.replace(tzinfo=timezone.utc)
+        if locked_until and datetime.now(timezone.utc) < locked_until:
+            raise HTTPException(status_code=429, detail="Too many attempts. Try again in 15 minutes.")
+        await db.login_attempts.delete_one({"identifier": identifier})
+
+    user = await db.auth_users.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid sign-in session")
+
+    ok, how = await two_factor.verify(user, req.code)
+    if not ok:
+        await db.login_attempts.update_one(
+            {"identifier": identifier},
+            {"$inc": {"count": 1},
+             "$set": {"locked_until": datetime.now(timezone.utc) + timedelta(minutes=15)}},
+            upsert=True)
+        detail = ("That code was already used — wait for the next one"
+                  if how == "replayed" else "Incorrect code")
+        raise HTTPException(status_code=401, detail=detail)
+
+    await db.login_attempts.delete_one({"identifier": identifier})
+    out = await _complete_login(user, response)
+    out["verifiedBy"] = how
+    if how == "recovery":
+        out["recoveryCodesRemaining"] = await two_factor.recovery_codes_remaining(user_id)
+    if req.trustDevice:
+        token = await two_factor.trust_device(user, request)
+        out["deviceToken"] = token
+        response.set_cookie("device_token", token, httponly=True, secure=_cookie_secure(),
+                            samesite="lax", max_age=two_factor.TRUSTED_DEVICE_DAYS * 86400,
+                            path="/")
+    return out
 
 @router.post("/register")
 async def register(req: RegisterRequest, response: Response):
@@ -288,7 +402,7 @@ async def add_staff_simple(data: dict, request: Request):
 
 # Custom roles management
 @router.get("/roles")
-async def get_custom_roles():
+async def get_custom_roles(_: dict = Depends(get_user)):
     s = await db.settings.find_one({"key": "custom_roles"}, {"_id": 0})
     defaults = ["cashier", "kitchen", "manager", "barista", "bar", "floor", "host", "dishwasher"]
     return s.get("value", defaults) if s else defaults

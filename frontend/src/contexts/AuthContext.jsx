@@ -25,11 +25,36 @@ export function AuthProvider({ children }) {
 
   useEffect(() => { checkAuth(); }, [checkAuth]);
 
+  // A correct password is not the same as being signed in. When the account
+  // carries a second factor the backend answers with a challenge instead of a
+  // token, and the caller has to come back through completeTwoFactor. The
+  // shape below makes that explicit so no caller can mistake a challenge for
+  // a successful login.
   const login = async (email, password) => {
-    const res = await axios.post(`${API}/api/auth/login`, { email, password }, { withCredentials: true });
+    const res = await axios.post(
+      `${API}/api/auth/login`,
+      { email, password, deviceToken: localStorage.getItem('nuva_device_token') || undefined },
+      { withCredentials: true },
+    );
+    if (res.data.twoFactorRequired) return { twoFactor: res.data };
     localStorage.setItem('nuva_token', res.data.token);
     setUser(res.data.user);
-    return res.data.user;
+    return { user: res.data.user };
+  };
+
+  const completeTwoFactor = async (challengeToken, code, trustDevice) => {
+    const res = await axios.post(
+      `${API}/api/auth/2fa/challenge`,
+      { challengeToken, code, trustDevice: !!trustDevice },
+      { withCredentials: true },
+    );
+    localStorage.setItem('nuva_token', res.data.token);
+    // Kept alongside the cookie: a tablet running the POS as a home-screen app
+    // doesn't always get third-party cookies back, and being asked for a code
+    // every shift is what drives staff to write the seed on the wall.
+    if (res.data.deviceToken) localStorage.setItem('nuva_device_token', res.data.deviceToken);
+    setUser(res.data.user);
+    return res.data;
   };
 
   const logout = async () => {
@@ -46,7 +71,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, hasPermission, checkAuth }}>
+    <AuthContext.Provider value={{ user, loading, login, completeTwoFactor, logout, hasPermission, checkAuth }}>
       {children}
     </AuthContext.Provider>
   );

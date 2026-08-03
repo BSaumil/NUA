@@ -56,9 +56,27 @@ Keep that string ready — we'll paste it into the backend in Step 4.
 
 1. In the same project, click **+ Create → GitHub Repo** → pick your repo again.
 2. After it loads, click the new service → **Settings**:
-   - **Root Directory**: `backend`
-   - **Build Command**: `pip install -r requirements.txt && pip install emergentintegrations --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/`
-   - **Start Command**: `uvicorn server:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips '*'`
+   - **Root Directory**: `backend` ← **this one is not optional.** See the box below.
+   - **Build Command**: *leave blank*
+   - **Start Command**: *leave blank*
+
+   > ### ⛔ The #1 cause of a failed first deploy
+   > This repo is a **monorepo** — `backend/`, `frontend/` and `bookings-api/`
+   > all live side by side, and the repo root holds a `package.json` that
+   > exists only for the Capacitor Android build (it has no `scripts`).
+   >
+   > If **Root Directory** is blank, Railway builds the *repo root*, sees that
+   > scriptless `package.json`, and fails the build with:
+   >
+   > ```
+   > No start command detected. Specify a start command
+   > ```
+   >
+   > Setting Root Directory to `backend` points Railway at `backend/Dockerfile`
+   > and `backend/railway.json`, which already declare the builder, the start
+   > command and the healthcheck. That's also why Build/Start Command stay
+   > blank — anything typed into those boxes **overrides** `railway.json`.
+
 3. Click the **Variables** tab → **+ New Variable**. Add these one by one:
 
 | Variable name | Value |
@@ -68,11 +86,15 @@ Keep that string ready — we'll paste it into the backend in Step 4.
 | `JWT_SECRET` | *click "Generate" — Railway makes a random one* |
 | `EMERGENT_LLM_KEY` | *paste your key from Emergent → Profile → Universal Key* |
 | `FRONTEND_URL` | `https://nua-frontend.up.railway.app` *(we'll fix this in Step 6)* |
-| `PORT` | `8001` |
+
+> **Don't set `PORT` yourself.** Railway assigns it, and the container reads
+> `$PORT` at boot (falling back to 8001 for Fly/Compose). Pinning it by hand is
+> the usual cause of *"Application failed to respond"* — the app ends up
+> listening on one port while Railway routes to another.
 
 4. **Networking** tab → click **Generate Domain**. Railway gives you something like `nua-backend-production.up.railway.app`. **Copy this URL.**
 
-5. Wait ~3 minutes for the first deploy. Open `https://YOUR-BACKEND.up.railway.app/api/social/platforms` in your browser — you'll see `{"detail":"Not authenticated"}` which means **it's working** (it's just asking for a login).
+5. Wait ~3 minutes for the first deploy. Open `https://YOUR-BACKEND.up.railway.app/api/` in your browser — you'll get a JSON blob with `"name": "NUA API"`. That's the same path Railway's healthcheck hits, so if the deploy went green, this works.
 
 ---
 
@@ -80,21 +102,28 @@ Keep that string ready — we'll paste it into the backend in Step 4.
 
 1. **+ Create → GitHub Repo** → same repo again.
 2. New service → **Settings**:
-   - **Root Directory**: `frontend`
-   - **Build Command**: `yarn install --frozen-lockfile && yarn build`
-   - **Start Command**: `npx serve -s build -l $PORT`
+   - **Root Directory**: `frontend` ← same rule as the backend. Blank = the
+     "No start command detected" build failure.
+   - **Build Command**: *leave blank*
+   - **Start Command**: *leave blank*
 
-   *(`serve` ships with the `npx` shim, so no extra deps needed.)*
+   `frontend/Dockerfile` builds the React bundle and serves it with nginx, and
+   `frontend/railway.json` tells Railway to use that Dockerfile. Nothing to type.
 
 3. **Variables** tab — add:
 
 | Variable name | Value |
 |---|---|
 | `REACT_APP_BACKEND_URL` | `https://YOUR-BACKEND.up.railway.app` *(from Step 4)* |
-| `PORT` | `3000` |
 | `NODE_ENV` | `production` |
 
-> ⚠️ **Most common mistake**: `REACT_APP_BACKEND_URL` MUST be set BEFORE the first build. If you set it after, click **Deployments → Redeploy**.
+> ⚠️ **Most common mistake**: `REACT_APP_BACKEND_URL` is baked into the JS bundle
+> at **build** time (that's how Create React App works), so it MUST be set BEFORE
+> the first build. If you set it afterwards, click **Deployments → Redeploy** —
+> a restart alone won't pick it up.
+
+> **Don't set `PORT` here either.** nginx renders its listen port from `$PORT`
+> when the container starts.
 
 4. **Networking** tab → **Generate Domain**. Note the URL (e.g. `nua-frontend-production.up.railway.app`).
 
@@ -170,6 +199,28 @@ above is missing an origin or has a typo (no trailing slash, exact scheme).
 
 ---
 
+## 🔌 Step 9 — Add the Bookings Partner API (optional)
+
+`bookings-api/` is a **separate** service from the restaurant backend — it's the
+multi-tenant booking platform that outside partners call with their own API
+keys. You only need it if you're selling bookings-as-a-service. The POS runs
+fine without it.
+
+1. **+ Create → GitHub Repo** → same repo.
+2. **Settings → Root Directory**: `bookings-api`. Build and Start Command blank
+   (`bookings-api/railway.json` + its Dockerfile handle both).
+3. **Variables**:
+
+| Variable name | Value |
+|---|---|
+| `BOOKINGS_MONGO_URL` | *(the same `MONGO_URL` from Step 3 — it uses its own database inside that instance)* |
+| `BOOKINGS_DB_NAME` | `nua_bookings` |
+| `BOOKINGS_ADMIN_KEY` | *click "Generate" — this key mints partner API keys, so treat it like a root password* |
+
+4. **Networking → Generate Domain**, then check `https://YOUR-BOOKINGS.up.railway.app/health`.
+
+---
+
 ## 💸 Cost breakdown
 
 | What | Free tier | Real cost |
@@ -197,12 +248,15 @@ That's the whole secret sauce — git push = live in production.
 
 | Symptom | Fix |
 |---|---|
-| Build fails with "command not found: yarn" | In frontend service Settings → Builder, switch to **NIXPACKS** (default). It auto-installs yarn. |
+| **Build fails: `No start command detected. Specify a start command`** | **Root Directory is blank**, so Railway is building the repo root instead of a service. Settings → **Root Directory** → set `backend`, `frontend` or `bookings-api` → Redeploy. See the box in Step 4. |
+| Build fails: `Nixpacks was unable to generate a build plan` | Same root cause as the row above — Root Directory not set. |
+| Build fails somewhere in `pip install emergentintegrations` | Shouldn't happen any more: that package comes from a private index and the Dockerfile now treats it as optional, since every place the code imports it falls back gracefully. If you pasted the old Build Command into Settings, clear it. |
+| Build fails with "command not found: yarn" | Clear the **Build Command** box. The frontend builds from `frontend/Dockerfile`, which brings its own Node and yarn. |
 | Frontend loads but every API call is `net::ERR_NAME_NOT_RESOLVED` | `REACT_APP_BACKEND_URL` wasn't set at build time. Set it, then **Deployments → Redeploy**. |
 | Backend returns 502 | Check **Deployments → View Logs**. Usually a missing variable. |
 | MongoDB connection refused | Make sure `MONGO_URL` was copied from the Mongo service's **Variables** tab, not a placeholder. |
 | App keeps "sleeping" | Hobby plan: services sleep after idle. Upgrade to Pro ($20/mo) or set min replicas to 1. |
-| "Application failed to respond" | Wrong start command. For backend it must use `$PORT` (Railway sets it dynamically). |
+| "Application failed to respond" | The container is listening on a different port than Railway is routing to. Check you haven't set a `PORT` variable by hand — leave it to Railway. |
 | Custom domain stuck "Pending" | DNS hasn't propagated. Run `dig +short www.yourdomain.com` — should return the Railway CNAME. |
 
 ---
@@ -212,9 +266,10 @@ That's the whole secret sauce — git push = live in production.
 - [ ] Code pushed to GitHub
 - [ ] Railway project created
 - [ ] MongoDB service added → connection string copied
-- [ ] Backend service added with all 6 variables set
-- [ ] Backend deployed → `/api/social/platforms` returns JSON
-- [ ] Frontend service added with `REACT_APP_BACKEND_URL` set
+- [ ] Backend service added, **Root Directory = `backend`**, Build/Start Command boxes empty
+- [ ] Backend variables set (`MONGO_URL`, `DB_NAME`, `JWT_SECRET`, `EMERGENT_LLM_KEY`, `FRONTEND_URL`) — and no hand-set `PORT`
+- [ ] Backend deployed → `/api/` returns JSON
+- [ ] Frontend service added, **Root Directory = `frontend`**, with `REACT_APP_BACKEND_URL` set before the first build
 - [ ] Frontend deployed → loads in browser
 - [ ] Logged in successfully as `owner@nuva.com`
 - [ ] Updated backend's `FRONTEND_URL` to the real frontend URL

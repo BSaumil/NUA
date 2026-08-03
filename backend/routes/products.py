@@ -3,7 +3,7 @@ from typing import List, Optional
 from datetime import datetime, timezone
 import uuid
 from database import db
-from deps import get_user, require_owner_or_manager
+from deps import get_user, optional_user, require_owner_or_manager
 from models.product import Product, ProductCreate, ProductUpdate
 from models.category import Category, CategoryCreate
 from models.modifier import Modifier, ModifierCreate
@@ -12,8 +12,16 @@ from pydantic import BaseModel
 router = APIRouter()
 
 # ============ PRODUCTS API ============
+# Deliberately reachable without logging in: the kiosk and the QR table-order
+# page are the menu, and they render before anyone has a session. What a guest
+# must NOT get is the trade side of the catalogue — what each dish costs us and
+# how much of it is in the building — so that gets stripped for guests only.
+GUEST_HIDDEN_PRODUCT_FIELDS = ("cost", "stock", "sku")
+
+
 @router.get("/products", response_model=List[Product])
-async def get_products(category: Optional[str] = None, search: Optional[str] = None, include_deleted: bool = False):
+async def get_products(category: Optional[str] = None, search: Optional[str] = None,
+                       include_deleted: bool = False, user=Depends(optional_user)):
     query = {}
     if not include_deleted:
         query["$or"] = [{"deletedAt": None}, {"deletedAt": {"$exists": False}}]
@@ -22,10 +30,16 @@ async def get_products(category: Optional[str] = None, search: Optional[str] = N
     if search:
         query["name"] = {"$regex": search, "$options": "i"}
     products = await db.products.find(query).to_list(1000)
+    if not user:
+        # Guests never see deleted rows either, whatever they ask for.
+        products = [p for p in products if not p.get("deletedAt")]
+        for p in products:
+            for f in GUEST_HIDDEN_PRODUCT_FIELDS:
+                p.pop(f, None)
     return [Product(**p) for p in products]
 
 @router.post("/products", response_model=Product)
-async def create_product(product: ProductCreate):
+async def create_product(product: ProductCreate, _: dict = Depends(require_owner_or_manager)):
     from services.entity_service import stamped_insert
     product_dict = product.dict()
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -34,7 +48,7 @@ async def create_product(product: ProductCreate):
     return Product(**doc)
 
 @router.put("/products/{product_id}", response_model=Product)
-async def update_product(product_id: str, product_update: ProductUpdate):
+async def update_product(product_id: str, product_update: ProductUpdate, _: dict = Depends(require_owner_or_manager)):
     from services.entity_service import stamped_update
     update_data = {k: v for k, v in product_update.dict().items() if v is not None}
     result = await stamped_update("products", product_id, update_data, entity_type="product")
@@ -43,7 +57,7 @@ async def update_product(product_id: str, product_update: ProductUpdate):
     return Product(**result)
 
 @router.delete("/products/{product_id}")
-async def delete_product(product_id: str):
+async def delete_product(product_id: str, _: dict = Depends(require_owner_or_manager)):
     from services.entity_service import soft_delete
     result = await soft_delete("products", product_id, entity_type="product")
     if not result:
@@ -51,7 +65,7 @@ async def delete_product(product_id: str):
     return {"message": "Product soft-deleted", "id": product_id}
 
 @router.post("/products/{product_id}/adjust-stock")
-async def adjust_stock(product_id: str, data: dict):
+async def adjust_stock(product_id: str, data: dict, _: dict = Depends(get_user)):
     adjustment = data.get("adjustment", 0)
     reason = data.get("reason", "Manual adjustment")
     product = await db.products.find_one({"id": product_id})

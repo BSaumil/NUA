@@ -3,6 +3,7 @@ from typing import Optional
 from datetime import datetime
 from database import db
 from models.kitchen_order import KitchenOrder
+import logging
 import uuid
 
 router = APIRouter()
@@ -62,6 +63,11 @@ async def place_table_order(table_id: str, data: dict):
         price = product.get("price", 0)
         kitchen_items.append({
             "productId": product["id"], "name": product["name"],
+            # Coursing maps categories to courses, and the docket reads
+            # productName — without both, a QR order lands entirely on the
+            # default course and prints without a name on some paths.
+            "productName": product["name"],
+            "category": product.get("category"),
             "quantity": qty, "price": price,
             "modifications": item.get("modifications", ""),
         })
@@ -95,6 +101,23 @@ async def place_table_order(table_id: str, data: dict):
         "createdAt": datetime.utcnow().isoformat(),
         "priority": "normal",
     }
+    # A QR table order is a dine-in order like any other, so it goes through
+    # the same coursing rules the POS uses. Without this a QR table could
+    # never be coursed — the items arrived with no course at all.
+    try:
+        from services import coursing as _coursing
+        _cfg = await _coursing.get_config()
+        order_doc["items"] = [{**i, "round": 1}
+                              for i in _coursing.assign_courses(order_doc["items"], _cfg)]
+        order_doc["courses"] = _coursing.initial_course_states(
+            order_doc["items"], _cfg, "dine_in",
+            straight_fire=False, fired_by="QR order",
+            now=order_doc["createdAt"],
+        )
+        order_doc["orderType"] = "dine_in"
+    except Exception as _e:
+        logging.getLogger(__name__).warning("QR order: coursing skipped — %s", _e)
+
     await db.kitchen_orders.insert_one(order_doc)
     order_doc.pop("_id", None)
 
@@ -111,7 +134,10 @@ async def place_table_order(table_id: str, data: dict):
     return {
         "orderId": order_id,
         "tableNumber": table_number,
-        "items": kitchen_items,
+        # The stored items, not the pre-coursing list — otherwise the guest's
+        # own screen shows no courses while the kitchen ticket has them.
+        "items": order_doc["items"],
+        "courses": order_doc.get("courses") or {},
         "subtotal": order_doc["subtotal"],
         "gst": order_doc["gst"],
         "total": order_doc["total"],

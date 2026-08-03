@@ -16,10 +16,15 @@ RUN yarn build
 # ---------- runtime ----------
 FROM nginx:alpine
 
-# SPA-friendly nginx config — every unknown path falls through to /index.html
-RUN printf '%s\n' \
+# SPA-friendly nginx config — every unknown path falls through to /index.html.
+# Written as a *template* under /etc/nginx/templates so the stock nginx
+# entrypoint runs envsubst over it at boot and bakes in whatever $PORT the
+# platform assigned (Railway assigns it dynamically). NGINX_ENVSUBST_FILTER
+# pins substitution to PORT alone, so nginx's own $uri/$host stay untouched.
+RUN mkdir -p /etc/nginx/templates \
+ && printf '%s\n' \
     'server {' \
-    '  listen 8080;' \
+    '  listen ${PORT};' \
     '  root /usr/share/nginx/html;' \
     '  gzip on;' \
     '  gzip_types text/plain text/css application/javascript application/json image/svg+xml;' \
@@ -30,9 +35,12 @@ RUN printf '%s\n' \
     '    expires 30d;' \
     '    add_header Cache-Control "public, immutable";' \
     '  }' \
-    '}' > /etc/nginx/conf.d/default.conf
+    '}' > /etc/nginx/templates/default.conf.template \
+ && rm -f /etc/nginx/conf.d/default.conf
 
 COPY --from=builder /app/build /usr/share/nginx/html
 
+ENV PORT=8080 \
+    NGINX_ENVSUBST_FILTER=^PORT$
 EXPOSE 8080
 CMD ["nginx", "-g", "daemon off;"]

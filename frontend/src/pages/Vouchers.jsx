@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
-import { finalizeAPI } from '../services/api';
+import { finalizeAPI, customersAPI } from '../services/api';
 import { toast } from 'sonner';
 import { QRCodeSVG } from 'qrcode.react';
 import {
@@ -69,8 +69,8 @@ export default function Vouchers() {
   };
   const loadCustomers = async () => {
     try {
-      const r = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/customers`);
-      setCustomers(await r.json());
+      const r = await customersAPI.getAll();
+      setCustomers(r.data || []);
     } catch { /* silent */ }
   };
   useEffect(() => { load(); loadAnalytics(); loadCustomers(); }, [filter.status, filter.sourceType]);

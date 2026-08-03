@@ -11,6 +11,8 @@ class KitchenOrderItem(BaseModel):
     modifiers: List[dict] = []
     notes: Optional[str] = None
     course: int = 1  # 1=starter, 2=main, 3=dessert
+    seat: Optional[int] = None   # which guest ordered it, so runners don't ask
+    round: int = 1               # which trip to the table this was rung on
     status: str = "pending"  # pending, preparing, ready
 
 
@@ -53,9 +55,21 @@ class KitchenOrder(BaseModel):
 
     # ── Per-course lifecycle (v33) ──
     # Keys are course numbers as strings ("1","2","3"). Each course has:
-    #   { status: "held"|"queued"|"fired"|"served",
-    #     heldAt, firedAt, firedBy, servedAt }
+    #   { status: "held"|"queued"|"fired"|"ready"|"served",
+    #     heldAt, firedAt, firedBy, readyAt, servedAt }
     courses: Dict[str, Any] = {}
+
+    # How many times the table has ordered onto this ticket. A long dinner
+    # adds dessert an hour after the mains; that's a second round on the same
+    # ticket, not a second ticket.
+    rounds: int = 1
+
+    # Append-only trail of every course state change:
+    #   { course, from, to, at, by }
+    # The `courses` map only keeps the latest timestamp per state, so a course
+    # held twice, or re-fired after a hold, loses its earlier history — and
+    # "how long did mains sit at the pass?" becomes unanswerable.
+    courseHistory: List[dict] = []
 
     createdAt: str = ""
     startedAt: Optional[str] = None

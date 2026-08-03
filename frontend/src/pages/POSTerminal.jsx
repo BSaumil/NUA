@@ -13,7 +13,7 @@ import {
 } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { usePOS } from '../contexts/POSContext';
-import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API, v26API, floorPlansAPI, itemsSystemAPI, kitchenAPI } from '../services/api';
+import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API, v26API, floorPlansAPI, itemsSystemAPI, kitchenAPI, coursingAPI } from '../services/api';
 import { useToast } from '../hooks/use-toast';
 import { useAuth } from '../contexts/AuthContext';
 import VoiceOrderButton from '../components/VoiceOrderButton';
@@ -23,8 +23,14 @@ import { QrPaymentDialog, UpiPaymentDialog, SplitPaymentDialog } from '../compon
 import ModifierSheet from '../components/pos/ModifierSheet';
 import POSHeaderBar from '../components/pos/POSHeaderBar';
 import ScanVoucherButton from '../components/pos/ScanVoucherButton';
+import TableNumberField from '../components/pos/TableNumberField';
+import { CourseHeader, SendToKitchenBar, ReadyBanner, SeatPicker } from '../components/pos/CourseControls';
+import { validateTable } from '../lib/tableNumber';
+import { groupCartByCourse, showCourseUI, courseKeys, courseLabel, lineCourse,
+         readyCourses, seatOptions, seatsEnabled } from '../lib/coursing';
 import { CategoryIcon } from './Categories';
-import { createTransactionResilient } from '../lib/offlineQueue';
+import { createTransactionResilient, courseActionResilient } from '../lib/offlineQueue';
+import { subscribeTickets, streamHealthy } from '../lib/ticketStream';
 import useOfflineQueue from '../hooks/useOfflineQueue';
 import { WifiOff } from 'lucide-react';
 
@@ -95,6 +101,9 @@ const POSTerminal = () => {
   // current cart to a specific table as an open tab (defers payment).
   const [sendToTableOpen, setSendToTableOpen] = useState(false);
   const [floorTables, setFloorTables] = useState([]);
+  // False until we know the venue has drawn a floor plan. While false the
+  // typed table number is accepted as-is, so a venue mid-setup can still sell.
+  const [floorConfigured, setFloorConfigured] = useState(false);
   const [sendingToTable, setSendingToTable] = useState(false);
   const [labels, setLabels] = useState({});
   // v17: Points-and-Pay
@@ -177,6 +186,273 @@ const POSTerminal = () => {
   }, []);
 
   useEffect(() => { fetchData(); }, []);
+
+  // Floor plan tables, loaded once up front so dine-in table entry can be
+  // validated as the server types instead of only when they open the picker.
+  const loadFloorTables = useCallback(async () => {
+    try {
+      const r = await floorPlansAPI.listTables();
+      setFloorTables(r.data?.tables || []);
+      setFloorConfigured(!!r.data?.configured);
+    } catch {
+      // Older backend or offline: leave validation off rather than block sales.
+      setFloorTables([]);
+      setFloorConfigured(false);
+    }
+  }, []);
+  useEffect(() => { loadFloorTables(); }, [loadFloorTables]);
+
+  // Live validity of the typed dine-in table. `unknown` blocks checkout.
+  const tableCheck = validateTable(tableNumber, floorTables, floorConfigured);
+  const tableBlocked = orderType === 'dine-in' && tableCheck.status === 'unknown';
+
+  // ── Coursing ──────────────────────────────────────────────────────────
+  // Off by default. A takeaway-only venue never enables it and so never sees
+  // a course selector, a Send-to-Kitchen bar, or Fire/Hold buttons.
+  const [coursingConfig, setCoursingConfig] = useState(null);
+  const [kitchenOrder, setKitchenOrder] = useState(null);   // set once sent
+  const [coursingBusy, setCoursingBusy] = useState(false);
+  const [courseOverrides, setCourseOverrides] = useState({}); // lineId -> course
+  const [seatOverrides, setSeatOverrides] = useState({});     // lineId -> seat
+  // How much of each cart line has already gone to the kitchen, keyed by line
+  // id. Tracking the *quantity* rather than just "sent" matters: bumping a
+  // line from 1 to 3 after sending is two more dishes the kitchen never heard
+  // about, and only the difference should be added to the ticket.
+  const [sentQty, setSentQty] = useState({});
+
+  useEffect(() => {
+    coursingAPI.getConfig()
+      .then(r => setCoursingConfig(r.data || null))
+      .catch(() => setCoursingConfig(null));   // older backend: feature stays off
+  }, []);
+
+  const coursingOn = showCourseUI(orderType, coursingConfig);
+  const useSeats = seatsEnabled(coursingConfig);
+  const seats = seatOptions(coursingConfig);
+
+  // Apply any per-line course/seat the server picked on top of the defaults.
+  const cartWithCourses = cart.map(i => ({
+    ...i,
+    ...(courseOverrides[i.id] != null ? { course: courseOverrides[i.id] } : {}),
+    ...(seatOverrides[i.id] != null ? { seat: seatOverrides[i.id] } : {}),
+  }));
+  const courseGroups = coursingOn ? groupCartByCourse(cartWithCourses, coursingConfig) : [];
+  // Only the un-sent portion of each line is outstanding.
+  const pendingLines = cartWithCourses
+    .map(i => ({ ...i, quantity: (i.quantity || 0) - (sentQty[i.id] || 0) }))
+    .filter(i => i.quantity > 0);
+  const pendingCount = pendingLines.reduce((n, i) => n + i.quantity, 0);
+  const ready = coursingOn ? readyCourses(kitchenOrder, coursingConfig) : [];
+
+  // An emptied cart drops the per-line state, but NOT the attached ticket:
+  // after a refresh the cart is empty while the table still has live courses,
+  // and clearing here would immediately undo the reattach below.
+  useEffect(() => {
+    if (cart.length === 0) { setCourseOverrides({}); setSeatOverrides({}); setSentQty({}); }
+  }, [cart.length]);
+
+  // Reattach to whatever ticket the kitchen already has for this table, so a
+  // refresh — or picking the table up on a second tablet — can still fire
+  // courses instead of being stranded without a ticket reference.
+  //
+  // Changing table drops the previous ticket first, in the same effect, so
+  // table 12's courses can't linger on screen while the server rings up 14.
+  useEffect(() => {
+    setKitchenOrder(null);
+    setSentQty({});
+    if (!coursingOn || tableCheck.status !== 'ok') return undefined;
+    let cancelled = false;
+    coursingAPI.openOrders({ tableNumber })
+      .then(r => { if (!cancelled) setKitchenOrder((r.data || [])[0] || null); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [coursingOn, tableNumber, orderType, tableCheck.status]);
+
+  // Live ticket updates over one shared stream for the whole browser — see
+  // lib/ticketStream. A connection per table would blow past the browser's
+  // six-per-origin cap on a busy floor and silently stop delivering. A slow
+  // poll stays as a fallback for proxies that buffer SSE.
+  useEffect(() => {
+    if (!kitchenOrder?.id || !coursingOn) return undefined;
+    const id = kitchenOrder.id;
+    const table = kitchenOrder.tableNumber || '';
+
+    const unsubscribe = subscribeTickets((rows) => {
+      const fresh = (rows || []).find(o => o.id === id);
+      if (fresh) setKitchenOrder(fresh);
+    });
+
+    const poll = setInterval(async () => {
+      if (streamHealthy()) return;           // the stream is doing the work
+      try {
+        const r = await coursingAPI.openOrders({ tableNumber: table || undefined });
+        const fresh = (r.data || []).find(o => o.id === id);
+        if (fresh) setKitchenOrder(fresh);
+      } catch {}
+    }, 15000);
+
+    return () => { unsubscribe(); clearInterval(poll); };
+  }, [kitchenOrder?.id, kitchenOrder?.tableNumber, coursingOn]);
+
+  const setLineCourse = (lineId, course) =>
+    setCourseOverrides(prev => ({ ...prev, [lineId]: course }));
+  const setLineSeat = (lineId, seat) =>
+    setSeatOverrides(prev => ({ ...prev, [lineId]: seat }));
+
+  const toKitchenItem = (i) => ({
+    productId: i.productId || i.id, productName: i.name, quantity: i.quantity,
+    category: i.category, notes: i.notes || null,
+    modifiers: i.selectedModifiers || [],
+    course: lineCourse(i, coursingConfig),
+    seat: useSeats ? (i.seat ?? null) : null,
+  });
+
+  const sendCartToKitchen = async (straightFire = false) => {
+    if (coursingBusy) return;
+    // Only the lines not already on the ticket go up — re-sending the whole
+    // cart would double every dish the kitchen is already cooking.
+    const outgoing = kitchenOrder ? pendingLines : cartWithCourses;
+    if (!outgoing.length) return;
+    if (tableBlocked) {
+      toast({ title: 'Unknown table', description: tableCheck.message, variant: 'destructive' });
+      return;
+    }
+    setCoursingBusy(true);
+    try {
+      const payload = {
+        items: outgoing.map(toKitchenItem),
+        // Survives the offline queue, so a replay of a request whose response
+        // was lost returns the existing ticket instead of doubling the order.
+        clientKey: (typeof crypto !== 'undefined' && crypto.randomUUID)
+          ? crypto.randomUUID() : `k-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        orderType, straightFire,
+        tableNumber: orderType === 'dine-in' ? tableNumber : null,
+        guestName: orderType === 'takeaway' ? walkInName : (selectedCustomer?.name || null),
+      };
+      const r = kitchenOrder
+        ? await courseActionResilient('addRound', { orderId: kitchenOrder.id, payload },
+            () => coursingAPI.addRound(kitchenOrder.id, payload))
+        : await courseActionResilient('sendToKitchen', { payload },
+            () => coursingAPI.sendToKitchen(payload));
+      if (r.queuedOffline) {
+        toast({ title: 'Saved offline',
+                description: 'The kitchen gets this order as soon as the connection is back.' });
+        setSentQty(prev => {
+          const next = { ...prev };
+          outgoing.forEach(i => { next[i.id] = (next[i.id] || 0) + i.quantity; });
+          return next;
+        });
+        return;
+      }
+      setKitchenOrder(r.data);
+      setSentQty(prev => {
+        const next = { ...prev };
+        outgoing.forEach(i => { next[i.id] = (next[i.id] || 0) + i.quantity; });
+        return next;
+      });
+      toast({
+        title: kitchenOrder ? `Added to ticket (round ${r.data?.rounds || 2})`
+             : straightFire ? 'Fired to kitchen' : 'Sent to kitchen',
+        description: straightFire
+          ? 'All courses fired at once.'
+          : 'Later courses are held until you fire them.',
+      });
+    } catch (err) {
+      toast({ title: 'Could not send to kitchen', description: err.response?.data?.detail || 'Try again', variant: 'destructive' });
+    } finally { setCoursingBusy(false); }
+  };
+
+  const courseAction = async (courseKey, kind, fn, verb) => {
+    if (!kitchenOrder) return;
+    setCoursingBusy(true);
+    try {
+      const r = await courseActionResilient(kind, { orderId: kitchenOrder.id, course: courseKey },
+        () => fn(kitchenOrder.id, courseKey));
+      if (r.queuedOffline) {
+        toast({ title: `${courseLabel(courseKey, coursingConfig)} queued`,
+                description: 'Offline — the kitchen is told the moment the connection returns.' });
+        return;
+      }
+      setKitchenOrder(r.data);
+      toast({ title: `${courseLabel(courseKey, coursingConfig)} ${verb}` });
+    } catch (err) {
+      toast({
+        title: `${verb} failed`,
+        description: err.response?.status === 403
+          ? 'Needs the Fire / Hold Courses permission.' : undefined,
+        variant: 'destructive',
+      });
+    } finally { setCoursingBusy(false); }
+  };
+  const fireCourseFromCart  = (k) => courseAction(k, 'fire',  kitchenAPI.fireCourse, 'fired');
+  const holdCourseFromCart  = (k) => courseAction(k, 'hold',  kitchenAPI.holdCourse, 'held');
+  const serveCourseFromCart = (k) => courseAction(k, 'serve', kitchenAPI.serveCourse, 'served');
+
+  /**
+   * Take some of a line back off the kitchen ticket.
+   *
+   * Removing a line on the POS used to leave the kitchen cooking it. Anything
+   * that already went up has to be cancelled explicitly, and the station that
+   * was making it gets a void docket.
+   */
+  const voidFromKitchen = useCallback(async (item, qty) => {
+    const already = sentQty[item.id] || 0;
+    const take = Math.min(already, qty);
+    if (!kitchenOrder || take <= 0) return;
+    try {
+      const voidPayload = {
+        items: [{
+          productId: item.productId || item.id, productName: item.name,
+          quantity: take, course: lineCourse(item, coursingConfig),
+          seat: item.seat ?? null,
+        }],
+      };
+      const r = await courseActionResilient('void', { orderId: kitchenOrder.id, payload: voidPayload },
+        () => coursingAPI.voidItems(kitchenOrder.id, voidPayload));
+      if (r.queuedOffline) {
+        toast({ title: 'Void queued',
+                description: 'Offline — the station is told the moment the connection returns.' });
+        return;
+      }
+      if (r.data?.order) setKitchenOrder(r.data.order);
+      setSentQty(prev => {
+        const next = { ...prev };
+        next[item.id] = Math.max(0, (next[item.id] || 0) - take);
+        if (next[item.id] === 0) delete next[item.id];
+        return next;
+      });
+      toast({
+        title: `Voided ${take} × ${item.name}`,
+        description: r.data?.voidPrinted
+          ? 'Void docket sent to the station that was cooking it.'
+          : 'It had not been fired yet — nothing to cancel at the pass.',
+      });
+    } catch (err) {
+      toast({
+        title: 'Could not void from the kitchen',
+        description: err.response?.status === 403
+          ? 'Needs the Comp / Void permission.'
+          : (err.response?.data?.detail || 'The kitchen may still be making it.'),
+        variant: 'destructive',
+      });
+    }
+  }, [kitchenOrder, sentQty, coursingConfig, toast]);
+
+  // Removing or reducing a cart line has to reach the kitchen too, not just
+  // the bill. Wraps the plain cart handlers rather than replacing them so
+  // non-coursing venues keep the exact behaviour they had.
+  const removeFromCartCoursed = useCallback((lineId) => {
+    const item = cart.find(i => i.id === lineId);
+    if (item && (sentQty[lineId] || 0) > 0) voidFromKitchen(item, sentQty[lineId]);
+    removeFromCart(lineId);
+  }, [cart, sentQty, voidFromKitchen, removeFromCart]);
+
+  const updateQuantityCoursed = useCallback((lineId, qty) => {
+    const item = cart.find(i => i.id === lineId);
+    const sent = sentQty[lineId] || 0;
+    if (item && sent > 0 && qty < sent) voidFromKitchen(item, sent - qty);
+    updateQuantity(lineId, qty);
+  }, [cart, sentQty, voidFromKitchen, updateQuantity]);
 
   // Wave 2 — Fetch AI upsell suggestions whenever the cart changes (debounced)
   useEffect(() => {
@@ -520,6 +796,12 @@ const POSTerminal = () => {
   // ---- Standard checkout ----
   const handleCheckout = async (paymentMethod) => {
     if (loading) return;
+    // A dine-in sale must land on a table that exists — otherwise the docket
+    // sends food to a table nobody is sitting at.
+    if (tableBlocked) {
+      toast({ title: 'Unknown table', description: tableCheck.message, variant: 'destructive' });
+      return;
+    }
     if (trainingMode) {
       toast({ title: "Training Mode", description: "Transaction simulated — no real charge was made.", variant: "default" });
       resetPayment();
@@ -559,7 +841,25 @@ const POSTerminal = () => {
         }
         toast({ title: "Transaction Complete!", description: `Payment of $${totals.total} via ${paymentMethod}` });
         // Auto-route items to category printers
-        try { await gamificationAPI.sendToPrinters({ items: cart.map(i => ({ productName: i.name, category: i.category, quantity: i.quantity })), orderId: res.data?.id }); } catch {}
+        try { await gamificationAPI.sendToPrinters({ items: cart.map(i => ({ productName: i.name, category: i.category, quantity: i.quantity })), orderId: res.data?.id, tableNumber: orderType === 'dine-in' ? tableNumber : null }); } catch {}
+        if (orderType === 'dine-in' && tableCheck.status === 'ok') {
+          try {
+            if (kitchenOrder) {
+              // A coursed table has been sitting there all meal. Paying closes
+              // the kitchen ticket and hands the table back — without this the
+              // floor plan filled up over a service and never drained, and the
+              // next party's first order joined the previous party's ticket.
+              await coursingAPI.settle({ tableNumber, transactionId: res.data?.id });
+              setKitchenOrder(null);
+              setSentQty({});
+            } else {
+              // Pay-at-counter dine-in: they're sitting down now, so the table
+              // becomes occupied rather than free.
+              await floorPlansAPI.occupyByNumber(tableNumber, res.data?.id);
+            }
+            loadFloorTables();
+          } catch { /* the sale is already recorded — don't fail it on this */ }
+        }
         // Settle gift cards: activate any pending-sold cards + redeem applied tenders.
         await settleGiftCards(res.data?.id);
       }
@@ -619,6 +919,57 @@ const POSTerminal = () => {
   };
 
   // ---- Split payment flow ----
+  /**
+   * Split the bill the way the table actually ate it: one part per seat that
+   * ordered something, each owing what that seat had.
+   *
+   * This is the reason venues turn seat ordering on — capturing the seat and
+   * then splitting evenly anyway defeats the point. Anything with no seat
+   * (shared plates, a bottle for the table) is spread across the seats, since
+   * dropping it would leave the parts short of the bill.
+   */
+  const initSeatSplitParts = useCallback(() => {
+    const bySeat = new Map();
+    let unseated = 0;
+    cartWithCourses.forEach(i => {
+      const line = (i.price || 0) * (i.quantity || 0);
+      if (i.seat == null) { unseated += line; return; }
+      if (!bySeat.has(i.seat)) bySeat.set(i.seat, { amount: 0, items: [] });
+      const b = bySeat.get(i.seat);
+      b.amount += line;
+      b.items.push({ name: i.name, quantity: i.quantity });
+    });
+    if (bySeat.size === 0) return false;
+
+    const seatsList = [...bySeat.keys()].sort((a, b) => a - b);
+    const share = unseated / seatsList.length;
+    // Scale to the payable total so discounts, surcharge and GST-inclusive
+    // rounding all land on the parts rather than leaving a stray few cents.
+    const gross = seatsList.reduce((s, k) => s + bySeat.get(k).amount, 0) + unseated;
+    const scale = gross > 0 ? totalNum / gross : 1;
+
+    const parts = seatsList.map(seat => {
+      const b = bySeat.get(seat);
+      return {
+        payerName: `Seat ${seat}`,
+        seat,
+        seatItems: b.items,
+        amount: Math.round((b.amount + share) * scale * 100) / 100,
+        method: 'Card',
+        status: 'pending',
+      };
+    });
+    // Put any rounding difference on the first part so the parts sum exactly.
+    const sum = parts.reduce((s, p) => s + p.amount, 0);
+    const drift = Math.round((totalNum - sum) * 100) / 100;
+    if (drift !== 0 && parts.length) {
+      parts[0].amount = Math.round((parts[0].amount + drift) * 100) / 100;
+    }
+    setSplitParts(parts);
+    setSplitCount(parts.length);
+    return true;
+  }, [cartWithCourses, totalNum]);
+
   const initSplitParts = useCallback((count, mode) => {
     const perPerson = Math.floor((totalNum / count) * 100) / 100;
     const remainder = Math.round((totalNum - perPerson * count) * 100) / 100;
@@ -731,6 +1082,17 @@ const POSTerminal = () => {
     });
     const paidPart = splitParts[idx];
     toast({ title: `Split #${idx + 1} Paid`, description: `$${Number(paidPart.amount).toFixed(2)} from ${paidPart.payerName}` });
+
+    // A seat that pays and leaves at eight shouldn't still read as owing at
+    // ten. Settle just their items now; the ticket itself stays open for the
+    // rest of the table and only closes once every seat has paid.
+    if (paidPart.seat != null && kitchenOrder) {
+      try {
+        await coursingAPI.settle({
+          tableNumber, orderId: kitchenOrder.id, seats: [paidPart.seat], releaseTable: false,
+        });
+      } catch { /* the guest has paid — never block on the tidy-up */ }
+    }
 
     const updatedParts = splitParts.map((s, i) => i === idx ? { ...s, status: 'confirmed' } : s);
     const allPaid = updatedParts.every(s => s.status === 'confirmed');
@@ -1235,16 +1597,12 @@ const POSTerminal = () => {
                   ))}
                 </div>
                 {orderType === 'dine-in' ? (
-                  <div className="flex gap-2 items-center" data-testid="table-row">
-                    <span className="text-xs text-gray-500 whitespace-nowrap">Table #</span>
-                    <Input
-                      placeholder="e.g. 12, Patio-A, Bar-3"
-                      value={tableNumber}
-                      onChange={e => setTableNumber(e.target.value)}
-                      className="h-8 text-xs flex-1"
-                      data-testid="table-input"
-                    />
-                  </div>
+                  <TableNumberField
+                    value={tableNumber}
+                    onChange={setTableNumber}
+                    tables={floorTables}
+                    configured={floorConfigured}
+                  />
                 ) : (
                   <div className="flex gap-2 items-center">
                     <span className="text-xs text-gray-500 whitespace-nowrap">Name</span>
@@ -1279,10 +1637,80 @@ const POSTerminal = () => {
             </CardContent>
           </Card>
         )}
+        {/* A live ticket for this table outranks the cart being empty — after
+            a refresh the server has no cart but the food is still coming. */}
+        {coursingOn && kitchenOrder && (
+          <ReadyBanner courses={ready} onServe={serveCourseFromCart} busy={coursingBusy} />
+        )}
         <div className="flex-1 overflow-y-auto mb-4">
           {cart.length === 0 ? (
             <div className="text-center py-12 text-gray-400">
               <ShoppingCart size={48} className="mx-auto mb-3 opacity-50" /><p>Cart is empty</p><p className="text-sm">Tap a product to add</p>
+            </div>
+          ) : coursingOn ? (
+            /* Coursed service: the cart is grouped by course, each group
+               carrying its own fire/hold state once the ticket is in. */
+            <div className="space-y-3" data-testid="cart-coursed">
+              {courseGroups.map(group => (
+                <div key={group.key} className="border rounded-md overflow-hidden">
+                  <CourseHeader
+                    course={group}
+                    config={coursingConfig}
+                    kitchenOrder={kitchenOrder}
+                    onFire={fireCourseFromCart}
+                    onHold={holdCourseFromCart}
+                    onServe={serveCourseFromCart}
+                    busy={coursingBusy}
+                  />
+                  <div className="space-y-2 p-1.5">
+                    {group.items.map(item => (
+                      <div key={item.id}>
+                        <SwipeableCartItem
+                          item={item}
+                          theme={theme}
+                          onUpdateQty={updateQuantityCoursed}
+                          onRemove={removeFromCartCoursed}
+                          onRepeat={(it) => { addToCart(it); toast({ title: 'Repeated', description: `Added another ${it.name}` }); }}
+                        />
+                        {/* Move a single dish to another course — the kitchen
+                            ticket is built from these, not from the category
+                            default, once the server has overridden it. */}
+                        <div className="flex items-center gap-2 pl-1 pt-0.5">
+                          <span className="flex items-center gap-1">
+                            <span className="text-[9px] text-gray-400 uppercase tracking-wider">Course</span>
+                            <select
+                              className="text-[10px] border rounded px-1 py-0.5 bg-white"
+                              value={lineCourse(item, coursingConfig)}
+                              onChange={e => setLineCourse(item.id, parseInt(e.target.value, 10))}
+                              data-testid={`cart-course-select-${item.id}`}
+                            >
+                              {courseKeys(coursingConfig).map(k => (
+                                <option key={k} value={k}>{courseLabel(k, coursingConfig)}</option>
+                              ))}
+                            </select>
+                          </span>
+                          {useSeats && (
+                            <span data-testid={`cart-seat-wrap-${item.id}`}>
+                              <SeatPicker
+                                value={item.seat ?? null}
+                                seats={seats}
+                                onChange={(s) => setLineSeat(item.id, s)}
+                              />
+                            </span>
+                          )}
+                          {(sentQty[item.id] || 0) > 0 && (
+                            <span className="text-[9px] text-emerald-600" data-testid={`cart-line-sent-${item.id}`}>
+                              {(sentQty[item.id] || 0) >= (item.quantity || 0)
+                                ? 'on ticket'
+                                : `${sentQty[item.id]} of ${item.quantity} on ticket`}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           ) : (
             <div className="space-y-2">
@@ -1299,6 +1727,23 @@ const POSTerminal = () => {
             </div>
           )}
         </div>
+
+        {/* Send-to-kitchen / straight fire. Only for coursed service — a
+            takeaway counter just takes payment and the docket prints. */}
+        {coursingOn && cart.length > 0 && (
+          <div className="mb-3">
+            <SendToKitchenBar
+              config={coursingConfig}
+              sent={!!kitchenOrder}
+              busy={coursingBusy}
+              disabled={tableBlocked}
+              pendingItems={pendingCount}
+              rounds={kitchenOrder?.rounds || 1}
+              onSend={() => sendCartToKitchen(false)}
+              onStraightFire={() => sendCartToKitchen(true)}
+            />
+          </div>
+        )}
 
         {/* Wave 2 — AI Upsell strip */}
         {cart.length > 0 && (upsells.length > 0 || upsellLoading) && (
@@ -1460,21 +1905,36 @@ const POSTerminal = () => {
               variant="outline"
               className="flex-1 h-14 text-base font-semibold"
               onClick={async () => {
-                try {
-                  const r = await floorPlansAPI.getAll();
-                  const active = (r.data || []).find(p => p.active) || (r.data || [])[0];
-                  setFloorTables(active?.tables || []);
-                } catch { setFloorTables([]); }
+                // Refresh first so table statuses in the picker are current.
+                // (This used to read `p.active`, which no floor plan has — the
+                // field is `isActive` — so it always fell through to plan [0].)
+                await loadFloorTables();
                 setSendToTableOpen(true);
               }}
               data-testid="pos-send-to-table">
               Send to Table
             </Button>
             <Button className="flex-1 h-14 text-base font-semibold" style={{ backgroundColor: theme.primary }}
-              onClick={() => setShowPayment(true)} data-testid="pos-proceed-payment">
+              disabled={tableBlocked}
+              title={tableBlocked ? tableCheck.message : undefined}
+              onClick={() => {
+                // Belt-and-braces: the button is disabled, but a stale table
+                // can still be in state if the floor plan changed underneath.
+                if (tableBlocked) {
+                  toast({ title: 'Unknown table', description: tableCheck.message, variant: 'destructive' });
+                  return;
+                }
+                setShowPayment(true);
+              }}
+              data-testid="pos-proceed-payment">
               Proceed to Payment
             </Button>
           </div>
+        )}
+        {tableBlocked && cart.length > 0 && (
+          <p className="text-[11px] text-red-600 text-center -mt-2 pb-1" data-testid="pos-table-blocked">
+            {tableCheck.message} — fix the table number to take payment.
+          </p>
         )}
 
         {/* Payment Methods Panel */}
@@ -1578,7 +2038,19 @@ const POSTerminal = () => {
         open={paymentView === 'split'} onClose={() => setPaymentView('methods')}
         total={totalNum}
         splitParts={splitParts} splitMode={splitMode} splitCount={splitCount}
-        onSetMode={(m) => { setSplitMode(m); if (m === 'equal') initSplitParts(splitCount, 'equal'); }}
+        seatsAvailable={useSeats && cartWithCourses.some(i => i.seat != null)}
+        onSetMode={(m) => {
+          if (m === 'seat') {
+            if (!initSeatSplitParts()) {
+              toast({ title: 'No seats assigned', description: 'Assign seats to cart lines first.', variant: 'destructive' });
+              return;
+            }
+            setSplitMode('seat');
+            return;
+          }
+          setSplitMode(m);
+          if (m === 'equal') initSplitParts(splitCount, 'equal');
+        }}
         onChangeCount={recalcEqualSplit}
         onUpdatePart={updateSplitPart}
         onPayPart={handlePaySplit}
@@ -1665,8 +2137,12 @@ const POSTerminal = () => {
                         orderId: `TABLE-${t.number}`, tableNumber: t.number,
                       });
                     } catch (err) { /* printer optional */ }
+                    // Reflect the tab on the floor plan.
+                    try { await floorPlansAPI.occupyByNumber(t.number, `TABLE-${t.number}`); } catch {}
                     setSendToTableOpen(false);
+                    setTableNumber(String(t.number));
                     clearCart();
+                    loadFloorTables();
                   } catch (e) {
                     toast({ title: 'Send failed', description: e?.response?.data?.detail, variant: 'destructive' });
                   } finally { setSendingToTable(false); }

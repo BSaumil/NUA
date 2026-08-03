@@ -363,4 +363,19 @@ async def create_refund(refund: RefundCreate, _user: dict = Depends(require_owne
             {"id": refund.customerId},
             {"$inc": {"storeCredit": refund.amount}}
         )
+
+    # The money path and the food path were tracked separately: refunding a
+    # sale left its kitchen ticket open and its stock consumed, so the kitchen
+    # kept cooking a dish nobody was paying for and inventory stayed wrong.
+    try:
+        from services import refund_effects
+        refund_obj_dict = refund_obj.dict()
+        refund_obj_dict["kitchenEffects"] = await refund_effects.reverse(
+            original_txn, refund_obj_dict, actor=_user.get("name") or _user.get("email"))
+        await db.refunds.update_one(
+            {"id": refund_obj_dict["id"]},
+            {"$set": {"kitchenEffects": refund_obj_dict["kitchenEffects"]}})
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Refund kitchen/stock reversal skipped: {e}")
     return refund_obj

@@ -1,0 +1,172 @@
+"""Route order items to station printers and queue the dockets.
+
+Lifted out of routes/gamification.py so two callers can share it: the POS
+sending a whole order, and a course being fired (which prints only that
+course's items, at the moment the server fires it — which is what a station
+actually wants).
+
+Item dicts may carry `course`, `courseLabel` and `seat`; they're passed
+straight through onto the job so the docket can print them.
+"""
+import copy
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+from database import db
+
+DEFAULT_PRINT_ROUTING: Dict[str, Any] = {
+    "enabled": True,
+    "routes": [
+        {"category": "Beverages", "printer": "Bar Printer", "priority": 1},
+        {"category": "Alcohol", "printer": "Bar Printer", "priority": 1},
+        {"category": "Beer", "printer": "Bar Printer", "priority": 1},
+        {"category": "Wine — Red", "printer": "Bar Printer", "priority": 1},
+        {"category": "Wine — White", "printer": "Bar Printer", "priority": 1},
+        {"category": "Wine — Sparkling", "printer": "Bar Printer", "priority": 1},
+        {"category": "Wine — Rosé", "printer": "Bar Printer", "priority": 1},
+        {"category": "Cocktails", "printer": "Bar Printer", "priority": 1},
+        {"category": "Spirits — Whisky", "printer": "Bar Printer", "priority": 1},
+        {"category": "Spirits — Gin", "printer": "Bar Printer", "priority": 1},
+        {"category": "Spirits — Vodka", "printer": "Bar Printer", "priority": 1},
+        {"category": "Spirits — Rum", "printer": "Bar Printer", "priority": 1},
+        {"category": "Spirits — Tequila", "printer": "Bar Printer", "priority": 1},
+        {"category": "Liqueurs", "printer": "Bar Printer", "priority": 1},
+        {"category": "Non-Alcoholic", "printer": "Bar Printer", "priority": 1},
+        {"category": "Coffee & Tea", "printer": "Bar Printer", "priority": 1},
+        {"category": "Food", "printer": "Kitchen Printer", "priority": 2},
+        {"category": "Mains", "printer": "Kitchen Printer", "priority": 2},
+        {"category": "Appetizers", "printer": "Kitchen Printer", "priority": 1},
+        {"category": "Bakery", "printer": "Kitchen Printer", "priority": 3},
+        {"category": "Desserts", "printer": "Kitchen Printer", "priority": 3},
+        {"category": "Pizza", "printer": "Pizza Station", "priority": 1},
+    ],
+    # Category groups (from the categories collection) used when no explicit
+    # category route matches — so a newly added drink category still goes to
+    # the bar instead of quietly landing on the kitchen printer.
+    "groupRoutes": [
+        {"group": "Alcohol", "printer": "Bar Printer", "priority": 1},
+        {"group": "Drinks", "printer": "Bar Printer", "priority": 1},
+    ],
+    "defaultPrinter": "Kitchen Printer",
+    "defaultPriority": 2,
+}
+
+
+async def load_config() -> Dict[str, Any]:
+    s = await db.settings.find_one({"key": "print_routing"}, {"_id": 0})
+    cfg = copy.deepcopy(s["value"]) if (s and s.get("value")) else copy.deepcopy(DEFAULT_PRINT_ROUTING)
+    routes = cfg.get("routes")
+    if isinstance(routes, dict):
+        cfg["routes"] = [
+            {"category": cat.title(), "printer": prn, "priority": 2}
+            for cat, prn in routes.items() if isinstance(prn, str)
+        ]
+    elif routes is None or not isinstance(routes, list):
+        cfg["routes"] = DEFAULT_PRINT_ROUTING["routes"]
+    cfg.setdefault("enabled", True)
+    cfg.setdefault("groupRoutes", DEFAULT_PRINT_ROUTING["groupRoutes"])
+    cfg.setdefault("defaultPrinter", DEFAULT_PRINT_ROUTING["defaultPrinter"])
+    cfg.setdefault("defaultPriority", DEFAULT_PRINT_ROUTING["defaultPriority"])
+    return cfg
+
+
+async def stations_for(items: List[dict]) -> List[str]:
+    """Which station printers a set of items would route to, without printing.
+
+    The KDS station filter needs this on the ticket itself: dockets carry
+    stations, but they're created per fired course, so a ticket's full station
+    list can't be read off them — and a bar screen filtering on a field the
+    ticket doesn't have silently shows everything.
+    """
+    config = await load_config()
+    routes = config.get("routes", [])
+    group_routes = config.get("groupRoutes") or DEFAULT_PRINT_ROUTING["groupRoutes"]
+    default_printer = config.get("defaultPrinter", "Kitchen Printer")
+    cat_docs = await db.categories.find({}, {"_id": 0, "name": 1, "group": 1}).to_list(500)
+    cat_group = {c.get("name", "").lower(): (c.get("group") or "") for c in cat_docs}
+
+    out: List[str] = []
+    for item in items or []:
+        cat = (item.get("category") or "")
+        route = next((r for r in routes if str(r.get("category", "")).lower() == cat.lower()), None)
+        if route:
+            printer = route["printer"]
+        else:
+            grp = cat_group.get(cat.lower(), "")
+            g = next((r for r in group_routes if str(r.get("group", "")).lower() == grp.lower()), None) if grp else None
+            printer = g["printer"] if g else default_printer
+        if printer not in out:
+            out.append(printer)
+    return out
+
+
+async def route_and_queue(items: List[dict], order_id: Optional[str] = None,
+                          table_number: Optional[str] = None,
+                          extra: Optional[Dict[str, Any]] = None) -> List[dict]:
+    """Split items across station printers and queue one docket per station.
+
+    Every docket carries the full section list and per-section detail, so each
+    station prints the whole order — its own dishes first, then what else is
+    going out with them and from where.
+    """
+    order_id = order_id or f"ORD-{str(uuid.uuid4())[:8].upper()}"
+    config = await load_config()
+    routes = config.get("routes", [])
+    group_routes = config.get("groupRoutes") or DEFAULT_PRINT_ROUTING["groupRoutes"]
+    default_printer = config.get("defaultPrinter", "Kitchen Printer")
+    default_priority = config.get("defaultPriority", 2)
+
+    cat_docs = await db.categories.find({}, {"_id": 0, "name": 1, "group": 1}).to_list(500)
+    cat_group = {c.get("name", "").lower(): (c.get("group") or "") for c in cat_docs}
+
+    def _route_for(cat: str):
+        route = next((r for r in routes if str(r.get("category", "")).lower() == cat.lower()), None)
+        if route:
+            return route["printer"], route.get("priority", default_priority)
+        grp = cat_group.get(cat.lower(), "")
+        if grp:
+            g = next((r for r in group_routes if str(r.get("group", "")).lower() == grp.lower()), None)
+            if g:
+                return g["printer"], g.get("priority", default_priority)
+        return default_printer, default_priority
+
+    printer_jobs: Dict[str, dict] = {}
+    for item in items:
+        printer_name, priority = _route_for(item.get("category", "") or "")
+        if printer_name not in printer_jobs:
+            printer_jobs[printer_name] = {"printer": printer_name, "items": [], "priority": priority}
+        printer_jobs[printer_name]["items"].append(item)
+        printer_jobs[printer_name]["priority"] = min(printer_jobs[printer_name]["priority"], priority)
+
+    # Keep same-course dishes together, and same-category dishes adjacent
+    # inside a course, so the docket reads the way the station works.
+    for job in printer_jobs.values():
+        seen: List[str] = []
+        for it in job["items"]:
+            c = (it.get("category") or "").lower()
+            if c not in seen:
+                seen.append(c)
+        job["items"].sort(key=lambda it: (int(it.get("course") or 1),
+                                          seen.index((it.get("category") or "").lower())))
+
+    jobs = sorted(printer_jobs.values(), key=lambda x: x["priority"])
+    order_stations = [j["printer"] for j in jobs]
+    order_sections = [{"printer": j["printer"], "items": j["items"]} for j in jobs]
+
+    records = []
+    for job in jobs:
+        record = {
+            "id": f"PRINT-{str(uuid.uuid4())[:8].upper()}",
+            "orderId": order_id, "tableNumber": table_number,
+            "printer": job["printer"], "priority": job["priority"],
+            "items": job["items"], "status": "queued",
+            "orderStations": order_stations,
+            "orderSections": order_sections,
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            **(extra or {}),
+        }
+        await db.print_jobs.insert_one(record)
+        record.pop("_id", None)
+        records.append(record)
+    return records

@@ -67,6 +67,7 @@ export function UpiPaymentDialog({ open, onClose, qrData, total, onConfirm, load
 export function SplitPaymentDialog({
   open, onClose, total, splitParts, splitMode, splitCount,
   onSetMode, onChangeCount, onUpdatePart, onPayPart, splitRemaining, loading, activeSplitIndex,
+  seatsAvailable = false,
 }) {
   const paidSoFar = Math.max(0, Math.round((Number(total) - Number(splitRemaining)) * 100) / 100);
   const allPaid = splitRemaining === 0 && splitParts.length > 0;
@@ -108,7 +109,7 @@ export function SplitPaymentDialog({
         })()}
         <div className="space-y-4 py-2">
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
+            <div className={`flex items-center gap-2 ${splitMode === 'seat' ? 'opacity-40 pointer-events-none' : ''}`}>
               <span className="text-sm font-medium text-gray-600">Split into</span>
               <div className="flex items-center border rounded-lg overflow-hidden">
                 <button className="px-3 py-1.5 hover:bg-gray-100 text-sm" onClick={() => splitCount > 2 && onChangeCount(splitCount - 1)}>-</button>
@@ -117,11 +118,11 @@ export function SplitPaymentDialog({
               </div>
             </div>
             <div className="flex gap-1 ml-auto">
-              {['equal', 'custom'].map(m => (
+              {['equal', 'custom', ...(seatsAvailable ? ['seat'] : [])].map(m => (
                 <button key={m} onClick={() => onSetMode(m)}
                   className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${splitMode === m ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
                   data-testid={`split-mode-${m}`}>
-                  {m === 'equal' ? 'Equal' : 'Custom'}
+                  {m === 'equal' ? 'Equal' : m === 'custom' ? 'Custom' : 'By seat'}
                 </button>
               ))}
             </div>
@@ -136,6 +137,11 @@ export function SplitPaymentDialog({
                       {part.status === 'confirmed' ? <Check size={16} /> : idx + 1}
                     </div>
                     <div className="flex-1 space-y-2">
+                      {part.seatItems && part.seatItems.length > 0 && (
+                        <p className="text-[10px] text-gray-500 leading-tight" data-testid={`split-seat-items-${idx}`}>
+                          {part.seatItems.map(i => `${i.quantity}× ${i.name}`).join(' · ')}
+                        </p>
+                      )}
                       <div className="flex gap-2">
                         <Input placeholder="Guest name" value={part.payerName} className="h-8 text-sm"
                           onChange={e => onUpdatePart(idx, 'payerName', e.target.value)}

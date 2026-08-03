@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Card, CardContent } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
-import { v25API } from '../../services/api';
+import { v25API, productsAPI } from '../../services/api';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useToast } from '../../hooks/use-toast';
 import { ChefHat, Plus } from 'lucide-react';
@@ -12,7 +12,10 @@ export default function RecipeCosting() {
   const [products, setProducts] = useState([]);
   const [selected, setSelected] = useState(null);
   const [ings, setIngs] = useState([]);
-  useEffect(() => { fetch(`${process.env.REACT_APP_BACKEND_URL}/api/products`).then(r => r.json()).then(setProducts); }, []);
+  // Goes through the authenticated client on purpose: /products hands an
+  // anonymous caller the menu with cost stripped out, and a costing screen
+  // with every cost at zero is worse than one that fails loudly.
+  useEffect(() => { productsAPI.getAll().then(r => setProducts(r.data || [])).catch(() => {}); }, []);
   const open = async (p) => { setSelected(p); const r = await v25API.getRecipe(p.id); setIngs(r.data?.ingredients || []); };
   const save = async () => { await v25API.upsertRecipe({ productId: selected.id, ingredients: ings }); toast({ title: 'Recipe saved · cost updated' }); };
   const total = ings.reduce((s, i) => s + (parseFloat(i.quantity) || 0) * (parseFloat(i.costPerUnit) || 0), 0);
