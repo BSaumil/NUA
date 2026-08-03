@@ -6,6 +6,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent } from '../components/ui/card';
 import { Lock, Mail, AlertCircle, Hash } from 'lucide-react';
+import Logo from '../components/brand/Logo';
 
 export default function Login() {
   const { login } = useAuth();
@@ -46,9 +47,11 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-gray-950 to-black" data-testid="login-page">
       <Card className="w-full max-w-sm border-gray-800 bg-gray-900/80 backdrop-blur">
         <CardContent className="p-8">
-          <div className="text-center mb-6">
-            <h1 className="text-3xl font-bold text-white tracking-tight">NUA</h1>
-            <p className="text-gray-400 text-sm mt-1">Staff Portal</p>
+          {/* Login is a marketing-facing surface, so it gets the full
+              gradient lockup (BRAND-SPEC §3). */}
+          <div className="flex flex-col items-center mb-6">
+            <Logo variant="marketing" size={34} />
+            <p className="text-gray-400 text-sm mt-2">Staff Portal</p>
           </div>
 
           {/* Mode Toggle */}

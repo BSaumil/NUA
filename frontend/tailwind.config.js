@@ -7,12 +7,29 @@ module.exports = {
   ],
   theme: {
   	extend: {
+  		// NUA brand tokens — see brand/BRAND-SPEC.md. `nua-purple` is reserved
+  		// for AI-surfaced features; never use it decoratively.
+  		fontFamily: {
+  			'nua-wordmark':  ["'Instrument Serif'", 'Georgia', 'serif'],
+  			'nua-display':   ["'Space Grotesk'", 'ui-sans-serif', 'system-ui', 'sans-serif'],
+  			'nua-body':      ['Manrope', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+  			'nua-mono':      ["'IBM Plex Mono'", 'ui-monospace', 'Menlo', 'monospace'],
+  			'nua-signature': ['Caveat', 'cursive']
+  		},
+  		letterSpacing: { tagline: '0.35em' },
   		borderRadius: {
   			lg: 'var(--radius)',
   			md: 'calc(var(--radius) - 2px)',
   			sm: 'calc(var(--radius) - 4px)'
   		},
   		colors: {
+  			nua: {
+  				orange: '#f58c14',
+  				purple: '#8b5cf6',
+  				pink:   '#ec4899',
+  				ink:    '#1c1917',
+  				paper:  '#fdfcfa'
+  			},
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',
   			card: {

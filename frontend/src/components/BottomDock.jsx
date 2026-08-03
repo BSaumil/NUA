@@ -11,6 +11,7 @@ import {
   Link2, Ban, Receipt, Calendar, MapPin, Clock, Sparkles, BookOpen, Shield, ShoppingBag,
   ShieldAlert, AlertTriangle, Flame, ArrowLeftRight, Key, Sun, Moon
 } from 'lucide-react';
+import Logo from './brand/Logo';
 
 // Role-default quick actions (left → right) on the bottom dock.
 // 4 most-common items per role, then "More" splash button.
@@ -222,7 +223,11 @@ export default function BottomDock() {
       >
         <div className="max-w-screen-2xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-1 text-sm">
-            <span className="font-bold tracking-wider px-2" style={{ color: theme.primary }}>NUA</span>
+            {/* In-product chrome — product variant only, never the gradient
+                marketing lockup (BRAND-SPEC §3). */}
+            <span className="px-2" style={{ color: theme.primary }}>
+              <Logo variant="product" size={22} />
+            </span>
             <span className={`text-[10px] mr-2 hidden sm:inline ${darkMode ? 'text-zinc-500' : 'text-gray-400'}`}>{user.name} · {role}</span>
           </div>
           <div className="flex items-center gap-1 flex-1 justify-center max-w-xl">

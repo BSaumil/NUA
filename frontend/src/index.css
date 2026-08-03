@@ -1,3 +1,8 @@
+/* NUA brand tokens — colours + typography. Must precede the Tailwind
+   directives: CSS requires @import before any other rule. */
+@import './typography.css';
+@import './colors.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
