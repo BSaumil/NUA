@@ -387,6 +387,12 @@ async def startup():
         start_coursing()
     except Exception as exc:
         logger.warning("Coursing scheduler failed to start: %s", exc)
+    # Burned TOTP codes and trusted devices both expire on their own.
+    try:
+        from services.two_factor import ensure_indexes as ensure_2fa_indexes
+        await ensure_2fa_indexes()
+    except Exception as exc:
+        logger.warning("2FA indexes failed: %s", exc)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

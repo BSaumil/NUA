@@ -755,27 +755,102 @@ async def get_audit_logs( limit: int = 200, user: dict = Depends(require_owner_o
 
 
 # =============================================================================
-# 2FA OWNER LOGIN (TOTP)
+# 2FA (TOTP)
+#
+# The enrolment half lives here; the login-time challenge lives in routes/auth.py
+# next to the password check, because that is where it actually has to bite.
 # =============================================================================
+@router.get("/auth/2fa/status")
+async def status_2fa(user: dict = Depends(get_user)):
+    from services import two_factor
+    fresh = await db.auth_users.find_one({"id": user["id"]}, {"_id": 0}) or {}
+    pol = await two_factor.policy()
+    return {
+        "enabled": bool(fresh.get("twoFactorEnabled")),
+        "enabledAt": fresh.get("twoFactorEnabledAt"),
+        "pendingSetup": bool(fresh.get("twoFactorSecretPending")),
+        "recoveryCodesRemaining": await two_factor.recovery_codes_remaining(user["id"]),
+        "requiredForYou": await two_factor.required_for(user),
+        "policy": pol,
+        "devices": await two_factor.list_devices(user["id"]),
+    }
+
+
 @router.post("/auth/2fa/setup")
-async def setup_2fa(user: dict = Depends(require_owner)):
-    secret = secrets.token_hex(16)  # In production use pyotp.random_base32()
-    await db.auth_users.update_one({"id": user["id"]}, {"$set": {"twoFactorSecret": secret, "twoFactorEnabled": False}})
-    return {"secret": secret, "qrUri": f"otpauth://totp/NUA:{user['email']}?secret={secret}&issuer=NUA"}
+async def setup_2fa(user: dict = Depends(get_user)):
+    """Mint a secret to scan. Nothing is enforced until it's confirmed."""
+    from services import two_factor
+    return await two_factor.begin_enrolment(user)
+
 
 @router.post("/auth/2fa/verify")
 async def verify_2fa(data: dict, user: dict = Depends(get_user)):
-    code = data.get("code", "")
-    # Stub: accept "123456" for demo (real implementation: pyotp.TOTP(secret).verify(code))
-    if code == "123456":
-        await db.auth_users.update_one({"id": user["id"]}, {"$set": {"twoFactorEnabled": True}})
-        return {"verified": True, "message": "2FA enabled"}
-    raise HTTPException(status_code=400, detail="Invalid code")
+    """Prove the secret works, which switches it on and issues recovery codes.
+
+    The codes come back exactly once — they are stored hashed, so this response
+    is the only chance to show or print them.
+    """
+    from services import two_factor
+    try:
+        return await two_factor.confirm_enrolment(user, data.get("code", ""))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 @router.post("/auth/2fa/disable")
-async def disable_2fa(user: dict = Depends(get_user)):
-    await db.auth_users.update_one({"id": user["id"]}, {"$unset": {"twoFactorSecret": "", "twoFactorEnabled": ""}})
-    return {"message": "2FA disabled"}
+async def disable_2fa(data: dict, user: dict = Depends(get_user)):
+    """Turning it off needs the current password — otherwise a borrowed,
+    still-logged-in tablet is enough to strip the second factor off the
+    owner's account."""
+    from routes.auth import verify_password
+    from services import two_factor
+    fresh = await db.auth_users.find_one({"id": user["id"]})
+    if not verify_password(data.get("password", ""), (fresh or {}).get("password_hash", "")):
+        raise HTTPException(status_code=403, detail="Enter your password to turn off two-factor")
+    pol = await two_factor.policy()
+    if pol["required"] and user.get("role") in pol["roles"]:
+        raise HTTPException(
+            status_code=403,
+            detail="This venue requires two-factor for your role — an owner must change the policy first")
+    await two_factor.disable(user["id"])
+    return {"message": "Two-factor turned off"}
+
+
+@router.post("/auth/2fa/recovery-codes")
+async def regen_recovery_codes(data: dict, user: dict = Depends(get_user)):
+    from routes.auth import verify_password
+    from services import two_factor
+    fresh = await db.auth_users.find_one({"id": user["id"]})
+    if not verify_password(data.get("password", ""), (fresh or {}).get("password_hash", "")):
+        raise HTTPException(status_code=403, detail="Enter your password to generate new codes")
+    if not (fresh or {}).get("twoFactorEnabled"):
+        raise HTTPException(status_code=400, detail="Two-factor isn't switched on")
+    return {"recoveryCodes": await two_factor.regenerate_recovery_codes(user["id"])}
+
+
+@router.delete("/auth/2fa/devices/{device_id}")
+async def revoke_trusted_device(device_id: str, user: dict = Depends(get_user)):
+    from services import two_factor
+    if not await two_factor.revoke_device(user["id"], device_id):
+        raise HTTPException(status_code=404, detail="No such device")
+    return {"message": "Device will be asked for a code next time"}
+
+
+@router.get("/auth/2fa/policy")
+async def get_2fa_policy(_: dict = Depends(require_owner_or_manager)):
+    from services import two_factor
+    pol = await two_factor.policy()
+    staff = await db.auth_users.find({}, {"_id": 0, "id": 1, "name": 1, "email": 1,
+                                          "role": 1, "twoFactorEnabled": 1}).to_list(200)
+    pol["staff"] = [s for s in staff if s.get("role") in pol["roles"]]
+    return pol
+
+
+@router.post("/auth/2fa/policy")
+async def save_2fa_policy(data: dict, _: dict = Depends(require_owner)):
+    """Only the owner can decide the venue needs a second factor."""
+    from services import two_factor
+    return await two_factor.set_policy(bool(data.get("required")), data.get("roles"))
 
 
 # =============================================================================
