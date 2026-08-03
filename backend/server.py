@@ -203,6 +203,11 @@ PUBLIC_API_PATHS = {
     # Auth itself, plus the endpoints the login screen needs before there is a user
     "/api/auth/login", "/api/auth/register", "/api/auth/logout", "/api/auth/refresh",
     "/api/auth/me", "/api/auth/forgot-password", "/api/auth/reset-password",
+    # The second half of login: password passed, code still owed. It carries
+    # its own short-lived challenge token in the body instead of a session
+    # token, which this middleware doesn't know how to read — the endpoint
+    # verifies that token itself.
+    "/api/auth/2fa/challenge",
     "/api/business/theme",       # login-screen branding
     # The menu, as guests see it. /products strips cost/stock/sku for guests.
     "/api/products", "/api/categories", "/api/modifiers",
