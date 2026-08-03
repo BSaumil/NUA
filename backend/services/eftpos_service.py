@@ -16,6 +16,7 @@ import socket
 import serial
 import json
 import asyncio
+import uuid
 from typing import Optional, Dict, Any
 from datetime import datetime
 import logging
@@ -24,13 +25,29 @@ logger = logging.getLogger(__name__)
 
 class EFTPOSProvider:
     """Base class for EFTPOS providers"""
-    
+
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.provider = config.get('provider')
         self.terminal_id = config.get('terminalId')
         self.connection_type = config.get('connectionType')
-        
+
+    async def _blocking(self, fn, *args):
+        """Run a blocking call (socket connect/send/recv) off the event loop.
+
+        Every socket-based provider below calls plain `socket.connect`,
+        `.sendall` and `.recv` directly inside an `async def`. Those are
+        synchronous, blocking calls — running one inline blocks this
+        process's *entire* event loop, meaning every other request the
+        backend is serving (every till, every kitchen display) stalls for
+        however long the terminal takes to answer. A 60-second EFTPOS
+        timeout would mean 60 seconds of the whole venue's POS freezing, not
+        just the one payment. Routing it through the default executor keeps
+        it off the loop.
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, fn, *args)
+
     async def connect(self) -> bool:
         """Establish connection to EFTPOS terminal"""
         raise NotImplementedError
@@ -79,8 +96,8 @@ class LinklyProvider(EFTPOSProvider):
             
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.socket.settimeout(self.config.get('timeout', 60))
-            self.socket.connect((ip, port))
-            
+            await self._blocking(self.socket.connect, (ip, port))
+
             logger.info(f"Connected to Linkly at {ip}:{port}")
             return True
         except Exception as e:
@@ -108,11 +125,11 @@ class LinklyProvider(EFTPOSProvider):
             
             # Send to Linkly
             request = json.dumps(message) + "\n"
-            self.socket.sendall(request.encode())
-            
+            await self._blocking(self.socket.sendall, request.encode())
+
             # Receive response
-            response = self.socket.recv(4096).decode()
-            result = json.loads(response)
+            response_bytes = await self._blocking(self.socket.recv, 4096)
+            result = json.loads(response_bytes.decode())
             
             return {
                 "approved": result.get("Success", False),
@@ -147,21 +164,21 @@ class TyroProvider(EFTPOSProvider):
             port = self.config.get('port', 6001)  # Default Tyro port
             
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.socket.connect((ip, port))
+            await self._blocking(self.socket.connect, (ip, port))
             return True
         except Exception as e:
             logger.error(f"Tyro connection failed: {e}")
             return False
-    
+
     async def purchase(self, amount: float, reference: str, cashout: float = 0.0) -> Dict[str, Any]:
         """Tyro purchase transaction"""
         # Tyro proprietary protocol
         try:
             message = f"T|{int(amount * 100)}|{reference}\n"
-            self.socket.sendall(message.encode())
-            
-            response = self.socket.recv(1024).decode()
-            parts = response.split('|')
+            await self._blocking(self.socket.sendall, message.encode())
+
+            response_bytes = await self._blocking(self.socket.recv, 1024)
+            parts = response_bytes.decode().split('|')
             
             return {
                 "approved": parts[0] == 'A',
@@ -187,20 +204,21 @@ class SmartpayProvider(EFTPOSProvider):
             port = self.config.get('port', 6050)  # Smartpay default
             
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.socket.connect((ip, port))
+            await self._blocking(self.socket.connect, (ip, port))
             return True
         except Exception as e:
             logger.error(f"Smartpay connection failed: {e}")
             return False
-    
+
     async def purchase(self, amount: float, reference: str, cashout: float = 0.0) -> Dict[str, Any]:
         """Smartpay purchase transaction"""
         try:
             # Smartpay XML format
             message = f'<Transaction><Type>Purchase</Type><Amount>{int(amount * 100)}</Amount><Ref>{reference}</Ref></Transaction>'
-            self.socket.sendall(message.encode())
-            
-            response = self.socket.recv(2048).decode()
+            await self._blocking(self.socket.sendall, message.encode())
+
+            response_bytes = await self._blocking(self.socket.recv, 2048)
+            response = response_bytes.decode()
             # Parse XML response
             # Simplified - real implementation needs XML parsing
             
@@ -239,7 +257,8 @@ class WindcaveProvider(EFTPOSProvider):
                 "merchantReference": reference
             }
             
-            response = requests.post(url, json=payload, headers=headers, timeout=60)
+            response = await self._blocking(
+                lambda: requests.post(url, json=payload, headers=headers, timeout=60))
             result = response.json()
             
             return {
@@ -253,14 +272,115 @@ class WindcaveProvider(EFTPOSProvider):
             return {"approved": False, "responseCode": "99", "responseText": str(e)}
 
 
+class SimulatorProvider(EFTPOSProvider):
+    """A terminal that isn't there.
+
+    Every provider above needs real hardware or a real vendor account to
+    exercise even once — there was no way to test a purchase, a decline, a
+    refund, a cancel, or a settlement without either. This is the "test
+    terminal" a venue can configure the exact same way as a real one
+    (provider: "simulator" in EFTPOSConfig) and get deterministic, documented
+    behaviour instead of a live socket.
+
+    Test-amount conventions, matching what real terminal simulators use so
+    the numbers are recognisable rather than invented:
+      $1.00  -> declined, insufficient funds (the most common real decline)
+      $2.00  -> declined, card expired
+      $3.00  -> times out / connection failure (tests the offline path)
+      $4.00  -> declined, do not honour (a generic bank-side refusal)
+      anything else -> approved
+    Refunds and cancels always succeed against a reference this simulator
+    itself issued; an unknown reference is refused, the same as a real
+    terminal would refuse to refund a transaction it never processed.
+    """
+
+    DECLINE_RULES = {
+        100: ("51", "Insufficient Funds"),
+        200: ("54", "Expired Card"),
+        400: ("05", "Do Not Honour"),
+    }
+    TIMEOUT_CENTS = 300
+
+    # EFTPOSService.get_provider() builds a brand-new provider instance for
+    # every single call (see process_transaction below) — nothing about this
+    # object survives between a purchase and the refund that follows it. A
+    # per-instance ledger would make refund() unable to ever find the
+    # purchase it's meant to reverse. Keyed by terminal so two configured
+    # simulator terminals don't share state, this dict lives at module scope
+    # instead, alongside every other instance of this class.
+    _ledgers: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        self._ledger = self._ledgers.setdefault(self.terminal_id or "default", {})
+
+    async def connect(self) -> bool:
+        return True
+
+    async def disconnect(self) -> bool:
+        return True
+
+    async def status(self) -> Dict[str, Any]:
+        return {"connected": True, "provider": "simulator", "terminalId": self.terminal_id}
+
+    def _rrn(self) -> str:
+        return uuid.uuid4().hex[:12].upper()
+
+    async def purchase(self, amount: float, reference: str, cashout: float = 0.0) -> Dict[str, Any]:
+        cents = int(round(amount * 100))
+        rrn = self._rrn()
+        stan = str(len(self._ledger) + 1).zfill(6)
+
+        if cents == self.TIMEOUT_CENTS:
+            return {"approved": False, "responseCode": "68", "responseText": "Timed out — no response from terminal"}
+
+        decline = self.DECLINE_RULES.get(cents)
+        if decline:
+            code, text = decline
+            self._ledger[rrn] = {"amount": amount, "reference": reference, "approved": False}
+            return {"approved": False, "responseCode": code, "responseText": text, "rrn": rrn, "stan": stan}
+
+        result = {
+            "approved": True, "responseCode": "00", "responseText": "Approved",
+            "authCode": uuid.uuid4().hex[:6].upper(), "rrn": rrn, "stan": stan,
+            "cardType": "visa", "maskedPan": "************4242",
+        }
+        self._ledger[rrn] = {"amount": amount, "reference": reference, "approved": True}
+        return result
+
+    async def refund(self, amount: float, reference: str) -> Dict[str, Any]:
+        original = next((v for v in self._ledger.values()
+                         if v["reference"] == reference and v["approved"]), None)
+        if not original:
+            return {"approved": False, "responseCode": "78", "responseText": "No matching original transaction"}
+        if amount > original["amount"] + 0.001:
+            return {"approved": False, "responseCode": "77",
+                    "responseText": f"Refund ${amount:.2f} exceeds original ${original['amount']:.2f}"}
+        rrn = self._rrn()
+        return {"approved": True, "responseCode": "00", "responseText": "Refund approved",
+               "authCode": uuid.uuid4().hex[:6].upper(), "rrn": rrn}
+
+    async def cancel(self) -> Dict[str, Any]:
+        return {"approved": True, "responseCode": "00", "responseText": "Transaction cancelled"}
+
+    async def settlement(self) -> Dict[str, Any]:
+        approved = [v for v in self._ledger.values() if v["approved"]]
+        return {
+            "approved": True, "responseCode": "00", "responseText": "Settlement complete",
+            "totalCount": len(approved),
+            "totalAmount": round(sum(v["amount"] for v in approved), 2),
+        }
+
+
 class EFTPOSService:
     """Main EFTPOS service - handles all providers"""
-    
+
     PROVIDERS = {
         'linkly': LinklyProvider,
         'tyro': TyroProvider,
         'smartpay': SmartpayProvider,
         'windcave': WindcaveProvider,
+        'simulator': SimulatorProvider,
         # Add more providers as needed
     }
     
