@@ -249,6 +249,15 @@ export const floorPlansAPI = {
   freeByNumber: (number) => api.post(`/floor-plans/tables/by-number/${encodeURIComponent(number)}/free`),
 };
 
+// Coursing API — course assignment, fire/hold config, POS -> kitchen
+export const coursingAPI = {
+  getConfig: () => api.get('/coursing/config'),
+  updateConfig: (data) => api.put('/coursing/config', data),
+  preview: (data) => api.post('/coursing/preview', data),
+  sendToKitchen: (data) => api.post('/coursing/send-to-kitchen', data),
+  openOrders: (params) => api.get('/coursing/orders/open', { params }),
+};
+
 // Waitlist API
 export const waitlistAPI = {
   getAll: (params) => api.get('/waitlist', { params }),

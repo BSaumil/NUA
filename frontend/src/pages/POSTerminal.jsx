@@ -13,7 +13,7 @@ import {
 } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { usePOS } from '../contexts/POSContext';
-import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API, v26API, floorPlansAPI, itemsSystemAPI, kitchenAPI } from '../services/api';
+import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API, v26API, floorPlansAPI, itemsSystemAPI, kitchenAPI, coursingAPI } from '../services/api';
 import { useToast } from '../hooks/use-toast';
 import { useAuth } from '../contexts/AuthContext';
 import VoiceOrderButton from '../components/VoiceOrderButton';
@@ -24,7 +24,9 @@ import ModifierSheet from '../components/pos/ModifierSheet';
 import POSHeaderBar from '../components/pos/POSHeaderBar';
 import ScanVoucherButton from '../components/pos/ScanVoucherButton';
 import TableNumberField from '../components/pos/TableNumberField';
+import { CourseHeader, SendToKitchenBar } from '../components/pos/CourseControls';
 import { validateTable } from '../lib/tableNumber';
+import { groupCartByCourse, showCourseUI, courseKeys, courseLabel, lineCourse } from '../lib/coursing';
 import { CategoryIcon } from './Categories';
 import { createTransactionResilient } from '../lib/offlineQueue';
 import useOfflineQueue from '../hooks/useOfflineQueue';
@@ -201,6 +203,87 @@ const POSTerminal = () => {
   // Live validity of the typed dine-in table. `unknown` blocks checkout.
   const tableCheck = validateTable(tableNumber, floorTables, floorConfigured);
   const tableBlocked = orderType === 'dine-in' && tableCheck.status === 'unknown';
+
+  // ── Coursing ──────────────────────────────────────────────────────────
+  // Off by default. A takeaway-only venue never enables it and so never sees
+  // a course selector, a Send-to-Kitchen bar, or Fire/Hold buttons.
+  const [coursingConfig, setCoursingConfig] = useState(null);
+  const [kitchenOrder, setKitchenOrder] = useState(null);   // set once sent
+  const [coursingBusy, setCoursingBusy] = useState(false);
+  const [courseOverrides, setCourseOverrides] = useState({}); // lineId -> course
+
+  useEffect(() => {
+    coursingAPI.getConfig()
+      .then(r => setCoursingConfig(r.data || null))
+      .catch(() => setCoursingConfig(null));   // older backend: feature stays off
+  }, []);
+
+  const coursingOn = showCourseUI(orderType, coursingConfig);
+  // Apply any per-line course the server picked on top of the category default.
+  const cartWithCourses = cart.map(i => (
+    courseOverrides[i.id] != null ? { ...i, course: courseOverrides[i.id] } : i
+  ));
+  const courseGroups = coursingOn ? groupCartByCourse(cartWithCourses, coursingConfig) : [];
+
+  // A new cart is a new kitchen ticket — don't leave the previous order's
+  // fire state attached to it.
+  useEffect(() => { if (cart.length === 0) { setKitchenOrder(null); setCourseOverrides({}); } }, [cart.length]);
+
+  const setLineCourse = (lineId, course) =>
+    setCourseOverrides(prev => ({ ...prev, [lineId]: course }));
+
+  const sendCartToKitchen = async (straightFire = false) => {
+    if (!cart.length || coursingBusy) return;
+    if (tableBlocked) {
+      toast({ title: 'Unknown table', description: tableCheck.message, variant: 'destructive' });
+      return;
+    }
+    setCoursingBusy(true);
+    try {
+      const r = await coursingAPI.sendToKitchen({
+        items: cartWithCourses.map(i => ({
+          productId: i.productId || i.id, productName: i.name, quantity: i.quantity,
+          category: i.category, notes: i.notes || null,
+          modifiers: i.selectedModifiers || [],
+          course: lineCourse(i, coursingConfig),
+        })),
+        orderType, straightFire,
+        tableNumber: orderType === 'dine-in' ? tableNumber : null,
+        guestName: orderType === 'takeaway' ? walkInName : (selectedCustomer?.name || null),
+      });
+      setKitchenOrder(r.data);
+      toast({
+        title: straightFire ? 'Fired to kitchen' : 'Sent to kitchen',
+        description: straightFire
+          ? 'All courses fired at once.'
+          : 'First course fired — hold the rest until the table is ready.',
+      });
+    } catch (err) {
+      toast({ title: 'Could not send to kitchen', description: err.response?.data?.detail || 'Try again', variant: 'destructive' });
+    } finally { setCoursingBusy(false); }
+  };
+
+  const fireCourseFromCart = async (courseKey) => {
+    if (!kitchenOrder) return;
+    setCoursingBusy(true);
+    try {
+      const r = await kitchenAPI.fireCourse(kitchenOrder.id, courseKey);
+      setKitchenOrder(r.data);
+      toast({ title: `${courseLabel(courseKey, coursingConfig)} fired` });
+    } catch { toast({ title: 'Fire failed', variant: 'destructive' }); }
+    finally { setCoursingBusy(false); }
+  };
+
+  const holdCourseFromCart = async (courseKey) => {
+    if (!kitchenOrder) return;
+    setCoursingBusy(true);
+    try {
+      const r = await kitchenAPI.holdCourse(kitchenOrder.id, courseKey);
+      setKitchenOrder(r.data);
+      toast({ title: `${courseLabel(courseKey, coursingConfig)} held` });
+    } catch { toast({ title: 'Hold failed', variant: 'destructive' }); }
+    finally { setCoursingBusy(false); }
+  };
 
   // Wave 2 — Fetch AI upsell suggestions whenever the cart changes (debounced)
   useEffect(() => {
@@ -1317,6 +1400,52 @@ const POSTerminal = () => {
             <div className="text-center py-12 text-gray-400">
               <ShoppingCart size={48} className="mx-auto mb-3 opacity-50" /><p>Cart is empty</p><p className="text-sm">Tap a product to add</p>
             </div>
+          ) : coursingOn ? (
+            /* Coursed service: the cart is grouped by course, each group
+               carrying its own fire/hold state once the ticket is in. */
+            <div className="space-y-3" data-testid="cart-coursed">
+              {courseGroups.map(group => (
+                <div key={group.key} className="border rounded-md overflow-hidden">
+                  <CourseHeader
+                    course={group}
+                    config={coursingConfig}
+                    kitchenOrder={kitchenOrder}
+                    onFire={fireCourseFromCart}
+                    onHold={holdCourseFromCart}
+                    busy={coursingBusy}
+                  />
+                  <div className="space-y-2 p-1.5">
+                    {group.items.map(item => (
+                      <div key={item.id}>
+                        <SwipeableCartItem
+                          item={item}
+                          theme={theme}
+                          onUpdateQty={updateQuantity}
+                          onRemove={removeFromCart}
+                          onRepeat={(it) => { addToCart(it); toast({ title: 'Repeated', description: `Added another ${it.name}` }); }}
+                        />
+                        {/* Move a single dish to another course — the kitchen
+                            ticket is built from these, not from the category
+                            default, once the server has overridden it. */}
+                        <div className="flex items-center gap-1 pl-1 pt-0.5">
+                          <span className="text-[9px] text-gray-400 uppercase tracking-wider">Course</span>
+                          <select
+                            className="text-[10px] border rounded px-1 py-0.5 bg-white"
+                            value={lineCourse(item, coursingConfig)}
+                            onChange={e => setLineCourse(item.id, parseInt(e.target.value, 10))}
+                            data-testid={`cart-course-select-${item.id}`}
+                          >
+                            {courseKeys(coursingConfig).map(k => (
+                              <option key={k} value={k}>{courseLabel(k, coursingConfig)}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : (
             <div className="space-y-2">
               {cart.map(item => (
@@ -1332,6 +1461,21 @@ const POSTerminal = () => {
             </div>
           )}
         </div>
+
+        {/* Send-to-kitchen / straight fire. Only for coursed service — a
+            takeaway counter just takes payment and the docket prints. */}
+        {coursingOn && cart.length > 0 && (
+          <div className="mb-3">
+            <SendToKitchenBar
+              config={coursingConfig}
+              sent={!!kitchenOrder}
+              busy={coursingBusy}
+              disabled={tableBlocked}
+              onSend={() => sendCartToKitchen(false)}
+              onStraightFire={() => sendCartToKitchen(true)}
+            />
+          </div>
+        )}
 
         {/* Wave 2 — AI Upsell strip */}
         {cart.length > 0 && (upsells.length > 0 || upsellLoading) && (

@@ -15,6 +15,7 @@ from routes.customers import router as customers_router
 from routes.identity import router as identity_router
 from routes.reservations import router as reservations_router
 from routes.kitchen import router as kitchen_router
+from routes.coursing import router as coursing_router
 from routes.analytics import router as analytics_router
 from routes.automation import router as automation_router
 from routes.settings import router as settings_router
@@ -77,6 +78,7 @@ api_router.include_router(customers_router)
 api_router.include_router(identity_router)
 api_router.include_router(reservations_router)
 api_router.include_router(kitchen_router)
+api_router.include_router(coursing_router)
 api_router.include_router(analytics_router)
 api_router.include_router(automation_router)
 api_router.include_router(settings_router)
