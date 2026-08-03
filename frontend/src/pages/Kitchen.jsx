@@ -50,6 +50,14 @@ function fmtHHMM(iso) {
   } catch { return '—'; }
 }
 
+/** Whole minutes since a timestamp — the live clock on a course's state. */
+function atPassMinutes(iso) {
+  if (!iso) return 0;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return 0;
+  return Math.max(0, Math.floor((Date.now() - t) / 60000));
+}
+
 export default function Kitchen() {
   const { theme } = useTheme();
   const [orders, setOrders] = useState([]);
@@ -218,6 +226,24 @@ export default function Kitchen() {
             {meta.status === 'held' && meta.heldAt && (
               <span className="text-[10px] text-slate-600 flex items-center gap-1">
                 <Pause size={10} /> held {fmtHHMM(meta.heldAt)}
+              </span>
+            )}
+            {/* Minutes since this course was called ready. Food dying under a
+                lamp is the expensive failure, and it's invisible unless the
+                clock is on screen — so it goes amber, then red. */}
+            {meta.status === 'ready' && meta.readyAt && (
+              <span className={`text-[10px] font-bold px-1.5 rounded flex items-center gap-1 ${
+                atPassMinutes(meta.readyAt) >= 5 ? 'bg-red-600 text-white'
+                : atPassMinutes(meta.readyAt) >= 2 ? 'bg-amber-500 text-white'
+                : 'text-emerald-700'}`}
+                data-testid={`at-pass-${order.id}-${courseNum}`}>
+                <Clock size={10} /> {atPassMinutes(meta.readyAt)}m at pass
+              </span>
+            )}
+            {meta.status === 'fired' && meta.firedAt && (
+              <span className="text-[10px] text-slate-600 flex items-center gap-1"
+                data-testid={`cooking-${order.id}-${courseNum}`}>
+                <Clock size={10} /> {atPassMinutes(meta.firedAt)}m cooking
               </span>
             )}
           </div>

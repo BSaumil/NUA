@@ -8,6 +8,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { gamificationAPI, coursingAPI } from '../services/api';
 import { toast } from 'sonner';
 import { stationLabel, printDocket, groupByCategory } from '../services/docket';
+import PrinterHealthPanel from '../components/settings/PrinterHealthPanel';
 
 export default function PrintRouting() {
   const { theme } = useTheme();
@@ -109,6 +110,8 @@ export default function PrintRouting() {
             <Input className="h-8 text-sm mt-1" value={config.defaultPrinter || ''} onChange={e => setConfig({ ...config, defaultPrinter: e.target.value })} data-testid="default-printer" />
           </div>
         </CardContent></Card>
+
+        <PrinterHealthPanel />
 
         {/* Live Print Queue */}
         <Card><CardHeader><CardTitle className="text-sm flex items-center gap-2"><Printer size={16} /> Print Queue</CardTitle></CardHeader>

@@ -63,11 +63,35 @@ export default function AuditLog() {
             <SelectItem value="updated">Updated</SelectItem>
             <SelectItem value="deleted">Deleted</SelectItem>
             <SelectItem value="restored">Restored</SelectItem>
+            {/* Coursing actions. "Who voided what tonight" is the question
+                this page exists to answer, and it had no way to ask it. */}
+            <SelectItem value="course_void">Course voided</SelectItem>
+            <SelectItem value="course_fired">Course fired</SelectItem>
           </SelectContent>
         </Select>
         <Input placeholder="Actor email…" value={actor} onChange={e => setActor(e.target.value)} data-testid="filter-actor" />
         <Button onClick={load} data-testid="filter-apply"><Search size={14} className="mr-1" /> Filter</Button>
       </CardContent></Card>
+
+      {/* One tap for the shrinkage question, rather than remembering that
+          voids live under entity type "kitchen_order". */}
+      <div className="flex gap-2 flex-wrap">
+        <Button size="sm" variant="outline" className="text-xs"
+          onClick={() => { setEntityType('kitchen_order'); setAction('course_void'); setActor(''); }}
+          data-testid="preset-voids">
+          Voids tonight
+        </Button>
+        <Button size="sm" variant="outline" className="text-xs"
+          onClick={() => { setEntityType('kitchen_order'); setAction(''); setActor(''); }}
+          data-testid="preset-coursing">
+          All coursing activity
+        </Button>
+        <Button size="sm" variant="ghost" className="text-xs"
+          onClick={() => { setEntityType(''); setAction(''); setActor(''); }}
+          data-testid="preset-clear">
+          Clear filters
+        </Button>
+      </div>
 
       <Card><CardContent className="p-0">
         <table className="w-full text-sm">

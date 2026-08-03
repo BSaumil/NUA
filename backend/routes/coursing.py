@@ -78,6 +78,16 @@ async def send_to_kitchen(body: dict, request: Request, user: dict = Depends(get
     if not items:
         raise HTTPException(status_code=400, detail="No items to send")
 
+    # Offline replay can re-send a request whose *response* was lost, not the
+    # request — the ticket exists, the till just never heard about it. A
+    # client-generated key makes the replay return that ticket instead of
+    # creating the table's order twice.
+    client_key = body.get("clientKey")
+    if client_key:
+        existing = await db.kitchen_orders.find_one({"clientKey": client_key}, {"_id": 0})
+        if existing:
+            return existing
+
     config = await coursing.get_config()
     order_type = body.get("orderType") or "dine_in"
 
@@ -121,6 +131,7 @@ async def send_to_kitchen(body: dict, request: Request, user: dict = Depends(get
     )
     doc = order.dict()
     doc["straightFired"] = straight
+    doc["clientKey"] = client_key
     await db.kitchen_orders.insert_one(doc)
     doc.pop("_id", None)
 
@@ -194,6 +205,25 @@ async def open_kitchen_orders(tableNumber: Optional[str] = None,
     return [await _apply_due_auto_fires(r, config) for r in rows]
 
 
+def _round_update(order: dict, courses: dict, next_round: int,
+                  new_items: list, client_key: Optional[str]) -> dict:
+    """The Mongo update for appending a round.
+
+    Built here rather than inline because an empty `$addToSet: {}` is invalid
+    — the operator has to be omitted entirely when there's no key to record.
+    """
+    update = {"$set": {
+        "courses": courses,
+        "rounds": next_round,
+        "items": (order.get("items") or []) + new_items,
+        # A closed-out ticket reopening for dessert is active again.
+        "status": "new" if order.get("status") == "ready" else order.get("status", "new"),
+    }}
+    if client_key:
+        update["$addToSet"] = {"roundKeys": client_key}
+    return update
+
+
 @router.post("/coursing/orders/{order_id}/add-round")
 async def add_round(order_id: str, body: dict, user: dict = Depends(get_user)):
     """Append a later order onto the table's existing ticket.
@@ -205,6 +235,15 @@ async def add_round(order_id: str, body: dict, user: dict = Depends(get_user)):
     items = body.get("items") or []
     if not items:
         raise HTTPException(status_code=400, detail="No items to add")
+
+    # Same reasoning as send-to-kitchen: a replayed round must not double the
+    # table's food.
+    client_key = body.get("clientKey")
+    if client_key:
+        dup = await db.kitchen_orders.find_one(
+            {"id": order_id, "roundKeys": client_key}, {"_id": 0})
+        if dup:
+            return dup
 
     order = await db.kitchen_orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
@@ -237,10 +276,7 @@ async def add_round(order_id: str, body: dict, user: dict = Depends(get_user)):
 
     updated = await db.kitchen_orders.find_one_and_update(
         {"id": order_id},
-        {"$set": {"courses": courses, "rounds": next_round,
-                  "items": (order.get("items") or []) + new_items,
-                  # A closed-out ticket reopening for dessert is active again.
-                  "status": "new" if order.get("status") == "ready" else order.get("status", "new")}},
+        _round_update(order, courses, next_round, new_items, client_key),
         return_document=True,
     )
     updated.pop("_id", None)
@@ -420,16 +456,62 @@ async def set_print_target(printer: str, body: dict, user: dict = Depends(get_us
     """Point a station printer at a real device (ESC/POS over TCP)."""
     if user.get("role") not in ("owner", "manager"):
         raise HTTPException(status_code=403, detail="Owner or manager only")
+    from services import escpos
     doc = {
         "printer": printer,
         "host": (body.get("host") or "").strip() or None,
         "port": int(body.get("port") or 9100),
         "enabled": bool(body.get("enabled", True)),
+        # Per-device because they genuinely vary: 58mm paper is 32 columns,
+        # non-Latin markets need another codepage, and cut support is the
+        # least consistent part of ESC/POS across manufacturers.
+        "width": max(24, min(96, int(body.get("width") or escpos.DEFAULT_WIDTH))),
+        "codepage": str(body.get("codepage") or escpos.DEFAULT_CODEPAGE),
+        "cut": (body.get("cut") if body.get("cut") in escpos.CUT_STYLES else "partial"),
         "updatedAt": _now(),
         "updatedBy": user.get("email"),
     }
     await db.printer_targets.update_one({"printer": printer}, {"$set": doc}, upsert=True)
     return doc
+
+
+@router.get("/print-targets/health")
+async def print_targets_health(_: dict = Depends(get_user)):
+    """Is every configured station printer reachable right now?
+
+    The pre-service check: a printer that's off fails one docket at a time in
+    the middle of service, which is the worst moment to find out.
+    """
+    from services import escpos
+    rows = await db.printer_targets.find({}, {"_id": 0}).to_list(50)
+    out = []
+    for row in rows:
+        if not row.get("host") or not row.get("enabled", True):
+            out.append({**row, "reachable": None, "reason": "no device configured"})
+            continue
+        out.append({**row, **await escpos.ping(row["host"], row.get("port", 9100))})
+    return {"printers": out,
+            "allReachable": all(p.get("reachable") for p in out) if out else None,
+            "checkedAt": _now()}
+
+
+@router.post("/print-targets/{printer}/test")
+async def print_target_test(printer: str, user: dict = Depends(get_user)):
+    """Send a self-test page so the width, codepage and cut can be eyeballed."""
+    if user.get("role") not in ("owner", "manager"):
+        raise HTTPException(status_code=403, detail="Owner or manager only")
+    from services import escpos
+    target = await escpos.printer_target(printer)
+    if not target:
+        raise HTTPException(status_code=404, detail=f"No device configured for '{printer}'")
+    payload = escpos.self_test(
+        printer,
+        width=target.get("width") or escpos.DEFAULT_WIDTH,
+        codepage=target.get("codepage") or escpos.DEFAULT_CODEPAGE,
+        cut=target.get("cut") or "partial",
+    )
+    result = await escpos.send(target["host"], payload, port=target.get("port", 9100))
+    return {"sent": bool(result.get("ok")), "bytes": len(payload), **result}
 
 
 @router.post("/print-jobs/{job_id}/escpos")
@@ -445,8 +527,13 @@ async def print_job_escpos(job_id: str, body: dict = None, _: dict = Depends(get
     if not job:
         raise HTTPException(status_code=404, detail="Print job not found")
 
-    payload = escpos.render(job)
     target = await escpos.printer_target(job.get("printer"))
+    payload = escpos.render(
+        job,
+        width=(target or {}).get("width") or escpos.DEFAULT_WIDTH,
+        codepage=(target or {}).get("codepage") or escpos.DEFAULT_CODEPAGE,
+        cut=(target or {}).get("cut") or "partial",
+    )
     if not target or not target.get("enabled", True):
         return {"sent": False, "reason": "no device configured for this printer",
                 "bytes": len(payload), "printer": job.get("printer")}
@@ -460,6 +547,74 @@ async def print_job_escpos(job_id: str, body: dict = None, _: dict = Depends(get
         )
         return {"sent": True, **result}
     return {"sent": False, "reason": result.get("error"), "bytes": len(payload)}
+
+
+@router.get("/coursing/analytics")
+async def coursing_analytics(days: int = 7, _: dict = Depends(get_user)):
+    """Where time actually goes, per course and per station.
+
+    `atPass` is the number worth acting on: minutes between the kitchen
+    calling a course ready and someone running it. Everything here comes from
+    the durable course-event trail, so it survives a ticket's own capped
+    history window.
+    """
+    from datetime import timedelta
+    from services import course_events
+
+    since = (datetime.now(timezone.utc) - timedelta(days=max(1, min(90, days)))).isoformat()
+    events = await db.course_events.find({"at": {"$gte": since}}, {"_id": 0}).to_list(20000)
+    if not events:
+        return {"days": days, "sampled": 0, "courses": {}, "byDay": {}, "slowestAtPass": []}
+
+    by_order: dict = {}
+    for e in events:
+        by_order.setdefault(e["orderId"], []).append(e)
+
+    config = await coursing.get_config()
+    labels = {str(c["key"]): c.get("label") for c in (config.get("courses") or [])}
+
+    buckets: dict = {}
+    per_day: dict = {}
+    slowest: list = []
+    for order_id, rows in by_order.items():
+        rows.sort(key=lambda r: r.get("at") or "")
+        for course in {int(r["course"]) for r in rows}:
+            held = course_events.minutes_between(rows, course, "held", "fired")
+            cook = course_events.minutes_between(rows, course, "fired", "ready")
+            at_pass = course_events.minutes_between(rows, course, "ready", "served")
+            key = str(course)
+            b = buckets.setdefault(key, {"label": labels.get(key, f"Course {course}"),
+                                         "held": [], "cook": [], "atPass": []})
+            if held is not None: b["held"].append(held)
+            if cook is not None: b["cook"].append(cook)
+            if at_pass is not None:
+                b["atPass"].append(at_pass)
+                slowest.append({"orderId": order_id, "course": course,
+                                "label": labels.get(key, f"Course {course}"),
+                                "atPassMinutes": at_pass})
+            day = (rows[0].get("at") or "")[:10]
+            d = per_day.setdefault(day, {"atPass": [], "cook": []})
+            if at_pass is not None: d["atPass"].append(at_pass)
+            if cook is not None: d["cook"].append(cook)
+
+    def _stats(values):
+        if not values:
+            return {"count": 0, "avg": None, "worst": None}
+        return {"count": len(values),
+                "avg": round(sum(values) / len(values), 1),
+                "worst": round(max(values), 1)}
+
+    return {
+        "days": days,
+        "sampled": len(by_order),
+        "courses": {k: {"label": v["label"], "held": _stats(v["held"]),
+                        "cook": _stats(v["cook"]), "atPass": _stats(v["atPass"])}
+                    for k, v in sorted(buckets.items(), key=lambda kv: int(kv[0]))},
+        "byDay": {d: {"atPass": _stats(v["atPass"]), "cook": _stats(v["cook"])}
+                  for d, v in sorted(per_day.items())},
+        # The specific tickets to go and look at, not just an average.
+        "slowestAtPass": sorted(slowest, key=lambda r: -r["atPassMinutes"])[:10],
+    }
 
 
 @router.post("/coursing/auto-fire/tick")

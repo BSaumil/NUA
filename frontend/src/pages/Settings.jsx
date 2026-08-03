@@ -11,6 +11,7 @@ import { locationsAPI, advancedAPI, staffMgmtAPI, enterpriseAPI, gamificationAPI
 import WalletCredentialsPanel from '../components/settings/WalletCredentialsPanel';
 import PermissionsPanel from '../components/settings/PermissionsPanel';
 import CoursingSettings from '../components/settings/CoursingSettings';
+import PrinterHealthPanel from '../components/settings/PrinterHealthPanel';
 import { toast } from 'sonner';
 import axios from 'axios';
 import { salaryTypeSuffix } from '../lib/staffPay';
@@ -562,6 +563,10 @@ const Settings = () => {
           }} data-testid="save-pr-btn"><Save size={16} className="mr-1" /> Save Print Routing</Button>
         </CardContent></Card>
       )}
+
+      {/* Sits with print routing because it answers the same question from
+          the other side: the routes are right, but is the device actually on? */}
+      {activeTab === 'print-routing' && <PrinterHealthPanel />}
 
       {activeTab === 'wallet' && (
         <WalletCredentialsPanel theme={theme} />

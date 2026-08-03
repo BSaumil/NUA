@@ -321,6 +321,10 @@ const POSTerminal = () => {
     try {
       const payload = {
         items: outgoing.map(toKitchenItem),
+        // Survives the offline queue, so a replay of a request whose response
+        // was lost returns the existing ticket instead of doubling the order.
+        clientKey: (typeof crypto !== 'undefined' && crypto.randomUUID)
+          ? crypto.randomUUID() : `k-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         orderType, straightFire,
         tableNumber: orderType === 'dine-in' ? tableNumber : null,
         guestName: orderType === 'takeaway' ? walkInName : (selectedCustomer?.name || null),

@@ -266,6 +266,9 @@ export const coursingAPI = {
   printTargets: () => api.get('/print-targets'),
   setPrintTarget: (printer, data) => api.put(`/print-targets/${encodeURIComponent(printer)}`, data),
   printEscpos: (jobId) => api.post(`/print-jobs/${jobId}/escpos`),
+  printHealth: () => api.get('/print-targets/health'),
+  printSelfTest: (printer) => api.post(`/print-targets/${encodeURIComponent(printer)}/test`),
+  analytics: (days = 7) => api.get('/coursing/analytics', { params: { days } }),
   streamUrl: (tableNumber) =>
     `${API_BASE_URL}/coursing/stream?tableNumber=${encodeURIComponent(tableNumber || '')}`
     + `&token=${encodeURIComponent(localStorage.getItem('nuva_token') || '')}`,

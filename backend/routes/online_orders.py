@@ -11,6 +11,7 @@ Endpoints:
 """
 from fastapi import APIRouter, HTTPException, Request, Depends
 from deps import get_user, require_owner, require_owner_or_manager
+import logging
 from database import db
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -269,6 +270,26 @@ async def update_status(order_id: str, data: dict, user: dict = Depends(get_user
     order["status"] = new_status
     if new_status == "accepted":
         order["acceptedAt"] = _iso(_now())
+        # Accepting used to update this order's own collection and nothing
+        # else, so an accepted online order never appeared on any KDS. It is
+        # a real order — it goes to the pass, coursed like any other.
+        try:
+            from services import channel_orders
+            ticket = await channel_orders.create_ticket(
+                order.get("items") or [],
+                order_type=("dine_in" if ch == "dine-in"
+                            else "delivery" if ch == "delivery" else "takeaway"),
+                table_number=order.get("tableNumber"),
+                source=f"online:{ch}", external_id=order["id"],
+                guest_name=(order.get("customer") or {}).get("name"),
+                notes=order.get("notes"),
+                actor=user.get("name") or "Online",
+            )
+            if ticket:
+                order["kitchenOrderId"] = ticket["id"]
+        except Exception as e:
+            logging.getLogger(__name__).warning(
+                "online order %s: kitchen ticket failed — %s", order_id, e)
         # Recompute ETA with fresh kitchen-load snapshot
         load = await _kitchen_load()
         order["eta"] = await _compute_eta(order.get("items", []), ch, load)

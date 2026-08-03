@@ -22,7 +22,11 @@ from database import db
 
 log = logging.getLogger(__name__)
 
-MAX_HISTORY = 200   # a very long service, not an unbounded document
+# The ticket keeps a bounded window so the document can't grow without limit,
+# but nothing is lost: every entry is also written to its own collection, so a
+# long-lived ticket's earliest history is still there rather than silently
+# rolling off the front.
+MAX_HISTORY = 200
 
 
 def _now() -> str:
@@ -48,6 +52,22 @@ async def record_transition(order_id: str, course: int, to_state: str,
         )
     except Exception as e:
         log.warning("course history append failed for %s: %s", order_id, e)
+
+    # Durable copy — this is what analytics reads, and what makes the cap on
+    # the ticket safe.
+    try:
+        await db.course_events.insert_one({**entry, "orderId": order_id})
+    except Exception as e:
+        log.warning("course event write failed for %s: %s", order_id, e)
+
+
+async def full_history(order_id: str) -> list:
+    """Every recorded transition for a ticket, including any the ticket's own
+    capped window has since dropped."""
+    rows = await db.course_events.find(
+        {"orderId": order_id}, {"_id": 0}).to_list(2000)
+    rows.sort(key=lambda r: r.get("at") or "")
+    return rows
 
 
 def course_state(order: Dict[str, Any], course: int) -> Optional[str]:

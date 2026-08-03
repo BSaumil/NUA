@@ -347,18 +347,46 @@ async def kiosk_start(data: dict):
 
 @router.post("/kiosk/session/{sid}/add")
 async def kiosk_add(sid: str, data: dict):
-    item = data.get("item") or {}
+    # The kiosk posts the item's fields at the top level; only a nested
+    # {"item": {...}} was read, so every line pushed an empty object and the
+    # cart was always effectively empty. Accept both shapes.
+    item = data.get("item") if isinstance(data.get("item"), dict) else data
+    item = {k: v for k, v in (item or {}).items() if k != "item"}
+    if not item:
+        raise HTTPException(status_code=400, detail="No item supplied")
     await db.kiosk_sessions.update_one({"id": sid}, {"$push": {"cart": item}})
-    return {"added": True}
+    return {"added": True, "item": item}
 
 
 @router.post("/kiosk/session/{sid}/checkout")
 async def kiosk_checkout(sid: str):
     s = await db.kiosk_sessions.find_one({"id": sid}, {"_id": 0})
     if not s: raise HTTPException(status_code=404, detail="Session not found")
-    total = sum(float(i.get("price", 0) or 0) * int(i.get("quantity", 1) or 1) for i in s.get("cart", []))
-    await db.kiosk_sessions.update_one({"id": sid}, {"$set": {"status": "checkout", "total": round(total, 2), "checkoutAt": _now()}})
-    return {"sessionId": sid, "total": round(total, 2), "items": len(s.get("cart", []))}
+    cart = s.get("cart") or []
+    total = sum(float(i.get("price", 0) or 0) * int(i.get("quantity", 1) or 1) for i in cart)
+
+    # Checkout used to write a total and stop, so kiosk food never reached the
+    # kitchen at all. It's a real order — it goes to the pass like any other.
+    ticket = None
+    try:
+        from services import channel_orders
+        ticket = await channel_orders.create_ticket(
+            cart,
+            order_type="dine_in" if s.get("tableId") else "takeaway",
+            table_number=s.get("tableNumber"),
+            source="kiosk", external_id=sid, actor="Kiosk",
+            guest_name=s.get("guestName"),
+        )
+    except Exception as e:
+        logging.getLogger(__name__).warning("kiosk checkout: kitchen ticket failed — %s", e)
+
+    await db.kiosk_sessions.update_one({"id": sid}, {"$set": {
+        "status": "checkout", "total": round(total, 2), "checkoutAt": _now(),
+        "kitchenOrderId": (ticket or {}).get("id"),
+    }})
+    return {"sessionId": sid, "total": round(total, 2), "items": len(cart),
+            "kitchenOrderId": (ticket or {}).get("id"),
+            "courses": (ticket or {}).get("courses") or {}}
 
 
 @router.get("/kiosk/sessions")

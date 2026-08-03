@@ -35,16 +35,33 @@ FEED_3 = b"\n\n\n"
 
 DEFAULT_PORT = 9100
 DEFAULT_WIDTH = 48             # characters per line at font A on 80mm
+DEFAULT_CODEPAGE = "cp437"     # near-universal default on thermal printers
+
+# Cut behaviour is the most manufacturer-specific part of ESC/POS: some
+# clones ignore GS V, others only honour the older ESC i / ESC m.
+CUT_STYLES = {
+    "partial": GS + b"V\x42\x00",
+    "full":    GS + b"V\x41\x00",
+    "legacy":  ESC + b"i",          # older Epson / many clones
+    "none":    b"",
+}
 
 
-def _line(char: str = "-", width: int = DEFAULT_WIDTH) -> bytes:
-    return (char * width).encode("cp437", "replace") + b"\n"
+def _line(char: str = "-", width: int = DEFAULT_WIDTH, codepage: str = DEFAULT_CODEPAGE) -> bytes:
+    return (char * width).encode(codepage, "replace") + b"\n"
 
 
-def _text(s: str) -> bytes:
-    # cp437 is the default codepage on virtually every thermal printer.
-    # Anything outside it (— … é) is replaced rather than corrupting the stream.
-    return str(s).encode("cp437", "replace")
+def _text(s: str, codepage: str = DEFAULT_CODEPAGE) -> bytes:
+    """Encode for the printer's codepage.
+
+    Anything outside it (— … é) is replaced rather than corrupting the byte
+    stream — a mangled character is a cosmetic problem, a desynced stream
+    means the rest of the ticket prints as garbage.
+    """
+    try:
+        return str(s).encode(codepage, "replace")
+    except LookupError:
+        return str(s).encode(DEFAULT_CODEPAGE, "replace")
 
 
 def _wrap(text: str, width: int, indent: int = 0) -> List[str]:
@@ -68,55 +85,66 @@ def _station_label(printer: str) -> str:
                   flags=re.IGNORECASE).strip().upper() or "KITCHEN"
 
 
-def render(job: Dict[str, Any], width: int = DEFAULT_WIDTH) -> bytes:
-    """A print job -> ESC/POS byte stream, mirroring the on-screen docket."""
+def render(job: Dict[str, Any], width: int = DEFAULT_WIDTH,
+           codepage: str = DEFAULT_CODEPAGE, cut: str = "partial") -> bytes:
+    """A print job -> ESC/POS byte stream, mirroring the on-screen docket.
+
+    `width`, `codepage` and `cut` are per-device because they genuinely vary:
+    58mm paper is 32 characters not 48, non-Latin markets need a different
+    codepage, and cut command support is the least consistent part of the
+    spec across manufacturers.
+    """
+    _t = lambda x: _text(x, codepage)
+    _l = lambda ch="-": _line(ch, width, codepage)
     out = bytearray()
     out += INIT
 
     # Station banner — the biggest thing on the ticket, because a cook reads
     # it from arm's length across a hot line.
     out += ALIGN_CENTER + SIZE_DOUBLE + BOLD_ON
-    out += _text(_station_label(job.get("printer"))) + b"\n"
+    out += _t(_station_label(job.get("printer"))) + b"\n"
     out += BOLD_OFF + SIZE_NORMAL
 
     if job.get("voidDocket"):
-        out += SIZE_TALL + BOLD_ON + _text("*** VOID ***") + b"\n" + BOLD_OFF + SIZE_NORMAL
+        out += SIZE_TALL + BOLD_ON + _t("*** VOID ***") + b"\n" + BOLD_OFF + SIZE_NORMAL
     elif job.get("courseLabel"):
-        out += SIZE_TALL + BOLD_ON + _text(f"FIRE: {job['courseLabel']}") + b"\n"
+        out += SIZE_TALL + BOLD_ON + _t(f"FIRE: {job['courseLabel']}") + b"\n"
         out += BOLD_OFF + SIZE_NORMAL
 
-    out += ALIGN_LEFT + _line("=", width)
+    out += ALIGN_LEFT + _l("=")
     table = job.get("tableNumber")
     header = f"TABLE {table}" if table else str(job.get("orderId") or "")
-    out += BOLD_ON + _text(header.ljust(width - 6)) + _text(f"P{job.get('priority', 2)}") + b"\n" + BOLD_OFF
+    out += BOLD_ON + _t(header.ljust(width - 6)) + _t(f"P{job.get('priority', 2)}") + b"\n" + BOLD_OFF
     if table and job.get("orderId"):
-        out += _text(str(job["orderId"])) + b"\n"
-    out += _line("=", width)
+        out += _t(str(job["orderId"])) + b"\n"
+    out += _l("=")
 
     # Own section first — that's what this station cooks.
     sections = job.get("orderSections") or [{"printer": job.get("printer"), "items": job.get("items") or []}]
     own = _station_label(job.get("printer"))
     own_items = next((s["items"] for s in sections if _station_label(s.get("printer")) == own),
                      job.get("items") or [])
-    out += _render_items(own_items, width, dim=False)
+    out += _render_items(own_items, width, dim=False, codepage=codepage)
 
     others = [s for s in sections if _station_label(s.get("printer")) != own]
     if others:
-        out += _line("-", width)
-        out += ALIGN_CENTER + _text("- ALSO ON THIS ORDER -") + b"\n" + ALIGN_LEFT
+        out += _l("-")
+        out += ALIGN_CENTER + _t("- ALSO ON THIS ORDER -") + b"\n" + ALIGN_LEFT
         for s in others:
-            out += BOLD_ON + _text(_station_label(s.get("printer"))) + b"\n" + BOLD_OFF
-            out += _render_items(s.get("items") or [], width, dim=True)
+            out += BOLD_ON + _t(_station_label(s.get("printer"))) + b"\n" + BOLD_OFF
+            out += _render_items(s.get("items") or [], width, dim=True, codepage=codepage)
 
     stations = job.get("orderStations") or [job.get("printer")]
-    out += _line("-", width)
-    out += _text("SECTIONS: ") + _text(" | ".join(_station_label(p) for p in stations)) + b"\n"
+    out += _l("-")
+    out += _t("SECTIONS: ") + _t(" | ".join(_station_label(p) for p in stations)) + b"\n"
 
-    out += FEED_3 + CUT
+    out += FEED_3 + CUT_STYLES.get(cut, CUT_STYLES["partial"])
     return bytes(out)
 
 
-def _render_items(items: List[dict], width: int, dim: bool) -> bytes:
+def _render_items(items: List[dict], width: int, dim: bool,
+                  codepage: str = DEFAULT_CODEPAGE) -> bytes:
+    _t = lambda x: _text(x, codepage)
     out = bytearray()
     # Course above category, same order as the screen docket.
     by_course: Dict[Any, List[dict]] = {}
@@ -127,27 +155,27 @@ def _render_items(items: List[dict], width: int, dim: bool) -> bytes:
     for course, rows in ordered:
         if course is not None and len(ordered) > 1:
             label = rows[0].get("courseLabel") or f"COURSE {course}"
-            out += BOLD_ON + _text(f"-- {str(label).upper()} --") + b"\n" + BOLD_OFF
+            out += BOLD_ON + _t(f"-- {str(label).upper()} --") + b"\n" + BOLD_OFF
         seen_cat = None
         for it in rows:
             cat = (it.get("category") or "Other").upper()
             if cat != seen_cat:
                 seen_cat = cat
-                out += _text(cat) + b"\n"
+                out += _t(cat) + b"\n"
             qty = f"{it.get('quantity', 1)}x "
             seat = f"[S{it['seat']}] " if it.get("seat") else ""
             name = f"{seat}{it.get('productName') or it.get('name') or ''}"
             lines = _wrap(name, width - len(qty))
             if not dim:
                 out += BOLD_ON
-            out += _text(qty + lines[0]) + b"\n"
+            out += _t(qty + lines[0]) + b"\n"
             for extra in lines[1:]:
-                out += _text(" " * len(qty) + extra) + b"\n"
+                out += _t(" " * len(qty) + extra) + b"\n"
             if not dim:
                 out += BOLD_OFF
             if it.get("notes"):
                 for nl in _wrap(f"> {it['notes']}", width - 2):
-                    out += _text("  " + nl) + b"\n"
+                    out += _t("  " + nl) + b"\n"
     return bytes(out)
 
 
@@ -171,6 +199,58 @@ async def send(host: str, payload: bytes, port: int = DEFAULT_PORT,
             await asyncio.wait_for(writer.wait_closed(), timeout=timeout)
         except (OSError, asyncio.TimeoutError):
             pass
+
+
+async def ping(host: str, port: int = DEFAULT_PORT, timeout: float = 3.0) -> Dict[str, Any]:
+    """Can we open a socket to this printer right now?
+
+    A station printer that's off or out of paper fails silently per job, one
+    docket at a time, in the middle of service. This is the pre-service check
+    that turns that into something you find out about at 4pm.
+    """
+    import time
+    started = time.monotonic()
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=timeout)
+    except (OSError, asyncio.TimeoutError) as e:
+        return {"reachable": False, "error": str(e), "host": host, "port": port}
+    writer.close()
+    try:
+        await asyncio.wait_for(writer.wait_closed(), timeout=timeout)
+    except (OSError, asyncio.TimeoutError):
+        pass
+    return {"reachable": True, "host": host, "port": port,
+            "latencyMs": round((time.monotonic() - started) * 1000, 1)}
+
+
+def self_test(printer_name: str, width: int = DEFAULT_WIDTH,
+              codepage: str = DEFAULT_CODEPAGE, cut: str = "partial") -> bytes:
+    """A one-page test print that proves the settings are right.
+
+    Prints the character ruler at the configured width, an accented string to
+    show whether the codepage is correct, and ends with the configured cut —
+    so a wrong width or codepage is visible on the paper rather than guessed.
+    """
+    out = bytearray(INIT)
+    out += ALIGN_CENTER + SIZE_DOUBLE + BOLD_ON
+    out += _text(_station_label(printer_name), codepage) + b"\n"
+    out += BOLD_OFF + SIZE_NORMAL + ALIGN_LEFT
+    out += _line("=", width, codepage)
+    out += _text(f"NUA printer test - {width} cols, {codepage}", codepage) + b"\n"
+    out += _line("-", width, codepage)
+    # Ruler: if this wraps, the width setting is too wide for the paper.
+    ruler = "".join(str(i % 10) for i in range(1, width + 1))
+    out += _text(ruler, codepage) + b"\n"
+    out += _text("Accents: Creme Brulee / Cafe / Rose", codepage) + b"\n"
+    out += _text("Codepage: Crème Brûlée / Café / Rosé", codepage) + b"\n"
+    out += _line("-", width, codepage)
+    out += BOLD_ON + _text("BOLD SAMPLE", codepage) + b"\n" + BOLD_OFF
+    out += SIZE_TALL + _text("TALL SAMPLE", codepage) + b"\n" + SIZE_NORMAL
+    out += _line("=", width, codepage)
+    out += _text(f"cut style: {cut}", codepage) + b"\n"
+    out += FEED_3 + CUT_STYLES.get(cut, CUT_STYLES["partial"])
+    return bytes(out)
 
 
 async def printer_target(printer_name: str) -> Optional[Dict[str, Any]]:
