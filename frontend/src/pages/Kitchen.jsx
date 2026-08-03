@@ -18,6 +18,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useLanguage } from '../i18n/useLanguage';
 import { LanguageSelector } from '../i18n/LanguageSelector';
 import { kitchenAPI, productsAPI } from '../services/api';
+import { loadOpenTicketsResilient } from '../lib/offlineQueue';
 import { toast } from 'sonner';
 
 const PRIORITY_CONFIG = {
@@ -69,6 +70,9 @@ export default function Kitchen() {
   // noise a cook has to filter by eye during service.
   const [station, setStation] = useState(() => localStorage.getItem('nua_kds_station') || '');
   const [orders, setOrders] = useState([]);
+  // Set only when the board currently on screen came from the offline
+  // cache rather than a live fetch — null the rest of the time.
+  const [offlineTickets, setOfflineTickets] = useState(null);
   const [filter, setFilter] = useState('active');
   const [newOrderDialog, setNewOrderDialog] = useState(false);
   const [products, setProducts] = useState([]);
@@ -92,11 +96,20 @@ export default function Kitchen() {
   }, []);
 
   const fetchOrders = useCallback(async () => {
+    const params = {};
+    if (filter !== 'active' && filter !== 'all') params.status = filter;
+    // A dropped connection used to leave the board silently stale — orders
+    // just stayed whatever they were in memory, with no persistence across
+    // a reload and no signal to the kitchen that what's on screen might be
+    // out of date. This falls back to the last-known ticket list (cached in
+    // IndexedDB) and says so, the same pattern the POS terminal's menu cache
+    // already uses for the same kind of outage. A real server error (not a
+    // network failure) still just logs, same as before this change.
     try {
-      const params = {};
-      if (filter !== 'active' && filter !== 'all') params.status = filter;
-      const res = await kitchenAPI.getOrders(params);
-      setOrders(res.data);
+      const { tickets, offline, cachedAt } = await loadOpenTicketsResilient(
+        () => kitchenAPI.getOrders(params).then(r => r.data));
+      setOrders(tickets);
+      setOfflineTickets(offline ? { cachedAt } : null);
     } catch (e) { console.error(e); }
   }, [filter]);
 
@@ -442,6 +455,16 @@ export default function Kitchen() {
 
   return (
     <div className="space-y-6" data-testid="kitchen-page">
+      {/* Offline board banner — dark-on-light-amber, not white-on-amber, for
+          the same contrast reason the POS terminal's equivalent banner uses
+          this pairing rather than the training-mode one's white-on-amber. */}
+      {offlineTickets && (
+        <div className="rounded-lg bg-amber-100 text-amber-900 text-center py-2 text-sm font-semibold"
+          data-testid="offline-tickets-banner">
+          You're offline — showing tickets as of{' '}
+          {offlineTickets.cachedAt ? new Date(offlineTickets.cachedAt).toLocaleTimeString() : 'last sync'}
+        </div>
+      )}
       {/* Average order time — a rough live gauge in the corner so the chef
           can judge pace mid-service without digging into a report. */}
       {avgOrderTime !== null && (
