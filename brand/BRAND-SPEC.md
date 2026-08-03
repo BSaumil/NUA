@@ -92,5 +92,47 @@ nua-digital-identity/
 
 ---
 
+## 6. Brand architecture
+
+One company, one platform, many industry verticals. NUA stays the recognisable
+ecosystem name; the suffix says which world you're in.
+
+| Layer | Name | Status |
+|---|---|---|
+| Company | **NUA AUS** (NUA AUS PTY LTD · ABN 54 299 131 653) | — |
+| Platform | **NUA OS** | live |
+| AI agent | **NUA AI** | live |
+| Hospitality | **NUA POS** (`nuapos.com.au`) | live |
+| Retail | **NUA Retail** | reserved |
+| Healthcare | **NUA Health** | reserved |
+| Pharmacy | **NUA Pharmacy** | reserved |
+| Education | **NUA Education** | reserved |
+| Manufacturing | **NUA Factory** | reserved |
+| Logistics | **NUA Logistics** | reserved |
+| Finance (industry) | **NUA Finance** | reserved |
+| Customer wallet | **NUA Wallet** | live |
+| Payments | **NUA Pay** | reserved |
+
+### Rules
+
+- These are **product** names. Features inside a product keep plain descriptive
+  names — "Payment Links", "Item Library", "Finance Suite". Promoting a feature
+  to a product name is what makes brand architectures rot.
+- **`NUA Finance` is the finance *industry* vertical**, not the accounting
+  module inside NUA POS. That module stays **Finance Suite** precisely so the
+  two can't collide when the vertical ships.
+- **`NUA Pay`** is payment processing as a product. The existing "Payment
+  Links" feature is not it, and isn't renamed.
+- The AI agent is **NUA AI** in every vertical — never re-skinned per industry.
+  Internal code still carries the legacy `ash` identifier in routes and
+  filenames; that's an implementation detail, not a user-facing name.
+- Reserved names are registered here so nothing else claims them and so
+  domain/app naming is decided once, not improvised per launch.
+
+The machine-readable copy lives at `frontend/src/brand/architecture.js` —
+import product names from there rather than hard-coding them.
+
+---
+
 ❤️ NUA — Built iteratively. Tested rigorously. Themed boldly.
 NUA AUS PTY LTD · ABN 54 299 131 653

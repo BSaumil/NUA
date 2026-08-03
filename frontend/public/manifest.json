@@ -1,7 +1,7 @@
 {
-  "name": "NUA - Restaurant OS",
-  "short_name": "NUA",
-  "description": "Restaurant operating system — POS, kitchen, reservations, inventory and AI-powered insights",
+  "name": "NUA POS",
+  "short_name": "NUA POS",
+  "description": "NUA POS — hospitality on NUA OS. Point of sale, kitchen, reservations, inventory and NUA AI insights.",
   "start_url": "/pos",
   "scope": "/",
   "display": "standalone",
