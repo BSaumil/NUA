@@ -30,7 +30,7 @@ import { readableTextColor } from '../lib/contrast';
 import { groupCartByCourse, showCourseUI, courseKeys, courseLabel, lineCourse,
          readyCourses, seatOptions, seatsEnabled } from '../lib/coursing';
 import { CategoryIcon } from './Categories';
-import { createTransactionResilient, courseActionResilient } from '../lib/offlineQueue';
+import { createTransactionResilient, courseActionResilient, cacheCatalogue, getCachedCatalogue, isNetworkFailure } from '../lib/offlineQueue';
 import { subscribeTickets, streamHealthy } from '../lib/ticketStream';
 import useOfflineQueue from '../hooks/useOfflineQueue';
 import { WifiOff } from 'lucide-react';
@@ -145,6 +145,9 @@ const POSTerminal = () => {
 
   // Categories with icons + colors (kept as full objects, not just names)
   const [categories, setCategories] = useState([{ id: 'all', name: 'All', icon: 'Sparkles', color: '#6366f1' }]);
+  // Set only when the menu currently on screen came from the offline cache
+  // rather than a live fetch — null the rest of the time.
+  const [offlineMenu, setOfflineMenu] = useState(null);
 
   // Modifier definitions (loaded once); ModifierSheet state for click-to-add flow
   const [modifiers, setModifiers] = useState([]);
@@ -620,18 +623,40 @@ const POSTerminal = () => {
         v15API.getLabels(localStorage.getItem('nua_lang') || 'en'),
         advancedAPI.getTrainingMode(),
       ]);
+      const buildCategoryList = (raw) => {
+        const active = (raw || [])
+          .filter(c => c.active !== false)
+          .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99))
+          .map(c => ({ id: c.id, name: c.name, icon: c.icon || 'Tag', color: c.color || '#6366f1' }));
+        return [{ id: 'all', name: 'All', icon: 'Sparkles', color: '#6366f1' }, ...active];
+      };
+
       if (productsRes.status === 'fulfilled') setProducts(productsRes.value.data || []);
       if (promotionsRes.status === 'fulfilled') setPromotions(promotionsRes.value.data || []);
       if (customersRes.status === 'fulfilled') setCustomers(customersRes.value.data || []);
       if (catsRes.status === 'fulfilled' && Array.isArray(catsRes.value?.data)) {
-        const active = catsRes.value.data
-          .filter(c => c.active !== false)
-          .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99))
-          .map(c => ({ id: c.id, name: c.name, icon: c.icon || 'Tag', color: c.color || '#6366f1' }));
-        setCategories([{ id: 'all', name: 'All', icon: 'Sparkles', color: '#6366f1' }, ...active]);
+        setCategories(buildCategoryList(catsRes.value.data));
       } else if (catsRes.status === 'rejected') {
         console.error('Failed to load categories', catsRes.reason);
         toast({ title: 'Categories failed to load', description: 'Showing "All" only — check your connection and refresh.', variant: 'destructive' });
+      }
+
+      // The menu is the one thing the floor cannot work without. A dropped
+      // connection used to mean an empty product grid until it came back;
+      // now the last-known menu renders instead, with a banner rather than
+      // a silent substitution, and the actual re-fetch (not just the cache
+      // write) resumes the moment the network genuinely returns.
+      if (productsRes.status === 'fulfilled' && catsRes.status === 'fulfilled') {
+        cacheCatalogue(productsRes.value.data || [], catsRes.value.data || []).catch(() => {});
+        setOfflineMenu(null);
+      } else if (productsRes.status === 'rejected' && isNetworkFailure(productsRes.reason)) {
+        const cached = await getCachedCatalogue();
+        if (cached.products.length) {
+          setProducts(cached.products);
+          setCategories(buildCategoryList(cached.categories));
+          setOfflineMenu({ cachedAt: cached.cachedAt });
+          toast({ title: "You're offline", description: `Showing the menu as of ${cached.cachedAt ? new Date(cached.cachedAt).toLocaleTimeString() : 'last sync'}.`, variant: 'destructive' });
+        }
       }
       if (modsRes.status === 'fulfilled' && Array.isArray(modsRes.value?.data)) {
         setModifiers(modsRes.value.data);
@@ -1155,6 +1180,16 @@ const POSTerminal = () => {
         <div className="fixed top-0 left-0 right-0 z-40 bg-amber-500 text-white text-center py-2 text-sm font-semibold"
           data-testid="training-mode-banner">
           TRAINING MODE — Transactions are simulated, no real charges
+        </div>
+      )}
+      {/* Offline menu banner — light-on-dark-amber text, not white-on-amber,
+          for the same reason dark mode's --primary-foreground was fixed:
+          this is exactly the message someone needs to actually read. */}
+      {offlineMenu && (
+        <div className={`${trainingMode ? 'fixed top-9' : 'fixed top-0'} left-0 right-0 z-40 bg-amber-100 text-amber-900 text-center py-2 text-sm font-semibold`}
+          data-testid="offline-menu-banner">
+          You're offline — showing the menu as of{' '}
+          {offlineMenu.cachedAt ? new Date(offlineMenu.cachedAt).toLocaleTimeString() : 'last sync'}
         </div>
       )}
       {/* Products Grid — smaller cards, category-wise */}
