@@ -29,7 +29,8 @@ import { validateTable } from '../lib/tableNumber';
 import { groupCartByCourse, showCourseUI, courseKeys, courseLabel, lineCourse,
          readyCourses, seatOptions, seatsEnabled } from '../lib/coursing';
 import { CategoryIcon } from './Categories';
-import { createTransactionResilient } from '../lib/offlineQueue';
+import { createTransactionResilient, courseActionResilient } from '../lib/offlineQueue';
+import { subscribeTickets, streamHealthy } from '../lib/ticketStream';
 import useOfflineQueue from '../hooks/useOfflineQueue';
 import { WifiOff } from 'lucide-react';
 
@@ -267,37 +268,30 @@ const POSTerminal = () => {
     return () => { cancelled = true; };
   }, [coursingOn, tableNumber, orderType, tableCheck.status]);
 
-  // Live ticket updates. One SSE connection per POS beats a poll per tablet
-  // every fifteen seconds, but proxies do buffer SSE — so a slow poll stays
-  // as a fallback and simply finds nothing new when the stream is working.
+  // Live ticket updates over one shared stream for the whole browser — see
+  // lib/ticketStream. A connection per table would blow past the browser's
+  // six-per-origin cap on a busy floor and silently stop delivering. A slow
+  // poll stays as a fallback for proxies that buffer SSE.
   useEffect(() => {
     if (!kitchenOrder?.id || !coursingOn) return undefined;
+    const id = kitchenOrder.id;
     const table = kitchenOrder.tableNumber || '';
-    const applyFresh = (rows) => {
-      const fresh = (rows || []).find(o => o.id === kitchenOrder.id);
-      if (fresh) setKitchenOrder(fresh);
-    };
 
-    let es = null;
-    let streamOk = false;
-    try {
-      es = new EventSource(coursingAPI.streamUrl(table));
-      es.addEventListener('tickets', (ev) => {
-        streamOk = true;
-        try { applyFresh(JSON.parse(ev.data)); } catch {}
-      });
-      es.onerror = () => { streamOk = false; };
-    } catch { es = null; }
+    const unsubscribe = subscribeTickets((rows) => {
+      const fresh = (rows || []).find(o => o.id === id);
+      if (fresh) setKitchenOrder(fresh);
+    });
 
     const poll = setInterval(async () => {
-      if (streamOk) return;               // the stream is doing the work
+      if (streamHealthy()) return;           // the stream is doing the work
       try {
         const r = await coursingAPI.openOrders({ tableNumber: table || undefined });
-        applyFresh(r.data);
+        const fresh = (r.data || []).find(o => o.id === id);
+        if (fresh) setKitchenOrder(fresh);
       } catch {}
     }, 15000);
 
-    return () => { if (es) es.close(); clearInterval(poll); };
+    return () => { unsubscribe(); clearInterval(poll); };
   }, [kitchenOrder?.id, kitchenOrder?.tableNumber, coursingOn]);
 
   const setLineCourse = (lineId, course) =>
@@ -332,8 +326,20 @@ const POSTerminal = () => {
         guestName: orderType === 'takeaway' ? walkInName : (selectedCustomer?.name || null),
       };
       const r = kitchenOrder
-        ? await coursingAPI.addRound(kitchenOrder.id, payload)
-        : await coursingAPI.sendToKitchen(payload);
+        ? await courseActionResilient('addRound', { orderId: kitchenOrder.id, payload },
+            () => coursingAPI.addRound(kitchenOrder.id, payload))
+        : await courseActionResilient('sendToKitchen', { payload },
+            () => coursingAPI.sendToKitchen(payload));
+      if (r.queuedOffline) {
+        toast({ title: 'Saved offline',
+                description: 'The kitchen gets this order as soon as the connection is back.' });
+        setSentQty(prev => {
+          const next = { ...prev };
+          outgoing.forEach(i => { next[i.id] = (next[i.id] || 0) + i.quantity; });
+          return next;
+        });
+        return;
+      }
       setKitchenOrder(r.data);
       setSentQty(prev => {
         const next = { ...prev };
@@ -352,19 +358,31 @@ const POSTerminal = () => {
     } finally { setCoursingBusy(false); }
   };
 
-  const courseAction = async (courseKey, fn, verb) => {
+  const courseAction = async (courseKey, kind, fn, verb) => {
     if (!kitchenOrder) return;
     setCoursingBusy(true);
     try {
-      const r = await fn(kitchenOrder.id, courseKey);
+      const r = await courseActionResilient(kind, { orderId: kitchenOrder.id, course: courseKey },
+        () => fn(kitchenOrder.id, courseKey));
+      if (r.queuedOffline) {
+        toast({ title: `${courseLabel(courseKey, coursingConfig)} queued`,
+                description: 'Offline — the kitchen is told the moment the connection returns.' });
+        return;
+      }
       setKitchenOrder(r.data);
       toast({ title: `${courseLabel(courseKey, coursingConfig)} ${verb}` });
-    } catch { toast({ title: `${verb} failed`, variant: 'destructive' }); }
-    finally { setCoursingBusy(false); }
+    } catch (err) {
+      toast({
+        title: `${verb} failed`,
+        description: err.response?.status === 403
+          ? 'Needs the Fire / Hold Courses permission.' : undefined,
+        variant: 'destructive',
+      });
+    } finally { setCoursingBusy(false); }
   };
-  const fireCourseFromCart  = (k) => courseAction(k, kitchenAPI.fireCourse, 'fired');
-  const holdCourseFromCart  = (k) => courseAction(k, kitchenAPI.holdCourse, 'held');
-  const serveCourseFromCart = (k) => courseAction(k, kitchenAPI.serveCourse, 'served');
+  const fireCourseFromCart  = (k) => courseAction(k, 'fire',  kitchenAPI.fireCourse, 'fired');
+  const holdCourseFromCart  = (k) => courseAction(k, 'hold',  kitchenAPI.holdCourse, 'held');
+  const serveCourseFromCart = (k) => courseAction(k, 'serve', kitchenAPI.serveCourse, 'served');
 
   /**
    * Take some of a line back off the kitchen ticket.
@@ -378,13 +396,20 @@ const POSTerminal = () => {
     const take = Math.min(already, qty);
     if (!kitchenOrder || take <= 0) return;
     try {
-      const r = await coursingAPI.voidItems(kitchenOrder.id, {
+      const voidPayload = {
         items: [{
           productId: item.productId || item.id, productName: item.name,
           quantity: take, course: lineCourse(item, coursingConfig),
           seat: item.seat ?? null,
         }],
-      });
+      };
+      const r = await courseActionResilient('void', { orderId: kitchenOrder.id, payload: voidPayload },
+        () => coursingAPI.voidItems(kitchenOrder.id, voidPayload));
+      if (r.queuedOffline) {
+        toast({ title: 'Void queued',
+                description: 'Offline — the station is told the moment the connection returns.' });
+        return;
+      }
       if (r.data?.order) setKitchenOrder(r.data.order);
       setSentQty(prev => {
         const next = { ...prev };
@@ -1053,6 +1078,17 @@ const POSTerminal = () => {
     });
     const paidPart = splitParts[idx];
     toast({ title: `Split #${idx + 1} Paid`, description: `$${Number(paidPart.amount).toFixed(2)} from ${paidPart.payerName}` });
+
+    // A seat that pays and leaves at eight shouldn't still read as owing at
+    // ten. Settle just their items now; the ticket itself stays open for the
+    // rest of the table and only closes once every seat has paid.
+    if (paidPart.seat != null && kitchenOrder) {
+      try {
+        await coursingAPI.settle({
+          tableNumber, orderId: kitchenOrder.id, seats: [paidPart.seat], releaseTable: false,
+        });
+      } catch { /* the guest has paid — never block on the tidy-up */ }
+    }
 
     const updatedParts = splitParts.map((s, i) => i === idx ? { ...s, status: 'confirmed' } : s);
     const allPaid = updatedParts.every(s => s.status === 'confirmed');

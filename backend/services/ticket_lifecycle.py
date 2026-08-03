@@ -83,17 +83,126 @@ async def free_table(table_number: Optional[str], actor: Optional[str] = None) -
         return False
 
 
+async def settle_seats(seats: List[int], table_number: Optional[str] = None,
+                       order_id: Optional[str] = None,
+                       actor: Optional[str] = None) -> Dict[str, Any]:
+    """Settle only the given seats' items on a table's ticket.
+
+    A guest who pays and leaves at 8pm shouldn't still read as owing at 10pm.
+    Their items are marked settled; the ticket itself only closes once every
+    seat on it has paid, so the rest of the table carries on as normal.
+    """
+    query: Dict[str, Any] = {"status": {"$in": OPEN_STATUSES}}
+    if order_id:
+        query = {"id": order_id}
+    elif table_number:
+        query["tableNumber"] = table_number
+    else:
+        return {"settledSeats": [], "closedOrders": [], "remainingSeats": []}
+
+    seats = [int(s) for s in seats or []]
+    now = _now()
+    settled_orders: List[str] = []
+    closed: List[str] = []
+    remaining: List[int] = []
+
+    for order in await db.kitchen_orders.find(query, {"_id": 0}).to_list(50):
+        items = [dict(i) for i in (order.get("items") or [])]
+        touched = False
+        for it in items:
+            if it.get("seat") in seats and not it.get("settledAt"):
+                it["settledAt"] = now
+                it["settledBy"] = actor
+                touched = True
+        if not touched:
+            continue
+        settled_orders.append(order["id"])
+
+        # Seats still owing: anything unsettled that has a seat, plus a flag
+        # for unseated items (shared plates nobody has claimed yet).
+        open_seats = sorted({i["seat"] for i in items
+                             if i.get("seat") is not None and not i.get("settledAt")})
+        unseated_open = any(i.get("seat") is None and not i.get("settledAt") for i in items)
+        remaining.extend(open_seats)
+
+        await db.kitchen_orders.update_one({"id": order["id"]}, {"$set": {"items": items}})
+        if not open_seats and not unseated_open:
+            # Everyone has paid — the ticket really is done.
+            closed.extend(await close_tickets(order_id=order["id"], actor=actor))
+
+    return {"settledSeats": seats, "closedOrders": closed,
+            "settledOrders": settled_orders, "remainingSeats": sorted(set(remaining))}
+
+
 async def settle(table_number: Optional[str] = None,
                  transaction_id: Optional[str] = None,
                  order_id: Optional[str] = None,
                  actor: Optional[str] = None,
-                 release_table: bool = True) -> Dict[str, Any]:
-    """Close tickets and (for dine-in) hand the table back."""
+                 release_table: bool = True,
+                 seats: Optional[List[int]] = None) -> Dict[str, Any]:
+    """Close tickets and (for dine-in) hand the table back.
+
+    With `seats`, only those seats settle — and the table is only released
+    once nothing is left owing on it.
+    """
+    if seats:
+        result = await settle_seats(seats, table_number=table_number,
+                                    order_id=order_id, actor=actor)
+        fully_done = bool(result["closedOrders"]) and not result["remainingSeats"]
+        freed = (await free_table(table_number, actor)
+                 if (release_table and fully_done) else False)
+        return {**result, "tableFreed": freed, "tableNumber": table_number,
+                "partial": not fully_done}
+
     closed = await close_tickets(table_number=table_number,
                                  transaction_id=transaction_id,
                                  order_id=order_id, actor=actor)
     freed = await free_table(table_number, actor) if release_table else False
-    return {"closedOrders": closed, "tableFreed": freed, "tableNumber": table_number}
+    return {"closedOrders": closed, "tableFreed": freed, "tableNumber": table_number,
+            "partial": False}
+
+
+async def move_ticket(from_table: str, to_table: str,
+                      actor: Optional[str] = None) -> Dict[str, Any]:
+    """Follow a moved/merged table with its kitchen ticket.
+
+    Move Table relabelled the tab and left the kitchen ticket on the old
+    number, so every later docket, the pacing state and the settle-on-payment
+    lookup all pointed at a table the party had left.
+    """
+    moved: List[str] = []
+    for order in await db.kitchen_orders.find(
+            {"tableNumber": from_table, "status": {"$in": OPEN_STATUSES}}, {"_id": 0}).to_list(50):
+        await db.kitchen_orders.update_one(
+            {"id": order["id"]},
+            {"$set": {"tableNumber": to_table},
+             "$push": {"tableMoves": {"from": from_table, "to": to_table,
+                                      "at": _now(), "by": actor}}},
+        )
+        moved.append(order["id"])
+
+    if moved:
+        # Hand the old table back and carry the party's pacing across, so the
+        # dwell timer doesn't restart just because they changed seats.
+        try:
+            from services import floor_tables
+            old = await floor_tables.resolve_table(from_table)
+            new = await floor_tables.resolve_table(to_table)
+            if old and new:
+                state = await db.table_states.find_one({"tableId": old[0]["id"]}, {"_id": 0})
+                await floor_tables.set_table_status(old[0]["id"], old[1], "available")
+                await floor_tables.set_table_status(new[0]["id"], new[1], "occupied", moved[0])
+                if state:
+                    await db.table_states.delete_one({"tableId": old[0]["id"]})
+                    await db.table_states.update_one(
+                        {"tableId": new[0]["id"]},
+                        {"$set": {**{k: v for k, v in state.items() if k != "tableId"},
+                                  "tableId": new[0]["id"], "updatedAt": _now()}},
+                        upsert=True,
+                    )
+        except Exception as e:
+            log.warning("move: floor plan follow-up failed %s -> %s: %s", from_table, to_table, e)
+    return {"movedOrders": moved, "from": from_table, "to": to_table}
 
 
 async def void_items(order_id: str, voids: List[dict], actor: Optional[str] = None) -> Dict[str, Any]:

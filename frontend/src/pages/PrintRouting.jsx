@@ -5,7 +5,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { useTheme } from '../contexts/ThemeContext';
-import { gamificationAPI } from '../services/api';
+import { gamificationAPI, coursingAPI } from '../services/api';
 import { toast } from 'sonner';
 import { stationLabel, printDocket, groupByCategory } from '../services/docket';
 
@@ -46,6 +46,26 @@ export default function PrintRouting() {
   const removeRoute = (idx) => {
     const routes = [...config.routes]; routes.splice(idx, 1);
     setConfig({ ...config, routes });
+  };
+
+  /**
+   * Print to the real station printer when one is configured, and fall back
+   * to the browser dialog when it isn't — a venue that hasn't set up an IP
+   * still prints exactly the way it does today.
+   */
+  const printJob = async (job) => {
+    try {
+      const r = await coursingAPI.printEscpos(job.id);
+      if (r.data?.sent) {
+        toast.success(`Sent to ${job.printer} (${r.data.bytes} bytes)`);
+        setQueue(q => q.filter(j => j.id !== job.id));
+        return;
+      }
+      toast(`${job.printer}: ${r.data?.reason || 'no device'} — using the browser dialog`);
+    } catch {
+      // Older backend or the endpoint is unreachable — browser it is.
+    }
+    printDocket(job);
   };
 
   const completeJob = async (id) => {
@@ -103,7 +123,7 @@ export default function PrintRouting() {
                 </div>
                 <div className="flex items-center gap-2">
                   {job.tableNumber && <Badge variant="outline" className="text-[10px]">Table {job.tableNumber}</Badge>}
-                  <Button size="sm" variant="outline" className="h-6 text-xs" onClick={() => printDocket(job)} data-testid={`print-${job.id}`}><Printer size={12} className="mr-1" /> Print</Button>
+                  <Button size="sm" variant="outline" className="h-6 text-xs" onClick={() => printJob(job)} data-testid={`print-${job.id}`}><Printer size={12} className="mr-1" /> Print</Button>
                   <Button size="sm" variant="outline" className="h-6 text-xs" onClick={() => completeJob(job.id)} data-testid={`complete-${job.id}`}><CheckCircle size={12} className="mr-1" /> Done</Button>
                 </div>
               </div>

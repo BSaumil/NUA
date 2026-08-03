@@ -6,12 +6,14 @@ from fastapi import APIRouter, HTTPException, Request, Depends
 from deps import get_user, require_owner, require_owner_or_manager, require_permission
 from database import db
 from datetime import datetime, timezone, timedelta
+import logging
 import uuid
 import os
 import base64
 import json
 import secrets
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -83,12 +85,26 @@ async def update_tab(tab_id: str, data: dict, _: dict = Depends(get_user)):
     patch = {k: v for k, v in data.items() if k in allowed}
     if not patch:
         raise HTTPException(status_code=400, detail="No updatable fields provided")
+    before = await db.pos_tabs.find_one({"id": tab_id}, {"_id": 0})
     result = await db.pos_tabs.find_one_and_update(
         {"id": tab_id}, {"$set": patch}, return_document=True,
     )
     if not result:
         raise HTTPException(status_code=404, detail="Tab not found")
     result.pop("_id", None)
+
+    # The kitchen ticket has to follow the party. Without this the tab moved
+    # to table 14 while every later docket, the pacing state and the
+    # settle-on-payment lookup still said table 12.
+    old_table = (before or {}).get("tableNumber")
+    new_table = patch.get("tableNumber")
+    if old_table and new_table and str(old_table) != str(new_table):
+        try:
+            from services import ticket_lifecycle
+            result["ticketMove"] = await ticket_lifecycle.move_ticket(
+                str(old_table), str(new_table), actor=_.get("name") or _.get("email"))
+        except Exception as e:
+            logger.warning("move tab: kitchen ticket did not follow: %s", e)
     return result
 
 
@@ -107,6 +123,18 @@ async def merge_tabs(tab_id: str, data: dict, _: dict = Depends(get_user)):
     await db.pos_tabs.update_one({"id": tab_id}, {"$set": {"cart": merged_cart}})
     await db.pos_tabs.delete_one({"id": other_id})
     result = await db.pos_tabs.find_one({"id": tab_id}, {"_id": 0})
+
+    # Two tables joined into one check: the absorbed table's kitchen ticket
+    # moves onto the surviving table too, or the kitchen keeps cooking for a
+    # table that no longer has anyone at it.
+    src, dst = other.get("tableNumber"), primary.get("tableNumber")
+    if src and dst and str(src) != str(dst):
+        try:
+            from services import ticket_lifecycle
+            result["ticketMove"] = await ticket_lifecycle.move_ticket(
+                str(src), str(dst), actor=_.get("name") or _.get("email"))
+        except Exception as e:
+            logger.warning("merge tabs: kitchen ticket did not follow: %s", e)
     return result
 
 

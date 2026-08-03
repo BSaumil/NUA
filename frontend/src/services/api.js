@@ -261,6 +261,11 @@ export const coursingAPI = {
   settle: (data) => api.post('/coursing/settle', data),
   voidItems: (id, data) => api.post(`/coursing/orders/${id}/void`, data),
   // SSE endpoint — consumed via EventSource, not axios.
+  moveTicket: (fromTable, toTable) => api.post('/coursing/move-ticket', { fromTable, toTable }),
+  timings: (orderId) => api.get(`/kitchen/orders/${orderId}/timings`),
+  printTargets: () => api.get('/print-targets'),
+  setPrintTarget: (printer, data) => api.put(`/print-targets/${encodeURIComponent(printer)}`, data),
+  printEscpos: (jobId) => api.post(`/print-jobs/${jobId}/escpos`),
   streamUrl: (tableNumber) =>
     `${API_BASE_URL}/coursing/stream?tableNumber=${encodeURIComponent(tableNumber || '')}`
     + `&token=${encodeURIComponent(localStorage.getItem('nuva_token') || '')}`,

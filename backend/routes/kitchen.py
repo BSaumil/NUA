@@ -237,8 +237,13 @@ async def cancel_kitchen_order(order_id: str, _: dict = Depends(get_user)):
 
 # ─── Course lifecycle — HOLD / FIRE / SERVE per course ────────────────────
 @router.post("/kitchen/orders/{order_id}/hold-course/{course}")
-async def hold_course(order_id: str, course: int, _: dict = Depends(require_permission("fire-course"))):
+async def hold_course(order_id: str, course: int,
+                      user: dict = Depends(require_permission("fire-course"))):
     """Explicitly hold a course — it will NOT fire automatically."""
+    from services import course_events
+    prior = await db.kitchen_orders.find_one({"id": order_id}, {"_id": 0, "courses": 1})
+    prev_state = course_events.course_state(prior or {}, course)
+
     key = f"courses.{course}"
     result = await db.kitchen_orders.find_one_and_update(
         {"id": order_id},
@@ -249,6 +254,8 @@ async def hold_course(order_id: str, course: int, _: dict = Depends(require_perm
     if not result:
         raise HTTPException(status_code=404, detail="Order not found")
     result.pop("_id", None)
+    await course_events.record_transition(order_id, course, "held",
+                                          user.get("name") or user.get("email"), prev_state)
     return result
 
 
@@ -260,6 +267,10 @@ async def fire_course_internal(order_id: str, course: int, actor: str) -> dict:
     automatically, so an auto-fire behaves exactly like a server tapping Fire
     rather than quietly skipping the printing.
     """
+    from services import course_events
+    prior = await db.kitchen_orders.find_one({"id": order_id}, {"_id": 0, "courses": 1})
+    prev_state = course_events.course_state(prior or {}, course)
+
     key = f"courses.{course}"
     result = await db.kitchen_orders.find_one_and_update(
         {"id": order_id},
@@ -279,6 +290,14 @@ async def fire_course_internal(order_id: str, course: int, actor: str) -> dict:
     from services import coursing as _coursing
     cfg = await _coursing.get_config()
     label = _course_label(course, cfg)
+
+    await course_events.record_transition(order_id, course, "fired", actor, prev_state)
+    await course_events.audit(
+        "course_fired", result, course=course, actor=actor,
+        memo=f"{label} fired for table {result.get('tableNumber') or '?'}"
+             + (" (automatic — timing rule)" if actor == "auto" else ""),
+        after={"course": course, "label": label, "firedBy": actor},
+    )
 
     # A station prints when the course is fired, not when the order is rung
     # up — that's the whole point of holding a course. Items carry their
@@ -352,6 +371,9 @@ async def ready_course(order_id: str, course: int, user: dict = Depends(require_
     if not result:
         raise HTTPException(status_code=404, detail="Order not found")
     result.pop("_id", None)
+    from services import course_events
+    await course_events.record_transition(order_id, course, "ready",
+                                          user.get("name") or user.get("email"), "fired")
     try:
         from services import coursing as _coursing, notification_service as ns
         label = _course_label(course, await _coursing.get_config())
@@ -372,7 +394,11 @@ async def ready_course(order_id: str, course: int, user: dict = Depends(require_
 
 
 @router.post("/kitchen/orders/{order_id}/serve-course/{course}")
-async def serve_course(order_id: str, course: int, _: dict = Depends(require_permission("fire-course"))):
+async def serve_course(order_id: str, course: int, user: dict = Depends(require_permission("fire-course"))):
+    from services import course_events
+    prior = await db.kitchen_orders.find_one({"id": order_id}, {"_id": 0, "courses": 1})
+    prev_state = course_events.course_state(prior or {}, course)
+
     key = f"courses.{course}"
     result = await db.kitchen_orders.find_one_and_update(
         {"id": order_id},
@@ -382,7 +408,28 @@ async def serve_course(order_id: str, course: int, _: dict = Depends(require_per
     if not result:
         raise HTTPException(status_code=404, detail="Order not found")
     result.pop("_id", None)
+    await course_events.record_transition(order_id, course, "served",
+                                          user.get("name") or user.get("email"), prev_state)
     return result
+
+
+@router.get("/kitchen/orders/{order_id}/timings")
+async def course_timings(order_id: str, _: dict = Depends(get_user)):
+    """Per-course timings derived from the ticket's history trail.
+
+    `atPassMinutes` is the number that actually costs a venue: food sitting
+    under a lamp between the kitchen calling it ready and someone running it.
+    """
+    from services import course_events
+    order = await db.kitchen_orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return {
+        "orderId": order_id,
+        "tableNumber": order.get("tableNumber"),
+        "courses": course_events.summarise(order),
+        "history": order.get("courseHistory") or [],
+    }
 
 
 @router.post("/kitchen/orders/{order_id}/priority")

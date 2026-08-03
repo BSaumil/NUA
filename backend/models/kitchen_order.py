@@ -64,6 +64,13 @@ class KitchenOrder(BaseModel):
     # ticket, not a second ticket.
     rounds: int = 1
 
+    # Append-only trail of every course state change:
+    #   { course, from, to, at, by }
+    # The `courses` map only keeps the latest timestamp per state, so a course
+    # held twice, or re-fired after a hold, loses its earlier history — and
+    # "how long did mains sit at the pass?" becomes unanswerable.
+    courseHistory: List[dict] = []
+
     createdAt: str = ""
     startedAt: Optional[str] = None
     readyAt: Optional[str] = None

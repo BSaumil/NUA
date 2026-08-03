@@ -272,7 +272,21 @@ async def settle_table(body: dict, user: dict = Depends(get_user)):
         order_id=body.get("orderId"),
         actor=user.get("name") or user.get("email"),
         release_table=body.get("releaseTable", True),
+        seats=body.get("seats"),
     )
+
+
+@router.post("/coursing/move-ticket")
+async def move_ticket(body: dict, user: dict = Depends(get_user)):
+    """Follow a moved or merged table with its kitchen ticket."""
+    from services import ticket_lifecycle
+    src, dst = body.get("fromTable"), body.get("toTable")
+    if not src or not dst:
+        raise HTTPException(status_code=400, detail="fromTable and toTable are required")
+    if str(src) == str(dst):
+        return {"movedOrders": [], "from": src, "to": dst}
+    return await ticket_lifecycle.move_ticket(
+        str(src), str(dst), actor=user.get("name") or user.get("email"))
 
 
 @router.post("/coursing/orders/{order_id}/void")
@@ -306,6 +320,21 @@ async def void_from_ticket(order_id: str, body: dict,
             )
         except Exception as e:
             log.warning("void: docket print failed for %s: %s", order_id, e)
+    # Comps and voids are the classic shrinkage vector, so this belongs in the
+    # audit log Settings already surfaces — not only on the ticket it deleted
+    # items from.
+    try:
+        from services import course_events
+        await course_events.audit(
+            "course_void", order, actor=user.get("name") or user.get("email"),
+            memo=("Voided " + ", ".join(f"{i['quantity']}x {i.get('productName')}"
+                                        for i in result["removed"])
+                  + f" from table {order.get('tableNumber') or '?'}"),
+            severity="notice", after={"removed": result["removed"],
+                                      "printed": bool(cancelled)},
+        )
+    except Exception as e:
+        log.warning("void: audit write failed for %s: %s", order_id, e)
     return {**result, "voidPrinted": bool(cancelled)}
 
 
@@ -378,6 +407,59 @@ async def coursing_stream(request: Request, tableNumber: Optional[str] = None,
         # nginx buffers SSE by default, which would defeat the whole point.
         "X-Accel-Buffering": "no",
     })
+
+
+@router.get("/print-targets")
+async def list_print_targets(_: dict = Depends(get_user)):
+    """Network addresses configured for station printers."""
+    return await db.printer_targets.find({}, {"_id": 0}).to_list(50)
+
+
+@router.put("/print-targets/{printer}")
+async def set_print_target(printer: str, body: dict, user: dict = Depends(get_user)):
+    """Point a station printer at a real device (ESC/POS over TCP)."""
+    if user.get("role") not in ("owner", "manager"):
+        raise HTTPException(status_code=403, detail="Owner or manager only")
+    doc = {
+        "printer": printer,
+        "host": (body.get("host") or "").strip() or None,
+        "port": int(body.get("port") or 9100),
+        "enabled": bool(body.get("enabled", True)),
+        "updatedAt": _now(),
+        "updatedBy": user.get("email"),
+    }
+    await db.printer_targets.update_one({"printer": printer}, {"$set": doc}, upsert=True)
+    return doc
+
+
+@router.post("/print-jobs/{job_id}/escpos")
+async def print_job_escpos(job_id: str, body: dict = None, _: dict = Depends(get_user)):
+    """Render a queued docket as ESC/POS and send it to the station printer.
+
+    Returns `sent: False` with a reason when no device is configured or it
+    can't be reached — the caller then falls back to the browser print path,
+    so a station without an IP still prints exactly as it does today.
+    """
+    from services import escpos
+    job = await db.print_jobs.find_one({"id": job_id}, {"_id": 0})
+    if not job:
+        raise HTTPException(status_code=404, detail="Print job not found")
+
+    payload = escpos.render(job)
+    target = await escpos.printer_target(job.get("printer"))
+    if not target or not target.get("enabled", True):
+        return {"sent": False, "reason": "no device configured for this printer",
+                "bytes": len(payload), "printer": job.get("printer")}
+
+    result = await escpos.send(target["host"], payload, port=target.get("port", 9100))
+    if result.get("ok"):
+        await db.print_jobs.update_one(
+            {"id": job_id},
+            {"$set": {"status": "printed", "printedAt": _now(),
+                      "printedVia": f"escpos://{target['host']}:{target.get('port', 9100)}"}},
+        )
+        return {"sent": True, **result}
+    return {"sent": False, "reason": result.get("error"), "bytes": len(payload)}
 
 
 @router.post("/coursing/auto-fire/tick")
