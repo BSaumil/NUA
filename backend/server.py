@@ -398,6 +398,14 @@ async def startup():
         await ensure_2fa_indexes()
     except Exception as exc:
         logger.warning("2FA indexes failed: %s", exc)
+    # The high-traffic collections (transactions, kitchen orders, customers,
+    # products) get indexes on the fields every dashboard and POS screen
+    # actually filters or sorts by — see services/db_indexes.py for why.
+    try:
+        from services.db_indexes import ensure_indexes as ensure_core_indexes
+        await ensure_core_indexes()
+    except Exception as exc:
+        logger.warning("Core indexes failed: %s", exc)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
