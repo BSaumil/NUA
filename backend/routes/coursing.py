@@ -135,6 +135,9 @@ async def send_to_kitchen(body: dict, request: Request, user: dict = Depends(get
     await db.kitchen_orders.insert_one(doc)
     doc.pop("_id", None)
 
+    from services import course_events as _ce
+    await _ce.record_initial(doc["id"], doc.get("courses") or {}, actor)
+
     # Courses fired at creation never pass through fire_course_internal, so
     # their side effects have to run here too — otherwise the first course
     # reaches the pass without printing a docket or moving the table's pacing.
@@ -280,6 +283,11 @@ async def add_round(order_id: str, body: dict, user: dict = Depends(get_user)):
         return_document=True,
     )
     updated.pop("_id", None)
+
+    # Courses a later round introduces start in a state nothing else records.
+    from services import course_events as _ce
+    new_keys = {k: v for k, v in courses.items() if k not in (order.get("courses") or {})}
+    await _ce.record_initial(order_id, new_keys, actor)
 
     # Straight-fired additions print immediately; held ones print when fired.
     if straight:
@@ -514,6 +522,38 @@ async def print_target_test(printer: str, user: dict = Depends(get_user)):
     return {"sent": bool(result.get("ok")), "bytes": len(payload), **result}
 
 
+@router.get("/print-profiles")
+async def print_profiles(_: dict = Depends(get_user)):
+    """Named device presets, so width/codepage/cut aren't guessed per venue."""
+    from services import escpos
+    return {"profiles": [{"id": k, **v} for k, v in escpos.DEVICE_PROFILES.items()]}
+
+
+@router.post("/print-jobs/{job_id}/dry-run")
+async def print_job_dry_run(job_id: str, body: dict = None, _: dict = Depends(get_user)):
+    """Render a docket to ESC/POS and describe it without sending anything.
+
+    No physical printer has seen this output, so the honest way to validate it
+    is to make the stream inspectable — control codes, line widths, and any
+    character the configured codepage couldn't represent.
+    """
+    from services import escpos
+    job = await db.print_jobs.find_one({"id": job_id}, {"_id": 0})
+    if not job:
+        raise HTTPException(status_code=404, detail="Print job not found")
+
+    body = body or {}
+    profile = escpos.DEVICE_PROFILES.get(body.get("profile") or "")
+    target = await escpos.printer_target(job.get("printer")) or {}
+    opts = {
+        "width": body.get("width") or (profile or {}).get("width") or target.get("width") or escpos.DEFAULT_WIDTH,
+        "codepage": body.get("codepage") or (profile or {}).get("codepage") or target.get("codepage") or escpos.DEFAULT_CODEPAGE,
+        "cut": body.get("cut") or (profile or {}).get("cut") or target.get("cut") or "partial",
+    }
+    payload = escpos.render(job, **opts)
+    return {"options": opts, **escpos.describe(payload)}
+
+
 @router.post("/print-jobs/{job_id}/escpos")
 async def print_job_escpos(job_id: str, body: dict = None, _: dict = Depends(get_user)):
     """Render a queued docket as ESC/POS and send it to the station printer.
@@ -554,21 +594,44 @@ async def coursing_analytics(days: int = 7, _: dict = Depends(get_user)):
     """Where time actually goes, per course and per station.
 
     `atPass` is the number worth acting on: minutes between the kitchen
-    calling a course ready and someone running it. Everything here comes from
-    the durable course-event trail, so it survives a ticket's own capped
-    history window.
+    calling a course ready and someone running it.
+
+    The grouping is done by Mongo rather than by loading the window into
+    memory — a busy quarter is hundreds of thousands of events, and pulling
+    them all back to group them client-side stops working long before the
+    data does.
     """
     from datetime import timedelta
     from services import course_events
 
-    since = (datetime.now(timezone.utc) - timedelta(days=max(1, min(90, days)))).isoformat()
-    events = await db.course_events.find({"at": {"$gte": since}}, {"_id": 0}).to_list(20000)
-    if not events:
-        return {"days": days, "sampled": 0, "courses": {}, "byDay": {}, "slowestAtPass": []}
+    days = max(1, min(90, days))
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
-    by_order: dict = {}
-    for e in events:
-        by_order.setdefault(e["orderId"], []).append(e)
+    # One document per (order, course) with its transitions in time order —
+    # the spans are then derived from that small per-course list rather than
+    # from the whole window.
+    pipeline = [
+        {"$match": {"at": {"$gte": since}}},
+        {"$sort": {"at": 1}},
+        {"$group": {
+            "_id": {"orderId": "$orderId", "course": "$course"},
+            "events": {"$push": {"to": "$to", "at": "$at"}},
+        }},
+        {"$limit": 20000},
+    ]
+    try:
+        groups = await db.course_events.aggregate(pipeline).to_list(20000)
+    except Exception as e:
+        log.warning("analytics aggregation failed, falling back to a scan: %s", e)
+        rows = await db.course_events.find({"at": {"$gte": since}}, {"_id": 0}).to_list(20000)
+        tmp: dict = {}
+        for r in rows:
+            tmp.setdefault((r["orderId"], int(r["course"])), []).append({"to": r["to"], "at": r["at"]})
+        groups = [{"_id": {"orderId": k[0], "course": k[1]},
+                   "events": sorted(v, key=lambda x: x["at"])} for k, v in tmp.items()]
+
+    if not groups:
+        return {"days": days, "sampled": 0, "courses": {}, "byDay": {}, "slowestAtPass": []}
 
     config = await coursing.get_config()
     labels = {str(c["key"]): c.get("label") for c in (config.get("courses") or [])}
@@ -576,26 +639,31 @@ async def coursing_analytics(days: int = 7, _: dict = Depends(get_user)):
     buckets: dict = {}
     per_day: dict = {}
     slowest: list = []
-    for order_id, rows in by_order.items():
-        rows.sort(key=lambda r: r.get("at") or "")
-        for course in {int(r["course"]) for r in rows}:
-            held = course_events.minutes_between(rows, course, "held", "fired")
-            cook = course_events.minutes_between(rows, course, "fired", "ready")
-            at_pass = course_events.minutes_between(rows, course, "ready", "served")
-            key = str(course)
-            b = buckets.setdefault(key, {"label": labels.get(key, f"Course {course}"),
-                                         "held": [], "cook": [], "atPass": []})
-            if held is not None: b["held"].append(held)
-            if cook is not None: b["cook"].append(cook)
-            if at_pass is not None:
-                b["atPass"].append(at_pass)
-                slowest.append({"orderId": order_id, "course": course,
-                                "label": labels.get(key, f"Course {course}"),
-                                "atPassMinutes": at_pass})
-            day = (rows[0].get("at") or "")[:10]
-            d = per_day.setdefault(day, {"atPass": [], "cook": []})
-            if at_pass is not None: d["atPass"].append(at_pass)
-            if cook is not None: d["cook"].append(cook)
+    orders = set()
+    for g in groups:
+        order_id = g["_id"]["orderId"]
+        course = int(g["_id"]["course"])
+        orders.add(order_id)
+        rows = [{**e, "course": course} for e in g["events"]]
+
+        held = course_events.minutes_between(rows, course, "held", "fired")
+        cook = course_events.minutes_between(rows, course, "fired", "ready")
+        at_pass = course_events.minutes_between(rows, course, "ready", "served")
+
+        key = str(course)
+        b = buckets.setdefault(key, {"label": labels.get(key, f"Course {course}"),
+                                     "held": [], "cook": [], "atPass": []})
+        if held is not None: b["held"].append(held)
+        if cook is not None: b["cook"].append(cook)
+        if at_pass is not None:
+            b["atPass"].append(at_pass)
+            slowest.append({"orderId": order_id, "course": course,
+                            "label": labels.get(key, f"Course {course}"),
+                            "atPassMinutes": at_pass})
+        day = (rows[0].get("at") or "")[:10]
+        d = per_day.setdefault(day, {"atPass": [], "cook": []})
+        if at_pass is not None: d["atPass"].append(at_pass)
+        if cook is not None: d["cook"].append(cook)
 
     def _stats(values):
         if not values:
@@ -606,7 +674,7 @@ async def coursing_analytics(days: int = 7, _: dict = Depends(get_user)):
 
     return {
         "days": days,
-        "sampled": len(by_order),
+        "sampled": len(orders),
         "courses": {k: {"label": v["label"], "held": _stats(v["held"]),
                         "cook": _stats(v["cook"]), "atPass": _stats(v["atPass"])}
                     for k, v in sorted(buckets.items(), key=lambda kv: int(kv[0]))},
@@ -615,6 +683,20 @@ async def coursing_analytics(days: int = 7, _: dict = Depends(get_user)):
         # The specific tickets to go and look at, not just an average.
         "slowestAtPass": sorted(slowest, key=lambda r: -r["atPassMinutes"])[:10],
     }
+
+
+@router.post("/coursing/events/purge")
+async def purge_course_events(user: dict = Depends(get_user)):
+    """Drop course events past retention.
+
+    The TTL index handles this by itself in production; this makes retention
+    something you can prove rather than only promise.
+    """
+    if user.get("role") not in ("owner", "manager"):
+        raise HTTPException(status_code=403, detail="Owner or manager only")
+    from services import course_events
+    return {"deleted": await course_events.purge_expired(),
+            "retentionDays": course_events.RETENTION_DAYS}
 
 
 @router.post("/coursing/auto-fire/tick")

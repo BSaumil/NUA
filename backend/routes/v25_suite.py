@@ -347,15 +347,44 @@ async def kiosk_start(data: dict):
 
 @router.post("/kiosk/session/{sid}/add")
 async def kiosk_add(sid: str, data: dict):
-    # The kiosk posts the item's fields at the top level; only a nested
-    # {"item": {...}} was read, so every line pushed an empty object and the
-    # cart was always effectively empty. Accept both shapes.
+    # The kiosk client wraps the item as {"item": {...}}; accept a flat body
+    # too so a direct API caller (or a future client) can't silently push an
+    # empty line.
     item = data.get("item") if isinstance(data.get("item"), dict) else data
     item = {k: v for k, v in (item or {}).items() if k != "item"}
     if not item:
         raise HTTPException(status_code=400, detail="No item supplied")
     await db.kiosk_sessions.update_one({"id": sid}, {"$push": {"cart": item}})
     return {"added": True, "item": item}
+
+
+@router.post("/kiosk/session/{sid}/course")
+async def kiosk_set_course(sid: str, data: dict):
+    """Move one kiosk cart line to a different course.
+
+    The ticket is built from the stored cart, so a guest's choice has to land
+    here — changing it only on their screen would be a lie the kitchen never
+    hears about.
+    """
+    line_id = data.get("lineId")
+    try:
+        course = int(data.get("course"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="A numeric course is required")
+    s = await db.kiosk_sessions.find_one({"id": sid}, {"_id": 0})
+    if not s:
+        raise HTTPException(status_code=404, detail="Session not found")
+    cart = list(s.get("cart") or [])
+    hit = False
+    for i, line in enumerate(cart):
+        if line.get("lineId") == line_id or (not line_id and i == data.get("index")):
+            cart[i] = {**line, "course": course}
+            hit = True
+            break
+    if not hit:
+        raise HTTPException(status_code=404, detail="Cart line not found")
+    await db.kiosk_sessions.update_one({"id": sid}, {"$set": {"cart": cart}})
+    return {"ok": True, "cart": cart}
 
 
 @router.post("/kiosk/session/{sid}/checkout")

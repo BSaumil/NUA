@@ -674,6 +674,7 @@ export const v25API = {
   // Should-have
   kioskStart: (data) => api.post('/v25/kiosk/session', data),
   kioskAdd: (sid, item) => api.post(`/v25/kiosk/session/${sid}/add`, { item }),
+  kioskSetCourse: (sid, data) => api.post(`/v25/kiosk/session/${sid}/course`, data),
   kioskCheckout: (sid) => api.post(`/v25/kiosk/session/${sid}/checkout`),
   kioskList: () => api.get('/v25/kiosk/sessions'),
   kioskUpsell: (sid) => api.post(`/v25/kiosk/session/${sid}/upsell`),

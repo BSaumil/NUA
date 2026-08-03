@@ -33,6 +33,24 @@ SIZE_TALL = GS + b"!\x01"
 CUT = GS + b"V\x42\x00"        # partial cut, feed first
 FEED_3 = b"\n\n\n"
 
+# Known-device presets. These are the settings that differ in practice, and
+# guessing them costs a roll of paper per attempt — so they're named rather
+# than rediscovered per venue.
+DEVICE_PROFILES = {
+    "epson-tm-80":   {"width": 48, "codepage": "cp437", "cut": "partial",
+                      "label": "Epson TM-series, 80mm"},
+    "epson-tm-58":   {"width": 32, "codepage": "cp437", "cut": "partial",
+                      "label": "Epson TM-series, 58mm"},
+    "star-tsp-80":   {"width": 48, "codepage": "cp437", "cut": "full",
+                      "label": "Star TSP-series, 80mm"},
+    "generic-80":    {"width": 48, "codepage": "cp437", "cut": "legacy",
+                      "label": "Generic/clone 80mm (older cut command)"},
+    "generic-58":    {"width": 32, "codepage": "cp437", "cut": "legacy",
+                      "label": "Generic/clone 58mm"},
+    "euro-80":       {"width": 48, "codepage": "cp850", "cut": "partial",
+                      "label": "80mm, Western European codepage"},
+}
+
 DEFAULT_PORT = 9100
 DEFAULT_WIDTH = 48             # characters per line at font A on 80mm
 DEFAULT_CODEPAGE = "cp437"     # near-universal default on thermal printers
@@ -199,6 +217,65 @@ async def send(host: str, payload: bytes, port: int = DEFAULT_PORT,
             await asyncio.wait_for(writer.wait_closed(), timeout=timeout)
         except (OSError, asyncio.TimeoutError):
             pass
+
+
+# How many bytes each control sequence occupies, including its parameters.
+# Needed because the parameter bytes are often printable ASCII (ESC "E" 0x01),
+# so filtering on "is this byte printable" leaves them behind and makes every
+# measured line look wider than it prints.
+_ESC_LEN = {b"@": 2, b"E": 3, b"a": 3, b"i": 2, b"m": 2, b"d": 3, b"!": 3, b"t": 3}
+_GS_LEN = {b"!": 3, b"V": 4, b"B": 3}
+
+
+def strip_control(payload: bytes) -> bytes:
+    """Remove ESC/GS sequences, leaving only what actually prints."""
+    out = bytearray()
+    i = 0
+    n = len(payload)
+    while i < n:
+        byte = payload[i:i + 1]
+        if byte == ESC and i + 1 < n:
+            i += _ESC_LEN.get(payload[i + 1:i + 2], 2)
+            continue
+        if byte == GS and i + 1 < n:
+            i += _GS_LEN.get(payload[i + 1:i + 2], 3)
+            continue
+        if payload[i] >= 0x20 or payload[i] == 0x0A:
+            out += byte
+        i += 1
+    return bytes(out)
+
+
+def describe(payload: bytes) -> Dict[str, Any]:
+    """Explain a byte stream in terms a human can check.
+
+    Nothing here has been near a physical printer, so the useful thing is to
+    make the stream inspectable: which control codes it contains, how wide the
+    longest line is, and whether anything failed to encode. A dry run against
+    this is how a wrong width or codepage gets caught before it wastes a roll
+    of paper.
+    """
+    codes = []
+    for name, seq in (("init", INIT), ("bold-on", BOLD_ON), ("center", ALIGN_CENTER),
+                      ("double-size", SIZE_DOUBLE), ("tall", SIZE_TALL)):
+        if seq in payload:
+            codes.append(name)
+    cut = next((n for n, seq in CUT_STYLES.items() if seq and payload.endswith(seq)), None)
+
+    text = strip_control(payload)
+    lines = [ln for ln in text.split(b"\n")]
+    longest = max((len(ln) for ln in lines), default=0)
+    return {
+        "bytes": len(payload),
+        "controlCodes": codes,
+        "cutStyle": cut,
+        "lines": len(lines),
+        "longestLine": longest,
+        # A '?' is what `errors="replace"` leaves behind — the signal that the
+        # configured codepage couldn't represent something.
+        "unencodableChars": text.count(b"?"),
+        "preview": text.decode("ascii", "replace"),
+    }
 
 
 async def ping(host: str, port: int = DEFAULT_PORT, timeout: float = 3.0) -> Dict[str, Any]:

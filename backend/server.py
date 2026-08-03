@@ -290,6 +290,13 @@ async def startup():
         start_scheduler()
     except Exception as exc:
         logger.warning("Ash scheduler failed to start: %s", exc)
+    # Analytics filters the course-event trail on time, and the trail needs a
+    # TTL so it can't grow forever.
+    try:
+        from services.course_events import ensure_indexes
+        await ensure_indexes()
+    except Exception as exc:
+        logger.warning("Course event indexes failed: %s", exc)
     # Course timing rules need minute-level granularity, so they get their own
     # loop rather than riding the hourly Ash scheduler.
     try:

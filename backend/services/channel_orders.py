@@ -102,6 +102,9 @@ async def create_ticket(items: List[dict], *, order_type: str,
     await db.kitchen_orders.insert_one(doc)
     doc.pop("_id", None)
 
+    from services import course_events
+    await course_events.record_initial(doc["id"], doc.get("courses") or {}, actor)
+
     # Same side effects a POS send gets: fired courses print, and a dine-in
     # table's pacing follows.
     fired = sorted(int(k) for k, v in (doc.get("courses") or {}).items()

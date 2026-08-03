@@ -15,7 +15,8 @@ Both are best-effort: losing a history row must never stop food reaching the
 pass.
 """
 import logging
-from datetime import datetime, timezone
+import os
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from database import db
@@ -56,9 +57,74 @@ async def record_transition(order_id: str, course: int, to_state: str,
     # Durable copy — this is what analytics reads, and what makes the cap on
     # the ticket safe.
     try:
-        await db.course_events.insert_one({**entry, "orderId": order_id})
+        await db.course_events.insert_one({
+            **entry, "orderId": order_id,
+            # Real date (not the ISO string) so the TTL index can expire it.
+            "expiresAt": datetime.now(timezone.utc) + timedelta(days=RETENTION_DAYS),
+        })
     except Exception as e:
         log.warning("course event write failed for %s: %s", order_id, e)
+
+
+# How long the durable trail is kept. Long enough for a quarter's analytics,
+# bounded so the collection can't grow forever on a busy site.
+RETENTION_DAYS = int(os.environ.get("COURSE_EVENT_RETENTION_DAYS", "120"))
+
+
+async def ensure_indexes() -> None:
+    """Index the trail on time, and let Mongo expire old rows itself.
+
+    Analytics filters on `at` over a rolling window, which is a collection
+    scan without this. The TTL index is what stops the durable trail — the
+    thing that makes the ticket's own capped history safe — from becoming an
+    unbounded collection instead.
+    """
+    try:
+        await db.course_events.create_index("at")
+        await db.course_events.create_index("orderId")
+        # `expiresAt` is a real date so Mongo's TTL monitor can act on it;
+        # `at` is stored as an ISO string for everything else that reads it.
+        await db.course_events.create_index("expiresAt", expireAfterSeconds=0)
+    except Exception as e:
+        log.warning("course event index setup failed: %s", e)
+
+
+async def purge_expired() -> int:
+    """Delete rows past retention.
+
+    A TTL index does this on its own in a real deployment, but it isn't
+    instant, and mongomock has no TTL monitor at all — so retention is also
+    enforceable on demand rather than only being a promise.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=RETENTION_DAYS)).isoformat()
+    try:
+        r = await db.course_events.delete_many({"at": {"$lt": cutoff}})
+        return r.deleted_count
+    except Exception as e:
+        log.warning("course event purge failed: %s", e)
+        return 0
+
+
+async def record_initial(order_id: str, courses: Dict[str, Any],
+                         actor: Optional[str] = None) -> None:
+    """Record the state each course starts in.
+
+    A course held at creation never passes through the hold endpoint, so
+    without this there is no "held" entry to measure from and held time is
+    permanently null for the ordinary case — which is most of them. The entry
+    is marked `initial` so it's distinguishable from a server actively
+    choosing to hold something later.
+    """
+    for key, state in (courses or {}).items():
+        status = (state or {}).get("status")
+        if not status:
+            continue
+        try:
+            course = int(key)
+        except (TypeError, ValueError):
+            continue
+        await record_transition(order_id, course, status, actor,
+                                from_state=None, extra={"initial": True})
 
 
 async def full_history(order_id: str) -> list:
