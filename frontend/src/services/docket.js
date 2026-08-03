@@ -44,6 +44,8 @@ function itemRows(items, dim = false) {
         <td class="qty">${item.quantity || 1}×</td>
         <td class="name">${item.seat ? `<span class="seat">S${item.seat}</span> ` : ''}${item.productName || item.name || ''}</td>
       </tr>
+      ${(item.allergens || []).length ? `<tr class="${dim ? 'dim' : ''}"><td></td><td class="allergen">!! ${item.allergens.map(a => String(a).toUpperCase()).join(', ')}</td></tr>` : ''}
+      ${(item.dietary || []).length ? `<tr class="${dim ? 'dim' : ''}"><td></td><td class="diet">(${item.dietary.join(', ')})</td></tr>` : ''}
       ${item.notes ? `<tr class="${dim ? 'dim' : ''}"><td></td><td class="note">» ${item.notes}</td></tr>` : ''}
   `).join('');
 }
@@ -111,6 +113,10 @@ export function generateDocketHTML(job) {
         .qty { width: 34px; font-weight: bold; font-size: 15px; }
         .name { font-size: 15px; font-weight: bold; }
         .note { font-size: 11px; font-style: italic; }
+        /* Allergens must be impossible to skim past — this is the one line on
+           a docket where missing it has consequences beyond a remake. */
+        .allergen { font-size: 12px; font-weight: bold; border: 2px solid #000; padding: 1px 3px; }
+        .diet { font-size: 10px; }
         .cat { font-size: 11px; font-weight: bold; letter-spacing: 1px; border-bottom: 1px solid #000; margin-top: 6px; padding-bottom: 1px; }
         /* Other sections: printed for context, visually secondary */
         .also { margin-top: 8px; font-size: 10px; letter-spacing: 1px; text-align: center; border-top: 2px solid #000; padding-top: 4px; }

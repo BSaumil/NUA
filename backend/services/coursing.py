@@ -68,15 +68,36 @@ DEFAULT_COURSING_CONFIG: Dict[str, Any] = {
 }
 
 
-async def get_config() -> Dict[str, Any]:
-    row = await db.coursing_config.find_one({"_id": CONFIG_ID}, {"_id": 0})
-    if not row:
-        row = dict(DEFAULT_COURSING_CONFIG)
-        await db.coursing_config.insert_one({"_id": CONFIG_ID, **row})
-        return row
-    # Fill in keys added after this venue first saved its config.
+def config_id(location_id: Optional[str] = None) -> str:
+    """Which config document a location uses.
+
+    Coursing was a single global singleton while Locations already existed, so
+    a two-site group couldn't course a bistro differently from its bar. A
+    location gets its own document only once someone saves one; until then it
+    inherits the venue-wide config, so nothing changes for single-site venues
+    and a new site starts consistent with the group.
+    """
+    return CONFIG_ID if not location_id else f"loc:{location_id}"
+
+
+async def get_config(location_id: Optional[str] = None) -> Dict[str, Any]:
     merged = dict(DEFAULT_COURSING_CONFIG)
-    merged.update(row)
+
+    base = await db.coursing_config.find_one({"_id": CONFIG_ID}, {"_id": 0})
+    if not base:
+        base = dict(DEFAULT_COURSING_CONFIG)
+        await db.coursing_config.insert_one({"_id": CONFIG_ID, **base})
+    merged.update(base)
+
+    if location_id:
+        override = await db.coursing_config.find_one({"_id": config_id(location_id)}, {"_id": 0})
+        if override:
+            merged.update(override)
+            merged["locationId"] = location_id
+            merged["inheritsVenue"] = False
+        else:
+            merged["locationId"] = location_id
+            merged["inheritsVenue"] = True
     return merged
 
 
@@ -104,6 +125,32 @@ def course_for_category(category: Optional[str], config: Dict[str, Any]) -> int:
             except (TypeError, ValueError):
                 return default
     return default
+
+
+async def enrich_allergens(items: List[dict]) -> List[dict]:
+    """Attach each item's allergens and dietary markers from the catalog.
+
+    The POS cart carries a product id, not the allergen list, so without this
+    the one place allergens matter most — the production docket — never sees
+    them. Anything already carrying them is left alone.
+    """
+    ids = [i.get("productId") for i in items or [] if i.get("productId") and not i.get("allergens")]
+    if not ids:
+        return [dict(i) for i in items or []]
+    rows = await db.products.find(
+        {"id": {"$in": ids}}, {"_id": 0, "id": 1, "allergens": 1, "dietary": 1}).to_list(300)
+    by_id = {r["id"]: r for r in rows}
+    out = []
+    for i in items or []:
+        row = dict(i)
+        hit = by_id.get(row.get("productId"))
+        if hit:
+            if hit.get("allergens"):
+                row.setdefault("allergens", hit["allergens"])
+            if hit.get("dietary"):
+                row.setdefault("dietary", hit["dietary"])
+        out.append(row)
+    return out
 
 
 def assign_courses(items: List[dict], config: Dict[str, Any]) -> List[dict]:

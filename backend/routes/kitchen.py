@@ -291,6 +291,7 @@ async def hold_course(order_id: str, course: int,
     result.pop("_id", None)
     await course_events.record_transition(order_id, course, "held",
                                           user.get("name") or user.get("email"), prev_state)
+    await course_events.reconcile_status(order_id)
     return result
 
 
@@ -327,6 +328,7 @@ async def fire_course_internal(order_id: str, course: int, actor: str) -> dict:
     label = _course_label(course, cfg)
 
     await course_events.record_transition(order_id, course, "fired", actor, prev_state)
+    await course_events.reconcile_status(order_id)
     await course_events.audit(
         "course_fired", result, course=course, actor=actor,
         memo=f"{label} fired for table {result.get('tableNumber') or '?'}"
@@ -409,6 +411,7 @@ async def ready_course(order_id: str, course: int, user: dict = Depends(require_
     from services import course_events
     await course_events.record_transition(order_id, course, "ready",
                                           user.get("name") or user.get("email"), "fired")
+    await course_events.reconcile_status(order_id)
     try:
         from services import coursing as _coursing, notification_service as ns
         label = _course_label(course, await _coursing.get_config())
@@ -445,6 +448,7 @@ async def serve_course(order_id: str, course: int, user: dict = Depends(require_
     result.pop("_id", None)
     await course_events.record_transition(order_id, course, "served",
                                           user.get("name") or user.get("email"), prev_state)
+    await course_events.reconcile_status(order_id)
     return result
 
 

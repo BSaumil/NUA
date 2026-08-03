@@ -37,24 +37,42 @@ def _now() -> str:
 
 
 @router.get("/coursing/config")
-async def get_coursing_config(_: dict = Depends(get_user)):
-    """Readable by any logged-in user — the POS needs it to render the cart."""
-    return await coursing.get_config()
+async def get_coursing_config(locationId: Optional[str] = None,
+                              _: dict = Depends(get_user)):
+    """Readable by any logged-in user — the POS needs it to render the cart.
+
+    Without a location this is the venue-wide config, which is what a
+    single-site venue always gets.
+    """
+    return await coursing.get_config(locationId)
 
 
 @router.put("/coursing/config")
-async def update_coursing_config(body: dict, user: dict = Depends(get_user)):
+async def update_coursing_config(body: dict, locationId: Optional[str] = None,
+                                 user: dict = Depends(get_user)):
+    """Save the venue-wide config, or one site's override of it."""
     if user.get("role") not in ("owner", "manager"):
         raise HTTPException(status_code=403, detail="Owner or manager only")
+    doc_id = coursing.config_id(locationId)
     patch = coursing.sanitize_config(body)
     patch["updatedAt"] = _now()
     patch["updatedBy"] = user.get("email")
+    if locationId:
+        patch["locationId"] = locationId
     await db.coursing_config.update_one(
-        {"_id": coursing.CONFIG_ID},
-        {"$set": {"_id": coursing.CONFIG_ID, **patch}},
-        upsert=True,
+        {"_id": doc_id}, {"$set": {"_id": doc_id, **patch}}, upsert=True,
     )
-    return await coursing.get_config()
+    return await coursing.get_config(locationId)
+
+
+@router.delete("/coursing/config")
+async def clear_location_override(locationId: str, user: dict = Depends(get_user)):
+    """Drop a site's override so it inherits the venue-wide config again."""
+    if user.get("role") not in ("owner", "manager"):
+        raise HTTPException(status_code=403, detail="Owner or manager only")
+    r = await db.coursing_config.delete_one({"_id": coursing.config_id(locationId)})
+    return {"cleared": r.deleted_count > 0, "locationId": locationId,
+            "config": await coursing.get_config(locationId)}
 
 
 @router.post("/coursing/preview")
@@ -104,7 +122,8 @@ async def send_to_kitchen(body: dict, request: Request, user: dict = Depends(get
             return await add_round(existing["id"], body, user)
     straight = coursing.is_straight_fire(order_type, config, bool(body.get("straightFire")))
 
-    priced = [{**it, "round": 1} for it in coursing.assign_courses(items, config)]
+    priced = [{**it, "round": 1} for it in
+              coursing.assign_courses(await coursing.enrich_allergens(items), config)]
     now = _now()
     actor = user.get("name") or user.get("email")
 
@@ -132,6 +151,13 @@ async def send_to_kitchen(body: dict, request: Request, user: dict = Depends(get
     doc = order.dict()
     doc["straightFired"] = straight
     doc["clientKey"] = client_key
+    # Every station this ticket fires from, stamped on the ticket itself — the
+    # KDS station filter reads this, and per-course dockets can't answer it.
+    try:
+        from services import print_routing as _pr
+        doc["orderStations"] = await _pr.stations_for(priced)
+    except Exception as e:
+        log.warning("send-to-kitchen: station stamp failed for %s: %s", doc["id"], e)
     await db.kitchen_orders.insert_one(doc)
     doc.pop("_id", None)
 
@@ -262,7 +288,7 @@ async def add_round(order_id: str, body: dict, user: dict = Depends(get_user)):
     next_round = int(order.get("rounds") or 1) + 1
     new_items = [
         {**it, "round": next_round}
-        for it in coursing.assign_courses(items, config)
+        for it in coursing.assign_courses(await coursing.enrich_allergens(items), config)
     ]
 
     courses = dict(order.get("courses") or {})
@@ -283,6 +309,17 @@ async def add_round(order_id: str, body: dict, user: dict = Depends(get_user)):
         return_document=True,
     )
     updated.pop("_id", None)
+
+    # A later round can bring in a station the ticket didn't fire from before.
+    try:
+        from services import print_routing as _pr
+        merged_stations = list(dict.fromkeys(
+            (order.get("orderStations") or []) + await _pr.stations_for(new_items)))
+        await db.kitchen_orders.update_one(
+            {"id": order_id}, {"$set": {"orderStations": merged_stations}})
+        updated["orderStations"] = merged_stations
+    except Exception as e:
+        log.warning("add-round: station stamp failed for %s: %s", order_id, e)
 
     # Courses a later round introduces start in a state nothing else records.
     from services import course_events as _ce
@@ -697,6 +734,105 @@ async def purge_course_events(user: dict = Depends(get_user)):
     from services import course_events
     return {"deleted": await course_events.purge_expired(),
             "retentionDays": course_events.RETENTION_DAYS}
+
+
+@router.get("/coursing/end-of-service")
+async def end_of_service(_: dict = Depends(get_user)):
+    """What's still open, before the overnight sweep silently cancels it.
+
+    Stale tickets were auto-cancelled at the next board read with no report,
+    so a table that walked without paying, or food that never left the pass,
+    just disappeared from the record overnight. This is the close-of-service
+    view: what's outstanding, how long it's been, and what it's worth.
+    """
+    from services import course_events
+    rows = await db.kitchen_orders.find(
+        {"status": {"$in": ["new", "preparing", "ready"]}}, {"_id": 0}).to_list(500)
+    now = datetime.now(timezone.utc)
+
+    open_tickets = []
+    for o in rows:
+        try:
+            created = datetime.fromisoformat(o.get("createdAt") or "")
+            if not created.tzinfo:
+                created = created.replace(tzinfo=timezone.utc)
+            age = round((now - created).total_seconds() / 60, 1)
+        except (TypeError, ValueError):
+            age = None
+        courses = o.get("courses") or {}
+        open_tickets.append({
+            "orderId": o["id"],
+            "tableNumber": o.get("tableNumber"),
+            "orderType": o.get("orderType"),
+            "status": o.get("status"),
+            "ageMinutes": age,
+            "rounds": o.get("rounds", 1),
+            "items": len(o.get("items") or []),
+            "heldCourses": [k for k, v in courses.items() if (v or {}).get("status") == "held"],
+            "atPass": [k for k, v in courses.items() if (v or {}).get("status") == "ready"],
+            # A ticket whose status disagrees with its courses is exactly the
+            # kind of thing that should be caught at close, not next service.
+            "statusShouldBe": course_events.derive_order_status(o),
+        })
+
+    # Tables still showing occupied with nothing open against them, and the
+    # reverse — both mean the floor plan won't be right when doors open.
+    plans = await db.floor_plans.find({}, {"_id": 0}).to_list(20)
+    occupied = [t.get("number") for p in plans for t in (p.get("tables") or [])
+                if t.get("status") == "occupied"]
+    with_tickets = {t["tableNumber"] for t in open_tickets if t.get("tableNumber")}
+    return {
+        "checkedAt": _now(),
+        "openTickets": sorted(open_tickets, key=lambda r: -(r["ageMinutes"] or 0)),
+        "openCount": len(open_tickets),
+        "occupiedTables": occupied,
+        "tablesOccupiedWithNoTicket": sorted(set(occupied) - with_tickets),
+        "ticketsWithNoTable": [t["orderId"] for t in open_tickets if not t.get("tableNumber")],
+        "statusMismatches": [t["orderId"] for t in open_tickets
+                             if t["statusShouldBe"] and t["statusShouldBe"] != t["status"]],
+    }
+
+
+@router.post("/coursing/end-of-service/close")
+async def close_service(body: dict, user: dict = Depends(get_user)):
+    """Close out what's left at end of service, on the record.
+
+    The overnight sweep cancels stale tickets anyway; doing it deliberately
+    means the reason is recorded and the floor plan is released, rather than
+    tomorrow's staff finding tables that look occupied from last night.
+    """
+    if user.get("role") not in ("owner", "manager"):
+        raise HTTPException(status_code=403, detail="Owner or manager only")
+    from services import ticket_lifecycle
+    reason = (body or {}).get("reason") or "closed at end of service"
+    actor = user.get("name") or user.get("email")
+
+    rows = await db.kitchen_orders.find(
+        {"status": {"$in": ["new", "preparing", "ready"]}}, {"_id": 0, "id": 1, "tableNumber": 1}
+    ).to_list(500)
+    closed, freed = [], []
+    for o in rows:
+        await db.kitchen_orders.update_one(
+            {"id": o["id"]},
+            {"$set": {"status": "cancelled", "cancelledAt": _now(),
+                      "closedBy": actor, "closedReason": reason}},
+        )
+        closed.append(o["id"])
+        if o.get("tableNumber") and await ticket_lifecycle.free_table(o["tableNumber"], actor):
+            freed.append(o["tableNumber"])
+
+    # A table whose ticket was served but never paid stays occupied — that's
+    # right during service and wrong at close, because tomorrow's staff would
+    # open to a floor plan full of last night's tables.
+    stranded = []
+    for plan in await db.floor_plans.find({}, {"_id": 0}).to_list(20):
+        for t in plan.get("tables") or []:
+            if t.get("status") == "occupied" and t.get("number") not in freed:
+                if await ticket_lifecycle.free_table(t["number"], actor):
+                    stranded.append(t["number"])
+    return {"closed": closed, "tablesFreed": sorted(set(freed)),
+            "strandedTablesReleased": sorted(set(stranded)),
+            "reason": reason, "by": actor, "at": _now()}
 
 
 @router.post("/coursing/auto-fire/tick")

@@ -191,6 +191,17 @@ def _render_items(items: List[dict], width: int, dim: bool,
                 out += _t(" " * len(qty) + extra) + b"\n"
             if not dim:
                 out += BOLD_OFF
+            # Allergens are the one thing on a docket that has to be
+            # impossible to skim past, so they get their own bold line rather
+            # than being folded in with the notes.
+            allergens = it.get("allergens") or []
+            if allergens:
+                for al in _wrap("!! " + ", ".join(str(a).upper() for a in allergens), width - 2):
+                    out += BOLD_ON + _t("  " + al) + b"\n" + BOLD_OFF
+            diet = it.get("dietary") or []
+            if diet:
+                for dl in _wrap("(" + ", ".join(str(d) for d in diet) + ")", width - 2):
+                    out += _t("  " + dl) + b"\n"
             if it.get("notes"):
                 for nl in _wrap(f"> {it['notes']}", width - 2):
                     out += _t("  " + nl) + b"\n"

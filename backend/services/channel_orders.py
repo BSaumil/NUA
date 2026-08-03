@@ -34,8 +34,10 @@ async def _enrich_categories(items: List[dict]) -> List[dict]:
     missing = [i.get("productId") for i in items if not i.get("category") and i.get("productId")]
     if not missing:
         return [dict(i) for i in items]
-    rows = await db.products.find({"id": {"$in": missing}},
-                                  {"_id": 0, "id": 1, "category": 1, "name": 1}).to_list(200)
+    rows = await db.products.find(
+        {"id": {"$in": missing}},
+        {"_id": 0, "id": 1, "category": 1, "name": 1, "allergens": 1, "dietary": 1},
+    ).to_list(200)
     by_id = {r["id"]: r for r in rows}
     out = []
     for i in items:
@@ -44,6 +46,11 @@ async def _enrich_categories(items: List[dict]) -> List[dict]:
         if hit:
             row.setdefault("category", hit.get("category"))
             row.setdefault("productName", row.get("name") or hit.get("name"))
+            # Allergens matter most on the docket, so they travel with the item.
+            if hit.get("allergens"):
+                row.setdefault("allergens", hit["allergens"])
+            if hit.get("dietary"):
+                row.setdefault("dietary", hit["dietary"])
         out.append(row)
     return out
 
@@ -99,6 +106,10 @@ async def create_ticket(items: List[dict], *, order_type: str,
     doc["source"] = source
     doc["externalId"] = external_id
     doc["straightFired"] = straight
+    try:
+        doc["orderStations"] = await print_routing.stations_for(priced)
+    except Exception as e:
+        log.warning("%s order: station stamp failed — %s", source, e)
     await db.kitchen_orders.insert_one(doc)
     doc.pop("_id", None)
 

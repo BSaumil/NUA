@@ -185,6 +185,52 @@ def summarise(order: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+# Course state -> what the ticket as a whole is doing. Ordered worst-to-best
+# so the ticket reports the least-progressed thing still outstanding.
+def derive_order_status(order: Dict[str, Any]) -> Optional[str]:
+    """What the ticket's status should be, given its courses.
+
+    The two were tracked independently, so a ticket could read "ready" while a
+    course sat held — the expo screen says collect it, the kitchen hasn't
+    started half of it. Courses are the source of truth here because they're
+    what staff actually act on.
+    """
+    courses = order.get("courses") or {}
+    if not courses:
+        return None                       # pre-coursing ticket: leave it alone
+    states = {(v or {}).get("status") for v in courses.values()}
+    if states <= {"served"}:
+        return "served"
+    if states <= {"served", "ready"}:
+        return "ready"                    # everything left is up at the pass
+    if states & {"fired", "queued"}:
+        return "preparing"
+    if states <= {"held", "served", "ready"}:
+        # Nothing is cooking; whatever remains is deliberately waiting.
+        return "new"
+    return None
+
+
+async def reconcile_status(order_id: str) -> Optional[str]:
+    """Bring a ticket's status in line with its courses. Returns the new one."""
+    order = await db.kitchen_orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        return None
+    want = derive_order_status(order)
+    if not want or want == order.get("status"):
+        return order.get("status")
+    patch: Dict[str, Any] = {"status": want}
+    if want == "ready" and not order.get("readyAt"):
+        patch["readyAt"] = _now()
+    if want == "served" and not order.get("servedAt"):
+        patch["servedAt"] = _now()
+    try:
+        await db.kitchen_orders.update_one({"id": order_id}, {"$set": patch})
+    except Exception as e:
+        log.warning("status reconcile failed for %s: %s", order_id, e)
+    return want
+
+
 async def audit(action: str, order: Dict[str, Any], *, course: Optional[int] = None,
                 actor: Optional[str] = None, memo: Optional[str] = None,
                 severity: str = "info", before: Optional[dict] = None,

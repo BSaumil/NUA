@@ -71,6 +71,36 @@ async def load_config() -> Dict[str, Any]:
     return cfg
 
 
+async def stations_for(items: List[dict]) -> List[str]:
+    """Which station printers a set of items would route to, without printing.
+
+    The KDS station filter needs this on the ticket itself: dockets carry
+    stations, but they're created per fired course, so a ticket's full station
+    list can't be read off them — and a bar screen filtering on a field the
+    ticket doesn't have silently shows everything.
+    """
+    config = await load_config()
+    routes = config.get("routes", [])
+    group_routes = config.get("groupRoutes") or DEFAULT_PRINT_ROUTING["groupRoutes"]
+    default_printer = config.get("defaultPrinter", "Kitchen Printer")
+    cat_docs = await db.categories.find({}, {"_id": 0, "name": 1, "group": 1}).to_list(500)
+    cat_group = {c.get("name", "").lower(): (c.get("group") or "") for c in cat_docs}
+
+    out: List[str] = []
+    for item in items or []:
+        cat = (item.get("category") or "")
+        route = next((r for r in routes if str(r.get("category", "")).lower() == cat.lower()), None)
+        if route:
+            printer = route["printer"]
+        else:
+            grp = cat_group.get(cat.lower(), "")
+            g = next((r for r in group_routes if str(r.get("group", "")).lower() == grp.lower()), None) if grp else None
+            printer = g["printer"] if g else default_printer
+        if printer not in out:
+            out.append(printer)
+    return out
+
+
 async def route_and_queue(items: List[dict], order_id: Optional[str] = None,
                           table_number: Optional[str] = None,
                           extra: Optional[Dict[str, Any]] = None) -> List[dict]:
