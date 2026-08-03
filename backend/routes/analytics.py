@@ -12,31 +12,72 @@ import math
 
 router = APIRouter()
 
+
+def _date_match(field: str, start_date: Optional[str], end_date: Optional[str]) -> dict:
+    """A $match stage for an optional date range, or {} for all-time.
+
+    Kept optional and defaulting to all-time rather than forcing a window:
+    these are lifetime P&L figures a venue expects to see by default, and
+    changing that default silently would change what the report means. What
+    this actually fixes is that the sum is now computed by the database
+    instead of by shipping every row to Python and adding it up there — a
+    P&L that summed the first 10,000 transactions and silently ignored the
+    rest was the real bug once a venue had traded past that many.
+    """
+    if not start_date and not end_date:
+        return {}
+    rng = {}
+    if start_date:
+        rng["$gte"] = datetime.fromisoformat(start_date)
+    if end_date:
+        rng["$lte"] = datetime.fromisoformat(end_date)
+    return {field: rng}
+
+
+async def _sum_transactions(match: dict) -> dict:
+    pipeline = [{"$match": match}] if match else []
+    pipeline.append({"$group": {"_id": None, "revenue": {"$sum": "$total"},
+                                "gst": {"$sum": "$gst"}}})
+    out = await db.transactions.aggregate(pipeline).to_list(1)
+    return out[0] if out else {"revenue": 0, "gst": 0}
+
+
+async def _sum_expenses(match: dict) -> List[dict]:
+    """Grouped by category, since P&L needs to split COGS from operating."""
+    pipeline = [{"$match": match}] if match else []
+    pipeline.append({"$group": {"_id": "$category", "amount": {"$sum": "$amount"},
+                                "gst": {"$sum": "$gstAmount"}}})
+    return await db.expenses.aggregate(pipeline).to_list(1000)
+
+
+COGS_CATEGORIES = ("Ingredients", "Food Supplies", "Beverages")
+
+
 # ============ ACCOUNTING API ============
 @router.get("/accounting/summary")
-async def get_accounting_summary(_: dict = Depends(require_owner_or_manager)):
-    transactions = await db.transactions.find().to_list(10000)
-    total_revenue = sum(t.get("total", 0) for t in transactions)
-    total_gst_collected = sum(t.get("gst", 0) for t in transactions)
-    expenses = await db.expenses.find().to_list(10000)
-    total_expenses = sum(e.get("amount", 0) for e in expenses)
-    total_gst_paid = sum(e.get("gstAmount", 0) for e in expenses)
+async def get_accounting_summary(start_date: Optional[str] = None, end_date: Optional[str] = None,
+                                 _: dict = Depends(require_owner_or_manager)):
+    txn_totals = await _sum_transactions(_date_match("timestamp", start_date, end_date))
+    expense_rows = await _sum_expenses(_date_match("date", start_date, end_date))
+    total_expenses = sum(r["amount"] for r in expense_rows)
+    total_gst_paid = sum(r["gst"] for r in expense_rows)
     return {
-        "revenue": round(total_revenue, 2),
-        "gstCollected": round(total_gst_collected, 2),
+        "revenue": round(txn_totals["revenue"], 2),
+        "gstCollected": round(txn_totals["gst"], 2),
         "expenses": round(total_expenses, 2),
         "gstPaid": round(total_gst_paid, 2),
-        "netGST": round(total_gst_collected - total_gst_paid, 2),
-        "profit": round(total_revenue - total_expenses, 2),
+        "netGST": round(txn_totals["gst"] - total_gst_paid, 2),
+        "profit": round(txn_totals["revenue"] - total_expenses, 2),
     }
 
 @router.get("/accounting/p-and-l")
-async def get_p_and_l(_: dict = Depends(require_owner_or_manager)):
-    transactions = await db.transactions.find().to_list(10000)
-    expenses = await db.expenses.find().to_list(10000)
-    revenue = sum(t.get("total", 0) for t in transactions)
-    cogs = sum(e.get("amount", 0) for e in expenses if e.get("category") in ["Ingredients", "Food Supplies", "Beverages"])
-    operating = sum(e.get("amount", 0) for e in expenses if e.get("category") not in ["Ingredients", "Food Supplies", "Beverages"])
+async def get_p_and_l(start_date: Optional[str] = None, end_date: Optional[str] = None,
+                      _: dict = Depends(require_owner_or_manager)):
+    txn_totals = await _sum_transactions(_date_match("timestamp", start_date, end_date))
+    expense_rows = await _sum_expenses(_date_match("date", start_date, end_date))
+    revenue = txn_totals["revenue"]
+    cogs = sum(r["amount"] for r in expense_rows if r["_id"] in COGS_CATEGORIES)
+    operating = sum(r["amount"] for r in expense_rows if r["_id"] not in COGS_CATEGORIES)
     gross_profit = revenue - cogs
     return {
         "revenue": round(revenue, 2),
