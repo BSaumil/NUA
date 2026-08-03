@@ -84,3 +84,7 @@ def stop_scheduler() -> None:
     global _task
     if _task and not _task.done():
         _task.cancel()
+
+
+def is_running() -> bool:
+    return bool(_task and not _task.done())

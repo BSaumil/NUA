@@ -63,6 +63,7 @@ from routes.audit import router as audit_router
 from routes.approvals import router as approvals_router
 from routes.nua import router as nua_router
 from routes.hq import router as hq_router
+from routes.ops import router as ops_router
 from middleware.license_middleware import LicenseEnforcementMiddleware
 from middleware.actor_context import ActorContextMiddleware
 
@@ -125,6 +126,7 @@ api_router.include_router(approvals_router)
 api_router.include_router(nua_router)
 api_router.include_router(hq_router)
 api_router.include_router(multi_tenant_router)
+api_router.include_router(ops_router)
 
 @api_router.get("/")
 async def root():
@@ -334,6 +336,13 @@ app.add_middleware(
     expose_headers=["x-ai-parsed-fallback"],
 )
 
+# Outermost of all: added last, so it wraps everything else (CORS, rate
+# limiting, the auth gate) and logs — and can catch an unhandled exception
+# from — every request that reaches this process, not just the ones that get
+# as far as a route handler.
+from services.observability import ObservabilityMiddleware
+app.add_middleware(ObservabilityMiddleware)
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -406,6 +415,12 @@ async def startup():
         await ensure_core_indexes()
     except Exception as exc:
         logger.warning("Core indexes failed: %s", exc)
+    # Captured errors expire on their own after 30 days.
+    try:
+        from services.observability import ensure_indexes as ensure_observability_indexes
+        await ensure_observability_indexes()
+    except Exception as exc:
+        logger.warning("Observability indexes failed: %s", exc)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

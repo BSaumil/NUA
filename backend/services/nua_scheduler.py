@@ -114,6 +114,10 @@ def stop_scheduler() -> None:
         _task.cancel()
 
 
+def is_running() -> bool:
+    return bool(_task and not _task.done())
+
+
 async def digest_status() -> dict:
     """For the UI: last digest sent + next scheduled time."""
     latest = await db.ash_digests.find_one({}, {"_id": 0}, sort=[("date", -1)])

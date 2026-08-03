@@ -286,6 +286,12 @@ export const twoFactorAPI = {
   setPolicy: (required, roles) => api.post('/auth/2fa/policy', { required, roles }),
 };
 
+// Ops: health + recent unhandled-error visibility
+export const opsAPI = {
+  health: () => api.get('/health'),
+  recentErrors: (limit = 50) => api.get('/ops/errors', { params: { limit } }),
+};
+
 // Waitlist API
 export const waitlistAPI = {
   getAll: (params) => api.get('/waitlist', { params }),
