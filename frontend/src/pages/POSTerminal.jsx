@@ -26,6 +26,7 @@ import ScanVoucherButton from '../components/pos/ScanVoucherButton';
 import TableNumberField from '../components/pos/TableNumberField';
 import { CourseHeader, SendToKitchenBar, ReadyBanner, SeatPicker } from '../components/pos/CourseControls';
 import { validateTable } from '../lib/tableNumber';
+import { readableTextColor } from '../lib/contrast';
 import { groupCartByCourse, showCourseUI, courseKeys, courseLabel, lineCourse,
          readyCourses, seatOptions, seatsEnabled } from '../lib/coursing';
 import { CategoryIcon } from './Categories';
@@ -1237,11 +1238,19 @@ const POSTerminal = () => {
             }
             const pill = (cat) => {
               const active = selectedCategory === cat.name;
+              const bg = cat.color || theme.primary;
               return (
                 <button key={cat.id || cat.name}
                   onClick={() => { setSelectedCategory(cat.name); setShowMoreCats(false); }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full whitespace-nowrap transition-all flex-shrink-0 text-xs font-semibold ${active ? 'text-white shadow-md' : 'bg-white text-gray-700 border hover:border-gray-400'}`}
-                  style={active ? { backgroundColor: cat.color || theme.primary } : { borderColor: `${cat.color || theme.primary}40` }}
+                  // min-h-11 (44px) — the WCAG/HIG floor for a touch target,
+                  // tapped a few hundred times a shift by hands that are
+                  // frequently wet or gloved. Text color is computed per
+                  // button rather than hardcoded white: category colors are
+                  // owner-configurable, so a fixed color would read fine on
+                  // some and vanish on others.
+                  className={`flex items-center gap-1.5 px-3.5 min-h-11 rounded-full whitespace-nowrap transition-all flex-shrink-0 text-xs font-semibold ${active ? 'shadow-md' : 'bg-white text-gray-700 border hover:border-gray-400'}`}
+                  style={active ? { backgroundColor: bg, color: readableTextColor(bg) }
+                                : { borderColor: `${bg}40` }}
                   data-testid={`pos-cat-${cat.name}`}>
                   <CategoryIcon name={cat.icon} size={14} />
                   {cat.name}
@@ -1255,8 +1264,8 @@ const POSTerminal = () => {
                   {visible.map(pill)}
                   {overflow.length > 0 && (
                     <button onClick={() => setShowMoreCats(v => !v)}
-                      className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold border flex-shrink-0 transition-all ${showMoreCats ? 'text-white' : 'bg-gray-50 text-gray-600 hover:border-gray-400'}`}
-                      style={showMoreCats ? { backgroundColor: theme.primary } : {}}
+                      className={`flex items-center gap-1 px-3.5 min-h-11 rounded-full text-xs font-semibold border flex-shrink-0 transition-all ${showMoreCats ? '' : 'bg-gray-50 text-gray-600 hover:border-gray-400'}`}
+                      style={showMoreCats ? { backgroundColor: theme.primary, color: readableTextColor(theme.primary) } : {}}
                       data-testid="pos-cat-more">
                       More · {overflow.length} {showMoreCats ? '▴' : '▾'}
                     </button>
