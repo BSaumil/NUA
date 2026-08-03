@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 80" width="200" height="80" role="img" aria-label="Nua">
+  <title>NUA wordmark</title>
+  <!-- Marketing wordmark: Instrument Serif italic, gradient-filled.
+       NOTE: this file references the Instrument Serif web font by name. If a
+       vendor or tool can't guarantee that font is loaded, convert the text to
+       outlines before sending it out (Figma/Illustrator: Text -> Outline). -->
+  <defs>
+    <linearGradient id="nuaWordGradient" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#f58c14"/>
+      <stop offset="50%"  stop-color="#ec4899"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+  </defs>
+  <text x="4" y="58" font-family="'Instrument Serif', Georgia, serif" font-style="italic"
+        font-size="64" fill="url(#nuaWordGradient)">Nua</text>
+</svg>

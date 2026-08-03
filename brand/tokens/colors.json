@@ -1,0 +1,7 @@
+{
+  "nua-orange": { "value": "#f58c14", "role": "Primary / CTA" },
+  "nua-purple": { "value": "#8b5cf6", "role": "AI features only" },
+  "nua-pink":   { "value": "#ec4899", "role": "Insights / alerts" },
+  "nua-ink":    { "value": "#1c1917", "role": "Dark mode / reversed" },
+  "nua-paper":  { "value": "#fdfcfa", "role": "Background" }
+}
