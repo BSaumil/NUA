@@ -258,6 +258,12 @@ export const coursingAPI = {
   openOrders: (params) => api.get('/coursing/orders/open', { params }),
   addRound: (id, data) => api.post(`/coursing/orders/${id}/add-round`, data),
   autoFireTick: () => api.post('/coursing/auto-fire/tick'),
+  settle: (data) => api.post('/coursing/settle', data),
+  voidItems: (id, data) => api.post(`/coursing/orders/${id}/void`, data),
+  // SSE endpoint — consumed via EventSource, not axios.
+  streamUrl: (tableNumber) =>
+    `${API_BASE_URL}/coursing/stream?tableNumber=${encodeURIComponent(tableNumber || '')}`
+    + `&token=${encodeURIComponent(localStorage.getItem('nuva_token') || '')}`,
 };
 
 // Waitlist API

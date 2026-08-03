@@ -267,18 +267,37 @@ const POSTerminal = () => {
     return () => { cancelled = true; };
   }, [coursingOn, tableNumber, orderType, tableCheck.status]);
 
-  // Poll the attached ticket so the cart learns when the kitchen calls a
-  // course ready, and so timing rules (evaluated server-side on read) land.
+  // Live ticket updates. One SSE connection per POS beats a poll per tablet
+  // every fifteen seconds, but proxies do buffer SSE — so a slow poll stays
+  // as a fallback and simply finds nothing new when the stream is working.
   useEffect(() => {
-    if (!kitchenOrder?.id || !coursingOn) return;
-    const tick = setInterval(async () => {
+    if (!kitchenOrder?.id || !coursingOn) return undefined;
+    const table = kitchenOrder.tableNumber || '';
+    const applyFresh = (rows) => {
+      const fresh = (rows || []).find(o => o.id === kitchenOrder.id);
+      if (fresh) setKitchenOrder(fresh);
+    };
+
+    let es = null;
+    let streamOk = false;
+    try {
+      es = new EventSource(coursingAPI.streamUrl(table));
+      es.addEventListener('tickets', (ev) => {
+        streamOk = true;
+        try { applyFresh(JSON.parse(ev.data)); } catch {}
+      });
+      es.onerror = () => { streamOk = false; };
+    } catch { es = null; }
+
+    const poll = setInterval(async () => {
+      if (streamOk) return;               // the stream is doing the work
       try {
-        const r = await coursingAPI.openOrders({ tableNumber: kitchenOrder.tableNumber || undefined });
-        const fresh = (r.data || []).find(o => o.id === kitchenOrder.id);
-        if (fresh) setKitchenOrder(fresh);
+        const r = await coursingAPI.openOrders({ tableNumber: table || undefined });
+        applyFresh(r.data);
       } catch {}
     }, 15000);
-    return () => clearInterval(tick);
+
+    return () => { if (es) es.close(); clearInterval(poll); };
   }, [kitchenOrder?.id, kitchenOrder?.tableNumber, coursingOn]);
 
   const setLineCourse = (lineId, course) =>
@@ -346,6 +365,65 @@ const POSTerminal = () => {
   const fireCourseFromCart  = (k) => courseAction(k, kitchenAPI.fireCourse, 'fired');
   const holdCourseFromCart  = (k) => courseAction(k, kitchenAPI.holdCourse, 'held');
   const serveCourseFromCart = (k) => courseAction(k, kitchenAPI.serveCourse, 'served');
+
+  /**
+   * Take some of a line back off the kitchen ticket.
+   *
+   * Removing a line on the POS used to leave the kitchen cooking it. Anything
+   * that already went up has to be cancelled explicitly, and the station that
+   * was making it gets a void docket.
+   */
+  const voidFromKitchen = useCallback(async (item, qty) => {
+    const already = sentQty[item.id] || 0;
+    const take = Math.min(already, qty);
+    if (!kitchenOrder || take <= 0) return;
+    try {
+      const r = await coursingAPI.voidItems(kitchenOrder.id, {
+        items: [{
+          productId: item.productId || item.id, productName: item.name,
+          quantity: take, course: lineCourse(item, coursingConfig),
+          seat: item.seat ?? null,
+        }],
+      });
+      if (r.data?.order) setKitchenOrder(r.data.order);
+      setSentQty(prev => {
+        const next = { ...prev };
+        next[item.id] = Math.max(0, (next[item.id] || 0) - take);
+        if (next[item.id] === 0) delete next[item.id];
+        return next;
+      });
+      toast({
+        title: `Voided ${take} × ${item.name}`,
+        description: r.data?.voidPrinted
+          ? 'Void docket sent to the station that was cooking it.'
+          : 'It had not been fired yet — nothing to cancel at the pass.',
+      });
+    } catch (err) {
+      toast({
+        title: 'Could not void from the kitchen',
+        description: err.response?.status === 403
+          ? 'Needs the Comp / Void permission.'
+          : (err.response?.data?.detail || 'The kitchen may still be making it.'),
+        variant: 'destructive',
+      });
+    }
+  }, [kitchenOrder, sentQty, coursingConfig, toast]);
+
+  // Removing or reducing a cart line has to reach the kitchen too, not just
+  // the bill. Wraps the plain cart handlers rather than replacing them so
+  // non-coursing venues keep the exact behaviour they had.
+  const removeFromCartCoursed = useCallback((lineId) => {
+    const item = cart.find(i => i.id === lineId);
+    if (item && (sentQty[lineId] || 0) > 0) voidFromKitchen(item, sentQty[lineId]);
+    removeFromCart(lineId);
+  }, [cart, sentQty, voidFromKitchen, removeFromCart]);
+
+  const updateQuantityCoursed = useCallback((lineId, qty) => {
+    const item = cart.find(i => i.id === lineId);
+    const sent = sentQty[lineId] || 0;
+    if (item && sent > 0 && qty < sent) voidFromKitchen(item, sent - qty);
+    updateQuantity(lineId, qty);
+  }, [cart, sentQty, voidFromKitchen, updateQuantity]);
 
   // Wave 2 — Fetch AI upsell suggestions whenever the cart changes (debounced)
   useEffect(() => {
@@ -735,10 +813,21 @@ const POSTerminal = () => {
         toast({ title: "Transaction Complete!", description: `Payment of $${totals.total} via ${paymentMethod}` });
         // Auto-route items to category printers
         try { await gamificationAPI.sendToPrinters({ items: cart.map(i => ({ productName: i.name, category: i.category, quantity: i.quantity })), orderId: res.data?.id, tableNumber: orderType === 'dine-in' ? tableNumber : null }); } catch {}
-        // Put the order on the floor plan so the table reads as occupied.
         if (orderType === 'dine-in' && tableCheck.status === 'ok') {
           try {
-            await floorPlansAPI.occupyByNumber(tableNumber, res.data?.id);
+            if (kitchenOrder) {
+              // A coursed table has been sitting there all meal. Paying closes
+              // the kitchen ticket and hands the table back — without this the
+              // floor plan filled up over a service and never drained, and the
+              // next party's first order joined the previous party's ticket.
+              await coursingAPI.settle({ tableNumber, transactionId: res.data?.id });
+              setKitchenOrder(null);
+              setSentQty({});
+            } else {
+              // Pay-at-counter dine-in: they're sitting down now, so the table
+              // becomes occupied rather than free.
+              await floorPlansAPI.occupyByNumber(tableNumber, res.data?.id);
+            }
             loadFloorTables();
           } catch { /* the sale is already recorded — don't fail it on this */ }
         }
@@ -801,6 +890,57 @@ const POSTerminal = () => {
   };
 
   // ---- Split payment flow ----
+  /**
+   * Split the bill the way the table actually ate it: one part per seat that
+   * ordered something, each owing what that seat had.
+   *
+   * This is the reason venues turn seat ordering on — capturing the seat and
+   * then splitting evenly anyway defeats the point. Anything with no seat
+   * (shared plates, a bottle for the table) is spread across the seats, since
+   * dropping it would leave the parts short of the bill.
+   */
+  const initSeatSplitParts = useCallback(() => {
+    const bySeat = new Map();
+    let unseated = 0;
+    cartWithCourses.forEach(i => {
+      const line = (i.price || 0) * (i.quantity || 0);
+      if (i.seat == null) { unseated += line; return; }
+      if (!bySeat.has(i.seat)) bySeat.set(i.seat, { amount: 0, items: [] });
+      const b = bySeat.get(i.seat);
+      b.amount += line;
+      b.items.push({ name: i.name, quantity: i.quantity });
+    });
+    if (bySeat.size === 0) return false;
+
+    const seatsList = [...bySeat.keys()].sort((a, b) => a - b);
+    const share = unseated / seatsList.length;
+    // Scale to the payable total so discounts, surcharge and GST-inclusive
+    // rounding all land on the parts rather than leaving a stray few cents.
+    const gross = seatsList.reduce((s, k) => s + bySeat.get(k).amount, 0) + unseated;
+    const scale = gross > 0 ? totalNum / gross : 1;
+
+    const parts = seatsList.map(seat => {
+      const b = bySeat.get(seat);
+      return {
+        payerName: `Seat ${seat}`,
+        seat,
+        seatItems: b.items,
+        amount: Math.round((b.amount + share) * scale * 100) / 100,
+        method: 'Card',
+        status: 'pending',
+      };
+    });
+    // Put any rounding difference on the first part so the parts sum exactly.
+    const sum = parts.reduce((s, p) => s + p.amount, 0);
+    const drift = Math.round((totalNum - sum) * 100) / 100;
+    if (drift !== 0 && parts.length) {
+      parts[0].amount = Math.round((parts[0].amount + drift) * 100) / 100;
+    }
+    setSplitParts(parts);
+    setSplitCount(parts.length);
+    return true;
+  }, [cartWithCourses, totalNum]);
+
   const initSplitParts = useCallback((count, mode) => {
     const perPerson = Math.floor((totalNum / count) * 100) / 100;
     const remainder = Math.round((totalNum - perPerson * count) * 100) / 100;
@@ -1488,8 +1628,8 @@ const POSTerminal = () => {
                         <SwipeableCartItem
                           item={item}
                           theme={theme}
-                          onUpdateQty={updateQuantity}
-                          onRemove={removeFromCart}
+                          onUpdateQty={updateQuantityCoursed}
+                          onRemove={removeFromCartCoursed}
                           onRepeat={(it) => { addToCart(it); toast({ title: 'Repeated', description: `Added another ${it.name}` }); }}
                         />
                         {/* Move a single dish to another course — the kitchen
@@ -1858,7 +1998,19 @@ const POSTerminal = () => {
         open={paymentView === 'split'} onClose={() => setPaymentView('methods')}
         total={totalNum}
         splitParts={splitParts} splitMode={splitMode} splitCount={splitCount}
-        onSetMode={(m) => { setSplitMode(m); if (m === 'equal') initSplitParts(splitCount, 'equal'); }}
+        seatsAvailable={useSeats && cartWithCourses.some(i => i.seat != null)}
+        onSetMode={(m) => {
+          if (m === 'seat') {
+            if (!initSeatSplitParts()) {
+              toast({ title: 'No seats assigned', description: 'Assign seats to cart lines first.', variant: 'destructive' });
+              return;
+            }
+            setSplitMode('seat');
+            return;
+          }
+          setSplitMode(m);
+          if (m === 'equal') initSplitParts(splitCount, 'equal');
+        }}
         onChangeCount={recalcEqualSplit}
         onUpdatePart={updateSplitPart}
         onPayPart={handlePaySplit}

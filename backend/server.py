@@ -290,12 +290,24 @@ async def startup():
         start_scheduler()
     except Exception as exc:
         logger.warning("Ash scheduler failed to start: %s", exc)
+    # Course timing rules need minute-level granularity, so they get their own
+    # loop rather than riding the hourly Ash scheduler.
+    try:
+        from services.coursing_scheduler import start_scheduler as start_coursing
+        start_coursing()
+    except Exception as exc:
+        logger.warning("Coursing scheduler failed to start: %s", exc)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
     try:
         from services.nua_scheduler import stop_scheduler
         stop_scheduler()
+    except Exception:
+        pass
+    try:
+        from services.coursing_scheduler import stop_scheduler as stop_coursing
+        stop_coursing()
     except Exception:
         pass
     client.close()

@@ -59,6 +59,17 @@ async def advance_for_course(order: Dict[str, Any], course: int,
     if not table_id:
         return None
 
+    # Food going to a table is the clearest possible signal it's occupied.
+    # Waiting for payment to mark it would leave the floor plan showing an
+    # empty table all through the meal.
+    try:
+        from services import floor_tables
+        hit = await floor_tables.resolve_table(order.get("tableNumber"))
+        if hit and hit[0].get("status") != "occupied":
+            await floor_tables.set_table_status(hit[0]["id"], hit[1], "occupied", order.get("id"))
+    except Exception as e:
+        log.warning("pacing: could not mark table occupied: %s", e)
+
     try:
         existing = await db.table_states.find_one({"tableId": table_id})
         now = _now()

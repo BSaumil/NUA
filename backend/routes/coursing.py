@@ -5,19 +5,31 @@ never created a kitchen order, so the KDS hold/fire buttons only ever applied
 to tickets a chef typed in by hand. Courses assigned on the POS now become a
 real kitchen order with real per-course state.
 """
+import asyncio
+import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 
 from database import db
-from deps import get_user
+from deps import get_user, require_permission
 from models.kitchen_order import KitchenOrder
 from services import coursing
 
 router = APIRouter()
 log = logging.getLogger(__name__)
+
+# How often the SSE stream re-checks for ticket changes. Short enough to
+# feel live at the pass, long enough not to hammer Mongo per connection.
+SSE_INTERVAL_SECONDS = float(os.environ.get('COURSING_SSE_INTERVAL', '3'))
+# Hard cap on a single stream's lifetime. EventSource reconnects by itself, so
+# recycling costs the client nothing and stops abandoned tablets holding a
+# connection and a poll loop open indefinitely.
+SSE_MAX_SECONDS = float(os.environ.get('COURSING_SSE_MAX_SECONDS', '300'))
 
 
 def _now() -> str:
@@ -244,6 +256,128 @@ async def add_round(order_id: str, body: dict, user: dict = Depends(get_user)):
         except Exception:
             pass
     return updated
+
+
+@router.post("/coursing/settle")
+async def settle_table(body: dict, user: dict = Depends(get_user)):
+    """Close the table's kitchen ticket and hand the table back.
+
+    Called after payment. Idempotent — a retry finds nothing open and simply
+    reports nothing closed.
+    """
+    from services import ticket_lifecycle
+    return await ticket_lifecycle.settle(
+        table_number=body.get("tableNumber"),
+        transaction_id=body.get("transactionId"),
+        order_id=body.get("orderId"),
+        actor=user.get("name") or user.get("email"),
+        release_table=body.get("releaseTable", True),
+    )
+
+
+@router.post("/coursing/orders/{order_id}/void")
+async def void_from_ticket(order_id: str, body: dict,
+                           user: dict = Depends(require_permission("comp-void"))):
+    """Take items off a live ticket and tell the stations that were cooking them.
+
+    Removing a line on the POS used to leave the kitchen plating a dish nobody
+    was paying for. Gated on the same comp/void permission as any other
+    give-away, because that is what this is once the food is on.
+    """
+    from services import print_routing, ticket_lifecycle
+    result = await ticket_lifecycle.void_items(
+        order_id, body.get("items") or [], actor=user.get("name") or user.get("email"))
+    if not result["ok"]:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    # Only print a void docket for items that had already been fired — there's
+    # nothing to cancel at a station that never saw the dish.
+    order = result.get("order") or {}
+    fired = {k for k, v in (order.get("courses") or {}).items()
+             if v.get("status") in ("fired", "ready", "served")}
+    cancelled = [i for i in result["removed"] if str(int(i.get("course") or 1)) in fired]
+    if cancelled and body.get("print", True):
+        try:
+            await print_routing.route_and_queue(
+                [{**i, "notes": "*** VOID — DO NOT MAKE ***"} for i in cancelled],
+                order_id=order_id, table_number=order.get("tableNumber"),
+                extra={"kitchenOrderId": order_id, "voidDocket": True,
+                       "courseLabel": "VOID"},
+            )
+        except Exception as e:
+            log.warning("void: docket print failed for %s: %s", order_id, e)
+    return {**result, "voidPrinted": bool(cancelled)}
+
+
+@router.get("/coursing/stream")
+async def coursing_stream(request: Request, tableNumber: Optional[str] = None,
+                          token: Optional[str] = None):
+    """Server-sent events for a table's live ticket.
+
+    Replaces per-tablet polling: one long-lived connection per POS rather than
+    a request every fifteen seconds from every device on the floor. The client
+    keeps polling as a fallback for proxies that buffer SSE.
+
+    Auth is resolved by hand because EventSource cannot set an Authorization
+    header — the token may arrive as a query parameter instead. It's still the
+    same JWT, verified the same way; only the transport differs, and this is
+    the one endpoint that accepts it.
+    """
+    from routes.auth import get_current_user
+    try:
+        await get_current_user(request)
+    except HTTPException:
+        if not token:
+            raise
+        from routes.auth import JWT_ALGORITHM, _secret
+        import jwt as _jwt
+        try:
+            payload = _jwt.decode(token, _secret(), algorithms=[JWT_ALGORITHM])
+            if payload.get("type") != "access":
+                raise HTTPException(status_code=401, detail="Invalid token type")
+            if not await db.auth_users.find_one({"id": payload["sub"]}):
+                raise HTTPException(status_code=401, detail="User not found")
+        except _jwt.PyJWTError:
+            raise HTTPException(status_code=401, detail="Invalid token")
+
+    async def events():
+        last = None
+        started = asyncio.get_event_loop().time()
+        # Named event so the client can tell a real update from the keepalive.
+        while True:
+            # Bounded lifetime: EventSource reconnects on its own, and a stream
+            # that can only end when the client disconnects leaks a connection
+            # (and a Mongo poll loop) for every tablet that goes to sleep
+            # without closing cleanly.
+            if asyncio.get_event_loop().time() - started > SSE_MAX_SECONDS:
+                return
+            if await request.is_disconnected():
+                return
+            try:
+                config = await coursing.get_config()
+                query: dict = {"status": {"$nin": ["served", "cancelled"]}}
+                if tableNumber:
+                    query["tableNumber"] = tableNumber
+                rows = await db.kitchen_orders.find(query, {"_id": 0}).to_list(20)
+                rows.sort(key=lambda r: r.get("createdAt") or "", reverse=True)
+                rows = [await _apply_due_auto_fires(r, config) for r in rows]
+                payload = json.dumps(rows, default=str)
+                if payload != last:
+                    last = payload
+                    yield f"event: tickets\ndata: {payload}\n\n"
+                else:
+                    yield ": keepalive\n\n"
+            except Exception as e:
+                log.warning("coursing stream error: %s", e)
+                yield ": error\n\n"
+            await asyncio.sleep(SSE_INTERVAL_SECONDS)
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        # nginx buffers SSE by default, which would defeat the whole point.
+        "X-Accel-Buffering": "no",
+    })
 
 
 @router.post("/coursing/auto-fire/tick")

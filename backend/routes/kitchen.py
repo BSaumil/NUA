@@ -3,7 +3,7 @@ from typing import Optional
 import logging
 from datetime import datetime, timezone
 from database import db
-from deps import get_user
+from deps import get_user, require_permission
 from models.kitchen_order import KitchenOrder, KitchenOrderCreate
 
 router = APIRouter()
@@ -92,6 +92,30 @@ async def get_avg_order_time(_: dict = Depends(get_user)):
     return {"avgOrderMinutes": avg, "ordersCompletedToday": count}
 
 
+async def _active_queue_depth() -> tuple[int, int]:
+    """(orders actually cooking, orders whose every course is held).
+
+    A ticket sitting on held courses isn't work the kitchen is doing — a table
+    holding its mains for another twenty minutes shouldn't inflate the wait
+    quoted to someone at the counter. Tickets with no course map at all count
+    as active, which keeps every pre-coursing ticket behaving as before.
+    """
+    rows = await db.kitchen_orders.find(
+        {"status": {"$in": ["new", "preparing"]}}, {"_id": 0, "courses": 1}).to_list(500)
+    active = held = 0
+    for o in rows:
+        courses = o.get("courses") or {}
+        if not courses:
+            active += 1
+            continue
+        statuses = [(v or {}).get("status") for v in courses.values()]
+        if any(s in ("queued", "fired", "ready") for s in statuses):
+            active += 1
+        elif all(s == "held" for s in statuses):
+            held += 1
+    return active, held
+
+
 @router.get("/kitchen/next-order-eta")
 async def get_next_order_eta(_: dict = Depends(get_user)):
     """A quick, honest ballpark for "how long for a takeaway right now?" when
@@ -99,13 +123,17 @@ async def get_next_order_eta(_: dict = Depends(get_user)):
     couple of minutes for every order already ahead of it in the queue.
     Not a precise promise, just a fast answer for the person at the till."""
     avg, completed_count = await _avg_order_minutes_today()
-    queue_depth = await db.kitchen_orders.count_documents({"status": {"$in": ["new", "preparing"]}})
+    queue_depth, held_depth = await _active_queue_depth()
     baseline = avg if completed_count > 0 else 12.0  # no data yet today — a sane starting guess
     minutes_per_order_ahead = 2.5
     estimated = round(baseline + queue_depth * minutes_per_order_ahead, 1)
     return {
         "avgOrderMinutes": avg, "ordersCompletedToday": completed_count,
-        "queueDepth": queue_depth, "estimatedWaitMinutes": estimated,
+        "queueDepth": queue_depth,
+        # Surfaced so the counter can see the difference between "the kitchen
+        # is slammed" and "there are tables holding their mains".
+        "heldOrders": held_depth,
+        "estimatedWaitMinutes": estimated,
     }
 
 
@@ -209,7 +237,7 @@ async def cancel_kitchen_order(order_id: str, _: dict = Depends(get_user)):
 
 # ─── Course lifecycle — HOLD / FIRE / SERVE per course ────────────────────
 @router.post("/kitchen/orders/{order_id}/hold-course/{course}")
-async def hold_course(order_id: str, course: int, _: dict = Depends(get_user)):
+async def hold_course(order_id: str, course: int, _: dict = Depends(require_permission("fire-course"))):
     """Explicitly hold a course — it will NOT fire automatically."""
     key = f"courses.{course}"
     result = await db.kitchen_orders.find_one_and_update(
@@ -301,14 +329,14 @@ async def fire_course_internal(order_id: str, course: int, actor: str) -> dict:
 
 
 @router.post("/kitchen/orders/{order_id}/fire-course/{course}")
-async def fire_course(order_id: str, course: int, user: dict = Depends(get_user)):
+async def fire_course(order_id: str, course: int, user: dict = Depends(require_permission("fire-course"))):
     """Fire a specific course — lifts any hold, prints that course's dockets,
     and advances the table's pacing."""
     return await fire_course_internal(order_id, course, user.get("name") or user.get("email"))
 
 
 @router.post("/kitchen/orders/{order_id}/ready-course/{course}")
-async def ready_course(order_id: str, course: int, user: dict = Depends(get_user)):
+async def ready_course(order_id: str, course: int, user: dict = Depends(require_permission("fire-course"))):
     """Mark a single course ready at the pass.
 
     Order-level `ready` already existed, but with coursing the server needs to
@@ -344,7 +372,7 @@ async def ready_course(order_id: str, course: int, user: dict = Depends(get_user
 
 
 @router.post("/kitchen/orders/{order_id}/serve-course/{course}")
-async def serve_course(order_id: str, course: int, _: dict = Depends(get_user)):
+async def serve_course(order_id: str, course: int, _: dict = Depends(require_permission("fire-course"))):
     key = f"courses.{course}"
     result = await db.kitchen_orders.find_one_and_update(
         {"id": order_id},
