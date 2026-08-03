@@ -242,6 +242,11 @@ export const floorPlansAPI = {
   delete: (id) => api.delete(`/floor-plans/${id}`),
   updateTableStatus: (tableId, status, planId) => api.post(`/floor-plans/tables/${tableId}/status`, null, { params: { status, plan_id: planId } }),
   assignServer: (sectionId, serverId, planId) => api.post(`/floor-plans/sections/${sectionId}/assign`, null, { params: { server_id: serverId, plan_id: planId } }),
+  // Typed-table validation for POS dine-in.
+  listTables: () => api.get('/floor-plans/tables/all'),
+  resolveTable: (number) => api.get('/floor-plans/tables/resolve', { params: { number } }),
+  occupyByNumber: (number, orderId) => api.post(`/floor-plans/tables/by-number/${encodeURIComponent(number)}/occupy`, null, { params: { order_id: orderId } }),
+  freeByNumber: (number) => api.post(`/floor-plans/tables/by-number/${encodeURIComponent(number)}/free`),
 };
 
 // Waitlist API

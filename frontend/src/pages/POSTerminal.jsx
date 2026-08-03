@@ -23,6 +23,8 @@ import { QrPaymentDialog, UpiPaymentDialog, SplitPaymentDialog } from '../compon
 import ModifierSheet from '../components/pos/ModifierSheet';
 import POSHeaderBar from '../components/pos/POSHeaderBar';
 import ScanVoucherButton from '../components/pos/ScanVoucherButton';
+import TableNumberField from '../components/pos/TableNumberField';
+import { validateTable } from '../lib/tableNumber';
 import { CategoryIcon } from './Categories';
 import { createTransactionResilient } from '../lib/offlineQueue';
 import useOfflineQueue from '../hooks/useOfflineQueue';
@@ -95,6 +97,9 @@ const POSTerminal = () => {
   // current cart to a specific table as an open tab (defers payment).
   const [sendToTableOpen, setSendToTableOpen] = useState(false);
   const [floorTables, setFloorTables] = useState([]);
+  // False until we know the venue has drawn a floor plan. While false the
+  // typed table number is accepted as-is, so a venue mid-setup can still sell.
+  const [floorConfigured, setFloorConfigured] = useState(false);
   const [sendingToTable, setSendingToTable] = useState(false);
   const [labels, setLabels] = useState({});
   // v17: Points-and-Pay
@@ -177,6 +182,25 @@ const POSTerminal = () => {
   }, []);
 
   useEffect(() => { fetchData(); }, []);
+
+  // Floor plan tables, loaded once up front so dine-in table entry can be
+  // validated as the server types instead of only when they open the picker.
+  const loadFloorTables = useCallback(async () => {
+    try {
+      const r = await floorPlansAPI.listTables();
+      setFloorTables(r.data?.tables || []);
+      setFloorConfigured(!!r.data?.configured);
+    } catch {
+      // Older backend or offline: leave validation off rather than block sales.
+      setFloorTables([]);
+      setFloorConfigured(false);
+    }
+  }, []);
+  useEffect(() => { loadFloorTables(); }, [loadFloorTables]);
+
+  // Live validity of the typed dine-in table. `unknown` blocks checkout.
+  const tableCheck = validateTable(tableNumber, floorTables, floorConfigured);
+  const tableBlocked = orderType === 'dine-in' && tableCheck.status === 'unknown';
 
   // Wave 2 — Fetch AI upsell suggestions whenever the cart changes (debounced)
   useEffect(() => {
@@ -520,6 +544,12 @@ const POSTerminal = () => {
   // ---- Standard checkout ----
   const handleCheckout = async (paymentMethod) => {
     if (loading) return;
+    // A dine-in sale must land on a table that exists — otherwise the docket
+    // sends food to a table nobody is sitting at.
+    if (tableBlocked) {
+      toast({ title: 'Unknown table', description: tableCheck.message, variant: 'destructive' });
+      return;
+    }
     if (trainingMode) {
       toast({ title: "Training Mode", description: "Transaction simulated — no real charge was made.", variant: "default" });
       resetPayment();
@@ -559,7 +589,14 @@ const POSTerminal = () => {
         }
         toast({ title: "Transaction Complete!", description: `Payment of $${totals.total} via ${paymentMethod}` });
         // Auto-route items to category printers
-        try { await gamificationAPI.sendToPrinters({ items: cart.map(i => ({ productName: i.name, category: i.category, quantity: i.quantity })), orderId: res.data?.id }); } catch {}
+        try { await gamificationAPI.sendToPrinters({ items: cart.map(i => ({ productName: i.name, category: i.category, quantity: i.quantity })), orderId: res.data?.id, tableNumber: orderType === 'dine-in' ? tableNumber : null }); } catch {}
+        // Put the order on the floor plan so the table reads as occupied.
+        if (orderType === 'dine-in' && tableCheck.status === 'ok') {
+          try {
+            await floorPlansAPI.occupyByNumber(tableNumber, res.data?.id);
+            loadFloorTables();
+          } catch { /* the sale is already recorded — don't fail it on this */ }
+        }
         // Settle gift cards: activate any pending-sold cards + redeem applied tenders.
         await settleGiftCards(res.data?.id);
       }
@@ -1235,16 +1272,12 @@ const POSTerminal = () => {
                   ))}
                 </div>
                 {orderType === 'dine-in' ? (
-                  <div className="flex gap-2 items-center" data-testid="table-row">
-                    <span className="text-xs text-gray-500 whitespace-nowrap">Table #</span>
-                    <Input
-                      placeholder="e.g. 12, Patio-A, Bar-3"
-                      value={tableNumber}
-                      onChange={e => setTableNumber(e.target.value)}
-                      className="h-8 text-xs flex-1"
-                      data-testid="table-input"
-                    />
-                  </div>
+                  <TableNumberField
+                    value={tableNumber}
+                    onChange={setTableNumber}
+                    tables={floorTables}
+                    configured={floorConfigured}
+                  />
                 ) : (
                   <div className="flex gap-2 items-center">
                     <span className="text-xs text-gray-500 whitespace-nowrap">Name</span>
@@ -1460,21 +1493,36 @@ const POSTerminal = () => {
               variant="outline"
               className="flex-1 h-14 text-base font-semibold"
               onClick={async () => {
-                try {
-                  const r = await floorPlansAPI.getAll();
-                  const active = (r.data || []).find(p => p.active) || (r.data || [])[0];
-                  setFloorTables(active?.tables || []);
-                } catch { setFloorTables([]); }
+                // Refresh first so table statuses in the picker are current.
+                // (This used to read `p.active`, which no floor plan has — the
+                // field is `isActive` — so it always fell through to plan [0].)
+                await loadFloorTables();
                 setSendToTableOpen(true);
               }}
               data-testid="pos-send-to-table">
               Send to Table
             </Button>
             <Button className="flex-1 h-14 text-base font-semibold" style={{ backgroundColor: theme.primary }}
-              onClick={() => setShowPayment(true)} data-testid="pos-proceed-payment">
+              disabled={tableBlocked}
+              title={tableBlocked ? tableCheck.message : undefined}
+              onClick={() => {
+                // Belt-and-braces: the button is disabled, but a stale table
+                // can still be in state if the floor plan changed underneath.
+                if (tableBlocked) {
+                  toast({ title: 'Unknown table', description: tableCheck.message, variant: 'destructive' });
+                  return;
+                }
+                setShowPayment(true);
+              }}
+              data-testid="pos-proceed-payment">
               Proceed to Payment
             </Button>
           </div>
+        )}
+        {tableBlocked && cart.length > 0 && (
+          <p className="text-[11px] text-red-600 text-center -mt-2 pb-1" data-testid="pos-table-blocked">
+            {tableCheck.message} — fix the table number to take payment.
+          </p>
         )}
 
         {/* Payment Methods Panel */}
@@ -1665,8 +1713,12 @@ const POSTerminal = () => {
                         orderId: `TABLE-${t.number}`, tableNumber: t.number,
                       });
                     } catch (err) { /* printer optional */ }
+                    // Reflect the tab on the floor plan.
+                    try { await floorPlansAPI.occupyByNumber(t.number, `TABLE-${t.number}`); } catch {}
                     setSendToTableOpen(false);
+                    setTableNumber(String(t.number));
                     clearCart();
+                    loadFloorTables();
                   } catch (e) {
                     toast({ title: 'Send failed', description: e?.response?.data?.detail, variant: 'destructive' });
                   } finally { setSendingToTable(false); }

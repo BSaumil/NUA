@@ -1,7 +1,9 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
 from datetime import datetime
 from database import db
+from deps import get_user
+from services import floor_tables
 from models.reservation import Reservation, ReservationCreate, ReservationUpdate
 from models.floor_plan import FloorPlan, FloorPlanCreate, FloorPlanUpdate
 from models.waitlist import WaitlistEntry, WaitlistEntryCreate, WaitlistEntryUpdate
@@ -383,6 +385,70 @@ async def update_table_status(table_id: str, status: str, plan_id: Optional[str]
                 {"id": plan_id}, {"$set": {"tables": tables, "updatedAt": datetime.utcnow().isoformat()}}
             )
     return {"message": f"Table {table_id} status updated to {status}"}
+
+# ── Typed-table validation (POS dine-in) ──────────────────────────────────
+# The POS accepts a hand-typed table number. These endpoints are what stop a
+# typo becoming an order on a table that doesn't exist.
+@router.get("/floor-plans/tables/resolve")
+async def resolve_typed_table(number: str, _: dict = Depends(get_user)):
+    """Resolve a typed table number against the configured floor plans.
+
+    Returns `configured: False` when the venue has drawn no floor plan at all —
+    the caller should then accept free text rather than block the sale.
+    """
+    configured = await floor_tables.has_floor_plan()
+    if not configured:
+        return {"configured": False, "found": False, "table": None,
+                "suggestions": [], "message": "No floor plan configured"}
+
+    hit = await floor_tables.resolve_table(number)
+    if not hit:
+        return {
+            "configured": True, "found": False, "table": None,
+            "suggestions": await floor_tables.suggest(number),
+            "message": f"Table '{number}' is not on the floor plan",
+        }
+    table, plan_id = hit
+    return {"configured": True, "found": True, "planId": plan_id,
+            "table": table, "suggestions": [], "message": "ok"}
+
+
+@router.get("/floor-plans/tables/all")
+async def list_floor_tables(_: dict = Depends(get_user)):
+    """Flat list of every configured table, for POS pickers and validation."""
+    tables = await floor_tables.list_tables()
+    return {"configured": len(tables) > 0, "tables": tables}
+
+
+@router.post("/floor-plans/tables/by-number/{number}/occupy")
+async def occupy_table_by_number(number: str, order_id: Optional[str] = None,
+                                 _: dict = Depends(get_user)):
+    """Mark the table a POS order was just assigned to as occupied.
+
+    404s on an unknown table so the POS can surface the error instead of
+    silently losing the association.
+    """
+    hit = await floor_tables.resolve_table(number)
+    if not hit:
+        raise HTTPException(status_code=404,
+                            detail=f"Table '{number}' is not on the floor plan")
+    table, plan_id = hit
+    await floor_tables.set_table_status(table["id"], plan_id, "occupied", order_id)
+    return {"ok": True, "tableId": table["id"], "planId": plan_id,
+            "number": table.get("number"), "status": "occupied"}
+
+
+@router.post("/floor-plans/tables/by-number/{number}/free")
+async def free_table_by_number(number: str, _: dict = Depends(get_user)):
+    hit = await floor_tables.resolve_table(number)
+    if not hit:
+        raise HTTPException(status_code=404,
+                            detail=f"Table '{number}' is not on the floor plan")
+    table, plan_id = hit
+    await floor_tables.set_table_status(table["id"], plan_id, "available")
+    return {"ok": True, "tableId": table["id"], "planId": plan_id,
+            "number": table.get("number"), "status": "available"}
+
 
 @router.post("/floor-plans/sections/{section_id}/assign")
 async def assign_server_to_section(section_id: str, server_id: str, plan_id: str):
