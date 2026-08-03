@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Palette, MapPin, Users as UsersIcon, Building, GraduationCap, Plus, Edit, Trash2, Save, Receipt, Shield, Monitor, Zap, Printer, Globe, Clock, KeyRound, Target, Gift, Utensils } from 'lucide-react';
+import { Palette, MapPin, Users as UsersIcon, Building, GraduationCap, Plus, Edit, Trash2, Save, Receipt, Shield, ShieldCheck, Monitor, Zap, Printer, Globe, Clock, KeyRound, Target, Gift, Utensils } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -12,6 +12,7 @@ import WalletCredentialsPanel from '../components/settings/WalletCredentialsPane
 import PermissionsPanel from '../components/settings/PermissionsPanel';
 import CoursingSettings from '../components/settings/CoursingSettings';
 import PrinterHealthPanel from '../components/settings/PrinterHealthPanel';
+import SecurityPanel from '../components/settings/SecurityPanel';
 import { toast } from 'sonner';
 import axios from 'axios';
 import { salaryTypeSuffix } from '../lib/staffPay';
@@ -162,6 +163,7 @@ const Settings = () => {
     { id: 'print-routing', label: 'Print Routing', icon: Printer },
     { id: 'coursing', label: 'Courses & Firing', icon: Utensils },
     { id: 'permissions', label: 'Permissions', icon: Shield },
+    { id: 'security', label: 'Security', icon: ShieldCheck },
     { id: 'surcharge', label: 'Surcharges', icon: Zap },
     { id: 'hardware', label: 'Hardware', icon: Monitor },
     { id: 'training', label: 'Training', icon: GraduationCap },
@@ -567,6 +569,8 @@ const Settings = () => {
       {/* Sits with print routing because it answers the same question from
           the other side: the routes are right, but is the device actually on? */}
       {activeTab === 'print-routing' && <PrinterHealthPanel />}
+
+      {activeTab === 'security' && <SecurityPanel />}
 
       {activeTab === 'wallet' && (
         <WalletCredentialsPanel theme={theme} />

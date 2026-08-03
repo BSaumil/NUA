@@ -274,6 +274,18 @@ export const coursingAPI = {
     + `&token=${encodeURIComponent(localStorage.getItem('nuva_token') || '')}`,
 };
 
+// Two-factor sign-in
+export const twoFactorAPI = {
+  status: () => api.get('/auth/2fa/status'),
+  setup: () => api.post('/auth/2fa/setup', {}),
+  verify: (code) => api.post('/auth/2fa/verify', { code }),
+  disable: (password) => api.post('/auth/2fa/disable', { password }),
+  regenerateCodes: (password) => api.post('/auth/2fa/recovery-codes', { password }),
+  revokeDevice: (id) => api.delete(`/auth/2fa/devices/${id}`),
+  getPolicy: () => api.get('/auth/2fa/policy'),
+  setPolicy: (required, roles) => api.post('/auth/2fa/policy', { required, roles }),
+};
+
 // Waitlist API
 export const waitlistAPI = {
   getAll: (params) => api.get('/waitlist', { params }),
