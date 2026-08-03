@@ -292,6 +292,12 @@ export const opsAPI = {
   recentErrors: (limit = 50) => api.get('/ops/errors', { params: { limit } }),
 };
 
+// Backup / restore
+export const backupAPI = {
+  download: () => api.get('/ops/backup', { responseType: 'blob' }),
+  runDrill: () => api.post('/ops/backup/drill'),
+};
+
 // Waitlist API
 export const waitlistAPI = {
   getAll: (params) => api.get('/waitlist', { params }),

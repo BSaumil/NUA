@@ -5,12 +5,14 @@ Two audiences: a deep health check for uptime monitors and load balancers
 owner, who has no other way to see that something has been failing quietly
 since 3am.
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 
 from database import db
-from deps import require_owner_or_manager
+from deps import require_owner, require_owner_or_manager
 from services.observability import check_health
 from services import retention
+from services import backup
 
 router = APIRouter()
 
@@ -52,3 +54,40 @@ async def retention_purge(_: dict = Depends(require_owner_or_manager)):
     """Run the purge immediately rather than waiting for Mongo's own TTL
     sweep. Only ever removes what was already past its expiry."""
     return {"deleted": await retention.purge_now()}
+
+
+# ============ BACKUP / RESTORE ============
+# Owner-only, not owner-or-manager: this can produce a full export of every
+# customer record and every transaction the venue has, and (on restore) can
+# overwrite live data. That's a different risk tier from the read-only ops
+# endpoints above.
+@router.get("/ops/backup")
+async def download_backup(_: dict = Depends(require_owner)):
+    """A full backup archive, right now, as a download."""
+    archive = await backup.create_backup()
+    filename = f"nua-backup-{__import__('datetime').datetime.now().strftime('%Y%m%d-%H%M%S')}.tar.gz"
+    return Response(content=archive, media_type="application/gzip",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@router.post("/ops/backup/verify")
+async def verify_uploaded_backup(data: dict, _: dict = Depends(require_owner)):
+    """Check an archive against its own manifest — base64-encoded body,
+    since this is meant for a small Settings-screen upload, not a bulk
+    transfer endpoint."""
+    import base64
+    try:
+        archive = base64.b64decode(data.get("archiveBase64", ""))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Not valid base64")
+    if not archive:
+        raise HTTPException(status_code=400, detail="Empty archive")
+    return backup.verify_backup(archive)
+
+
+@router.post("/ops/backup/drill")
+async def restore_drill(_: dict = Depends(require_owner)):
+    """Prove a backup of the live data can actually be restored — end to
+    end, against a disposable scratch database, never the live one. This is
+    the thing an untested backup skips."""
+    return await backup.run_restore_drill()
