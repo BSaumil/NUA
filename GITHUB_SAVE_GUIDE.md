@@ -1,4 +1,4 @@
-# 🚀 How to Save Ananta POS to GitHub
+# 🚀 How to Save NUA POS to GitHub
 
 ## Quick Instructions
 
@@ -6,7 +6,7 @@
 
 When you click it, you'll be prompted to:
 1. **Connect GitHub Account** (if not already connected)
-2. **Choose Repository Name** (e.g., "ananta-pos")
+2. **Choose Repository Name** (e.g., "nua-pos")
 3. **Set Repository Visibility** (Public or Private)
 4. **Confirm Save**
 
@@ -14,7 +14,7 @@ When you click it, you'll be prompted to:
 
 ## What Gets Saved
 
-Your complete Ananta POS application including:
+Your complete NUA POS application including:
 
 ### ✅ Backend (FastAPI + Python)
 - `/backend/server.py` - Main API server
@@ -50,7 +50,7 @@ Your complete Ananta POS application including:
 ## After Saving to GitHub
 
 You'll receive:
-1. **GitHub Repository URL** - `https://github.com/yourusername/ananta-pos`
+1. **GitHub Repository URL** - `https://github.com/yourusername/nua-pos`
 2. **Clone Command** - To download on any computer
 3. **Full Access** - View, edit, fork, share
 
@@ -60,13 +60,13 @@ You'll receive:
 
 ### 1. View Online
 ```
-https://github.com/yourusername/ananta-pos
+https://github.com/yourusername/nua-pos
 ```
 
 ### 2. Clone to Computer
 ```bash
-git clone https://github.com/yourusername/ananta-pos.git
-cd ananta-pos
+git clone https://github.com/yourusername/nua-pos.git
+cd nua-pos
 ```
 
 ### 3. Run Locally
@@ -128,13 +128,13 @@ REACT_APP_BACKEND_URL=http://localhost:8001
 ### ✅ Immediate Actions:
 1. **Click "Save to GitHub"** in Emergent chat
 2. **Connect GitHub account** if needed
-3. **Choose repository name**: `ananta-pos` (or your preference)
+3. **Choose repository name**: `nua-pos` (or your preference)
 4. **Set to Private** (recommended for business app)
 5. **Confirm and Save**
 
 ### ✅ After Saving:
 1. **Star the repository** (for easy access)
-2. **Add description**: "Ananta POS - Complete Point of Sale System with BAS/GST Filing"
+2. **Add description**: "NUA POS - Complete Point of Sale System with BAS/GST Filing"
 3. **Add topics**: `pos`, `point-of-sale`, `react`, `fastapi`, `mongodb`, `australia`, `gst`, `accounting`
 4. **Create README badges** (optional)
 5. **Set up GitHub Actions** for CI/CD (optional)
@@ -153,7 +153,7 @@ REACT_APP_BACKEND_URL=http://localhost:8001
 After saving, your GitHub repo will look like:
 
 ```
-ananta-pos/
+nua-pos/
 ├── frontend/
 │   ├── public/
 │   ├── src/
@@ -218,7 +218,7 @@ Your GitHub repository serves as:
 ## Common Issues & Solutions
 
 **Issue**: "Repository name already exists"
-**Solution**: Choose different name: `ananta-pos-v2`, `my-ananta-pos`
+**Solution**: Choose different name: `nua-pos-v2`, `my-nua-pos`
 
 **Issue**: "Large files warning"
 **Solution**: Check `.gitignore` excludes `node_modules/`
@@ -266,13 +266,13 @@ git init
 git add .
 
 # 3. Commit
-git commit -m "Initial commit: Ananta POS v2.0"
+git commit -m "Initial commit: NUA POS v2.0"
 
 # 4. Create GitHub repo manually
 # Go to github.com → New Repository
 
 # 5. Push to GitHub
-git remote add origin https://github.com/yourusername/ananta-pos.git
+git remote add origin https://github.com/yourusername/nua-pos.git
 git branch -M main
 git push -u origin main
 ```
@@ -285,7 +285,7 @@ git push -u origin main
 - Visit: https://docs.github.com
 - Chat: GitHub Support
 
-**Questions about Ananta POS?**
+**Questions about NUA POS?**
 - See: `/app/README.md`
 - Check: `/app/DEPLOYMENT_ACCESS_GUIDE.md`
 
@@ -293,7 +293,7 @@ git push -u origin main
 
 <div align="center">
 
-**Ready to Save Your Ananta POS to GitHub!**
+**Ready to Save Your NUA POS to GitHub!**
 
 Click the "Save to GitHub" button in the chat interface
 

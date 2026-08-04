@@ -1,5 +1,5 @@
 """
-Backend API Tests for NUVA POS - Phase 2 (Guest CRM, Feedback) and Phase 3 (KDS)
+Backend API Tests for NUA POS - Phase 2 (Guest CRM, Feedback) and Phase 3 (KDS)
 Tests cover:
 - Customer 360° Profile API
 - Feedback API (CRUD + respond)
@@ -425,7 +425,7 @@ class TestPhase1Regression:
         response = requests.get(f"{BASE_URL}/api/")
         assert response.status_code == 200
         data = response.json()
-        assert data['name'] == 'NUVA POS API'
+        assert data['name'] == 'NUA POS API'
         assert 'features' in data
         print(f"API: {data['name']} v{data['version']}")
 

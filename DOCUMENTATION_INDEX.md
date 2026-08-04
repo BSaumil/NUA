@@ -1,4 +1,4 @@
-# 📚 Complete Documentation Index - Ananta POS
+# 📚 Complete Documentation Index - NUA POS
 
 ## 🎯 I Want to Build the Windows .exe - Where Do I Start?
 
@@ -236,10 +236,10 @@ Total: ~80 minutes
 **...understand what's in the .exe**
 → Read: [PACKAGE_README.md](PACKAGE_README.md) → "What's Inside" section
 
-**...see all Ananta POS features**
+**...see all NUA POS features**
 → Read: [INTEGRATIONS_AND_FEATURES.md](INTEGRATIONS_AND_FEATURES.md)
 
-**...compare Ananta to other POS systems**
+**...compare NUA to other POS systems**
 → Read: [FEATURE_COMPARISON.md](FEATURE_COMPARISON.md)
 
 ---
@@ -431,7 +431,7 @@ Want Windows .exe?
 
 ## 🎊 You're All Set!
 
-You now have access to **complete, professional-grade documentation** for building your Ananta POS Windows executable.
+You now have access to **complete, professional-grade documentation** for building your NUA POS Windows executable.
 
 **Everything you need is documented.**
 **Every question is answered.**
@@ -441,4 +441,4 @@ You now have access to **complete, professional-grade documentation** for buildi
 
 ---
 
-**Built with ❤️ for Ananta POS | Documentation v2.0**
+**Built with ❤️ for NUA POS | Documentation v2.0**

@@ -1,4 +1,4 @@
-"""Integration Plugin Framework for NUVA POS
+"""Integration Plugin Framework for NUA POS
 
 Supports easy integration with third-party services:
 - Accounting: QuickBooks, Xero, MYOB, Tally

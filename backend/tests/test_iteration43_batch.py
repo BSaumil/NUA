@@ -10,8 +10,8 @@ import pytest
 import requests
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://pos-checkout-16.preview.emergentagent.com").rstrip("/")
-OWNER_EMAIL = "owner@nuva.com"
-OWNER_PW = "NuvaOwner2026!"
+OWNER_EMAIL = "owner@nua.com"
+OWNER_PW = "NuaOwner2026!"
 
 
 @pytest.fixture(scope="session")

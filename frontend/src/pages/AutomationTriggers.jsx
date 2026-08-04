@@ -14,7 +14,7 @@ import axios from 'axios';
 
 /* Tiny API wrapper — kept local to avoid polluting services/api.js */
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const headers = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
+const headers = () => ({ Authorization: `Bearer ${localStorage.getItem('nua_token')}` });
 const rulesAPI = {
   list: () => axios.get(`${API}/rules`, { headers: headers() }),
   create: (b) => axios.post(`${API}/rules`, b, { headers: headers() }),

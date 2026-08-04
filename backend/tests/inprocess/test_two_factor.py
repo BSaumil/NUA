@@ -187,19 +187,19 @@ def test_venue_policy_forces_enrolment_for_managers_but_not_cashiers(client, enr
     headers, _, _, _ = enrolled
     req(client, "POST", "/api/auth/2fa/policy", headers=headers, json={"required": True})
     req(client, "POST", "/api/auth/staff/add", headers=headers, json={
-        "name": "Gate Manager", "email": "gate.manager@nuva.com",
+        "name": "Gate Manager", "email": "gate.manager@nua.com",
         "password": "MgrPass123!", "role": "manager"})
     req(client, "POST", "/api/auth/staff/add", headers=headers, json={
-        "name": "Gate Cashier2", "email": "gate.cashier2@nuva.com",
+        "name": "Gate Cashier2", "email": "gate.cashier2@nua.com",
         "password": "CashPass123!", "role": "cashier"})
     client.cookies.clear()
 
     r = req(client, "POST", "/api/auth/login",
-            json={"email": "gate.manager@nuva.com", "password": "MgrPass123!"})
+            json={"email": "gate.manager@nua.com", "password": "MgrPass123!"})
     body = r.json()
     assert body.get("enrolmentRequired") is True
     assert "token" not in body
 
     r = req(client, "POST", "/api/auth/login",
-            json={"email": "gate.cashier2@nuva.com", "password": "CashPass123!"})
+            json={"email": "gate.cashier2@nua.com", "password": "CashPass123!"})
     assert "token" in r.json()

@@ -12,7 +12,7 @@ import axios from 'axios';
 import { toast } from 'sonner';
 
 const API = process.env.REACT_APP_BACKEND_URL;
-const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
+const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('nua_token')}` });
 
 export default function ShiftSwaps() {
   const { theme } = useTheme();

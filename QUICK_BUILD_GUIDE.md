@@ -1,4 +1,4 @@
-# 🚀 Quick Build Guide - Ananta POS Windows Executable
+# 🚀 Quick Build Guide - NUA POS Windows Executable
 
 ## ⚡ Fast Track (5 Minutes Read)
 
@@ -76,7 +76,7 @@ Before building, install these on your **Windows machine**:
 1. **Download/Clone the code**
    ```bash
    git clone <your-repo-url>
-   cd ananta-pos
+   cd nua-pos
    ```
 
 2. **Run the build script**
@@ -95,8 +95,8 @@ Before building, install these on your **Windows machine**:
 4. **Get your installer!**
    - Location: `/app/frontend/dist/`
    - Files created:
-     - `Ananta POS-Setup-2.0.1.exe` (Full installer)
-     - `Ananta POS-Portable-2.0.1.exe` (Portable version)
+     - `NUA POS-Setup-2.0.1.exe` (Full installer)
+     - `NUA POS-Portable-2.0.1.exe` (Portable version)
 
 ---
 
@@ -156,8 +156,8 @@ yarn electron:build
 ```
 
 ✅ **Success Check**: Files in `/app/frontend/dist/`:
-- `Ananta POS-Setup-2.0.1.exe` 
-- `Ananta POS-Portable-2.0.1.exe`
+- `NUA POS-Setup-2.0.1.exe` 
+- `NUA POS-Portable-2.0.1.exe`
 
 ---
 
@@ -165,7 +165,7 @@ yarn electron:build
 
 After successful build:
 
-### 📦 Installer Version (`Ananta POS-Setup-2.0.1.exe`)
+### 📦 Installer Version (`NUA POS-Setup-2.0.1.exe`)
 - Size: ~200-300 MB
 - Type: NSIS Windows Installer
 - Features:
@@ -175,7 +175,7 @@ After successful build:
   - Auto-start option
   - Clean uninstaller
 
-### 💼 Portable Version (`Ananta POS-Portable-2.0.1.exe`)
+### 💼 Portable Version (`NUA POS-Portable-2.0.1.exe`)
 - Size: ~200-300 MB  
 - Type: Standalone executable
 - Features:
@@ -191,19 +191,19 @@ After successful build:
 
 ### Test Installer:
 1. Navigate to `/app/frontend/dist/`
-2. Double-click `Ananta POS-Setup-2.0.1.exe`
+2. Double-click `NUA POS-Setup-2.0.1.exe`
 3. Follow installation wizard
 4. Launch from Desktop or Start Menu
 5. **First launch**: Takes 10-15 seconds (services starting)
 6. **Verify**: 
-   - Window opens with Ananta POS interface
+   - Window opens with NUA POS interface
    - Can navigate between pages
    - Can create transactions
    - Works completely offline
 
 ### Test Portable:
 1. Navigate to `/app/frontend/dist/`
-2. Double-click `Ananta POS-Portable-2.0.1.exe`
+2. Double-click `NUA POS-Portable-2.0.1.exe`
 3. App starts directly (no installation)
 4. Verify same functionality as installer
 
@@ -272,7 +272,7 @@ yarn electron:build
 1. Run portable version first (easier to debug)
 2. Check Windows Firewall settings
 3. Ensure MongoDB port 27017 isn't blocked
-4. Check logs in: `%APPDATA%/Ananta POS/logs/`
+4. Check logs in: `%APPDATA%/NUA POS/logs/`
 5. Try running as Administrator
 
 ### ❌ MongoDB not found in package
@@ -341,8 +341,8 @@ You can now distribute your installer to users:
 - Network share
 
 **File to share**: 
-- `Ananta POS-Setup-2.0.1.exe` (for end users)
-- `Ananta POS-Portable-2.0.1.exe` (for testing/demo)
+- `NUA POS-Setup-2.0.1.exe` (for end users)
+- `NUA POS-Portable-2.0.1.exe` (for testing/demo)
 
 ---
 
@@ -393,7 +393,7 @@ If you encounter issues not covered here:
 
 Once you have your `.exe` files, you're done! 
 
-Your Ananta POS is now a professional Windows application that can be:
+Your NUA POS is now a professional Windows application that can be:
 - ✅ Installed on any Windows PC (7, 8, 10, 11)
 - ✅ Distributed to customers
 - ✅ Run completely offline
@@ -404,4 +404,4 @@ Your Ananta POS is now a professional Windows application that can be:
 
 ---
 
-**Built with ❤️ by Ananta POS Team**
+**Built with ❤️ by NUA POS Team**

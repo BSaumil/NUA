@@ -1,4 +1,4 @@
-# Ananta POS Assets
+# NUA POS Assets
 
 This folder should contain the following files for building the Windows installer:
 

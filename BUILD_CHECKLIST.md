@@ -1,4 +1,4 @@
-# ⚡ ANANTA POS - Windows .EXE Build Checklist
+# ⚡ NUA POS - Windows .EXE Build Checklist
 
 ## 📥 DOWNLOAD & INSTALL (One Time)
 
@@ -51,8 +51,8 @@ yarn electron:build
 
 ```
 /app/frontend/dist/
-├── Ananta POS-Setup-2.0.1.exe      (Installer - 200-300 MB)
-└── Ananta POS-Portable-2.0.1.exe   (Portable - 200-300 MB)
+├── NUA POS-Setup-2.0.1.exe      (Installer - 200-300 MB)
+└── NUA POS-Portable-2.0.1.exe   (Portable - 200-300 MB)
 ```
 
 ## ⏱️ BUILD TIME
@@ -69,7 +69,7 @@ TOTAL:    ~20-35 min
 
 ```
 1. Navigate to /app/frontend/dist/
-2. Double-click Ananta POS-Setup-2.0.1.exe
+2. Double-click NUA POS-Setup-2.0.1.exe
 3. Install and launch
 4. First start takes 10-15 seconds
 5. Verify app opens and works offline
@@ -138,7 +138,7 @@ Current Windows:    WINDOWS_EXE_GUIDE.md
 
 ```
 Share this file with users:
-→ Ananta POS-Setup-2.0.1.exe
+→ NUA POS-Setup-2.0.1.exe
 
 Size: ~200-300 MB
 Includes: Everything (frontend + backend + database)

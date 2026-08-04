@@ -1,4 +1,4 @@
-# 📥 How to Get Ananta POS .exe File
+# 📥 How to Get NUA POS .exe File
 
 ## 🎯 Current Situation
 
@@ -27,7 +27,7 @@ Here's why:
 2. **Clone on Windows PC:**
    ```cmd
    git clone YOUR_GITHUB_URL
-   cd ananta-pos
+   cd nua-pos
    ```
 
 3. **Install Build Tools:**
@@ -48,7 +48,7 @@ Here's why:
 4. **Build Backend:**
    ```cmd
    cd backend
-   pyinstaller --onefile --name AnantaPOS-Backend server.py
+   pyinstaller --onefile --name NUAPOS-Backend server.py
    ```
 
 5. **Build Frontend:**
@@ -61,8 +61,8 @@ Here's why:
 
 6. **Output:**
    ```
-   ✅ dist/Ananta-POS-Setup-2.0.1.exe (Full Installer)
-   ✅ dist/Ananta-POS-Portable-2.0.1.exe (Portable)
+   ✅ dist/NUA-POS-Setup-2.0.1.exe (Full Installer)
+   ✅ dist/NUA-POS-Portable-2.0.1.exe (Portable)
    ```
 
 **Guide:** See `/app/WINDOWS_EXE_GUIDE.md`
@@ -110,7 +110,7 @@ Here's why:
 **To Access:**
 1. Open browser
 2. Go to: `http://localhost:3000`
-3. Use Ananta POS
+3. Use NUA POS
 
 **Make it Feel Like Desktop App:**
 - **Chrome:** Menu → More Tools → Create Shortcut → Check "Open as window"
@@ -130,7 +130,7 @@ Here's why:
 
 2. **Deploy to Cloud** (For anywhere access)
    - Click "Deploy" in chat
-   - Get URL: `https://ananta-pos.emergent.sh`
+   - Get URL: `https://nua-pos.emergent.sh`
    - Access from any device
 
 3. **Build .exe Later** (When needed)
@@ -186,8 +186,8 @@ Backend: http://localhost:8001
 
 ### Solution 3: Request Build Service
 
-**Email:** support@anantapos.com
-**Request:** "Please build Windows .exe for Ananta POS"
+**Email:** support@nuapos.com
+**Request:** "Please build Windows .exe for NUA POS"
 **Include:** Your GitHub URL (from "Save to GitHub")
 **Timeline:** 24-48 hours
 **Cost:** Free for first build
@@ -249,7 +249,7 @@ Backend: http://localhost:8001
 - Tested on Windows 10/11
 - Includes auto-update setup
 - 24-48 hour delivery
-- Email: support@anantapos.com
+- Email: support@nuapos.com
 
 ---
 
@@ -324,7 +324,7 @@ A: Just refresh browser - or deploy updated version to cloud.
 1. ✅ **Continue using web version** - It's fully functional!
 2. 📤 **Click "Save to GitHub"** - Backup your code
 3. 🔍 **Decide which option** - See table above
-4. 📧 **Contact us if need help** - support@anantapos.com
+4. 📧 **Contact us if need help** - support@nuapos.com
 
 **Web version is production-ready and used by many businesses!**
 
@@ -332,7 +332,7 @@ A: Just refresh browser - or deploy updated version to cloud.
 
 <div align="center">
 
-**Ananta POS is Working Right Now!**
+**NUA POS is Working Right Now!**
 
 Access at: http://localhost:3000
 

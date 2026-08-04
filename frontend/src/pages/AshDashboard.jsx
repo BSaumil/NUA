@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { Brain, Sparkles, AlertTriangle, TrendingDown, DollarSign, Users, ChefHat, Package, CloudRain, CalendarCheck, ShoppingCart, Clock, Heart, UserX, LineChart, FileText, Play, X as XIcon } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
+const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nua_token')}` });
 
 const CAT_META = {
   staffing:         { label: 'Staffing',           icon: Users,        color: '#3b82f6' },

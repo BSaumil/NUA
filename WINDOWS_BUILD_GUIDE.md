@@ -1,8 +1,8 @@
-# 🔨 Windows Build Guide - Ananta POS .exe
+# 🔨 Windows Build Guide - NUA POS .exe
 
 ## Overview
 
-This guide will walk you through building the Ananta POS Windows executable file.
+This guide will walk you through building the NUA POS Windows executable file.
 
 **Time Required:** 20-35 minutes (mostly automated)
 
@@ -36,7 +36,7 @@ Choose the method that works best for you:
 
 **Option A: From File Explorer**
 1. Open File Explorer
-2. Navigate to your project folder (e.g., `C:\Users\...\AnantaPOS\`)
+2. Navigate to your project folder (e.g., `C:\Users\...\NUAPOS\`)
 3. Click in the address bar
 4. Type: `cmd`
 5. Press Enter
@@ -47,7 +47,7 @@ Choose the method that works best for you:
 3. Press Enter
 4. Navigate:
    ```bash
-   cd C:\Users\YourName\Documents\AnantaPOS
+   cd C:\Users\YourName\Documents\NUAPOS
    ```
 
 ---
@@ -71,7 +71,7 @@ The script will automatically:
 **Phase 1: Check Prerequisites** (1 minute)
 ```
 ========================================
-Ananta POS - Windows Build Script
+NUA POS - Windows Build Script
 ========================================
 
 [1/6] Checking Node.js installation...
@@ -134,8 +134,8 @@ BUILD COMPLETE!
 ========================================
 
 Your installer files are located at:
-  C:\...\AnantaPOS\frontend\dist\Ananta POS-Setup-2.0.1.exe
-  C:\...\AnantaPOS\frontend\dist\Ananta POS-Portable-2.0.1.exe
+  C:\...\NUAPOS\frontend\dist\NUA POS-Setup-2.0.1.exe
+  C:\...\NUAPOS\frontend\dist\NUA POS-Portable-2.0.1.exe
 
 You can now distribute these files!
 
@@ -210,7 +210,7 @@ python build_backend.py
 
 **Expected output:**
 ```
-Building Ananta POS Backend Executable...
+Building NUA POS Backend Executable...
 Running: pyinstaller --name=server --onefile ...
 INFO: PyInstaller: 5.x.x
 INFO: Python: 3.x.x
@@ -352,9 +352,9 @@ yarn electron:build
 • packaging  platform=win32 arch=x64 electron=28.x.x
 • downloading  url=https://github.com/electron/electron/releases/download/...
 • downloaded  url=... duration=30s
-• building  target=nsis file=dist\Ananta POS-Setup-2.0.1.exe
-• building  target=portable file=dist\Ananta POS-Portable-2.0.1.exe
-• building block map  blockMapFile=dist\Ananta POS-Setup-2.0.1.exe.blockmap
+• building  target=nsis file=dist\NUA POS-Setup-2.0.1.exe
+• building  target=portable file=dist\NUA POS-Portable-2.0.1.exe
+• building block map  blockMapFile=dist\NUA POS-Setup-2.0.1.exe.blockmap
 ```
 
 **⚠️ This step takes the longest - be patient!**
@@ -376,9 +376,9 @@ After successful build:
 
 ```
 frontend\dist\
-├── Ananta POS-Setup-2.0.1.exe          (~200-300 MB)
-├── Ananta POS-Portable-2.0.1.exe       (~200-300 MB)
-├── Ananta POS-Setup-2.0.1.exe.blockmap
+├── NUA POS-Setup-2.0.1.exe          (~200-300 MB)
+├── NUA POS-Portable-2.0.1.exe       (~200-300 MB)
+├── NUA POS-Setup-2.0.1.exe.blockmap
 ├── builder-effective-config.yaml
 └── win-unpacked\                        (folder)
 ```
@@ -387,7 +387,7 @@ frontend\dist\
 
 ### What's What?
 
-**`Ananta POS-Setup-2.0.1.exe`** - Full Installer
+**`NUA POS-Setup-2.0.1.exe`** - Full Installer
 - Professional NSIS installer
 - Installation wizard
 - Creates Desktop shortcut
@@ -395,7 +395,7 @@ frontend\dist\
 - Add/Remove Programs entry
 - **Use this** for distributing to end users
 
-**`Ananta POS-Portable-2.0.1.exe`** - Portable Version
+**`NUA POS-Portable-2.0.1.exe`** - Portable Version
 - Standalone executable
 - No installation needed
 - Run from anywhere
@@ -415,10 +415,10 @@ frontend\dist\
 
 1. **Navigate to:**
    ```
-   C:\...\AnantaPOS\frontend\dist\
+   C:\...\NUAPOS\frontend\dist\
    ```
 
-2. **Double-click:** `Ananta POS-Setup-2.0.1.exe`
+2. **Double-click:** `NUA POS-Setup-2.0.1.exe`
 
 3. **Installation Wizard:**
    - Click "Next"
@@ -430,7 +430,7 @@ frontend\dist\
 
 4. **Launch the app:**
    - Double-click Desktop shortcut, OR
-   - Windows Key → Search "Ananta POS" → Click
+   - Windows Key → Search "NUA POS" → Click
 
 5. **First Launch:**
    - Takes 10-15 seconds (services starting)
@@ -452,10 +452,10 @@ frontend\dist\
 
 1. **Navigate to:**
    ```
-   C:\...\AnantaPOS\frontend\dist\
+   C:\...\NUAPOS\frontend\dist\
    ```
 
-2. **Double-click:** `Ananta POS-Portable-2.0.1.exe`
+2. **Double-click:** `NUA POS-Portable-2.0.1.exe`
 
 3. **Direct Launch:**
    - No installation needed
@@ -476,8 +476,8 @@ frontend\dist\
 
 ### You Have:
 
-- ✅ `Ananta POS-Setup-2.0.1.exe` - For distribution
-- ✅ `Ananta POS-Portable-2.0.1.exe` - For testing/demos
+- ✅ `NUA POS-Setup-2.0.1.exe` - For distribution
+- ✅ `NUA POS-Portable-2.0.1.exe` - For testing/demos
 - ✅ Fully tested application
 - ✅ Ready to share with users!
 
@@ -513,7 +513,7 @@ frontend\dist\
 
 **What users need to do:**
 
-1. Download `Ananta POS-Setup-2.0.1.exe`
+1. Download `NUA POS-Setup-2.0.1.exe`
 2. Double-click to run
 3. Follow installation wizard
 4. Launch from Desktop or Start Menu
@@ -647,7 +647,7 @@ yarn electron:build
 
 Check logs:
 ```
-C:\Users\YourName\AppData\Roaming\Ananta POS\logs\
+C:\Users\YourName\AppData\Roaming\NUA POS\logs\
 ```
 
 Common causes:
@@ -709,7 +709,7 @@ To reduce (optional):
 
 3. New filename:
    ```
-   Ananta POS-Setup-2.0.2.exe
+   NUA POS-Setup-2.0.2.exe
    ```
 
 ---
@@ -827,7 +827,7 @@ One .exe file with everything needed!
 
 ---
 
-**🎉 Congratulations! You've successfully built Ananta POS Windows executable!**
+**🎉 Congratulations! You've successfully built NUA POS Windows executable!**
 
 **Your .exe file is ready to change the way businesses operate! 🚀**
 

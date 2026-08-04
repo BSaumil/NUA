@@ -206,7 +206,7 @@ Wait ~5 minutes. When done:
 Visit https://nua-frontend.fly.dev/
 ```
 
-🎉 **OPEN THAT URL!** Log in with `owner@nuva.com` / `NuvaOwner2026!` — Nua is live on the internet.
+🎉 **OPEN THAT URL!** Log in with `owner@nua.com` / `NuaOwner2026!` — Nua is live on the internet.
 
 ---
 
@@ -242,7 +242,7 @@ And **rebuild the frontend** with the new backend URL if you also gave the backe
 |---|---|
 | Backend alive? | `curl https://nua-backend.fly.dev/api/social/platforms` → returns JSON |
 | Frontend alive? | Browser → `https://nua-frontend.fly.dev` → landing page renders |
-| Login works? | `owner@nuva.com` / `NuvaOwner2026!` → dashboard appears |
+| Login works? | `owner@nua.com` / `NuaOwner2026!` → dashboard appears |
 | Mongo wired? | Add a product → refresh → it's still there |
 | AI calendar? | `/social-media` → Calendar tab → chips render with times |
 
@@ -307,7 +307,7 @@ That's it. Each deploy takes 2–5 minutes, zero downtime.
 - [ ] Backend deployed → `https://nua-backend.fly.dev/api/social/platforms` returns JSON
 - [ ] Frontend `Dockerfile` + `fly.toml` created
 - [ ] Frontend deployed → loads in browser
-- [ ] Logged in successfully as `owner@nuva.com`
+- [ ] Logged in successfully as `owner@nua.com`
 - [ ] (Optional) Custom domain + HTTPS certificate
 - [ ] (Optional) Updated `FRONTEND_URL` secret + redeployed
 

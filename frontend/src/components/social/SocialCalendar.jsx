@@ -556,7 +556,7 @@ export const SocialCalendar = ({ theme, posts, accounts, onReload }) => {
                   data-testid="edit-caption"
                 />
                 <Input
-                  placeholder="Hashtags (space-separated, e.g. #foodie #nuva)"
+                  placeholder="Hashtags (space-separated, e.g. #foodie #nua)"
                   value={editForm.hashtags}
                   onChange={(e) => setEditForm({ ...editForm, hashtags: e.target.value })}
                   data-testid="edit-hashtags"

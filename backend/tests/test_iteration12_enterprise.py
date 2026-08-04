@@ -18,19 +18,19 @@ class TestAuth:
     
     @pytest.fixture(scope="class")
     def owner_token(self):
-        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "owner@nuva.com", "password": "NuvaOwner2026!"})
+        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "owner@nua.com", "password": "NuaOwner2026!"})
         assert r.status_code == 200, f"Owner login failed: {r.text}"
         return r.json()["token"]
     
     @pytest.fixture(scope="class")
     def manager_token(self):
-        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "manager@nuva.com", "password": "Staff2026!"})
+        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "manager@nua.com", "password": "Staff2026!"})
         assert r.status_code == 200, f"Manager login failed: {r.text}"
         return r.json()["token"]
     
     @pytest.fixture(scope="class")
     def cashier_token(self):
-        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "cashier@nuva.com", "password": "Staff2026!"})
+        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "cashier@nua.com", "password": "Staff2026!"})
         assert r.status_code == 200, f"Cashier login failed: {r.text}"
         return r.json()["token"]
     
@@ -56,12 +56,12 @@ class TestPermissions:
     
     @pytest.fixture(scope="class")
     def owner_token(self):
-        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "owner@nuva.com", "password": "NuvaOwner2026!"})
+        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "owner@nua.com", "password": "NuaOwner2026!"})
         return r.json()["token"]
     
     @pytest.fixture(scope="class")
     def manager_token(self):
-        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "manager@nuva.com", "password": "Staff2026!"})
+        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "manager@nua.com", "password": "Staff2026!"})
         return r.json()["token"]
     
     @pytest.fixture(scope="class")
@@ -69,7 +69,7 @@ class TestPermissions:
         """Get cashier's staff ID"""
         r = requests.get(f"{BASE_URL}/api/auth/staff", headers={"Authorization": f"Bearer {owner_token}"})
         staff = r.json()
-        cashier = next((s for s in staff if s["email"] == "cashier@nuva.com"), None)
+        cashier = next((s for s in staff if s["email"] == "cashier@nua.com"), None)
         return cashier["id"] if cashier else None
     
     def test_get_all_permissions_returns_26(self):
@@ -130,7 +130,7 @@ class TestPermissions:
         if not cashier_id:
             pytest.skip("Cashier not found")
         # Login as cashier
-        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "cashier@nuva.com", "password": "Staff2026!"})
+        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "cashier@nua.com", "password": "Staff2026!"})
         cashier_token = r.json()["token"]
         # Get /me
         r = requests.get(f"{BASE_URL}/api/auth/me", headers={"Authorization": f"Bearer {cashier_token}"})
@@ -146,12 +146,12 @@ class TestSurcharging:
     
     @pytest.fixture(scope="class")
     def owner_token(self):
-        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "owner@nuva.com", "password": "NuvaOwner2026!"})
+        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "owner@nua.com", "password": "NuaOwner2026!"})
         return r.json()["token"]
     
     @pytest.fixture(scope="class")
     def manager_token(self):
-        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "manager@nuva.com", "password": "Staff2026!"})
+        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "manager@nua.com", "password": "Staff2026!"})
         return r.json()["token"]
     
     def test_get_surcharge_settings(self):
@@ -208,17 +208,17 @@ class TestLiveSales:
     
     @pytest.fixture(scope="class")
     def owner_token(self):
-        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "owner@nuva.com", "password": "NuvaOwner2026!"})
+        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "owner@nua.com", "password": "NuaOwner2026!"})
         return r.json()["token"]
     
     @pytest.fixture(scope="class")
     def manager_token(self):
-        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "manager@nuva.com", "password": "Staff2026!"})
+        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "manager@nua.com", "password": "Staff2026!"})
         return r.json()["token"]
     
     @pytest.fixture(scope="class")
     def cashier_token(self):
-        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "cashier@nuva.com", "password": "Staff2026!"})
+        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "cashier@nua.com", "password": "Staff2026!"})
         return r.json()["token"]
     
     def test_live_sales_owner(self, owner_token):
@@ -251,17 +251,17 @@ class TestReports:
     
     @pytest.fixture(scope="class")
     def owner_token(self):
-        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "owner@nuva.com", "password": "NuvaOwner2026!"})
+        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "owner@nua.com", "password": "NuaOwner2026!"})
         return r.json()["token"]
     
     @pytest.fixture(scope="class")
     def manager_token(self):
-        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "manager@nuva.com", "password": "Staff2026!"})
+        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "manager@nua.com", "password": "Staff2026!"})
         return r.json()["token"]
     
     @pytest.fixture(scope="class")
     def cashier_token(self):
-        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "cashier@nuva.com", "password": "Staff2026!"})
+        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "cashier@nua.com", "password": "Staff2026!"})
         return r.json()["token"]
     
     def test_generate_itemised_report(self, owner_token):
@@ -356,12 +356,12 @@ class TestHardware:
     
     @pytest.fixture(scope="class")
     def owner_token(self):
-        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "owner@nuva.com", "password": "NuvaOwner2026!"})
+        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "owner@nua.com", "password": "NuaOwner2026!"})
         return r.json()["token"]
     
     @pytest.fixture(scope="class")
     def manager_token(self):
-        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "manager@nuva.com", "password": "Staff2026!"})
+        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "manager@nua.com", "password": "Staff2026!"})
         return r.json()["token"]
     
     def test_get_printers(self):
@@ -433,12 +433,12 @@ class TestReportConfig:
     
     @pytest.fixture(scope="class")
     def owner_token(self):
-        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "owner@nuva.com", "password": "NuvaOwner2026!"})
+        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "owner@nua.com", "password": "NuaOwner2026!"})
         return r.json()["token"]
     
     @pytest.fixture(scope="class")
     def manager_token(self):
-        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "manager@nuva.com", "password": "Staff2026!"})
+        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "manager@nua.com", "password": "Staff2026!"})
         return r.json()["token"]
     
     def test_get_report_config_owner(self, owner_token):
@@ -481,7 +481,7 @@ class TestRBACEnforcement:
     
     @pytest.fixture(scope="class")
     def cashier_token(self):
-        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "cashier@nuva.com", "password": "Staff2026!"})
+        r = requests.post(f"{BASE_URL}/api/auth/login", json={"email": "cashier@nua.com", "password": "Staff2026!"})
         return r.json()["token"]
     
     def test_cashier_denied_surcharge_save(self, cashier_token):

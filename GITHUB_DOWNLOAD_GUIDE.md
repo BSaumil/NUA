@@ -1,8 +1,8 @@
-# 🌟 GitHub Download Guide - Ananta POS
+# 🌟 GitHub Download Guide - NUA POS
 
 ## Overview
 
-This guide shows you how to save your Ananta POS code to GitHub and then download it to your Windows PC for building the .exe file.
+This guide shows you how to save your NUA POS code to GitHub and then download it to your Windows PC for building the .exe file.
 
 **Time Required:** 10-15 minutes
 
@@ -67,16 +67,16 @@ This guide shows you how to save your Ananta POS code to GitHub and then downloa
 **The platform will ask you:**
 
 1. **Repository Name:**
-   - Enter: `ananta-pos` (or any name you prefer)
+   - Enter: `nua-pos` (or any name you prefer)
    - Must be lowercase, use hyphens for spaces
-   - Example: `ananta-pos-system`, `my-pos-app`
+   - Example: `nua-pos-system`, `my-pos-app`
 
 2. **Visibility:**
    - Choose: **Private** (recommended for business apps)
    - Or: **Public** (if you want to share openly)
 
 3. **Description** (optional):
-   - Enter: "Ananta POS - Complete Point of Sale System"
+   - Enter: "NUA POS - Complete Point of Sale System"
 
 4. Click **"Create Repository"** or **"Save"**
 
@@ -103,7 +103,7 @@ This guide shows you how to save your Ananta POS code to GitHub and then downloa
 1. Platform shows success message
 2. You'll see a URL like:
    ```
-   https://github.com/YOUR-USERNAME/ananta-pos
+   https://github.com/YOUR-USERNAME/nua-pos
    ```
 
 3. **COPY THIS URL** - you'll need it!
@@ -111,7 +111,7 @@ This guide shows you how to save your Ananta POS code to GitHub and then downloa
 4. Alternatively:
    - Go to github.com
    - Log in
-   - Look for "ananta-pos" in your repositories
+   - Look for "nua-pos" in your repositories
    - Click on it
    - Copy the URL from browser address bar
 
@@ -176,25 +176,25 @@ cd C:\Projects
 **In Command Prompt, run:**
 
 ```bash
-git clone https://github.com/YOUR-USERNAME/ananta-pos.git
+git clone https://github.com/YOUR-USERNAME/nua-pos.git
 ```
 
 **Replace** `YOUR-USERNAME` with your actual GitHub username!
 
 **Example:**
 ```bash
-git clone https://github.com/john-doe/ananta-pos.git
+git clone https://github.com/john-doe/nua-pos.git
 ```
 
 **What happens:**
 - Git downloads all files from GitHub
-- Creates folder: `ananta-pos`
-- Shows progress: "Cloning into 'ananta-pos'..."
+- Creates folder: `nua-pos`
+- Shows progress: "Cloning into 'nua-pos'..."
 - Takes 1-2 minutes
 
 **Expected output:**
 ```
-Cloning into 'ananta-pos'...
+Cloning into 'nua-pos'...
 remote: Enumerating objects: 150, done.
 remote: Counting objects: 100% (150/150), done.
 remote: Compressing objects: 100% (120/120), done.
@@ -210,7 +210,7 @@ Resolving deltas: 100% (30/30), done.
 **Check that files were downloaded:**
 
 ```bash
-cd ananta-pos
+cd nua-pos
 dir
 ```
 
@@ -236,7 +236,7 @@ After completing this guide:
 - [ ] Repository URL copied
 - [ ] Git installed on Windows
 - [ ] Repository cloned to Windows PC
-- [ ] Files verified in `ananta-pos` folder
+- [ ] Files verified in `nua-pos` folder
 - [ ] Command Prompt open in project directory
 
 ---
@@ -266,7 +266,7 @@ If you make changes in the platform and want to update:
 
 **2. Pull changes on Windows:**
 ```bash
-cd ananta-pos
+cd nua-pos
 git pull
 ```
 
@@ -288,7 +288,7 @@ That's it! Your Windows code is now updated.
 **Solution:**
 You're trying to use SSH. Use HTTPS instead:
 ```bash
-git clone https://github.com/USERNAME/ananta-pos.git
+git clone https://github.com/USERNAME/nua-pos.git
 ```
 (Note: Use `https://` not `git@`)
 
@@ -332,7 +332,7 @@ git clone https://github.com/USERNAME/ananta-pos.git
 ### Keep Your Code Synced
 ```bash
 # Always pull latest before building
-cd ananta-pos
+cd nua-pos
 git pull
 ```
 

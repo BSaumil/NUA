@@ -17,8 +17,8 @@ import pytest
 import requests
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://pos-checkout-16.preview.emergentagent.com").rstrip("/")
-OWNER_EMAIL = "owner@nuva.com"
-OWNER_PASS = "NuvaOwner2026!"
+OWNER_EMAIL = "owner@nua.com"
+OWNER_PASS = "NuaOwner2026!"
 
 
 @pytest.fixture(scope="module")
@@ -161,8 +161,8 @@ def ensure_account(session, auth_headers):
         accts = accts.get("accounts", [])
     if not accts:
         session.post(f"{BASE_URL}/api/social/accounts", headers=auth_headers,
-                     json={"platform": "instagram", "handle": "nuva_iter40",
-                           "displayName": "Nuva Iter40"}, timeout=15)
+                     json={"platform": "instagram", "handle": "nua_iter40",
+                           "displayName": "Nua Iter40"}, timeout=15)
     return True
 
 
@@ -258,7 +258,7 @@ def test_weekly_plan_no_connected_accounts_error(session, auth_headers):
     finally:
         # Restore an account so other tests can keep running
         session.post(f"{BASE_URL}/api/social/accounts", headers=auth_headers,
-                     json={"platform": "instagram", "handle": "nuva_iter40_restored",
+                     json={"platform": "instagram", "handle": "nua_iter40_restored",
                            "displayName": "Restored"}, timeout=15)
 
 
@@ -269,7 +269,7 @@ def test_weekly_plan_no_connected_accounts_error(session, auth_headers):
 def seed_post(session, auth_headers, ensure_account):
     body = {
         "platform": "instagram", "postType": "post",
-        "caption": "TEST_seed iter40 caption", "hashtags": ["#nuva", "#seed"],
+        "caption": "TEST_seed iter40 caption", "hashtags": ["#nua", "#seed"],
         "imageUrl": None, "status": "draft",
     }
     r = session.post(f"{BASE_URL}/api/social/posts", headers=auth_headers, json=body, timeout=15)

@@ -18,8 +18,8 @@ from datetime import datetime, timezone, timedelta
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://pos-checkout-16.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 
-OWNER = {"email": "owner@nuva.com", "password": "NuvaOwner2026!"}
-CASHIER = {"email": "cashier@nuva.com", "password": "Staff2026!"}
+OWNER = {"email": "owner@nua.com", "password": "NuaOwner2026!"}
+CASHIER = {"email": "cashier@nua.com", "password": "Staff2026!"}
 
 
 def _login(session: requests.Session, creds: dict) -> str:

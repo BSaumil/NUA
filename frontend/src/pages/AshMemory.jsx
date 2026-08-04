@@ -11,7 +11,7 @@ import { toast } from 'sonner';
 import { BookMarked, RefreshCw, Plus, Trash2, Search } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
+const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nua_token')}` });
 
 const KIND_TONE = {
   preference: 'bg-indigo-500', pattern: 'bg-emerald-500',

@@ -18,8 +18,8 @@ class TestAuth:
     def test_owner_login(self):
         """Test owner login"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "owner@nuva.com",
-            "password": "NuvaOwner2026!"
+            "email": "owner@nua.com",
+            "password": "NuaOwner2026!"
         })
         assert response.status_code == 200, f"Owner login failed: {response.text}"
         data = response.json()
@@ -31,7 +31,7 @@ class TestAuth:
     def test_manager_login(self):
         """Test manager login"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "manager@nuva.com",
+            "email": "manager@nua.com",
             "password": "Staff2026!"
         })
         assert response.status_code == 200, f"Manager login failed: {response.text}"
@@ -43,7 +43,7 @@ class TestAuth:
     def test_cashier_login(self):
         """Test cashier login"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "cashier@nuva.com",
+            "email": "cashier@nua.com",
             "password": "Staff2026!"
         })
         assert response.status_code == 200, f"Cashier login failed: {response.text}"
@@ -59,8 +59,8 @@ class TestStaffAddWithNameOnly:
     @pytest.fixture
     def owner_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "owner@nuva.com",
-            "password": "NuvaOwner2026!"
+            "email": "owner@nua.com",
+            "password": "NuaOwner2026!"
         })
         return response.json()["token"]
     
@@ -76,7 +76,7 @@ class TestStaffAddWithNameOnly:
         data = response.json()
         assert data["name"] == unique_name
         # Email should be auto-generated
-        assert "@nuva.local" in data["email"] or data["email"] != ""
+        assert "@nua.local" in data["email"] or data["email"] != ""
         assert data["role"] == "cashier"  # Default role
         print(f"PASS: Staff created with name only - email auto-generated: {data['email']}")
         
@@ -140,8 +140,8 @@ class TestSalaryType:
     @pytest.fixture
     def owner_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "owner@nuva.com",
-            "password": "NuvaOwner2026!"
+            "email": "owner@nua.com",
+            "password": "NuaOwner2026!"
         })
         return response.json()["token"]
     
@@ -229,15 +229,15 @@ class TestCustomRoles:
     @pytest.fixture
     def owner_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "owner@nuva.com",
-            "password": "NuvaOwner2026!"
+            "email": "owner@nua.com",
+            "password": "NuaOwner2026!"
         })
         return response.json()["token"]
     
     @pytest.fixture
     def manager_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "manager@nuva.com",
+            "email": "manager@nua.com",
             "password": "Staff2026!"
         })
         return response.json()["token"]
@@ -321,8 +321,8 @@ class TestRosterWeekView:
     @pytest.fixture
     def owner_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "owner@nuva.com",
-            "password": "NuvaOwner2026!"
+            "email": "owner@nua.com",
+            "password": "NuaOwner2026!"
         })
         return response.json()["token"]
     
@@ -421,8 +421,8 @@ class TestStaffListPayRateColumn:
     @pytest.fixture
     def owner_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "owner@nuva.com",
-            "password": "NuvaOwner2026!"
+            "email": "owner@nua.com",
+            "password": "NuaOwner2026!"
         })
         return response.json()["token"]
     

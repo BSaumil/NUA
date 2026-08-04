@@ -54,8 +54,8 @@ REACT_APP_BACKEND_URL=https://api.your-domain.com
 A bootstrap **owner** is auto-created on first backend startup:
 
 ```
-email:    owner@nuva.com
-password: NuvaOwner2026!
+email:    owner@nua.com
+password: NuaOwner2026!
 ```
 
 Change it immediately via **Settings → Staff → Roles** in production.
@@ -136,7 +136,7 @@ volumes: { mongo-data: {} }
 
 ### 1.4 — Smoke test (Web)
 1. Browse to `https://your-deployed-domain.com` — landing should render.
-2. Log in with `owner@nuva.com` / `NuvaOwner2026!`.
+2. Log in with `owner@nua.com` / `NuaOwner2026!`.
 3. Open **POS** → punch in a $1 test item → finish order. Expect ✅ on the kitchen ticket.
 4. Open **Social Media → Calendar** → confirm the "best time to post" chips render.
 5. Hit `/api/health` (or `/api/social/platforms`) — expect HTTP 200 JSON.

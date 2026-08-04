@@ -15,7 +15,7 @@ BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 if not BASE_URL:
     raise RuntimeError("REACT_APP_BACKEND_URL missing")
 
-OWNER = {"email": "owner@nuva.com", "password": "NuvaOwner2026!"}
+OWNER = {"email": "owner@nua.com", "password": "NuaOwner2026!"}
 CUSTOMER_ID = "cust-1"
 
 

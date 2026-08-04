@@ -61,7 +61,7 @@ const Dashboard = () => {
 
       // Active tables
       try {
-        const kitchenRes = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/kitchen/orders`, { headers: { Authorization: `Bearer ${localStorage.getItem('nuva_token')}` } });
+        const kitchenRes = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/kitchen/orders`, { headers: { Authorization: `Bearer ${localStorage.getItem('nua_token')}` } });
         const ko = await kitchenRes.json();
         const tables = new Set((ko || []).filter(o => o.tableNumber).map(o => o.tableNumber));
         setActiveTables(tables.size);

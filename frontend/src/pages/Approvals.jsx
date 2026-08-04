@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import { ShieldCheck, ShieldAlert, ShieldX, Clock } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
+const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nua_token')}` });
 
 export default function Approvals() {
   const [items, setItems] = useState([]);

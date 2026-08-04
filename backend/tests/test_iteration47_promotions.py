@@ -32,8 +32,8 @@ def _read_env_url():
 
 BASE_URL = _read_env_url()
 
-OWNER_EMAIL = "owner@nuva.com"
-OWNER_PASS = "NuvaOwner2026!"
+OWNER_EMAIL = "owner@nua.com"
+OWNER_PASS = "NuaOwner2026!"
 
 
 # ─────────────────────────── fixtures ───────────────────────────

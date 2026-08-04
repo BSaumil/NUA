@@ -7,12 +7,12 @@ import { Badge } from './ui/badge';
 import { useAuth } from '../contexts/AuthContext';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
+const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nua_token')}` });
 
 const SESSION_KEY_BASE = 'nua-ash-chat-session';
 const userScope = () => {
   try {
-    const u = JSON.parse(localStorage.getItem('nuva_user') || '{}');
+    const u = JSON.parse(localStorage.getItem('nua_user') || '{}');
     return u.email || 'anon';
   } catch { return 'anon'; }
 };

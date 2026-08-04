@@ -30,8 +30,8 @@ if not _BURL:
 assert _BURL, "REACT_APP_BACKEND_URL not configured"
 BASE = _BURL.rstrip("/") + "/api"
 
-OWNER = {"email": "owner@nuva.com", "password": "NuvaOwner2026!"}
-CASHIER = {"email": "cashier@nuva.com", "password": "Staff2026!"}
+OWNER = {"email": "owner@nua.com", "password": "NuaOwner2026!"}
+CASHIER = {"email": "cashier@nua.com", "password": "Staff2026!"}
 
 
 # ---------- shared fixtures ---------- #
@@ -324,7 +324,7 @@ class TestRegression:
             "subtotal": 1.0, "gst": 0.1, "total": 1.1,
             "paymentMethod": "cash",
             "location": "main",
-            "cashier": "owner@nuva.com",
+            "cashier": "owner@nua.com",
         }
         r = requests.post(f"{BASE}/transactions", headers=owner_h, json=body, timeout=30)
         assert r.status_code in (200, 201), r.text

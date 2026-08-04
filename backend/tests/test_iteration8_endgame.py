@@ -1,5 +1,5 @@
 """
-Iteration 8 Backend Tests - NUVA POS Endgame Features
+Iteration 8 Backend Tests - NUA POS Endgame Features
 Tests: Email Marketing, End-of-Day Reports, Tip Management, Training Mode
 """
 import pytest
@@ -10,10 +10,10 @@ import uuid
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://pos-checkout-16.preview.emergentagent.com')
 
 # Test credentials
-OWNER_CREDS = {"email": "owner@nuva.com", "password": "NuvaOwner2026!"}
-MANAGER_CREDS = {"email": "manager@nuva.com", "password": "Staff2026!"}
-CASHIER_CREDS = {"email": "cashier@nuva.com", "password": "Staff2026!"}
-KITCHEN_CREDS = {"email": "kitchen@nuva.com", "password": "Staff2026!"}
+OWNER_CREDS = {"email": "owner@nua.com", "password": "NuaOwner2026!"}
+MANAGER_CREDS = {"email": "manager@nua.com", "password": "Staff2026!"}
+CASHIER_CREDS = {"email": "cashier@nua.com", "password": "Staff2026!"}
+KITCHEN_CREDS = {"email": "kitchen@nua.com", "password": "Staff2026!"}
 
 
 @pytest.fixture(scope="module")
@@ -58,7 +58,7 @@ class TestAuth:
         data = response.json()
         assert "token" in data
         assert "user" in data
-        assert data["user"]["email"] == "owner@nuva.com"
+        assert data["user"]["email"] == "owner@nua.com"
         assert data["user"]["role"] == "owner"
     
     def test_manager_login_success(self):
@@ -78,7 +78,7 @@ class TestAuth:
     def test_invalid_credentials_rejected(self):
         """Invalid credentials return 401"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "wrong@nuva.com", "password": "wrongpass"
+            "email": "wrong@nua.com", "password": "wrongpass"
         })
         assert response.status_code == 401
 

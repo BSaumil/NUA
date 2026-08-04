@@ -64,7 +64,7 @@ export default function Login() {
     setError(''); setLoading(true);
     try {
       const res = await staffMgmtAPI.pinLogin(pin);
-      localStorage.setItem('nuva_token', res.data.token);
+      localStorage.setItem('nua_token', res.data.token);
       window.location.assign('/'); // role-based landing (Today / POS / Kitchen)
     } catch (err) {
       setError(err.response?.data?.detail || 'Invalid PIN');
@@ -189,7 +189,7 @@ export default function Login() {
 
           <div className="mt-6 pt-4 border-t border-gray-800">
             <p className="text-xs text-gray-500 text-center">
-              {mode === 'email' ? 'Owner: owner@nuva.com' : 'Ask your manager for your PIN code'}
+              {mode === 'email' ? 'Owner: owner@nua.com' : 'Ask your manager for your PIN code'}
             </p>
           </div>
           </>

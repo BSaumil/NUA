@@ -1,9 +1,9 @@
 {
-  "name": "ananta-pos-desktop",
+  "name": "nua-pos-desktop",
   "version": "2.0.1",
-  "description": "NUVA POS - Complete Point of Sale System for Windows",
+  "description": "NUA POS - Complete Point of Sale System for Windows",
   "main": "electron/main.js",
-  "author": "NUVA POS Team",
+  "author": "NUA POS Team",
   "license": "Proprietary",
   "scripts": {
     "start": "react-scripts start",
@@ -16,9 +16,9 @@
     "dist": "electron-builder"
   },
   "build": {
-    "appId": "com.anantapos.desktop",
-    "productName": "NUVA POS",
-    "copyright": "Copyright © 2025 NUVA POS",
+    "appId": "com.nua.pos",
+    "productName": "NUA POS",
+    "copyright": "Copyright © 2025 NUA POS",
     "directories": {
       "output": "dist",
       "buildResources": "assets"
@@ -61,7 +61,7 @@
       "allowElevation": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "NUVA POS",
+      "shortcutName": "NUA POS",
       "installerIcon": "assets/installer-icon.ico",
       "uninstallerIcon": "assets/uninstaller-icon.ico",
       "installerHeader": "assets/installer-header.bmp",

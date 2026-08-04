@@ -1,4 +1,4 @@
-# Ananta POS Clone - Complete Feature Comparison
+# NUA POS Clone - Complete Feature Comparison
 
 ## ✅ IMPLEMENTED - Core Features
 

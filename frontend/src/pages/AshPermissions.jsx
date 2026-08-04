@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import { ShieldCheck, RefreshCw, Search, Lock, Zap, Eye, Sparkles, TrendingUp } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
+const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nua_token')}` });
 
 const RISK_BG = { low: 'bg-emerald-500', medium: 'bg-amber-500', high: 'bg-rose-500', critical: 'bg-rose-700' };
 const RISK_ORDER = { low: 0, medium: 1, high: 2, critical: 3 };

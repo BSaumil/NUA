@@ -122,4 +122,4 @@ async def get_qr_menu_data():
             "allergens": p.get("allergens", []),
             "available": p.get("stock", 0) > 0,
         })
-    return {"categories": list(categories.values()), "restaurantName": "NUVA", "lastUpdated": datetime.utcnow().isoformat()}
+    return {"categories": list(categories.values()), "restaurantName": "NUA", "lastUpdated": datetime.utcnow().isoformat()}

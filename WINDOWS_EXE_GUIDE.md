@@ -1,13 +1,13 @@
-# 💻 Ananta POS - Windows Desktop Application Guide
+# 💻 NUA POS - Windows Desktop Application Guide
 
-**Build standalone Windows .exe installer for Ananta POS**
+**Build standalone Windows .exe installer for NUA POS**
 
 ---
 
 ## 🎯 What You Get
 
 **Single .exe installer that includes:**
-- ✅ Complete Ananta POS application
+- ✅ Complete NUA POS application
 - ✅ Built-in database (MongoDB embedded)
 - ✅ No internet required for operation
 - ✅ Auto-start on Windows boot
@@ -55,7 +55,7 @@ pip install pyinstaller
 cd /app/backend
 
 # Create spec file for PyInstaller
-pyinstaller --name AnantaPOS-Backend ^
+pyinstaller --name NUAPOS-Backend ^
   --onefile ^
   --add-data "models;models" ^
   --add-data "services;services" ^
@@ -64,7 +64,7 @@ pyinstaller --name AnantaPOS-Backend ^
   --hidden-import fastapi ^
   server.py
 
-# Output: dist/AnantaPOS-Backend.exe
+# Output: dist/NUAPOS-Backend.exe
 ```
 
 ### Step 3: Build Frontend with Electron
@@ -81,7 +81,7 @@ npm run build
 # Build Electron app
 npm run electron:build
 
-# Output: dist/Ananta-POS-Setup-2.0.1.exe
+# Output: dist/NUA-POS-Setup-2.0.1.exe
 ```
 
 ### Step 4: Create Unified Installer
@@ -91,9 +91,9 @@ npm run electron:build
 # Download: https://jrsoftware.org/isinfo.php
 
 # Run the installer script
-iscc ananta-installer.iss
+iscc nua-installer.iss
 
-# Output: AnantaPOS-Setup-v2.0.1.exe
+# Output: NUAPOS-Setup-v2.0.1.exe
 ```
 
 ---
@@ -105,12 +105,12 @@ iscc ananta-installer.iss
 ```powershell
 # build-windows.ps1
 
-Write-Host "Building Ananta POS for Windows..." -ForegroundColor Green
+Write-Host "Building NUA POS for Windows..." -ForegroundColor Green
 
 # Build Backend
 Write-Host "Building Backend..." -ForegroundColor Yellow
 cd backend
-pyinstaller ananta-backend.spec
+pyinstaller nua-backend.spec
 cd ..
 
 # Build Frontend
@@ -122,10 +122,10 @@ cd ..
 
 # Create Installer
 Write-Host "Creating Installer..." -ForegroundColor Yellow
-iscc installer/ananta-installer.iss
+iscc installer/nua-installer.iss
 
 Write-Host "Build Complete!" -ForegroundColor Green
-Write-Host "Installer: output/AnantaPOS-Setup-v2.0.1.exe"
+Write-Host "Installer: output/NUAPOS-Setup-v2.0.1.exe"
 ```
 
 **Run:**
@@ -140,16 +140,16 @@ Write-Host "Installer: output/AnantaPOS-Setup-v2.0.1.exe"
 ### What Happens When User Runs .exe:
 
 1. **Welcome Screen**
-   - Ananta POS logo
+   - NUA POS logo
    - Version information
    - License agreement
 
 2. **Installation Location**
-   - Default: `C:\Program Files\AnantaPOS`
+   - Default: `C:\Program Files\NUAPOS`
    - User can customize
 
 3. **Components Selection**
-   - [x] Ananta POS Application (Required)
+   - [x] NUA POS Application (Required)
    - [x] Desktop Shortcut
    - [x] Start Menu Entry
    - [ ] Start with Windows
@@ -169,7 +169,7 @@ Write-Host "Installer: output/AnantaPOS-Setup-v2.0.1.exe"
    - Hardware detection
 
 6. **Completion**
-   - Launch Ananta POS
+   - Launch NUA POS
    - Desktop shortcut created
    - System tray icon
 
@@ -178,10 +178,10 @@ Write-Host "Installer: output/AnantaPOS-Setup-v2.0.1.exe"
 ## 🗂️ Installed Directory Structure
 
 ```
-C:\Program Files\AnantaPOS\
-├── AnantaPOS.exe              (Main launcher)
+C:\Program Files\NUAPOS\
+├── NUAPOS.exe              (Main launcher)
 ├── backend\
-│   ├── AnantaPOS-Backend.exe  (FastAPI server)
+│   ├── NUAPOS-Backend.exe  (FastAPI server)
 │   └── config\
 │       ├── settings.json
 │       └── database.conf
@@ -228,7 +228,7 @@ C:\Program Files\AnantaPOS\
 
 ## 🔧 Build Configuration Files
 
-### 1. PyInstaller Spec (backend/ananta-backend.spec)
+### 1. PyInstaller Spec (backend/nua-backend.spec)
 
 ```python
 # -*- mode: python ; coding: utf-8 -*-
@@ -268,7 +268,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='AnantaPOS-Backend',
+    name='NUAPOS-Backend',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -304,7 +304,7 @@ function createWindow() {
       nodeIntegration: true,
       contextIsolation: false
     },
-    title: 'Ananta POS',
+    title: 'NUA POS',
     autoHideMenuBar: true
   });
 
@@ -322,18 +322,18 @@ function createTray() {
   tray = new Tray(path.join(__dirname, '../assets/tray-icon.ico'));
   
   const contextMenu = Menu.buildFromTemplate([
-    { label: 'Open Ananta POS', click: () => mainWindow.show() },
+    { label: 'Open NUA POS', click: () => mainWindow.show() },
     { label: 'Settings', click: () => {} },
     { type: 'separator' },
     { label: 'Exit', click: () => app.quit() }
   ]);
   
   tray.setContextMenu(contextMenu);
-  tray.setToolTip('Ananta POS');
+  tray.setToolTip('NUA POS');
 }
 
 function startBackend() {
-  const backendPath = path.join(process.resourcesPath, 'backend', 'AnantaPOS-Backend.exe');
+  const backendPath = path.join(process.resourcesPath, 'backend', 'NUAPOS-Backend.exe');
   backendProcess = spawn(backendPath);
   
   backendProcess.on('error', (err) => {
@@ -361,9 +361,9 @@ app.on('window-all-closed', () => {
 ```json
 {
   "build": {
-    "appId": "com.anantapos.app",
-    "productName": "Ananta POS",
-    "copyright": "Copyright © 2025 Ananta POS",
+    "appId": "com.nuapos.app",
+    "productName": "NUA POS",
+    "copyright": "Copyright © 2025 NUA POS",
     "win": {
       "target": ["nsis"],
       "icon": "assets/icon.ico",
@@ -397,8 +397,8 @@ app.on('window-all-closed', () => {
 # Build portable package
 npm run build:portable
 
-# Output: AnantaPOS-Portable-v2.0.1.zip
-# Extract anywhere and run AnantaPOS.exe
+# Output: NUAPOS-Portable-v2.0.1.zip
+# Extract anywhere and run NUAPOS.exe
 ```
 
 **Portable Features:**
@@ -449,7 +449,7 @@ autoUpdater.on('update-available', () => {
   dialog.showMessageBox({
     type: 'info',
     title: 'Update Available',
-    message: 'A new version of Ananta POS is available. Download now?',
+    message: 'A new version of NUA POS is available. Download now?',
     buttons: ['Yes', 'Later']
   });
 });
@@ -462,7 +462,7 @@ autoUpdater.on('update-available', () => {
 ### Debug Mode:
 ```bash
 # Run in development mode
-AnantaPOS.exe --debug
+NUAPOS.exe --debug
 
 # Features:
 - DevTools enabled
@@ -476,9 +476,9 @@ AnantaPOS.exe --debug
 ## ✅ Pre-Built Download (Coming Soon)
 
 **We'll provide ready-to-use installers:**
-- AnantaPOS-Setup-v2.0.1.exe (Full installer)
-- AnantaPOS-Portable-v2.0.1.zip (Portable)
-- AnantaPOS-Update-v2.0.1.exe (Update only)
+- NUAPOS-Setup-v2.0.1.exe (Full installer)
+- NUAPOS-Portable-v2.0.1.zip (Portable)
+- NUAPOS-Update-v2.0.1.exe (Update only)
 
 **System Requirements:**
 - Windows 10/11 (64-bit)
@@ -492,14 +492,14 @@ AnantaPOS.exe --debug
 
 ### 1. Silent Installation (for IT departments)
 ```cmd
-AnantaPOS-Setup.exe /S /D=C:\AnantaPOS
+NUAPOS-Setup.exe /S /D=C:\NUAPOS
 ```
 
 ### 2. Command Line Interface
 ```cmd
-AnantaPOS.exe --backup
-AnantaPOS.exe --restore backup.zip
-AnantaPOS.exe --export-data
+NUAPOS.exe --backup
+NUAPOS.exe --restore backup.zip
+NUAPOS.exe --export-data
 ```
 
 ### 3. Network Installation
@@ -513,7 +513,7 @@ AnantaPOS.exe --export-data
 ## 📞 Support
 
 **Need Help Building?**
-- Email: support@anantapos.com
+- Email: support@nuapos.com
 - Video tutorial: Coming soon
 - Build service: Available on request
 
@@ -525,7 +525,7 @@ AnantaPOS.exe --export-data
 
 <div align="center">
 
-**Ananta POS - Desktop Edition**
+**NUA POS - Desktop Edition**
 
 Professional Windows Application
 

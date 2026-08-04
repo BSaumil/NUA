@@ -295,7 +295,7 @@ async def ai_generate(body: AIGenerateIn, _: dict = Depends(require_owner_or_man
 
 def _fallback_generation(platform: str, post_type: str, subject_label: str) -> dict:
     """Template used when the LLM key is unavailable or upstream errors."""
-    base_tags = ["#nuva", "#restaurant", "#foodie", "#chefspecial"]
+    base_tags = ["#nua", "#restaurant", "#foodie", "#chefspecial"]
     platform_tag = {
         "instagram": "#instafood",
         "facebook": "#facebook",

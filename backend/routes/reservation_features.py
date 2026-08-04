@@ -239,8 +239,8 @@ async def remove_social_account(account_id: str, _: dict = Depends(require_owner
 @router.post("/email/test")
 async def send_test_email(data: dict, user: dict = Depends(require_owner_or_manager)):
     recipient = data.get("to", "sambhatt7@gmail.com")
-    subject = data.get("subject", "NUVA POS Test Email")
-    body = data.get("body", "This is a test email from NUVA POS system.")
+    subject = data.get("subject", "NUA POS Test Email")
+    body = data.get("body", "This is a test email from NUA POS system.")
 
     # Store email record
     email_record = {
@@ -256,7 +256,7 @@ async def send_test_email(data: dict, user: dict = Depends(require_owner_or_mana
 @router.get("/email/settings")
 async def get_email_settings(_: dict = Depends(require_owner)):
     s = await db.settings.find_one({"key": "email_config"}, {"_id": 0})
-    return s.get("value", {}) if s else {"testEmail": "sambhatt7@gmail.com", "senderName": "NUVA POS", "senderEmail": ""}
+    return s.get("value", {}) if s else {"testEmail": "sambhatt7@gmail.com", "senderName": "NUA POS", "senderEmail": ""}
 
 @router.post("/email/settings")
 async def save_email_settings(data: dict, _: dict = Depends(require_owner)):

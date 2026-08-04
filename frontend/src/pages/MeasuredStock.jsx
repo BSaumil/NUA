@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
+const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nua_token')}` });
 
 const UOM_OPTIONS = ['ml', 'l', 'g', 'kg', 'ea'];
 const WASTE_REASONS = ['spillage', 'corked', 'over_pour', 'kicked', 'expired', 'other'];

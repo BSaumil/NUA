@@ -39,7 +39,7 @@ async def _send_digest_notification(subject: str, body: str) -> None:
     """Best-effort dispatch. Uses utils.notifications if configured, else logs."""
     try:
         from utils.notifications import send_email
-        recipient = os.environ.get("ASH_DIGEST_EMAIL") or "owner@nuva.com"
+        recipient = os.environ.get("ASH_DIGEST_EMAIL") or "owner@nua.com"
         await send_email(recipient, subject, body)
         logger.info(f"[ash] daily digest emailed to {recipient}")
     except Exception as e:

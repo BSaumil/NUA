@@ -13,9 +13,9 @@ import uuid
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
-OWNER_CREDS = {"email": "owner@nuva.com", "password": "NuvaOwner2026!"}
-MANAGER_CREDS = {"email": "manager@nuva.com", "password": "Staff2026!"}
-CASHIER_CREDS = {"email": "cashier@nuva.com", "password": "Staff2026!"}
+OWNER_CREDS = {"email": "owner@nua.com", "password": "NuaOwner2026!"}
+MANAGER_CREDS = {"email": "manager@nua.com", "password": "Staff2026!"}
+CASHIER_CREDS = {"email": "cashier@nua.com", "password": "Staff2026!"}
 
 
 @pytest.fixture(scope="module")

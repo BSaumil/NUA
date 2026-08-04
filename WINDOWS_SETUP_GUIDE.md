@@ -1,8 +1,8 @@
-# 🛠️ Windows PC Setup Guide - Ananta POS
+# 🛠️ Windows PC Setup Guide - NUA POS
 
 ## Overview
 
-This guide will help you install everything needed on your Windows PC to build the Ananta POS .exe file.
+This guide will help you install everything needed on your Windows PC to build the NUA POS .exe file.
 
 **Time Required:** 15-25 minutes (one-time setup)
 
@@ -291,8 +291,8 @@ Database that will be embedded in your .exe file.
 
 6. **Copy the entire `bin` folder**
 
-7. **Navigate to your Ananta POS project:**
-   - Example: `C:\Users\YourName\Documents\AnantaPOS\`
+7. **Navigate to your NUA POS project:**
+   - Example: `C:\Users\YourName\Documents\NUAPOS\`
 
 8. **Create folder structure:**
    - Create folder: `mongodb`
@@ -300,7 +300,7 @@ Database that will be embedded in your .exe file.
 
 **Final structure should be:**
 ```
-AnantaPOS\
+NUAPOS\
 ├── backend\
 ├── frontend\
 ├── mongodb\              ← Create this
@@ -335,7 +335,7 @@ AnantaPOS\
 **Navigate to your project folder in Command Prompt:**
 
 ```bash
-cd C:\Users\YourName\Documents\AnantaPOS
+cd C:\Users\YourName\Documents\NUAPOS
 ```
 
 **Run the checker script:**
@@ -348,7 +348,7 @@ python check_prerequisites.py
 
 ```
 =============================================================
-🔍 Ananta POS - Build Prerequisites Checker
+🔍 NUA POS - Build Prerequisites Checker
 =============================================================
 
 1️⃣  System Requirements
@@ -376,7 +376,7 @@ Checking frontend structure... ✅ OK: All files present
 Checks passed: 11/11
 
 🎉 ALL CHECKS PASSED!
-✅ Your system is ready to build Ananta POS!
+✅ Your system is ready to build NUA POS!
 
 Next step: Run build_windows_exe.bat
 ```

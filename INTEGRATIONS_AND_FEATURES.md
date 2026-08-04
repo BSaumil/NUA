@@ -1,4 +1,4 @@
-# 🔌 Ananta POS - Complete Integration Framework + EPOS NOW Features
+# 🔌 NUA POS - Complete Integration Framework + EPOS NOW Features
 
 **Version:** 2.0.1  
 **Status:** ✅ Enterprise Ready - All EPOS NOW Features + Universal Integrations
@@ -430,7 +430,7 @@ POST /api/webhooks/{integration_name}
 
 ## 🎯 Feature Comparison
 
-| Feature | EPOS NOW | Ananta POS | Status |
+| Feature | EPOS NOW | NUA POS | Status |
 |---------|----------|------------|--------|
 | Core POS | ✅ | ✅ | Match |
 | Inventory | ✅ | ✅ | Match |
@@ -502,7 +502,7 @@ curl -X POST /api/integrations \
 ## 📞 Integration Support
 
 **Need Help Adding Integration?**
-- Email: integrations@anantapos.com
+- Email: integrations@nuapos.com
 - Custom integrations available
 - Training & onboarding support
 
@@ -515,7 +515,7 @@ curl -X POST /api/integrations \
 
 <div align="center">
 
-**Ananta POS v2.0.1 - Enterprise Complete**
+**NUA POS v2.0.1 - Enterprise Complete**
 
 ✅ All EPOS NOW Features  
 ✅ Universal Integration Framework  
