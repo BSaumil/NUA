@@ -144,7 +144,23 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
         pass
     surcharge_amount = round(net_before_surcharge * surcharge_percent / 100, 2)
 
-    total = net_before_surcharge + surcharge_amount
+    # Auto-gratuity (configured in Settings > Gratuity) — a genuine service
+    # charge, calculated on either the pre-discount subtotal or the
+    # discounted net depending on the owner's setting, never on the
+    # unrelated weekend/holiday surcharge.
+    gratuity_percent = 0.0
+    gratuity_label = None
+    try:
+        from routes.enterprise_features import check_gratuity
+        gratuity_info = await check_gratuity(covers=transaction.covers)
+        gratuity_percent = float(gratuity_info.get("gratuityPercent") or 0)
+        gratuity_label = gratuity_info.get("label")
+        gratuity_base = subtotal if gratuity_info.get("calculateOn") == "pre_discount" else net_before_surcharge
+    except Exception:
+        gratuity_base = net_before_surcharge
+    gratuity_amount = round(gratuity_base * gratuity_percent / 100, 2)
+
+    total = net_before_surcharge + surcharge_amount + gratuity_amount
     # GST component contained within the final (GST-inclusive) total, at the
     # standard AU 10%-inclusive rate: gst = total / 11.
     gst = total / 11
@@ -163,6 +179,10 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
         "surchargeAmount": surcharge_amount,
         "surchargePercent": surcharge_percent,
         "surchargeReason": surcharge_reason,
+        "gratuityAmount": gratuity_amount,
+        "gratuityPercent": gratuity_percent,
+        "gratuityLabel": gratuity_label,
+        "covers": transaction.covers,
         "gst": round(gst, 2),
         "total": round(total, 2),
         "paymentMethod": transaction.paymentMethod,

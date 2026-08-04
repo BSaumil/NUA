@@ -31,6 +31,30 @@ export default function ModifierSheet({ product, modifiers, open, onClose, onCon
   const [selected, setSelected] = useState({});
   const [lastProductId, setLastProductId] = useState(null);
 
+  // Nested modifiers: a chosen option can reveal follow-up modifier group(s)
+  // (e.g. "Oat Milk" -> "Sweetness Level"), up to 3 levels deep. Walk the
+  // product's top-level groups, and for each currently-selected option that
+  // has a childModifierId, splice that child group in right after it.
+  const MAX_MODIFIER_DEPTH = 3;
+  const visibleModifiers = useMemo(() => {
+    const out = [];
+    const seen = new Set();
+    const walk = (mod, depth) => {
+      if (!mod || seen.has(mod.id) || depth > MAX_MODIFIER_DEPTH) return;
+      seen.add(mod.id);
+      out.push(mod);
+      const chosenNames = selected[mod.id] || new Set();
+      (mod.options || []).forEach(opt => {
+        if (chosenNames.has(opt.name) && opt.childModifierId) {
+          const child = modifiers.find(m => m.id === opt.childModifierId);
+          if (child) walk(child, depth + 1);
+        }
+      });
+    };
+    productModifiers.forEach(m => walk(m, 1));
+    return out;
+  }, [productModifiers, modifiers, selected]);
+
   // Reset selection when a different product is opened.
   if (open && product?.id && product.id !== lastProductId) {
     setLastProductId(product.id);
@@ -66,11 +90,11 @@ export default function ModifierSheet({ product, modifiers, open, onClose, onCon
   // If modifier definitions haven't loaded yet for a product that DOES have modifierIds,
   // block confirm until they arrive.
   const isLoadingDefs = (product.modifierIds || []).length > 0 && productModifiers.length === 0;
-  const missing = productModifiers.filter(m => m.mandatory && (!(selected[m.id]) || selected[m.id].size === 0));
+  const missing = visibleModifiers.filter(m => m.mandatory && (!(selected[m.id]) || selected[m.id].size === 0));
   const canConfirm = !isLoadingDefs && missing.length === 0;
 
   // Compute extra price across all selected option prices
-  const extra = productModifiers.reduce((sum, m) => {
+  const extra = visibleModifiers.reduce((sum, m) => {
     const chosenNames = selected[m.id] || new Set();
     const optPrices = (m.options || []).filter(o => chosenNames.has(o.name)).reduce((s, o) => s + (o.price || 0), 0);
     return sum + optPrices;
@@ -80,7 +104,7 @@ export default function ModifierSheet({ product, modifiers, open, onClose, onCon
 
   const confirm = () => {
     if (!canConfirm) return;
-    const selections = productModifiers
+    const selections = visibleModifiers
       .map(m => {
         const names = Array.from(selected[m.id] || []);
         if (names.length === 0) return null;
@@ -110,10 +134,11 @@ export default function ModifierSheet({ product, modifiers, open, onClose, onCon
             ) : (
               <p className="text-center text-gray-400 text-sm py-6">No modifiers — tap Confirm to add</p>
             )
-          ) : productModifiers.map(mod => {
+          ) : visibleModifiers.map(mod => {
             const chosenNames = selected[mod.id] || new Set();
+            const isNested = !productModifiers.some(m => m.id === mod.id);
             return (
-              <div key={mod.id} data-testid={`mod-group-${mod.id}`}>
+              <div key={mod.id} data-testid={`mod-group-${mod.id}`} className={isNested ? 'pl-3 border-l-2 border-gray-200' : ''}>
                 <div className="flex items-center gap-2 mb-2">
                   <h3 className="text-sm font-bold">{mod.name}</h3>
                   {mod.mandatory ? (

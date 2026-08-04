@@ -67,7 +67,7 @@ async def place_table_order(table_id: str, data: dict):
             # productName — without both, a QR order lands entirely on the
             # default course and prints without a name on some paths.
             "productName": product["name"],
-            "category": product.get("category"),
+            "category": product.get("category") or "Other",
             "quantity": qty, "price": price,
             "modifications": item.get("modifications", ""),
         })

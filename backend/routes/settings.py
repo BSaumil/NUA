@@ -126,6 +126,19 @@ async def create_printer(printer: PrinterConfigCreate, user: dict = Depends(get_
     await db.printers.insert_one(printer_obj.dict())
     return printer_obj
 
+@router.put("/printers/{printer_id}", response_model=PrinterConfig)
+async def update_printer(printer_id: str, data: dict, user: dict = Depends(get_user)):
+    business_id = user.get("businessId") or "default"
+    allowed = {"name", "type", "ipAddress", "port", "paperWidth", "autoprint",
+               "location", "status", "footerInPerson", "footerOnline", "paddingLines"}
+    update = {k: v for k, v in data.items() if k in allowed}
+    result = await db.printers.find_one_and_update(
+        {"id": printer_id, "businessId": business_id}, {"$set": update}, return_document=True,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Printer not found")
+    return PrinterConfig(**result)
+
 @router.post("/printers/{printer_id}/print")
 async def print_receipt(printer_id: str, transaction_id: str, user: dict = Depends(get_user)):
     business_id = user.get("businessId") or "default"

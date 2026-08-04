@@ -498,6 +498,7 @@ DEFAULT_DOCKET_CONFIG = {
     "colourByCourse": True,
     "warnMinutes": 15,              # elapsed threshold for amber warning
     "criticalMinutes": 25,          # elapsed threshold for red critical
+    "sortMode": "rungIn",           # rungIn | alphabetical | category — order items appear within a ticket
 }
 
 

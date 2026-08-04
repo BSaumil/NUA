@@ -45,6 +45,7 @@ SEED_COA: List[Dict[str, Any]] = [
     {"code": "2310", "name": "Voucher Liability",        "type": "liability", "subType": "current_liability", "isLocked": True},
     {"code": "2320", "name": "Customer Deposits Held",   "type": "liability", "subType": "current_liability", "isLocked": True},
     {"code": "2400", "name": "Wages Payable",            "type": "liability", "subType": "current_liability", "isLocked": True},
+    {"code": "2410", "name": "Gratuities Payable",       "type": "liability", "subType": "current_liability", "isLocked": True},
 
     # Equity (3xxx)
     {"code": "3000", "name": "Owner's Equity",           "type": "equity",    "isLocked": True},
@@ -475,14 +476,16 @@ async def general_ledger(account_code: str, from_date: Optional[str] = None, to_
 # Auto-posting hooks — called from other modules
 # ═════════════════════════════════════════════════════════════════════════
 async def auto_post_pos_sale(txn: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """POS transaction (cash/card) → Bank DR, Sales CR, Surcharge CR, GST CR.
+    """POS transaction (cash/card) → Bank DR, Sales CR, Surcharge CR, Gratuity CR, GST CR.
 
     `total` is GST-inclusive (menu prices already include GST) and already
-    contains any auto-surcharge. `gst` is the 1/11th component within
-    `total`, not an amount added on top of it — so the non-GST portion of
-    `total` (`total - gst`) is split between Sales and Surcharge revenue in
-    proportion to each one's share of the pre-GST net, and the discount is
-    grossed back onto Sales at its GST-exclusive value.
+    contains any auto-surcharge and auto-gratuity. `gst` is the 1/11th
+    component within `total`, not an amount added on top of it — so the
+    non-GST portion of `total` (`total - gst`) is split between Sales,
+    Surcharge revenue, and Gratuities Payable in proportion to each one's
+    share of the pre-GST net, and the discount is grossed back onto Sales at
+    its GST-exclusive value. Gratuity is a liability, not revenue — it's
+    money owed out to staff, not money the business earned.
     """
     total = float(txn.get("total") or 0)
     if total <= 0:
@@ -490,11 +493,14 @@ async def auto_post_pos_sale(txn: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     gst = float(txn.get("gst") or 0)
     discount = float(txn.get("discountAmount") or 0)
     surcharge = float(txn.get("surchargeAmount") or 0)
+    gratuity = float(txn.get("gratuityAmount") or 0)
 
     net_of_gst_total = round(total - gst, 2)
     surcharge_share = (surcharge / total) if total > 0 else 0
+    gratuity_share = (gratuity / total) if total > 0 else 0
     surcharge_net = round(net_of_gst_total * surcharge_share, 2)
-    sales_net = round(net_of_gst_total - surcharge_net, 2)  # remainder — keeps the entry exactly balanced
+    gratuity_net = round(net_of_gst_total * gratuity_share, 2)
+    sales_net = round(net_of_gst_total - surcharge_net - gratuity_net, 2)  # remainder — keeps the entry exactly balanced
     gross_sales = round(sales_net + discount, 2)
 
     method = (txn.get("paymentMethod") or "").lower()
@@ -508,6 +514,8 @@ async def auto_post_pos_sale(txn: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     lines.append({"accountCode": "4000", "debit": 0.0, "credit": gross_sales, "description": "Sales revenue"})
     if surcharge_net > 0:
         lines.append({"accountCode": "4040", "debit": 0.0, "credit": surcharge_net, "description": txn.get("surchargeReason") or "Surcharge revenue"})
+    if gratuity_net > 0:
+        lines.append({"accountCode": "2410", "debit": 0.0, "credit": gratuity_net, "description": txn.get("gratuityLabel") or "Auto-gratuity"})
     if gst > 0:
         lines.append({"accountCode": "2100", "debit": 0.0, "credit": gst, "description": "GST on sales (incl.)"})
     return await post_entry(

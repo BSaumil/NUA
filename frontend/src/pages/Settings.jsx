@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Palette, MapPin, Users as UsersIcon, Building, GraduationCap, Plus, Edit, Trash2, Save, Receipt, Shield, ShieldCheck, Activity, DownloadCloud, Monitor, Zap, Printer, Globe, Clock, KeyRound, Target, Gift, Utensils, LayoutGrid } from 'lucide-react';
+import { Palette, MapPin, Users as UsersIcon, Building, GraduationCap, Plus, Edit, Trash2, Save, Receipt, Shield, ShieldCheck, Activity, DownloadCloud, Monitor, Zap, Printer, Globe, Clock, KeyRound, Target, Gift, Utensils, LayoutGrid, Percent } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -51,6 +51,9 @@ const Settings = () => {
   const [editingPerms, setEditingPerms] = useState([]);
   // Surcharge
   const [surchargeSettings, setSurchargeSettings] = useState({ enabled: false, weekendSurcharge: 0, publicHolidaySurcharge: 0, publicHolidays: [], weekendDays: ['Saturday', 'Sunday'] });
+  // Auto-gratuity
+  const [gratuitySettings, setGratuitySettings] = useState({ enabled: false, calculateOn: 'post_discount', rates: [] });
+  const [newGratuityRate, setNewGratuityRate] = useState({ label: '', percent: '', minCovers: '', maxCovers: '' });
   // Hardware
   const [printers, setPrinters] = useState([]);
   const [scanners, setScanners] = useState([]);
@@ -72,6 +75,7 @@ const Settings = () => {
     staffMgmtAPI.getReceiptSettings().then(r => { if (r.data && Object.keys(r.data).length) setReceiptSettings(r.data); }).catch(() => {});
     enterpriseAPI.getAllPermissions().then(r => setAllPerms(r.data)).catch(() => {});
     enterpriseAPI.getSurchargeSettings().then(r => { if (r.data) setSurchargeSettings(r.data); }).catch(() => {});
+    enterpriseAPI.getGratuitySettings().then(r => { if (r.data) setGratuitySettings(r.data); }).catch(() => {});
     enterpriseAPI.getPrinters().then(r => setPrinters(r.data)).catch(() => {});
     enterpriseAPI.getScanners().then(r => setScanners(r.data)).catch(() => {});
     enterpriseAPI.getReportConfig().then(r => { if (r.data) setReportConfig(r.data); }).catch(() => {});
@@ -171,6 +175,7 @@ const Settings = () => {
     { id: 'ops', label: 'System Health', icon: Activity },
     { id: 'backup', label: 'Backup', icon: DownloadCloud },
     { id: 'surcharge', label: 'Surcharges', icon: Zap },
+    { id: 'gratuity', label: 'Auto-Gratuity', icon: Percent },
     { id: 'hardware', label: 'Hardware', icon: Monitor },
     { id: 'training', label: 'Training', icon: GraduationCap },
     { id: 'locations', label: 'Locations', icon: MapPin },
@@ -228,6 +233,72 @@ const Settings = () => {
           <Button style={{ backgroundColor: theme.primary }} onClick={async () => {
             try { await enterpriseAPI.saveSurchargeSettings(surchargeSettings); toast.success('Surcharge settings saved'); } catch { toast.error('Failed'); }
           }} data-testid="save-surcharge-btn"><Save size={16} className="mr-1" /> Save Surcharge Settings</Button>
+        </CardContent></Card>
+      )}
+
+      {/* Auto-Gratuity */}
+      {activeTab === 'gratuity' && user?.role === 'owner' && (
+        <Card><CardHeader><CardTitle>Auto-Gratuity</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-gray-500">Automatically add a service charge at checkout — different rates can apply by party size (e.g. 18% for tables of 6+).</p>
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input type="checkbox" checked={gratuitySettings.enabled} onChange={e => setGratuitySettings({ ...gratuitySettings, enabled: e.target.checked })} data-testid="gratuity-enabled" />
+            Enable Auto-Gratuity
+          </label>
+          <div>
+            <label className="text-sm font-medium mb-1 block">Calculate on</label>
+            <div className="flex gap-3">
+              <label className="flex items-center gap-1.5 text-sm">
+                <input type="radio" name="gratuity-calc-on" checked={gratuitySettings.calculateOn === 'pre_discount'}
+                  onChange={() => setGratuitySettings({ ...gratuitySettings, calculateOn: 'pre_discount' })} data-testid="gratuity-pre-discount" />
+                Pre-discount subtotal
+              </label>
+              <label className="flex items-center gap-1.5 text-sm">
+                <input type="radio" name="gratuity-calc-on" checked={gratuitySettings.calculateOn !== 'pre_discount'}
+                  onChange={() => setGratuitySettings({ ...gratuitySettings, calculateOn: 'post_discount' })} data-testid="gratuity-post-discount" />
+                Discounted total
+              </label>
+            </div>
+          </div>
+          <div>
+            <label className="text-sm font-medium mb-1 block">Rates</label>
+            <div className="space-y-1.5">
+              {(gratuitySettings.rates || []).map((r, i) => (
+                <div key={i} className="flex items-center gap-2 text-sm bg-gray-50 rounded px-3 py-2" data-testid={`gratuity-rate-${i}`}>
+                  <span className="flex-1">{r.label || 'Rate'}</span>
+                  <Badge variant="outline">{r.percent}%</Badge>
+                  <span className="text-xs text-gray-500">
+                    {r.minCovers || r.maxCovers ? `covers ${r.minCovers ?? '0'}–${r.maxCovers ?? '∞'}` : 'default (any party size)'}
+                  </span>
+                  <button className="text-red-400 text-xs" onClick={() => setGratuitySettings({ ...gratuitySettings, rates: gratuitySettings.rates.filter((_, j) => j !== i) })}>&times;</button>
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-5 gap-2 mt-2">
+              <Input placeholder="Label" className="col-span-2" value={newGratuityRate.label} onChange={e => setNewGratuityRate({ ...newGratuityRate, label: e.target.value })} data-testid="new-gratuity-label" />
+              <Input type="number" step="0.5" placeholder="%" value={newGratuityRate.percent} onChange={e => setNewGratuityRate({ ...newGratuityRate, percent: e.target.value })} data-testid="new-gratuity-percent" />
+              <Input type="number" placeholder="Min covers" value={newGratuityRate.minCovers} onChange={e => setNewGratuityRate({ ...newGratuityRate, minCovers: e.target.value })} data-testid="new-gratuity-min-covers" />
+              <Input type="number" placeholder="Max covers" value={newGratuityRate.maxCovers} onChange={e => setNewGratuityRate({ ...newGratuityRate, maxCovers: e.target.value })} data-testid="new-gratuity-max-covers" />
+            </div>
+            <Button size="sm" variant="outline" className="mt-2" onClick={() => {
+              if (!newGratuityRate.label || !newGratuityRate.percent) return;
+              setGratuitySettings({
+                ...gratuitySettings,
+                rates: [...(gratuitySettings.rates || []), {
+                  id: `GRAT-${Date.now()}`,
+                  label: newGratuityRate.label,
+                  percent: parseFloat(newGratuityRate.percent) || 0,
+                  minCovers: newGratuityRate.minCovers ? parseInt(newGratuityRate.minCovers, 10) : null,
+                  maxCovers: newGratuityRate.maxCovers ? parseInt(newGratuityRate.maxCovers, 10) : null,
+                }],
+              });
+              setNewGratuityRate({ label: '', percent: '', minCovers: '', maxCovers: '' });
+            }} data-testid="add-gratuity-rate-btn"><Plus size={14} className="mr-1" /> Add Rate</Button>
+            <p className="text-[11px] text-gray-400 mt-1">Leave covers blank on one rate to use it as the default for parties that don't match a sized rule. The most specific covers range wins.</p>
+          </div>
+          <Button style={{ backgroundColor: theme.primary }} onClick={async () => {
+            try { await enterpriseAPI.saveGratuitySettings(gratuitySettings); toast.success('Gratuity settings saved'); } catch { toast.error('Failed'); }
+          }} data-testid="save-gratuity-btn"><Save size={16} className="mr-1" /> Save Gratuity Settings</Button>
         </CardContent></Card>
       )}
 

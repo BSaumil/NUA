@@ -491,6 +491,10 @@ export const enterpriseAPI = {
   getSurchargeSettings: () => api.get('/surcharge/settings'),
   saveSurchargeSettings: (data) => api.post('/surcharge/settings', data),
   checkSurcharge: () => api.get('/surcharge/check'),
+  // Auto-gratuity
+  getGratuitySettings: () => api.get('/gratuity/settings'),
+  saveGratuitySettings: (data) => api.post('/gratuity/settings', data),
+  checkGratuity: (covers) => api.get('/gratuity/check', { params: { covers } }),
   // Live Sales
   getLiveSales: () => api.get('/live-sales'),
   // Permissions
@@ -611,7 +615,7 @@ export const inventoryAPI = {
   listRecipes: () => api.get('/recipes'),
   createStockTake: (data) => api.post('/stock-takes', data),
   listStockTakes: () => api.get('/stock-takes'),
-  assignInvoiceToStock: (invoiceId, assignments) => api.post(`/invoices/${invoiceId}/assign-stock`, { assignments }),
+  assignInvoiceToStock: (invoiceId, assignments, priceUpdates) => api.post(`/invoices/${invoiceId}/assign-stock`, { assignments, priceUpdates }),
   bas: (params) => api.get('/accounting/bas', { params }),
   basCsv: (params) => api.get('/accounting/bas.csv', { params, responseType: 'blob' }),
 };
