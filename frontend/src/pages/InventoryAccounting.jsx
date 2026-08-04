@@ -219,6 +219,9 @@ function InvoiceAssignmentPanel() {
   const [ingredients, setIngredients] = useState([]);
   const [opened, setOpened] = useState(null);
   const [assignments, setAssignments] = useState([]);
+  const [priceReview, setPriceReview] = useState(null);
+  const [priceDraft, setPriceDraft] = useState({});
+  const [savingPrices, setSavingPrices] = useState(false);
   useEffect(() => {
     aiPantryAPI.listInvoices().then(r => setInvoices(r.data || []));
     inventoryAPI.listIngredients().then(r => setIngredients(r.data || []));
@@ -241,9 +244,32 @@ function InvoiceAssignmentPanel() {
     try {
       const r = await inventoryAPI.assignInvoiceToStock(opened.id, filtered);
       toast({ title: 'Stock updated', description: `${r.data.movements.length} ingredients credited · ${r.data.recipesRolledUp} recipes re-costed` });
-      setOpened(null);
       aiPantryAPI.listInvoices().then(r => setInvoices(r.data || []));
+      if ((r.data.priceReview || []).length > 0) {
+        setPriceReview(r.data.priceReview);
+        setPriceDraft(Object.fromEntries(r.data.priceReview.map(p => [p.productId, p.price])));
+      } else {
+        setOpened(null);
+      }
     } catch (e) { toast({ title: 'Failed', description: e?.response?.data?.detail, variant: 'destructive' }); }
+  };
+
+  const savePrices = async () => {
+    setSavingPrices(true);
+    try {
+      await Promise.all(priceReview.map(p => {
+        const newPrice = parseFloat(priceDraft[p.productId]);
+        return Number.isFinite(newPrice) && newPrice !== p.price
+          ? productsAPI.update(p.productId, { price: newPrice })
+          : Promise.resolve();
+      }));
+      toast({ title: 'Prices updated' });
+    } catch { toast({ title: 'Some prices failed to save', variant: 'destructive' }); }
+    finally {
+      setSavingPrices(false);
+      setPriceReview(null);
+      setOpened(null);
+    }
   };
   return (
     <Card><CardContent className="p-4">
@@ -269,6 +295,48 @@ function InvoiceAssignmentPanel() {
               ))}
             </div>
           )}
+        </>
+      ) : priceReview ? (
+        <>
+          <div className="flex justify-between items-center mb-3">
+            <div>
+              <h3 className="font-bold">Cost changed on {priceReview.length} product{priceReview.length === 1 ? '' : 's'}</h3>
+              <p className="text-xs text-gray-500">Receiving this stock moved the recipe cost — review the margin and re-price now if needed, or leave the price as-is.</p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => { setPriceReview(null); setOpened(null); }}>Skip</Button>
+              <Button onClick={savePrices} disabled={savingPrices} style={{ background: theme.primary }} data-testid="save-prices-btn">
+                <Save size={14} className="mr-1" /> {savingPrices ? 'Saving…' : 'Save Prices'}
+              </Button>
+            </div>
+          </div>
+          <table className="w-full text-sm" data-testid="price-review-table">
+            <thead className="bg-gray-50 text-xs uppercase text-gray-500"><tr><th className="text-left p-2">Product</th><th>New cost</th><th>Price</th><th>Margin</th></tr></thead>
+            <tbody>
+              {priceReview.map(p => {
+                const draftPrice = parseFloat(priceDraft[p.productId]);
+                const margin = Number.isFinite(draftPrice) && draftPrice > 0 ? Math.round((draftPrice - p.cost) / draftPrice * 1000) / 10 : null;
+                return (
+                  <tr key={p.productId} className="border-t" data-testid={`price-review-row-${p.productId}`}>
+                    <td className="p-2">{p.name}</td>
+                    <td className="p-2">${p.cost.toFixed(2)}</td>
+                    <td className="p-2">
+                      <Input type="number" step="0.01" className="w-24" value={priceDraft[p.productId] ?? ''}
+                        onChange={e => setPriceDraft(d => ({ ...d, [p.productId]: e.target.value }))}
+                        data-testid={`price-review-input-${p.productId}`} />
+                    </td>
+                    <td className="p-2">
+                      {margin === null ? '—' : (
+                        <Badge className={margin < 20 ? 'bg-red-100 text-red-700' : margin < 40 ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}>
+                          {margin}%
+                        </Badge>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </>
       ) : (
         <>

@@ -271,6 +271,12 @@ async def assign_invoice_to_stock(invoice_id: str, data: dict, user: dict = Depe
     touched_ings = {m["ingredientId"] for m in movements}
     affected_recipes = await db.recipes.find(
         {"lines.ingredientId": {"$in": list(touched_ings)}}, {"_id": 0}).to_list(500)
+    # Receiving stock can move an ingredient's cost enough to erode a
+    # product's margin — surfaced here so the owner can react on the same
+    # screen instead of noticing weeks later on a margin report, and can
+    # optionally re-price right away via `priceUpdates: {productId: newPrice}`.
+    price_updates = data.get("priceUpdates") or {}
+    price_review = []
     for rec in affected_recipes:
         lines = rec.get("lines", [])
         ing_lookup = {}
@@ -281,8 +287,23 @@ async def assign_invoice_to_stock(invoice_id: str, data: dict, user: dict = Depe
             sum((ing_lookup[l["ingredientId"]] or {}).get("unitCost", 0) * l["qtyBase"]
                 for l in lines), 4)
         await db.recipes.update_one({"productId": rec["productId"]}, {"$set": {"computedCost": new_cost}})
-        await db.products.update_one({"id": rec["productId"]}, {"$set": {"cost": new_cost}})
-    return {"movements": movements, "errors": errors, "recipesRolledUp": len(affected_recipes)}
+        product_update = {"cost": new_cost}
+        override = price_updates.get(rec["productId"])
+        if override is not None:
+            try:
+                product_update["price"] = round(float(override), 2)
+            except (TypeError, ValueError):
+                pass
+        await db.products.update_one({"id": rec["productId"]}, {"$set": product_update})
+        product = await db.products.find_one({"id": rec["productId"]}, {"_id": 0, "name": 1, "price": 1})
+        price = float(product_update.get("price", (product or {}).get("price", 0)) or 0)
+        margin_pct = round(((price - new_cost) / price) * 100, 1) if price > 0 else None
+        price_review.append({
+            "productId": rec["productId"], "name": (product or {}).get("name", ""),
+            "cost": new_cost, "price": price, "marginPct": margin_pct,
+        })
+    return {"movements": movements, "errors": errors, "recipesRolledUp": len(affected_recipes),
+            "priceReview": price_review}
 
 
 # =============================================================================

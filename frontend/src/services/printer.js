@@ -23,7 +23,16 @@ class PrinterService {
   };
 
   // Format receipt text
-  formatReceipt(transaction, businessInfo = {}) {
+  // printerConfig: { footerInPerson, footerOnline, paddingLines } — from the
+  // printer's own profile (backend/models/printer.py). Defaults keep the
+  // footer on and 3 padding lines when no config is supplied.
+  formatReceipt(transaction, businessInfo = {}, printerConfig = {}) {
+    const isOnlineOrder = transaction.orderType === 'online';
+    const showFooter = isOnlineOrder
+      ? printerConfig.footerOnline !== false
+      : printerConfig.footerInPerson !== false;
+    const paddingLines = Number.isFinite(printerConfig.paddingLines) ? printerConfig.paddingLines : 3;
+
     let receipt = '';
 
     // Initialize
@@ -117,17 +126,21 @@ class PrinterService {
     // Payment method
     receipt += `Payment: ${transaction.paymentMethod}\n\n`;
 
-    // Footer
-    receipt += this.ESC_POS.ALIGN_CENTER;
-    receipt += 'Thank you for your business!\n';
-    receipt += 'Please come again\n\n';
-    
-    if (businessInfo.website) {
-      receipt += `${businessInfo.website}\n`;
+    // Footer — toggleable per printer profile, split by in-person vs online
+    // orders so a kitchen line can run bare while a customer-facing online
+    // receipt keeps the contact/return info.
+    if (showFooter) {
+      receipt += this.ESC_POS.ALIGN_CENTER;
+      receipt += 'Thank you for your business!\n';
+      receipt += 'Please come again\n\n';
+
+      if (businessInfo.website) {
+        receipt += `${businessInfo.website}\n`;
+      }
     }
 
     // Feed and cut
-    receipt += this.ESC_POS.FEED + '\x03'; // Feed 3 lines
+    receipt += this.ESC_POS.FEED + String.fromCharCode(Math.max(0, paddingLines));
     receipt += this.ESC_POS.CUT;
 
     return receipt;
@@ -136,7 +149,7 @@ class PrinterService {
   // Print to network printer
   async printToNetwork(printerConfig, transaction) {
     try {
-      const receiptText = this.formatReceipt(transaction);
+      const receiptText = this.formatReceipt(transaction, {}, printerConfig);
       const encoded = this.encoder.encode(receiptText);
 
       // Send to printer via network
@@ -157,15 +170,15 @@ class PrinterService {
     } catch (error) {
       console.error('Error printing receipt:', error);
       // Fallback to browser print
-      this.printBrowser(transaction);
+      this.printBrowser(transaction, printerConfig);
       return false;
     }
   }
 
   // Fallback browser print
-  printBrowser(transaction) {
+  printBrowser(transaction, printerConfig = {}) {
     const printWindow = window.open('', '_blank');
-    const html = this.generateHTMLReceipt(transaction);
+    const html = this.generateHTMLReceipt(transaction, printerConfig);
     
     printWindow.document.write(html);
     printWindow.document.close();
@@ -178,7 +191,11 @@ class PrinterService {
   }
 
   // Generate HTML receipt for browser printing
-  generateHTMLReceipt(transaction) {
+  generateHTMLReceipt(transaction, printerConfig = {}) {
+    const isOnlineOrder = transaction.orderType === 'online';
+    const showFooter = isOnlineOrder
+      ? printerConfig.footerOnline !== false
+      : printerConfig.footerInPerson !== false;
     return `
       <!DOCTYPE html>
       <html>
@@ -243,8 +260,10 @@ class PrinterService {
         <div>Payment: ${transaction.paymentMethod}</div>
         <div class="separator"></div>
         <div class="center" style="font-size: 10px">Prices include GST</div>
+        ${showFooter ? `
         <div class="center">Thank you for your business!</div>
         <div class="center">Please come again</div>
+        ` : ''}
       </body>
       </html>
     `;

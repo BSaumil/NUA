@@ -36,6 +36,53 @@ async def check_surcharge():
         return {"surchargePercent": config.get("weekendSurcharge", 0), "reason": "Weekend Surcharge"}
     return {"surchargePercent": 0, "reason": None}
 
+# ============ AUTO-GRATUITY ============
+# Multiple conditional rates (e.g. 18% for parties of 6+, 10% default), and a
+# choice of whether the rate applies to the pre-discount subtotal or the
+# discounted net — a discount shouldn't quietly shrink the tip a server
+# earned for the same work.
+@router.get("/gratuity/settings")
+async def get_gratuity_settings():
+    s = await db.settings.find_one({"key": "gratuity_config"}, {"_id": 0})
+    return s.get("value", {}) if s else {
+        "enabled": False,
+        "calculateOn": "post_discount",  # pre_discount | post_discount
+        "rates": [],  # [{id, label, percent, minCovers, maxCovers}]
+    }
+
+@router.post("/gratuity/settings")
+async def save_gratuity_settings(data: dict, _: dict = Depends(require_owner)):
+    await db.settings.update_one({"key": "gratuity_config"}, {"$set": {"key": "gratuity_config", "value": data}}, upsert=True)
+    return {"message": "Gratuity settings saved"}
+
+def _match_gratuity_rate(rates, covers):
+    """Most specific match wins: a rule scoped to a covers range beats the
+    unconditional default, so a 6+ party gets 18% instead of falling through
+    to the standard 10%."""
+    if covers is not None:
+        for r in rates:
+            lo, hi = r.get("minCovers"), r.get("maxCovers")
+            if lo is not None or hi is not None:
+                if (lo is None or covers >= lo) and (hi is None or covers <= hi):
+                    return r
+    for r in rates:
+        if r.get("minCovers") is None and r.get("maxCovers") is None:
+            return r
+    return None
+
+@router.get("/gratuity/check")
+async def check_gratuity(covers: int = None):
+    """Which gratuity rate (if any) applies right now, for this party size."""
+    s = await db.settings.find_one({"key": "gratuity_config"}, {"_id": 0})
+    config = s.get("value", {}) if s else {}
+    calculate_on = config.get("calculateOn", "post_discount")
+    if not config.get("enabled"):
+        return {"gratuityPercent": 0, "label": None, "calculateOn": calculate_on}
+    rate = _match_gratuity_rate(config.get("rates") or [], covers)
+    if not rate:
+        return {"gratuityPercent": 0, "label": None, "calculateOn": calculate_on}
+    return {"gratuityPercent": float(rate.get("percent") or 0), "label": rate.get("label"), "calculateOn": calculate_on}
+
 # ============ LIVE SALES REPORTING ============
 @router.get("/live-sales")
 async def get_live_sales(_: dict = Depends(require_owner_or_manager)):

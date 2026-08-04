@@ -15,7 +15,7 @@ export default function Modifiers() {
   const [showDialog, setShowDialog] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: '', type: 'list', mandatory: false, multiSelect: false, maxSelections: 1, options: [], printWithItem: true, channels: ['dine-in','pickup','delivery'], availableFrom: '', availableTo: '', activeDays: [] });
-  const [newOption, setNewOption] = useState({ name: '', price: '' });
+  const [newOption, setNewOption] = useState({ name: '', price: '', childModifierId: '' });
 
   useEffect(() => { fetchData(); }, []);
   const fetchData = async () => { try { const r = await itemsSystemAPI.getModifiers(); setModifiers(r.data); } catch {} };
@@ -25,9 +25,39 @@ export default function Modifiers() {
 
   const addOption = () => {
     if (!newOption.name) return;
-    setForm({ ...form, options: [...form.options, { name: newOption.name, price: parseFloat(newOption.price) || 0 }] });
-    setNewOption({ name: '', price: '' });
+    const opt = { name: newOption.name, price: parseFloat(newOption.price) || 0 };
+    if (newOption.childModifierId) opt.childModifierId = newOption.childModifierId;
+    setForm({ ...form, options: [...form.options, opt] });
+    setNewOption({ name: '', price: '', childModifierId: '' });
   };
+
+  const setOptionChild = (idx, childModifierId) => {
+    setForm({
+      ...form,
+      options: form.options.map((o, i) => i === idx
+        ? (childModifierId ? { ...o, childModifierId } : (() => { const { childModifierId: _drop, ...rest } = o; return rest; })())
+        : o),
+    });
+  };
+
+  // Nested modifiers cap at 3 levels deep — depth of the longest chain
+  // hanging off `mod` (1 = itself, no children).
+  const modifierDepth = (mod, visited = new Set()) => {
+    if (!mod || visited.has(mod.id)) return 0;
+    visited.add(mod.id);
+    let maxChild = 0;
+    (mod.options || []).forEach(o => {
+      if (o.childModifierId) {
+        const child = modifiers.find(m => m.id === o.childModifierId);
+        if (child) maxChild = Math.max(maxChild, modifierDepth(child, visited));
+      }
+    });
+    return 1 + maxChild;
+  };
+
+  // A modifier can be nested under an option here if it isn't itself
+  // (direct self-reference) and attaching it wouldn't push the chain past 3 levels.
+  const eligibleChildModifiers = modifiers.filter(m => (!editing || m.id !== editing.id) && (1 + modifierDepth(m)) <= 3);
 
   const handleSave = async () => {
     if (!form.name) { toast.error('Name required'); return; }
@@ -61,7 +91,10 @@ export default function Modifiers() {
               </div>
               <div className="space-y-1">
                 {(mod.options || []).map((o, i) => (
-                  <div key={i} className="flex justify-between text-sm py-0.5"><span className="text-gray-600">{o.name}</span>{o.price > 0 && <span className="text-gray-500">+${o.price.toFixed(2)}</span>}</div>
+                  <div key={i} className="flex justify-between text-sm py-0.5">
+                    <span className="text-gray-600">{o.name}{o.childModifierId && <span className="text-[10px] text-blue-600 ml-1">→ nested</span>}</span>
+                    {o.price > 0 && <span className="text-gray-500">+${o.price.toFixed(2)}</span>}
+                  </div>
                 ))}
               </div>
             </CardContent>
@@ -86,8 +119,26 @@ export default function Modifiers() {
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.printWithItem} onChange={e => setForm({ ...form, printWithItem: e.target.checked })} /> Print with main item on ticket</label>
             <div>
               <p className="text-sm font-medium mb-2">Options</p>
+              <p className="text-[11px] text-gray-400 mb-2">Nest a follow-up modifier under an option so it only appears once that option is picked — e.g. "Oat Milk" reveals "Sweetness Level". Up to 3 levels deep.</p>
               {form.options.map((o, i) => (
-                <div key={i} className="flex items-center gap-2 mb-1"><span className="flex-1 text-sm">{o.name}</span><span className="text-sm text-gray-500">{o.price > 0 ? `+$${o.price}` : 'Free'}</span><button className="text-red-400 text-xs" onClick={() => setForm({ ...form, options: form.options.filter((_, j) => j !== i) })}>&times;</button></div>
+                <div key={i} className="mb-1.5 border rounded-md p-2">
+                  <div className="flex items-center gap-2">
+                    <span className="flex-1 text-sm">{o.name}</span>
+                    <span className="text-sm text-gray-500">{o.price > 0 ? `+$${o.price}` : 'Free'}</span>
+                    <button className="text-red-400 text-xs" onClick={() => setForm({ ...form, options: form.options.filter((_, j) => j !== i) })}>&times;</button>
+                  </div>
+                  <select
+                    className="w-full mt-1.5 p-1 border rounded text-xs text-gray-600"
+                    value={o.childModifierId || ''}
+                    onChange={e => setOptionChild(i, e.target.value)}
+                    data-testid={`option-child-mod-${i}`}
+                  >
+                    <option value="">No follow-up modifier</option>
+                    {eligibleChildModifiers.map(m => (
+                      <option key={m.id} value={m.id}>Reveals: {m.name}</option>
+                    ))}
+                  </select>
+                </div>
               ))}
               <div className="flex gap-2 mt-2">
                 <Input placeholder="Option name" className="flex-1 h-8 text-sm" value={newOption.name} onChange={e => setNewOption({ ...newOption, name: e.target.value })} data-testid="option-name" />

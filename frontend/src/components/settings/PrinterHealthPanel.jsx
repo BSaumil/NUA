@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
-import { Printer } from 'lucide-react';
+import { Input } from '../ui/input';
+import { Printer, ChevronDown, ChevronUp } from 'lucide-react';
 import { coursingAPI } from '../../services/api';
 import { toast } from 'sonner';
 
@@ -16,6 +17,9 @@ import { toast } from 'sonner';
 export default function PrinterHealthPanel() {
   const [health, setHealth] = useState(null);
   const [checking, setChecking] = useState(false);
+  const [layoutOpenFor, setLayoutOpenFor] = useState(null);
+  const [layoutDraft, setLayoutDraft] = useState({});
+  const [savingLayout, setSavingLayout] = useState(false);
 
   const checkPrinters = async () => {
     setChecking(true);
@@ -28,6 +32,27 @@ export default function PrinterHealthPanel() {
       else toast('No station printers configured — dockets use the browser dialog');
     } catch { toast.error('Could not check printers'); }
     finally { setChecking(false); }
+  };
+
+  const toggleLayout = (p) => {
+    if (layoutOpenFor === p.printer) { setLayoutOpenFor(null); return; }
+    setLayoutOpenFor(p.printer);
+    setLayoutDraft({
+      footerInPerson: p.footerInPerson !== false,
+      footerOnline: p.footerOnline !== false,
+      paddingLines: p.paddingLines ?? 3,
+    });
+  };
+
+  const saveLayout = async (printer) => {
+    setSavingLayout(true);
+    try {
+      await coursingAPI.setPrintTarget(printer, layoutDraft);
+      toast.success(`Ticket layout saved for ${printer}`);
+      setHealth(h => h ? { ...h, printers: h.printers.map(p => p.printer === printer ? { ...p, ...layoutDraft } : p) } : h);
+      setLayoutOpenFor(null);
+    } catch { toast.error('Could not save layout'); }
+    finally { setSavingLayout(false); }
   };
 
   const selfTest = async (printer) => {
@@ -59,26 +84,58 @@ export default function PrinterHealthPanel() {
           </p>
         )}
         {(health?.printers || []).map(p => (
-          <div key={p.printer} className="flex items-center gap-2 p-2 rounded-lg border"
-            data-testid={`printer-${p.printer}`}>
-            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-              p.reachable === true ? 'bg-emerald-500'
-              : p.reachable === false ? 'bg-red-500' : 'bg-gray-300'}`} />
-            <span className="text-sm font-medium flex-1 truncate">{p.printer}</span>
-            <span className="text-[10px] text-gray-500">
-              {p.host ? `${p.host}:${p.port}` : 'no device'}
-            </span>
-            {p.reachable === true && (
-              <Badge className="text-[10px] bg-emerald-100 text-emerald-700">{p.latencyMs}ms</Badge>
-            )}
-            {p.reachable === false && (
-              <Badge className="text-[10px] bg-red-100 text-red-700" title={p.error}>unreachable</Badge>
-            )}
-            {p.host && (
-              <Button size="sm" variant="outline" className="h-6 text-[10px]"
-                onClick={() => selfTest(p.printer)} data-testid={`selftest-${p.printer}`}>
-                Test page
+          <div key={p.printer} className="rounded-lg border" data-testid={`printer-${p.printer}`}>
+            <div className="flex items-center gap-2 p-2">
+              <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                p.reachable === true ? 'bg-emerald-500'
+                : p.reachable === false ? 'bg-red-500' : 'bg-gray-300'}`} />
+              <span className="text-sm font-medium flex-1 truncate">{p.printer}</span>
+              <span className="text-[10px] text-gray-500">
+                {p.host ? `${p.host}:${p.port}` : 'no device'}
+              </span>
+              {p.reachable === true && (
+                <Badge className="text-[10px] bg-emerald-100 text-emerald-700">{p.latencyMs}ms</Badge>
+              )}
+              {p.reachable === false && (
+                <Badge className="text-[10px] bg-red-100 text-red-700" title={p.error}>unreachable</Badge>
+              )}
+              {p.host && (
+                <Button size="sm" variant="outline" className="h-6 text-[10px]"
+                  onClick={() => selfTest(p.printer)} data-testid={`selftest-${p.printer}`}>
+                  Test page
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" className="h-6 text-[10px] px-1.5"
+                onClick={() => toggleLayout(p)} data-testid={`ticket-layout-toggle-${p.printer}`}>
+                Ticket layout {layoutOpenFor === p.printer ? <ChevronUp size={12} className="ml-0.5" /> : <ChevronDown size={12} className="ml-0.5" />}
               </Button>
+            </div>
+            {layoutOpenFor === p.printer && (
+              <div className="border-t p-2.5 space-y-2 bg-gray-50" data-testid={`ticket-layout-${p.printer}`}>
+                <label className="flex items-center justify-between text-xs">
+                  <span>Footer on dine-in / takeaway tickets</span>
+                  <input type="checkbox" checked={layoutDraft.footerInPerson}
+                    onChange={e => setLayoutDraft(d => ({ ...d, footerInPerson: e.target.checked }))}
+                    data-testid={`footer-in-person-${p.printer}`} />
+                </label>
+                <label className="flex items-center justify-between text-xs">
+                  <span>Footer on online / delivery tickets</span>
+                  <input type="checkbox" checked={layoutDraft.footerOnline}
+                    onChange={e => setLayoutDraft(d => ({ ...d, footerOnline: e.target.checked }))}
+                    data-testid={`footer-online-${p.printer}`} />
+                </label>
+                <label className="flex items-center justify-between text-xs gap-2">
+                  <span>Padding lines before cut</span>
+                  <Input type="number" min={0} max={9} className="h-7 w-16 text-xs"
+                    value={layoutDraft.paddingLines}
+                    onChange={e => setLayoutDraft(d => ({ ...d, paddingLines: parseInt(e.target.value, 10) || 0 }))}
+                    data-testid={`padding-lines-${p.printer}`} />
+                </label>
+                <Button size="sm" className="h-7 text-xs w-full" disabled={savingLayout}
+                  onClick={() => saveLayout(p.printer)} data-testid={`save-layout-${p.printer}`}>
+                  {savingLayout ? 'Saving…' : 'Save'}
+                </Button>
+              </div>
             )}
           </div>
         ))}

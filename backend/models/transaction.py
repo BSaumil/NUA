@@ -49,6 +49,10 @@ class Transaction(BaseModel):
     surchargeAmount: float = 0.0
     surchargePercent: float = 0.0
     surchargeReason: Optional[str] = None
+    gratuityAmount: float = 0.0
+    gratuityPercent: float = 0.0
+    gratuityLabel: Optional[str] = None
+    covers: Optional[int] = None
     gst: float
     total: float
     paymentMethod: str
@@ -79,6 +83,7 @@ class TransactionCreate(BaseModel):
     appliedDiscounts: List[AppliedDiscount] = []
     pointsRedeemed: int = 0
     pointsDiscount: float = 0.0
+    covers: Optional[int] = None
     emailReceipt: Optional[str] = None
     smsReceipt: Optional[str] = None
     tableNumber: Optional[str] = None
