@@ -1,16 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 80" width="200" height="80" role="img" aria-label="Nua">
-  <title>NUA wordmark</title>
-  <!-- Marketing wordmark: Instrument Serif italic, gradient-filled.
-       NOTE: this file references the Instrument Serif web font by name. If a
-       vendor or tool can't guarantee that font is loaded, convert the text to
-       outlines before sending it out (Figma/Illustrator: Text -> Outline). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 140">
   <defs>
-    <linearGradient id="nuaWordGradient" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%"   stop-color="#f58c14"/>
-      <stop offset="50%"  stop-color="#ec4899"/>
-      <stop offset="100%" stop-color="#8b5cf6"/>
+    <linearGradient id="nuaChrome" x1="0%" y1="0%" x2="100%" y2="30%">
+      <stop offset="10%" stop-color="#f58c14"/>
+      <stop offset="55%" stop-color="#8b5cf6"/>
+      <stop offset="90%" stop-color="#ec4899"/>
     </linearGradient>
   </defs>
-  <text x="4" y="58" font-family="'Instrument Serif', Georgia, serif" font-style="italic"
-        font-size="64" fill="url(#nuaWordGradient)">Nua</text>
+  <!-- Requires 'Bricolage Grotesque' (weight 700) loaded as a web font. For print or any
+       context where the font can't be guaranteed, use wordmark-nua-gradient-outlined.svg instead. -->
+  <text x="0" y="105" font-family="'Bricolage Grotesque', sans-serif" font-weight="700" font-size="112" letter-spacing="-2" fill="url(#nuaChrome)">NUA</text>
 </svg>

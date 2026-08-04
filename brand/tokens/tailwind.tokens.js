@@ -10,7 +10,7 @@ module.exports = {
     },
   },
   fontFamily: {
-    'nua-wordmark':  ["'Instrument Serif'", 'Georgia', 'serif'],
+    'nua-wordmark':  ["'Bricolage Grotesque'", 'sans-serif'],
     'nua-display':   ["'Space Grotesk'", 'ui-sans-serif', 'system-ui', 'sans-serif'],
     'nua-body':      ['Manrope', 'ui-sans-serif', 'system-ui', 'sans-serif'],
     'nua-mono':      ["'IBM Plex Mono'", 'ui-monospace', 'Menlo', 'monospace'],

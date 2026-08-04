@@ -1,9 +1,10 @@
 # NUA brand assets
 
-Generated from `BRAND-SPEC.md`. The spec arrived without its asset package,
-so the icon, wordmark, flourish, favicons and tokens here were built to match
-its description (Pulse Grid icon, Instrument Serif gradient wordmark, Caveat
-signature flourish) and its colour/type tables.
+Sourced from the "Chrome × Brand Identity × Signature × Geometric Pulse"
+digital identity package delivered against `BRAND-SPEC.md` (Pulse Grid icon,
+Bricolage Grotesque gradient wordmark, Caveat signature flourish). This
+supersedes an earlier hand-built approximation of the same spec that used
+Instrument Serif before the real asset package arrived.
 
 ## What's wired into the app already
 
@@ -21,9 +22,10 @@ on login/hero, `<Icon variant="mono" />` below ~24px.
 ## Files here are the source of truth for handoff
 
 `assets/wordmark/*.svg` are for print vendors, signage and merch — not for
-direct import into the app (use the React components). They reference
-Instrument Serif **by name**: convert text to outlines before sending to any
-vendor who can't guarantee the font is loaded.
+direct import into the app (use the React components). `wordmark-nua-gradient.svg`
+and `lockup-horizontal.svg` reference Bricolage Grotesque **by name**; the
+`-outlined` siblings are true vector outlines with no font dependency — use
+those for any vendor who can't guarantee the font is loaded.
 
 ## Not generated
 

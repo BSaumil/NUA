@@ -10,7 +10,7 @@ module.exports = {
   		// NUA brand tokens — see brand/BRAND-SPEC.md. `nua-purple` is reserved
   		// for AI-surfaced features; never use it decoratively.
   		fontFamily: {
-  			'nua-wordmark':  ["'Instrument Serif'", 'Georgia', 'serif'],
+  			'nua-wordmark':  ["'Bricolage Grotesque'", 'sans-serif'],
   			'nua-display':   ["'Space Grotesk'", 'ui-sans-serif', 'system-ui', 'sans-serif'],
   			'nua-body':      ['Manrope', 'ui-sans-serif', 'system-ui', 'sans-serif'],
   			'nua-mono':      ["'IBM Plex Mono'", 'ui-monospace', 'Menlo', 'monospace'],

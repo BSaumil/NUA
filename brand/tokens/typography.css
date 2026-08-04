@@ -1,10 +1,10 @@
 /* NUA typography tokens. Imported once, globally.
    Roles per BRAND-SPEC.md §5. */
-@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@500;600;700&family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Caveat:wght@600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Space+Grotesk:wght@500;600;700&family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Caveat:wght@600&display=swap');
 
 :root {
   /* Marketing wordmark — gradient-filled, hero contexts only */
-  --nua-font-wordmark: 'Instrument Serif', Georgia, serif;
+  --nua-font-wordmark: 'Bricolage Grotesque', sans-serif;
   /* Display / product headings — in-app, functional UI */
   --nua-font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
   /* Body copy */

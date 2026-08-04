@@ -1,7 +1,15 @@
 {
-  "nua-orange": { "value": "#f58c14", "role": "Primary / CTA" },
-  "nua-purple": { "value": "#8b5cf6", "role": "AI features only" },
-  "nua-pink":   { "value": "#ec4899", "role": "Insights / alerts" },
-  "nua-ink":    { "value": "#1c1917", "role": "Dark mode / reversed" },
-  "nua-paper":  { "value": "#fdfcfa", "role": "Background" }
+  "orange":   { "value": "#f58c14", "usage": "primary / CTA" },
+  "purple":   { "value": "#8b5cf6", "usage": "AI features only — reserved" },
+  "pink":     { "value": "#ec4899", "usage": "insights / alerts" },
+  "white":    { "value": "#ffffff", "usage": "background" },
+  "ink":      { "value": "#1c1917", "usage": "dark mode / reversed" },
+  "inkSoft":  { "value": "#57534e", "usage": "secondary text" },
+  "paper":    { "value": "#fdfcfa", "usage": "warm background alt" },
+  "paperAlt": { "value": "#f3efe7", "usage": "panel background" },
+  "line":     { "value": "#e6e0d4", "usage": "hairline borders" },
+  "gradient": {
+    "value": "linear-gradient(100deg, #f58c14 10%, #8b5cf6 55%, #ec4899 90%)",
+    "usage": "hero/marketing wordmark fill only — never functional UI"
+  }
 }

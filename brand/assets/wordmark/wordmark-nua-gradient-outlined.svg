@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 114">
+  <defs>
+    <linearGradient id="nuaChrome" x1="0%" y1="0%" x2="100%" y2="30%">
+      <stop offset="10%" stop-color="#f58c14"/>
+      <stop offset="55%" stop-color="#8b5cf6"/>
+      <stop offset="90%" stop-color="#ec4899"/>
+    </linearGradient>
+  </defs>
+  <g fill="url(#nuaChrome)" transform="translate(0,102.40)">
+  <g transform="translate(0.00,0) scale(0.14000,-0.14000)"><path d="M73 0V660H261L560 193H571L562 660H702V0H532L216 489H205L214 0Z"/></g>
+    <g transform="translate(105.70,0) scale(0.14000,-0.14000)"><path d="M365 -14Q304 -14 256.5 -1.5Q209 11 174.0 34.5Q139 58 115.5 91.5Q92 125 80.5 167.0Q69 209 69 259V660H214V264Q214 213 230.5 179.5Q247 146 280.0 130.0Q313 114 364 114Q416 114 449.5 130.0Q483 146 499.5 179.5Q516 213 516 264V660H659V259Q659 129 585.5 57.5Q512 -14 365 -14Z"/></g>
+    <g transform="translate(204.82,0) scale(0.14000,-0.14000)"><path d="M18 0 244 660H454L680 0H524L357 546H342L174 0ZM145 130V228H574V130Z"/></g>
+  </g>
+</svg>
