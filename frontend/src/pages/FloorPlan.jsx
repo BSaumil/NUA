@@ -17,7 +17,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger
 } from '../components/ui/dropdown-menu';
 import { useTheme } from '../contexts/ThemeContext';
-import { floorPlansAPI, tableCoursesAPI } from '../services/api';
+import { floorPlansAPI, tableCoursesAPI, v15API } from '../services/api';
 import { toast } from 'sonner';
 import { TableInfoDrawer } from '../components/floor/TableInfoDrawer';
 
@@ -54,6 +54,12 @@ export default function FloorPlan() {
   const [drawerTable, setDrawerTable] = useState(null);
   const [courseSettingsOpen, setCourseSettingsOpen] = useState(false);
   const [courseDraft, setCourseDraft] = useState([]);
+
+  // Merge tables: multi-select occupied tables on the floor plan and combine
+  // their open checks into one, so a large or growing party doesn't need
+  // staff to juggle separate tabs or leave the floor to rearrange seating.
+  const [mergeMode, setMergeMode] = useState(false);
+  const [mergeSelection, setMergeSelection] = useState([]);
 
   const fetchCourses = useCallback(async () => {
     try {
@@ -184,8 +190,44 @@ export default function FloorPlan() {
 
   const handleMouseUp = () => { setDragging(null); };
 
+  const toggleMergeSelect = (tableId) => {
+    setMergeSelection(sel => sel.includes(tableId) ? sel.filter(id => id !== tableId) : [...sel, tableId]);
+  };
+
+  const handleMergeTables = async () => {
+    try {
+      const res = await v15API.getTabs();
+      const openTabs = res.data || [];
+      const selectedTables = tables.filter(t => mergeSelection.includes(t.id));
+      const matched = selectedTables
+        .map(t => ({ table: t, tab: openTabs.find(tb => String(tb.tableNumber) === String(t.number)) }))
+        .filter(m => m.tab);
+      if (matched.length < 2) {
+        toast.error('Selected tables need an open order each to merge');
+        return;
+      }
+      const [primary, ...rest] = matched;
+      for (const m of rest) {
+        await v15API.mergeTabs(primary.tab.id, m.tab.id);
+      }
+      // The absorbed tables' checks now live on the primary table — free them
+      // up on the floor plan so staff can seat the next party there.
+      const freedIds = new Set(rest.map(m => m.table.id));
+      const updatedTables = tables.map(t => freedIds.has(t.id) ? { ...t, status: 'available' } : t);
+      setTables(updatedTables);
+      if (activePlanId) await floorPlansAPI.update(activePlanId, { tables: updatedTables });
+      toast.success(`Merged ${matched.length} tables into Table ${primary.table.number}`);
+    } catch {
+      toast.error('Merge failed');
+    } finally {
+      setMergeMode(false);
+      setMergeSelection([]);
+    }
+  };
+
   const handleTableStatusClick = (tableId, evt) => {
     if (mode !== 'view') return;
+    if (mergeMode) { toggleMergeSelect(tableId); return; }
     const t = tables.find(tb => tb.id === tableId);
     if (!t) return;
     // Shift-click = cycle status directly (legacy shortcut). Regular click
@@ -212,12 +254,13 @@ export default function FloorPlan() {
   const renderTable = (t) => {
     const sc = TABLE_STATUS_COLORS[t.status] || TABLE_STATUS_COLORS.available;
     const isSelected = selectedTable === t.id;
+    const isMergeSelected = mergeMode && mergeSelection.includes(t.id);
     const sectionObj = sections.find(s => s.name === t.section);
     const sectionColor = sectionObj?.color || '#6B7280';
     // Course-driven colour overrides status colour when a live state exists.
     const liveState = courseStates.find(cs => cs.tableId === t.id);
     const fillColor = liveState?.colour || sc.fill;
-    const strokeColor = isSelected ? theme.primary : (liveState ? liveState.colour : sc.stroke);
+    const strokeColor = isMergeSelected ? '#4F46E5' : isSelected ? theme.primary : (liveState ? liveState.colour : sc.stroke);
 
     return (
       <g key={t.id} data-testid={`floor-table-${t.id}`}
@@ -238,12 +281,12 @@ export default function FloorPlan() {
           <ellipse cx={t.x + t.width / 2} cy={t.y + t.height / 2}
             rx={t.width / 2} ry={t.height / 2}
             fill={fillColor} stroke={strokeColor}
-            strokeWidth={isSelected ? 3 : 1.5} opacity={0.9} />
+            strokeWidth={isMergeSelected ? 4 : isSelected ? 3 : 1.5} strokeDasharray={isMergeSelected ? '6 3' : undefined} opacity={0.9} />
         ) : (
           <rect x={t.x} y={t.y} width={t.width} height={t.height}
             rx={t.shape === 'square' ? 4 : 8}
             fill={fillColor} stroke={strokeColor}
-            strokeWidth={isSelected ? 3 : 1.5} opacity={0.9} />
+            strokeWidth={isMergeSelected ? 4 : isSelected ? 3 : 1.5} strokeDasharray={isMergeSelected ? '6 3' : undefined} opacity={0.9} />
         )}
         {/* Table number */}
         <text x={t.x + t.width / 2} y={t.y + t.height / 2 - 4}
@@ -283,6 +326,14 @@ export default function FloorPlan() {
           <Button variant="outline" onClick={() => setNewPlanDialog(true)} data-testid="new-plan-btn">
             <Plus size={16} className="mr-1" /> New Floor
           </Button>
+          {mode === 'view' && (
+            <Button variant={mergeMode ? 'default' : 'outline'}
+              onClick={() => { setMergeMode(m => !m); setMergeSelection([]); }}
+              style={mergeMode ? { background: '#4F46E5' } : {}}
+              data-testid="merge-tables-btn">
+              {mergeMode ? 'Cancel Merge' : 'Merge Tables'}
+            </Button>
+          )}
           <Button variant={mode === 'edit' ? 'default' : 'outline'}
             onClick={() => setMode(mode === 'edit' ? 'view' : 'edit')}
             style={mode === 'edit' ? { background: theme.primary } : {}}
@@ -307,10 +358,26 @@ export default function FloorPlan() {
           </div>
         ))}
         <div className="ml-auto text-sm text-gray-500">
-          Total: <span className="font-bold">{tables.length}</span> tables | 
+          Total: <span className="font-bold">{tables.length}</span> tables |
           Capacity: <span className="font-bold">{tables.reduce((s, t) => s + (t.maxCovers || t.capacity || 0), 0)}</span> covers
         </div>
       </div>
+
+      {mergeMode && (
+        <div className="flex items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-2" data-testid="merge-action-bar">
+          <span className="text-sm text-indigo-700">
+            {mergeSelection.length === 0 ? 'Select 2 or more occupied tables to combine their checks' : `${mergeSelection.length} table${mergeSelection.length === 1 ? '' : 's'} selected`}
+          </span>
+          {mergeSelection.length >= 2 && (
+            <Button size="sm" style={{ background: '#4F46E5' }} onClick={handleMergeTables} data-testid="confirm-merge-btn">
+              Merge into one check
+            </Button>
+          )}
+          {mergeSelection.length > 0 && (
+            <Button size="sm" variant="outline" onClick={() => setMergeSelection([])}>Clear</Button>
+          )}
+        </div>
+      )}
 
       <div className="flex gap-4">
         {/* Canvas */}

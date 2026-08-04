@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   ChefHat, Clock, Flame, Bell, Check, X, Plus, Users, User, Monitor,
-  UtensilsCrossed, RotateCcw, Zap, Timer, Pause, PlayCircle, Settings2,
+  UtensilsCrossed, RotateCcw, Zap, Timer, Pause, PlayCircle, Settings2, AlertTriangle,
 } from 'lucide-react';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -83,10 +83,11 @@ export default function Kitchen() {
   const [avgOrderTime, setAvgOrderTime] = useState(null);
   const [orderForm, setOrderForm] = useState({
     tableNumber: '', orderType: 'dine_in', items: [], notes: '', priority: 'normal',
-    covers: '', deviceLabel: '',
+    covers: '', deviceLabel: '', seatNotes: [],
   });
   const [selectedProduct, setSelectedProduct] = useState('');
   const [selectedCourse, setSelectedCourse] = useState(1);
+  const [seatNoteDraft, setSeatNoteDraft] = useState({ seat: 1, note: '', tag: 'allergen' });
 
   useEffect(() => {
     try {
@@ -178,13 +179,23 @@ export default function Kitchen() {
     if (!product) return;
     setOrderForm(f => ({
       ...f,
-      items: [...f.items, { productId: product.id, productName: product.name, quantity: 1, course: selectedCourse, status: 'pending', notes: '' }],
+      items: [...f.items, { productId: product.id, productName: product.name, category: product.category || 'Other', quantity: 1, course: selectedCourse, status: 'pending', notes: '' }],
     }));
     setSelectedProduct('');
   };
 
   const removeItemFromOrder = (idx) => {
     setOrderForm(f => ({ ...f, items: f.items.filter((_, i) => i !== idx) }));
+  };
+
+  const addSeatNote = () => {
+    if (!seatNoteDraft.note.trim()) return;
+    setOrderForm(f => ({ ...f, seatNotes: [...(f.seatNotes || []), { ...seatNoteDraft, seat: parseInt(seatNoteDraft.seat, 10) || 1 }] }));
+    setSeatNoteDraft(d => ({ ...d, note: '' }));
+  };
+
+  const removeSeatNote = (idx) => {
+    setOrderForm(f => ({ ...f, seatNotes: f.seatNotes.filter((_, i) => i !== idx) }));
   };
 
   const handleCreateOrder = async () => {
@@ -234,6 +245,17 @@ export default function Kitchen() {
   }), [orders, newOrders, preparing, ready]);
 
   const fontClass = FONT_SIZE_CLASS[config.fontSize] || FONT_SIZE_CLASS.medium;
+
+  const sortTicketItems = (items) => {
+    const mode = config.sortMode || 'rungIn';
+    if (mode === 'alphabetical') {
+      return [...items].sort((a, b) => (a.productName || '').localeCompare(b.productName || ''));
+    }
+    if (mode === 'category') {
+      return [...items].sort((a, b) => (a.category || 'Other').localeCompare(b.category || 'Other'));
+    }
+    return items; // rungIn — the order items were punched in
+  };
 
   const renderCourseRow = (order, courseNum, courseItems) => {
     const meta = order.courses?.[String(courseNum)] || { status: 'queued' };
@@ -310,7 +332,7 @@ export default function Kitchen() {
           </div>
         </div>
         <div className="px-3 py-1.5 space-y-1 bg-white">
-          {courseItems.map((item, idx) => (
+          {sortTicketItems(courseItems).map((item, idx) => (
             <div key={idx} className={`flex items-start justify-between ${fontClass}`}>
               <div className="flex items-start gap-2">
                 <span className="font-mono font-bold text-slate-400 w-5 text-center">{item.quantity}x</span>
@@ -399,6 +421,18 @@ export default function Kitchen() {
               <Clock size={10} /> in {fmtHHMM(order.createdAt)}
             </span>
           </div>
+
+          {/* Seat notes — allergens/dietary surfaced up top, impossible to miss */}
+          {(order.seatNotes || []).length > 0 && (
+            <div className="mb-2 space-y-1" data-testid={`seat-notes-${order.id}`}>
+              {order.seatNotes.map((sn, idx) => (
+                <div key={idx} className={`text-[11px] font-semibold px-2 py-1 rounded flex items-center gap-1 ${sn.tag === 'allergen' ? 'bg-red-100 text-red-700' : sn.tag === 'dietary' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
+                  {sn.tag === 'allergen' && <AlertTriangle size={11} />}
+                  Seat {sn.seat}: {sn.note}
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Courses */}
           {courseNums.length > 0
@@ -542,6 +576,17 @@ export default function Kitchen() {
                     </div>
                   ))}
                   <div className="grid grid-cols-3 gap-3 pt-2">
+                    <div>
+                      <label className="text-xs text-slate-500">Ticket item order</label>
+                      <Select value={configDraft.sortMode || 'rungIn'} onValueChange={v => setConfigDraft(d => ({ ...d, sortMode: v }))}>
+                        <SelectTrigger data-testid="cfg-sortMode"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="rungIn">Rung-in order</SelectItem>
+                          <SelectItem value="alphabetical">Alphabetical</SelectItem>
+                          <SelectItem value="category">By category</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                     <div>
                       <label className="text-xs text-slate-500">Font size</label>
                       <Select value={configDraft.fontSize || 'medium'} onValueChange={v => setConfigDraft(d => ({ ...d, fontSize: v }))}>
@@ -714,6 +759,36 @@ export default function Kitchen() {
                 ))}
               </div>
             )}
+            <div>
+              <label className="text-xs font-medium text-gray-500 mb-1 block">Seat Notes (allergens / dietary / custom)</label>
+              {(orderForm.seatNotes || []).length > 0 && (
+                <div className="space-y-1 mb-2">
+                  {orderForm.seatNotes.map((sn, idx) => (
+                    <div key={idx} className={`flex items-center justify-between rounded px-3 py-2 text-sm ${sn.tag === 'allergen' ? 'bg-red-50 text-red-700' : sn.tag === 'dietary' ? 'bg-amber-50 text-amber-700' : 'bg-gray-50 text-gray-700'}`}>
+                      <span>Seat {sn.seat}: {sn.note}</span>
+                      <Button variant="ghost" size="sm" className="h-6 px-1" onClick={() => removeSeatNote(idx)}><X size={12} /></Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <Input type="number" min={1} className="w-16" value={seatNoteDraft.seat}
+                  onChange={e => setSeatNoteDraft(d => ({ ...d, seat: e.target.value }))}
+                  data-testid="seat-note-seat" />
+                <Select value={seatNoteDraft.tag} onValueChange={v => setSeatNoteDraft(d => ({ ...d, tag: v }))}>
+                  <SelectTrigger className="w-32" data-testid="seat-note-tag"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="allergen">Allergen</SelectItem>
+                    <SelectItem value="dietary">Dietary</SelectItem>
+                    <SelectItem value="note">Custom note</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input className="flex-1" value={seatNoteDraft.note}
+                  onChange={e => setSeatNoteDraft(d => ({ ...d, note: e.target.value }))}
+                  placeholder="e.g. Peanut allergy" data-testid="seat-note-text" />
+                <Button variant="outline" onClick={addSeatNote} data-testid="add-seat-note-btn"><Plus size={14} /></Button>
+              </div>
+            </div>
             <div>
               <label className="text-xs font-medium text-gray-500 mb-1 block">Kitchen Notes</label>
               <Input value={orderForm.notes} onChange={e => setOrderForm(f => ({ ...f, notes: e.target.value }))}

@@ -16,6 +16,12 @@ class KitchenOrderItem(BaseModel):
     status: str = "pending"  # pending, preparing, ready
 
 
+class SeatNote(BaseModel):
+    seat: int
+    note: str
+    tag: str = "note"  # allergen | dietary | note — drives the KDS warning styling
+
+
 class KitchenOrderCreate(BaseModel):
     transactionId: Optional[str] = None
     reservationId: Optional[str] = None
@@ -23,6 +29,7 @@ class KitchenOrderCreate(BaseModel):
     orderType: str = "dine_in"  # dine_in, takeaway, delivery
     items: List[dict] = []
     notes: Optional[str] = None
+    seatNotes: List[SeatNote] = []  # per-seat allergen/dietary/custom notes
     priority: str = "normal"  # normal, rush, vip
     serverId: Optional[str] = None
     covers: Optional[int] = None
@@ -40,6 +47,7 @@ class KitchenOrder(BaseModel):
     orderType: str = "dine_in"
     items: List[dict] = []
     notes: Optional[str] = None
+    seatNotes: List[SeatNote] = []
     priority: str = "normal"
     status: str = "new"  # new, preparing, ready, served, cancelled
     serverId: Optional[str] = None

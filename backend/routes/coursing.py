@@ -498,21 +498,32 @@ async def list_print_targets(_: dict = Depends(get_user)):
 
 @router.put("/print-targets/{printer}")
 async def set_print_target(printer: str, body: dict, user: dict = Depends(get_user)):
-    """Point a station printer at a real device (ESC/POS over TCP)."""
+    """Point a station printer at a real device (ESC/POS over TCP).
+
+    Merges onto the existing doc rather than replacing it outright — a caller
+    updating just the ticket-layout fields (footer/padding) must not silently
+    wipe out an already-configured host/port because it omitted them.
+    """
     if user.get("role") not in ("owner", "manager"):
         raise HTTPException(status_code=403, detail="Owner or manager only")
     from services import escpos
+    existing = await db.printer_targets.find_one({"printer": printer}, {"_id": 0}) or {}
     doc = {
         "printer": printer,
-        "host": (body.get("host") or "").strip() or None,
-        "port": int(body.get("port") or 9100),
-        "enabled": bool(body.get("enabled", True)),
+        "host": (body["host"].strip() or None) if "host" in body else existing.get("host"),
+        "port": int(body.get("port", existing.get("port") or 9100)),
+        "enabled": bool(body.get("enabled", existing.get("enabled", True))),
         # Per-device because they genuinely vary: 58mm paper is 32 columns,
         # non-Latin markets need another codepage, and cut support is the
         # least consistent part of ESC/POS across manufacturers.
-        "width": max(24, min(96, int(body.get("width") or escpos.DEFAULT_WIDTH))),
-        "codepage": str(body.get("codepage") or escpos.DEFAULT_CODEPAGE),
-        "cut": (body.get("cut") if body.get("cut") in escpos.CUT_STYLES else "partial"),
+        "width": max(24, min(96, int(body.get("width") or existing.get("width") or escpos.DEFAULT_WIDTH))),
+        "codepage": str(body.get("codepage") or existing.get("codepage") or escpos.DEFAULT_CODEPAGE),
+        "cut": (body.get("cut") if body.get("cut") in escpos.CUT_STYLES else existing.get("cut") or "partial"),
+        # Ticket footer ("printed by <device> | <order type>") on/off per
+        # order source, plus blank feed lines before the cut.
+        "footerInPerson": bool(body.get("footerInPerson", existing.get("footerInPerson", True))),
+        "footerOnline": bool(body.get("footerOnline", existing.get("footerOnline", True))),
+        "paddingLines": max(0, min(9, int(body.get("paddingLines", existing.get("paddingLines", 3))))),
         "updatedAt": _now(),
         "updatedBy": user.get("email"),
     }
@@ -586,6 +597,9 @@ async def print_job_dry_run(job_id: str, body: dict = None, _: dict = Depends(ge
         "width": body.get("width") or (profile or {}).get("width") or target.get("width") or escpos.DEFAULT_WIDTH,
         "codepage": body.get("codepage") or (profile or {}).get("codepage") or target.get("codepage") or escpos.DEFAULT_CODEPAGE,
         "cut": body.get("cut") or (profile or {}).get("cut") or target.get("cut") or "partial",
+        "footer_in_person": target.get("footerInPerson", True),
+        "footer_online": target.get("footerOnline", True),
+        "padding_lines": target.get("paddingLines", 3),
     }
     payload = escpos.render(job, **opts)
     return {"options": opts, **escpos.describe(payload)}
@@ -610,6 +624,9 @@ async def print_job_escpos(job_id: str, body: dict = None, _: dict = Depends(get
         width=(target or {}).get("width") or escpos.DEFAULT_WIDTH,
         codepage=(target or {}).get("codepage") or escpos.DEFAULT_CODEPAGE,
         cut=(target or {}).get("cut") or "partial",
+        footer_in_person=(target or {}).get("footerInPerson", True),
+        footer_online=(target or {}).get("footerOnline", True),
+        padding_lines=(target or {}).get("paddingLines", 3),
     )
     if not target or not target.get("enabled", True):
         return {"sent": False, "reason": "no device configured for this printer",

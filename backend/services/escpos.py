@@ -104,13 +104,22 @@ def _station_label(printer: str) -> str:
 
 
 def render(job: Dict[str, Any], width: int = DEFAULT_WIDTH,
-           codepage: str = DEFAULT_CODEPAGE, cut: str = "partial") -> bytes:
+           codepage: str = DEFAULT_CODEPAGE, cut: str = "partial",
+           footer_in_person: bool = True, footer_online: bool = True,
+           padding_lines: int = 3) -> bytes:
     """A print job -> ESC/POS byte stream, mirroring the on-screen docket.
 
     `width`, `codepage` and `cut` are per-device because they genuinely vary:
     58mm paper is 32 characters not 48, non-Latin markets need a different
     codepage, and cut command support is the least consistent part of the
     spec across manufacturers.
+
+    `footer_in_person`/`footer_online` gate a trailing "printed by" line
+    identifying the device/profile that sent the ticket — some kitchens want
+    a bare ticket, others rely on it to trace a mis-routed docket, and the
+    preference often differs for dine-in versus online orders on the same
+    printer. `padding_lines` is how much blank feed happens before the cut,
+    since a short-throat cutter needs more clearance than a long one.
     """
     _t = lambda x: _text(x, codepage)
     _l = lambda ch="-": _line(ch, width, codepage)
@@ -156,7 +165,14 @@ def render(job: Dict[str, Any], width: int = DEFAULT_WIDTH,
     out += _l("-")
     out += _t("SECTIONS: ") + _t(" | ".join(_station_label(p) for p in stations)) + b"\n"
 
-    out += FEED_3 + CUT_STYLES.get(cut, CUT_STYLES["partial"])
+    order_type = str(job.get("orderType") or "dine_in")
+    is_online = order_type not in ("dine_in", "takeaway")
+    show_footer = footer_online if is_online else footer_in_person
+    if show_footer:
+        out += _l("-")
+        out += _t(f"Printed by: {job.get('printer', '')} | {order_type}") + b"\n"
+
+    out += (b"\n" * max(0, padding_lines)) + CUT_STYLES.get(cut, CUT_STYLES["partial"])
     return bytes(out)
 
 
