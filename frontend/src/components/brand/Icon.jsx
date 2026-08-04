@@ -1,19 +1,18 @@
 import React from 'react';
 
 /**
- * NUA Pulse Grid icon.
+ * NUA Pulse Grid icon — see brand/BRAND-SPEC.md and brand/assets/icons.
  *
- * variant="color" — full-colour tiles. Minimum 24px (BRAND-SPEC §3).
- * variant="mono"  — single tone via currentColor. Use anywhere below ~24px,
- *                   where the full-colour tiles muddy into noise. Minimum 14px.
+ * variant="color" — full-colour 2x2 tile grid. Minimum 24px (BRAND-SPEC §3).
+ * variant="mono"  — single-tone favicon/tab-bar mark. Minimum 14px.
  *
- * The purple tile is the AI-feature signal and is the one fixed exception to
- * purple being reserved for AI surfaces — so it stays purple in the colour
- * variant and must not be recoloured.
+ * Tile order is fixed: orange (top-left), purple (top-right, carries the
+ * pulse stroke — the one fixed exception to purple being AI-only), pink
+ * (bottom-left), ink (bottom-right).
  */
 export default function Icon({ size = 32, variant = 'color', className = '', title = 'NUA', ...rest }) {
   const common = {
-    width: size, height: size, viewBox: '0 0 64 64',
+    width: size, height: size, viewBox: '0 0 100 100',
     xmlns: 'http://www.w3.org/2000/svg', className,
     role: 'img', 'aria-label': title, ...rest,
   };
@@ -22,37 +21,28 @@ export default function Icon({ size = 32, variant = 'color', className = '', tit
     return (
       <svg {...common}>
         <title>{title}</title>
-        <g fill="currentColor">
-          <rect x="4" y="44" width="16" height="16" rx="4.5" opacity="0.45" />
-          <rect x="24" y="24" width="16" height="16" rx="4.5" opacity="0.7" />
-          <rect x="24" y="44" width="16" height="16" rx="4.5" opacity="0.9" />
-          <rect x="44" y="4" width="16" height="16" rx="4.5" />
-          <rect x="44" y="24" width="16" height="16" rx="4.5" />
-          <rect x="44" y="44" width="16" height="16" rx="4.5" />
-        </g>
+        <rect x="4" y="4" width="92" height="92" rx="20" fill="#f58c14" />
+        <polyline
+          points="22,54 34,54 40,32 51,70 59,54 78,54"
+          fill="none" stroke="#ffffff" strokeWidth="7.5"
+          strokeLinecap="round" strokeLinejoin="round"
+        />
       </svg>
     );
   }
 
-  // Unique gradient id per instance — two icons on one page would otherwise
-  // share (and fight over) the same def.
-  const gid = React.useId ? React.useId() : `nua-${Math.random().toString(36).slice(2)}`;
-  const warm = `warm-${gid}`;
   return (
     <svg {...common}>
       <title>{title}</title>
-      <defs>
-        <linearGradient id={warm} x1="0" y1="1" x2="1" y2="0">
-          <stop offset="0%" stopColor="#f58c14" />
-          <stop offset="100%" stopColor="#f9a03f" />
-        </linearGradient>
-      </defs>
-      <rect x="4" y="44" width="16" height="16" rx="4.5" fill={`url(#${warm})`} opacity="0.55" />
-      <rect x="24" y="24" width="16" height="16" rx="4.5" fill={`url(#${warm})`} opacity="0.8" />
-      <rect x="24" y="44" width="16" height="16" rx="4.5" fill={`url(#${warm})`} />
-      <rect x="44" y="4" width="16" height="16" rx="4.5" fill="#8b5cf6" />
-      <rect x="44" y="24" width="16" height="16" rx="4.5" fill="#ec4899" />
-      <rect x="44" y="44" width="16" height="16" rx="4.5" fill={`url(#${warm})`} />
+      <rect x="6" y="6" width="40" height="40" rx="10" fill="#f58c14" />
+      <rect x="54" y="6" width="40" height="40" rx="10" fill="#8b5cf6" />
+      <rect x="6" y="54" width="40" height="40" rx="10" fill="#ec4899" />
+      <rect x="54" y="54" width="40" height="40" rx="10" fill="#1c1917" />
+      <polyline
+        points="60,27 65,27 68,17 72,39 75,27 88,27"
+        fill="none" stroke="#ffffff" strokeWidth="4.2"
+        strokeLinecap="round" strokeLinejoin="round"
+      />
     </svg>
   );
 }

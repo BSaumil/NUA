@@ -1,26 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 380 100" width="380" height="100" role="img" aria-label="NUA">
-  <title>NUA horizontal lockup</title>
-  <!-- Icon + gradient wordmark + flourish. Clear space: one grid-tile width
-       (16 units at the icon's native 64 scale) on all sides, minimum.
-       References Instrument Serif by name — see wordmark-nua-gradient.svg. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 140">
   <defs>
-    <linearGradient id="lockTileWarm" x1="0" y1="1" x2="1" y2="0">
-      <stop offset="0%" stop-color="#f58c14"/><stop offset="100%" stop-color="#f9a03f"/>
-    </linearGradient>
-    <linearGradient id="lockWordGradient" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#f58c14"/><stop offset="50%" stop-color="#ec4899"/><stop offset="100%" stop-color="#8b5cf6"/>
+    <linearGradient id="nuaChrome" x1="0%" y1="0%" x2="100%" y2="30%">
+      <stop offset="10%" stop-color="#f58c14"/>
+      <stop offset="55%" stop-color="#8b5cf6"/>
+      <stop offset="90%" stop-color="#ec4899"/>
     </linearGradient>
   </defs>
-  <g transform="translate(16,18)">
-    <rect x="4"  y="44" width="16" height="16" rx="4.5" fill="url(#lockTileWarm)" opacity="0.55"/>
-    <rect x="24" y="24" width="16" height="16" rx="4.5" fill="url(#lockTileWarm)" opacity="0.8"/>
-    <rect x="24" y="44" width="16" height="16" rx="4.5" fill="url(#lockTileWarm)"/>
-    <rect x="44" y="4"  width="16" height="16" rx="4.5" fill="#8b5cf6"/>
-    <rect x="44" y="24" width="16" height="16" rx="4.5" fill="#ec4899"/>
-    <rect x="44" y="44" width="16" height="16" rx="4.5" fill="url(#lockTileWarm)"/>
+  <g transform="translate(0,20)">
+    <rect x="6" y="6" width="40" height="40" rx="10" fill="#f58c14"/>
+    <rect x="54" y="6" width="40" height="40" rx="10" fill="#8b5cf6"/>
+    <rect x="6" y="54" width="40" height="40" rx="10" fill="#ec4899"/>
+    <rect x="54" y="54" width="40" height="40" rx="10" fill="#1c1917"/>
+    <polyline points="60,27 65,27 68,17 72,39 75,27 88,27" fill="none" stroke="#ffffff" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/>
   </g>
-  <text x="108" y="62" font-family="'Instrument Serif', Georgia, serif" font-style="italic"
-        font-size="58" fill="url(#lockWordGradient)">Nua</text>
-  <path d="M112 76 C 140 66, 178 66, 214 72 S 258 78, 286 68"
-        fill="none" stroke="#f58c14" stroke-width="2.5" stroke-linecap="round" opacity="0.9"/>
+  <!-- Requires 'Bricolage Grotesque' 700 loaded; use lockup-horizontal-outlined.svg where fonts aren't guaranteed -->
+  <text x="140" y="98" font-family="'Bricolage Grotesque', sans-serif" font-weight="700" font-size="88" letter-spacing="-1.5" fill="url(#nuaChrome)">NUA</text>
+  <path d="M144,110 Q180,102 210,114 T280,110 Q300,106 326,116" fill="none" stroke="#f58c14" stroke-width="2.2" stroke-linecap="round"/>
 </svg>

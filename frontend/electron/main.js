@@ -10,7 +10,7 @@ function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 700,
-    title: 'NUVA POS',
+    title: 'NUA POS',
     icon: path.join(__dirname, '..', 'public', 'favicon.ico'),
     webPreferences: {
       nodeIntegration: false,

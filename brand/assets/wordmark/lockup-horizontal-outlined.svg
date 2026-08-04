@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 376 130">
+  <defs>
+    <linearGradient id="nuaChrome" x1="0%" y1="0%" x2="100%" y2="30%">
+      <stop offset="10%" stop-color="#f58c14"/>
+      <stop offset="55%" stop-color="#8b5cf6"/>
+      <stop offset="90%" stop-color="#ec4899"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(0,15)">
+    <rect x="6" y="6" width="40" height="40" rx="10" fill="#f58c14"/>
+    <rect x="54" y="6" width="40" height="40" rx="10" fill="#8b5cf6"/>
+    <rect x="6" y="54" width="40" height="40" rx="10" fill="#ec4899"/>
+    <rect x="54" y="54" width="40" height="40" rx="10" fill="#1c1917"/>
+    <polyline points="60,27 65,27 68,17 72,39 75,27 88,27" fill="none" stroke="#ffffff" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <g fill="url(#nuaChrome)" transform="translate(140,88)">
+    <g transform="translate(0.00,0) scale(0.10000,-0.10000)"><path d="M73 0V660H261L560 193H571L562 660H702V0H532L216 489H205L214 0Z"/></g>
+    <g transform="translate(76.00,0) scale(0.10000,-0.10000)"><path d="M365 -14Q304 -14 256.5 -1.5Q209 11 174.0 34.5Q139 58 115.5 91.5Q92 125 80.5 167.0Q69 209 69 259V660H214V264Q214 213 230.5 179.5Q247 146 280.0 130.0Q313 114 364 114Q416 114 449.5 130.0Q483 146 499.5 179.5Q516 213 516 264V660H659V259Q659 129 585.5 57.5Q512 -14 365 -14Z"/></g>
+    <g transform="translate(147.30,0) scale(0.10000,-0.10000)"><path d="M18 0 244 660H454L680 0H524L357 546H342L174 0ZM145 130V228H574V130Z"/></g>
+  </g>
+  <path d="M144,102 Q180,94 210,106 T280,102 Q300,98 326,108" fill="none" stroke="#f58c14" stroke-width="2.2" stroke-linecap="round"/>
+</svg>

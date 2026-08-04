@@ -3,8 +3,8 @@
 **For:** Claude Code
 **Company:** NUA AUS PTY LTD · ABN 54 299 131 653
 **Product:** NUA — Restaurant OS
-**Spec version:** 2026-08-03
-**Source concept:** Mixed lockup — Pulse Grid icon (Brand Identity system) + Instrument Serif gradient wordmark (Instrument Gradient / Chrome Serif) + Caveat signature flourish (Script Signature)
+**Spec version:** 2026-08-04
+**Source concept:** Mixed lockup — Pulse Grid icon (Brand Identity system) + Bricolage Grotesque gradient wordmark (Chrome Serif gradient technique, upright/bold instead of italic serif) + Caveat signature flourish (Script Signature)
 
 This package contains every asset and token needed to wire NUA's digital identity into the codebase: favicons, app icons, logo components, color tokens, and typography tokens. Follow the tasks below in order.
 
@@ -56,7 +56,7 @@ nua-digital-identity/
    - `<Logo variant="marketing" />` — landing page hero, investor decks rendered in-app, login/signup screens. Full gradient wordmark + flourish.
    - `<Icon size={n} variant="mono" />` — anywhere below ~24px.
 
-4. **SVG source files** in `assets/wordmark/` are for design handoff, print vendors, or contexts outside the app (letterhead, merch, signage) — not for direct import into the app; use the React components for those instead. Note: `wordmark-nua-gradient.svg` and `lockup-horizontal.svg` reference the Instrument Serif web font by name. If a vendor or tool can't guarantee that font is loaded, convert the text to outlines before sending the file out (Figma/Illustrator: *Text → Outline*).
+4. **SVG source files** in `assets/wordmark/` are for design handoff, print vendors, or contexts outside the app (letterhead, merch, signage) — not for direct import into the app; use the React components for those instead. `wordmark-nua-gradient.svg` and `lockup-horizontal.svg` reference the Bricolage Grotesque web font by name; the `-outlined` siblings are true vector outlines extracted from the font file, so they render correctly with no font dependency — use those for anything outside the app.
 
 5. **Verify** the tab favicon, app manifest icon (install as PWA / add to home screen), and both `<Logo>` variants render correctly light and dark before marking this done.
 
@@ -84,7 +84,7 @@ nua-digital-identity/
 
 | Role | Face | Notes |
 |---|---|---|
-| Wordmark (marketing) | Instrument Serif, italic | Gradient-filled, hero contexts only |
+| Wordmark (marketing) | Bricolage Grotesque, 700 | Gradient-filled, upright not italic, hero contexts only |
 | Display / product headings | Space Grotesk, 700 | In-app, functional UI |
 | Body | Manrope | General copy |
 | Tagline / data / receipts | IBM Plex Mono | Tracked +0.3–0.4em for taglines |
