@@ -1,10 +1,9 @@
 """
-Iteration 11 Tests: Menu Engineering AI Import, Price Adjust, Ghost Discount, What-If Advanced
+Iteration 11 Tests: Menu Engineering AI Import, Price Adjust, What-If Advanced
 Tests for new features:
 1. AI Menu Import (PDF/JPEG) - POST /api/menu/ai-import
 2. Bulk Price Adjustment - POST /api/menu/price-adjust
-3. Ghost Discount (Owner only) - POST /api/pos/ghost-discount, GET /api/pos/ghost-discounts
-4. What-If Advanced with projectedQty - POST /api/analytics/what-if-advanced
+3. What-If Advanced with projectedQty - POST /api/analytics/what-if-advanced
 """
 import pytest
 import requests
@@ -63,22 +62,6 @@ def test_product(owner_token):
     yield product
     # Cleanup
     requests.delete(f"{BASE_URL}/api/products/{product['id']}", headers=headers)
-
-
-@pytest.fixture(scope="module")
-def test_transaction(owner_token, test_product):
-    """Create a test transaction for ghost discount testing"""
-    headers = {"Authorization": f"Bearer {owner_token}"}
-    txn_data = {
-        "items": [{"productId": test_product["id"], "productName": test_product["name"], "quantity": 2, "price": test_product["price"]}],
-        "paymentMethod": "Card",
-        "customerId": None,
-        "location": "Main",
-        "cashier": "Test Cashier"
-    }
-    response = requests.post(f"{BASE_URL}/api/transactions", json=txn_data, headers=headers)
-    assert response.status_code in [200, 201], f"Failed to create test transaction: {response.text}"
-    return response.json()
 
 
 class TestAuth:
@@ -220,82 +203,6 @@ class TestBulkPriceAdjust:
         response = requests.post(f"{BASE_URL}/api/menu/price-adjust", json=data, headers=headers)
         assert response.status_code == 403, f"Cashier should be denied: {response.status_code}"
         print("PASS: Cashier denied price adjust access (403)")
-
-
-class TestGhostDiscount:
-    """Test Ghost Discount (Owner only) - POST /api/pos/ghost-discount, GET /api/pos/ghost-discounts"""
-    
-    def test_ghost_discount_owner_apply(self, owner_token, test_transaction):
-        """Owner can apply ghost discount"""
-        headers = {"Authorization": f"Bearer {owner_token}"}
-        data = {
-            "transactionId": test_transaction["id"],
-            "amount": 5.00,
-            "reason": "TEST_Owner discretion"
-        }
-        response = requests.post(f"{BASE_URL}/api/pos/ghost-discount", json=data, headers=headers)
-        assert response.status_code == 200, f"Ghost discount failed: {response.text}"
-        result = response.json()
-        assert "id" in result
-        assert result["id"].startswith("GHOST-")
-        assert result["amount"] == 5.00
-        assert result["transactionId"] == test_transaction["id"]
-        print(f"PASS: Owner applied ghost discount - ID: {result['id']}, Amount: ${result['amount']}")
-    
-    def test_ghost_discount_get_list_owner(self, owner_token):
-        """Owner can view ghost discounts list"""
-        headers = {"Authorization": f"Bearer {owner_token}"}
-        response = requests.get(f"{BASE_URL}/api/pos/ghost-discounts", headers=headers)
-        assert response.status_code == 200, f"Get ghost discounts failed: {response.text}"
-        result = response.json()
-        assert isinstance(result, list)
-        print(f"PASS: Owner can view ghost discounts - found {len(result)} entries")
-    
-    def test_ghost_discount_manager_denied(self, manager_token, test_transaction):
-        """Manager cannot apply ghost discount"""
-        headers = {"Authorization": f"Bearer {manager_token}"}
-        data = {"transactionId": test_transaction["id"], "amount": 2.00, "reason": "Test"}
-        response = requests.post(f"{BASE_URL}/api/pos/ghost-discount", json=data, headers=headers)
-        assert response.status_code == 403, f"Manager should be denied: {response.status_code}"
-        print("PASS: Manager denied ghost discount (403)")
-    
-    def test_ghost_discount_cashier_denied(self, cashier_token, test_transaction):
-        """Cashier cannot apply ghost discount"""
-        headers = {"Authorization": f"Bearer {cashier_token}"}
-        data = {"transactionId": test_transaction["id"], "amount": 2.00, "reason": "Test"}
-        response = requests.post(f"{BASE_URL}/api/pos/ghost-discount", json=data, headers=headers)
-        assert response.status_code == 403, f"Cashier should be denied: {response.status_code}"
-        print("PASS: Cashier denied ghost discount (403)")
-    
-    def test_ghost_discounts_list_manager_denied(self, manager_token):
-        """Manager cannot view ghost discounts list"""
-        headers = {"Authorization": f"Bearer {manager_token}"}
-        response = requests.get(f"{BASE_URL}/api/pos/ghost-discounts", headers=headers)
-        assert response.status_code == 403, f"Manager should be denied: {response.status_code}"
-        print("PASS: Manager denied ghost discounts list (403)")
-    
-    def test_ghost_discounts_list_cashier_denied(self, cashier_token):
-        """Cashier cannot view ghost discounts list"""
-        headers = {"Authorization": f"Bearer {cashier_token}"}
-        response = requests.get(f"{BASE_URL}/api/pos/ghost-discounts", headers=headers)
-        assert response.status_code == 403, f"Cashier should be denied: {response.status_code}"
-        print("PASS: Cashier denied ghost discounts list (403)")
-    
-    def test_ghost_discount_missing_transaction(self, owner_token):
-        """Ghost discount fails with missing transaction ID"""
-        headers = {"Authorization": f"Bearer {owner_token}"}
-        data = {"transactionId": "", "amount": 5.00, "reason": "Test"}
-        response = requests.post(f"{BASE_URL}/api/pos/ghost-discount", json=data, headers=headers)
-        assert response.status_code == 400, f"Should fail with 400: {response.status_code}"
-        print("PASS: Ghost discount requires transaction ID (400)")
-    
-    def test_ghost_discount_invalid_transaction(self, owner_token):
-        """Ghost discount fails with invalid transaction ID"""
-        headers = {"Authorization": f"Bearer {owner_token}"}
-        data = {"transactionId": "INVALID-TXN-ID", "amount": 5.00, "reason": "Test"}
-        response = requests.post(f"{BASE_URL}/api/pos/ghost-discount", json=data, headers=headers)
-        assert response.status_code == 404, f"Should fail with 404: {response.status_code}"
-        print("PASS: Ghost discount validates transaction exists (404)")
 
 
 class TestWhatIfAdvanced:

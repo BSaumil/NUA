@@ -53,6 +53,7 @@ async def log_event(
 
 async def list_events(
     *,
+    business_id: Optional[str] = None,
     entity_type: Optional[str] = None,
     entity_id: Optional[str] = None,
     action: Optional[str] = None,
@@ -60,6 +61,7 @@ async def list_events(
     limit: int = 200,
 ) -> List[Dict[str, Any]]:
     q: Dict[str, Any] = {}
+    if business_id: q["businessId"] = business_id
     if entity_type: q["entityType"] = entity_type
     if entity_id: q["entityId"] = entity_id
     if action: q["action"] = action

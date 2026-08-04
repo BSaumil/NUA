@@ -220,6 +220,7 @@ async def open_cash_drawer(data: dict, user: dict = Depends(require_permission("
         "id": str(uuid.uuid4()), "staffId": user["id"], "staffName": user.get("name") or user.get("email"),
         "role": user.get("role"), "reason": reason, "note": note,
         "location": data.get("location", "Main"),
+        "businessId": user.get("businessId") or "default",
         "openedAt": datetime.now(timezone.utc).isoformat(),
     }
     await db.drawer_events.insert_one(event)
@@ -235,9 +236,10 @@ async def open_cash_drawer(data: dict, user: dict = Depends(require_permission("
 
 
 @router.get("/pos/drawer-events")
-async def list_drawer_events(_: dict = Depends(require_owner_or_manager)):
+async def list_drawer_events(user: dict = Depends(require_owner_or_manager)):
     """Owner/manager oversight — every no-sale drawer open, who and why."""
-    rows = await db.drawer_events.find({}, {"_id": 0}).sort("openedAt", -1).to_list(200)
+    business_id = user.get("businessId") or "default"
+    rows = await db.drawer_events.find({"businessId": business_id}, {"_id": 0}).sort("openedAt", -1).to_list(200)
     return rows
 
 
@@ -733,7 +735,7 @@ async def cohort_retention(_: dict = Depends(require_owner_or_manager)):
 # =============================================================================
 @router.get("/audit/logs")
 async def get_audit_logs( limit: int = 200, user: dict = Depends(require_owner_or_manager)):
-    # Aggregate from multiple sources: comp_voids, refunds, ghost_discounts, login attempts
+    # Aggregate from multiple sources: comp_voids, refunds, login attempts
     logs = []
     cv = await db.comp_voids.find({}, {"_id": 0}).sort("processedAt", -1).to_list(100)
     for c in cv:
@@ -745,10 +747,6 @@ async def get_audit_logs( limit: int = 200, user: dict = Depends(require_owner_o
         logs.append({"id": r.get("id", str(uuid.uuid4())[:8]), "type": "REFUND", "user": r.get("processedBy", "?"),
                      "details": f"${r.get('amount',0):.2f} - {r.get('reason', '')}",
                      "timestamp": r.get("createdAt")})
-    ghosts = await db.ghost_discounts.find({}, {"_id": 0}).sort("createdAt", -1).to_list(100)
-    for g in ghosts:
-        logs.append({"id": g.get("id", str(uuid.uuid4())[:8]), "type": "GHOST_DISCOUNT", "user": g.get("appliedBy", "?"),
-                     "details": f"${g.get('amount',0):.2f}", "timestamp": g.get("createdAt")})
     # Sort by timestamp desc
     logs.sort(key=lambda x: x.get("timestamp") or "", reverse=True)
     return logs[:limit]

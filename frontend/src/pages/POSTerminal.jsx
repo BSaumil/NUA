@@ -90,9 +90,6 @@ const POSTerminal = () => {
   const [cashTendered, setCashTendered] = useState(0);
   const [showCashChange, setShowCashChange] = useState(false);
 
-  // Ghost discount (owner only - secret)
-  const [showGhost, setShowGhost] = useState(false);
-  const [ghostAmount, setGhostAmount] = useState('');
   const [lastTxnId, setLastTxnId] = useState(null);
 
   // v15: Tabs (Hold/Recall), Loyalty preview, BNPL, Multi-lang
@@ -1207,7 +1204,7 @@ const POSTerminal = () => {
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <div className="mb-3">
           {/* Compact status bar replaces the bulky "POS Terminal" title */}
-          <div onDoubleClick={() => { if (user?.role === 'owner') setShowGhost(true); }} data-testid="pos-title">
+          <div data-testid="pos-title">
             <POSHeaderBar themeColor={theme.primary} />
           </div>
           {queuedCount > 0 && (
@@ -2134,28 +2131,6 @@ const POSTerminal = () => {
         onCopyUpi={copyToClipboard}
       />
 
-      {/* Ghost Discount (Owner Secret - triple-click POS title to show) */}
-      {user?.role === 'owner' && (
-        <Dialog open={showGhost} onOpenChange={setShowGhost}>
-          <DialogContent className="max-w-xs" data-testid="ghost-discount-dialog">
-            <DialogHeader><DialogTitle className="text-red-600">Ghost Void</DialogTitle></DialogHeader>
-            <div className="space-y-3 py-2">
-              <p className="text-xs text-gray-500">This discount will NOT appear in sales, inventory, or any reports.</p>
-              <Input type="number" step="0.01" placeholder="Discount amount" value={ghostAmount}
-                onChange={e => setGhostAmount(e.target.value)} data-testid="ghost-amount" />
-              <p className="text-xs text-gray-400">Last transaction: {lastTxnId || 'None'}</p>
-              <Button className="w-full bg-red-600 hover:bg-red-700 text-white" disabled={!lastTxnId || !ghostAmount}
-                onClick={async () => {
-                  try {
-                    await menuFeaturesAPI.ghostDiscount({ transactionId: lastTxnId, amount: parseFloat(ghostAmount), reason: 'Owner void' });
-                    toast({ title: "Ghost Applied", description: "Discount applied invisibly" });
-                    setShowGhost(false); setGhostAmount('');
-                  } catch { toast({ title: "Failed", variant: "destructive" }); }
-                }} data-testid="apply-ghost-btn">Apply Ghost Void</Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
 
       {/* Send-to-Table dialog */}
       <Dialog open={sendToTableOpen} onOpenChange={setSendToTableOpen}>
