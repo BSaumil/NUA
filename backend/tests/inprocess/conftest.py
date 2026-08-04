@@ -27,7 +27,7 @@ motor_asyncio.AsyncIOMotorClient = mongomock_motor.AsyncMongoMockClient
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-OWNER = {"email": "owner@nuva.com", "password": "NuvaOwner2026!"}
+OWNER = {"email": "owner@nua.com", "password": "NuaOwner2026!"}
 
 
 @pytest.fixture(scope="session")

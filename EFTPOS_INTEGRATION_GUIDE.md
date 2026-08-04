@@ -1,4 +1,4 @@
-# 💳 Ananta POS - EFTPOS Integration Guide
+# 💳 NUA POS - EFTPOS Integration Guide
 
 **Version:** 2.0.0  
 **Status:** ✅ EFTPOS Ready - Supports All Major Australian Providers
@@ -7,7 +7,7 @@
 
 ## 🎉 EFTPOS Integration Complete!
 
-Ananta POS now supports **ANY Australian EFTPOS terminal** through our universal integration framework!
+NUA POS now supports **ANY Australian EFTPOS terminal** through our universal integration framework!
 
 ---
 
@@ -51,7 +51,7 @@ Ananta POS now supports **ANY Australian EFTPOS terminal** through our universal
 
 ## 🚀 Quick Setup Guide
 
-### Step 1: Configure EFTPOS Terminal in Ananta
+### Step 1: Configure EFTPOS Terminal in NUA
 
 **Via Settings Page:**
 1. Go to Settings → EFTPOS Terminals
@@ -321,7 +321,7 @@ When customer checks out:
    ↓
 2. Cashier Selects "Card Payment"
    ↓
-3. Ananta POS sends transaction to terminal
+3. NUA POS sends transaction to terminal
    {amount: 45.50, reference: "TXN-001"}
    ↓
 4. Terminal prompts: "INSERT/TAP CARD"
@@ -340,7 +340,7 @@ When customer checks out:
      maskedPan: "****1234"
    }
    ↓
-9. Ananta POS completes transaction
+9. NUA POS completes transaction
    ↓
 10. Receipt prints with EFTPOS details
 ```
@@ -511,8 +511,8 @@ GET /api/eftpos/transactions
 
 ## 🆘 Support
 
-### Ananta POS Support:
-- **Technical Issues:** support@anantapos.com
+### NUA POS Support:
+- **Technical Issues:** support@nuapos.com
 - **Integration Help:** Available
 
 ### Provider Support:
@@ -538,7 +538,7 @@ GET /api/eftpos/transactions
 
 Before going live:
 
-- [ ] EFTPOS terminal configured in Ananta
+- [ ] EFTPOS terminal configured in NUA
 - [ ] Connection tested successfully
 - [ ] Test transaction completed
 - [ ] Settlement tested
@@ -555,7 +555,7 @@ Before going live:
 
 1. **Choose Your Provider** - Select from supported list
 2. **Get Terminal** - Contact provider for hardware
-3. **Configure in Ananta** - Add terminal settings
+3. **Configure in NUA** - Add terminal settings
 4. **Test Connection** - Verify integration works
 5. **Process Test Transaction** - $0.01 test
 6. **Train Staff** - Show team how to use
@@ -565,7 +565,7 @@ Before going live:
 
 <div align="center">
 
-**Ananta POS - Universal EFTPOS Integration**
+**NUA POS - Universal EFTPOS Integration**
 
 Accept payments from ANY Australian EFTPOS terminal
 

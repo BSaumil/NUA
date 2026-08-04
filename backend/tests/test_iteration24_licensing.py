@@ -20,7 +20,7 @@ import pytest
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "http://localhost:8001").rstrip("/")
 API = f"{BASE_URL}/api"
 
-OWNER = {"email": "owner@nuva.com", "password": "NuvaOwner2026!"}
+OWNER = {"email": "owner@nua.com", "password": "NuaOwner2026!"}
 TEST_TENANT = "default"           # already has license per agent_to_agent context
 ISOLATED_TENANT = f"TEST_{uuid.uuid4().hex[:8]}"  # used for onboarding flow
 
@@ -68,7 +68,7 @@ def test_onboard_with_dev_skip_succeeds(owner_session):
     payload = {
         "tenantId": ISOLATED_TENANT,
         "abn": "51824753556",
-        "ownerEmail": "owner@nuva.com",
+        "ownerEmail": "owner@nua.com",
         "entityName": "TEST DEMO PTY LTD",
         "plan": "standard",
         "devSkipAbr": True,

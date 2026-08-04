@@ -13,7 +13,7 @@ import { advancedAPI } from '../services/api';
 import axios from 'axios';
 
 const API = process.env.REACT_APP_BACKEND_URL;
-const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
+const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('nua_token')}` });
 
 const EMPTY_FORM = {
   name: '', subject: '', body: '', targetTier: '',

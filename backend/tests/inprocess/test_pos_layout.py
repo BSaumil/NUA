@@ -51,10 +51,10 @@ def test_a_partial_quick_actions_update_does_not_drop_the_other_key(client, owne
 
 def test_saving_requires_owner_or_manager(client, owner_headers):
     req(client, "POST", "/api/auth/staff/add", headers=owner_headers, json={
-        "name": "Layout Cashier", "email": "layout.cashier@nuva.com",
+        "name": "Layout Cashier", "email": "layout.cashier@nua.com",
         "password": "CashierPass1!", "role": "cashier"})
     tok = req(client, "POST", "/api/auth/login",
-              json={"email": "layout.cashier@nuva.com", "password": "CashierPass1!"}).json()
+              json={"email": "layout.cashier@nua.com", "password": "CashierPass1!"}).json()
     client.cookies.clear()
     ch = {"Authorization": f"Bearer {tok['token']}"}
 

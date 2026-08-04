@@ -9,7 +9,7 @@ API = f"{BASE_URL}/api"
 
 @pytest.fixture(scope="session")
 def owner_token():
-    r = requests.post(f"{API}/auth/login", json={"email": "owner@nuva.com", "password": "NuvaOwner2026!"}, timeout=20)
+    r = requests.post(f"{API}/auth/login", json={"email": "owner@nua.com", "password": "NuaOwner2026!"}, timeout=20)
     assert r.status_code == 200, f"Owner login failed: {r.status_code} {r.text}"
     tok = r.json().get("token") or r.json().get("access_token")
     assert tok, r.text

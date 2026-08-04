@@ -462,7 +462,7 @@ const Products = () => {
     try {
       const r = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/items/bulk-import`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('nuva_token')}` },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('nua_token')}` },
         body: JSON.stringify({ rows }),
       });
       if (!r.ok) {

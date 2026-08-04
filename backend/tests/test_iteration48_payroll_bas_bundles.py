@@ -19,7 +19,7 @@ BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://pos-checkout-16.prev
 @pytest.fixture(scope="session")
 def owner_token():
     r = requests.post(f"{BASE_URL}/api/auth/login",
-                       json={"email": "owner@nuva.com", "password": "NuvaOwner2026!"})
+                       json={"email": "owner@nua.com", "password": "NuaOwner2026!"})
     assert r.status_code == 200, f"Owner login failed: {r.status_code} {r.text}"
     return r.json()["token"]
 
@@ -163,7 +163,7 @@ class TestWalletCredentials:
     def test_post_updates_env(self, owner_client):
         payload = {
             "apple": {
-                "passTypeIdentifier": "pass.com.TEST_iter48.nuva",
+                "passTypeIdentifier": "pass.com.TEST_iter48.nua",
                 "teamId": "TESTITER48TID",
                 "passTypeCertPem": "-----BEGIN CERTIFICATE-----\nTEST_iter48\n-----END CERTIFICATE-----",
                 "passTypeKeyPem": "-----BEGIN PRIVATE KEY-----\nTEST_iter48\n-----END PRIVATE KEY-----",
@@ -171,7 +171,7 @@ class TestWalletCredentials:
             },
             "google": {
                 "issuerId": "3388000000TEST48",
-                "classId": "3388000000TEST48.nuva_loyalty",
+                "classId": "3388000000TEST48.nua_loyalty",
                 "serviceAccountKey": '{"type":"service_account","project_id":"test"}',
             },
         }
@@ -180,12 +180,12 @@ class TestWalletCredentials:
         assert r.json().get("ok") is True
         # Re-GET should show updated fields + envReady True + persistedInDb True
         g = owner_client.get(f"{BASE_URL}/api/settings/wallet-credentials").json()
-        assert g["apple"]["passTypeId"] == "pass.com.TEST_iter48.nuva"
+        assert g["apple"]["passTypeId"] == "pass.com.TEST_iter48.nua"
         assert g["apple"]["teamId"] == "TESTITER48TID"
         assert g["apple"]["envReady"] is True
         assert g["apple"]["persistedInDb"] is True
         assert g["google"]["issuerId"] == "3388000000TEST48"
-        assert g["google"]["classId"] == "3388000000TEST48.nuva_loyalty"
+        assert g["google"]["classId"] == "3388000000TEST48.nua_loyalty"
         assert g["google"]["envReady"] is True
         assert g["google"]["persistedInDb"] is True
 

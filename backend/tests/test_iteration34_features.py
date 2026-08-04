@@ -23,13 +23,13 @@ def _login(email: str, password: str):
 
 @pytest.fixture(scope="module")
 def owner_token():
-    return _login("owner@nuva.com", "NuvaOwner2026!")
+    return _login("owner@nua.com", "NuaOwner2026!")
 
 
 @pytest.fixture(scope="module")
 def cashier_token():
     try:
-        return _login("cashier@nuva.com", "Staff2026!")
+        return _login("cashier@nua.com", "Staff2026!")
     except Exception:
         pytest.skip("cashier login unavailable")
 

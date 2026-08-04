@@ -19,8 +19,8 @@ import requests
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL").rstrip("/")
 API = f"{BASE_URL}/api"
 
-OWNER_EMAIL = "owner@nuva.com"
-OWNER_PASS = "NuvaOwner2026!"
+OWNER_EMAIL = "owner@nua.com"
+OWNER_PASS = "NuaOwner2026!"
 
 
 @pytest.fixture(scope="session")

@@ -17,8 +17,8 @@ class TestAuth:
     def test_owner_login(self):
         """Test owner login"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "owner@nuva.com",
-            "password": "NuvaOwner2026!"
+            "email": "owner@nua.com",
+            "password": "NuaOwner2026!"
         })
         assert response.status_code == 200
         data = response.json()
@@ -30,7 +30,7 @@ class TestAuth:
     def test_manager_login(self):
         """Test manager login"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "manager@nuva.com",
+            "email": "manager@nua.com",
             "password": "Staff2026!"
         })
         assert response.status_code == 200
@@ -43,7 +43,7 @@ class TestAuth:
     def test_cashier_login(self):
         """Test cashier login"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "cashier@nuva.com",
+            "email": "cashier@nua.com",
             "password": "Staff2026!"
         })
         assert response.status_code == 200
@@ -60,15 +60,15 @@ class TestRosterCRUD:
     @pytest.fixture
     def owner_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "owner@nuva.com",
-            "password": "NuvaOwner2026!"
+            "email": "owner@nua.com",
+            "password": "NuaOwner2026!"
         })
         return response.json()["token"]
     
     @pytest.fixture
     def manager_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "manager@nuva.com",
+            "email": "manager@nua.com",
             "password": "Staff2026!"
         })
         return response.json()["token"]
@@ -76,7 +76,7 @@ class TestRosterCRUD:
     @pytest.fixture
     def cashier_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "cashier@nuva.com",
+            "email": "cashier@nua.com",
             "password": "Staff2026!"
         })
         return response.json()["token"]
@@ -260,8 +260,8 @@ class TestWeekRosterCreation:
     @pytest.fixture
     def owner_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "owner@nuva.com",
-            "password": "NuvaOwner2026!"
+            "email": "owner@nua.com",
+            "password": "NuaOwner2026!"
         })
         return response.json()["token"]
     
@@ -324,8 +324,8 @@ class TestPositionOptions:
     @pytest.fixture
     def owner_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "owner@nuva.com",
-            "password": "NuvaOwner2026!"
+            "email": "owner@nua.com",
+            "password": "NuaOwner2026!"
         })
         return response.json()["token"]
     
@@ -378,15 +378,15 @@ class TestTimecardsCostVisibility:
     @pytest.fixture
     def owner_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "owner@nuva.com",
-            "password": "NuvaOwner2026!"
+            "email": "owner@nua.com",
+            "password": "NuaOwner2026!"
         })
         return response.json()["token"]
     
     @pytest.fixture
     def cashier_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "cashier@nuva.com",
+            "email": "cashier@nua.com",
             "password": "Staff2026!"
         })
         return response.json()["token"]
@@ -416,8 +416,8 @@ class TestStaffReports:
     @pytest.fixture
     def owner_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "owner@nuva.com",
-            "password": "NuvaOwner2026!"
+            "email": "owner@nua.com",
+            "password": "NuaOwner2026!"
         })
         return response.json()["token"]
     
@@ -443,8 +443,8 @@ class TestCleanup:
     @pytest.fixture
     def owner_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "owner@nuva.com",
-            "password": "NuvaOwner2026!"
+            "email": "owner@nua.com",
+            "password": "NuaOwner2026!"
         })
         return response.json()["token"]
     

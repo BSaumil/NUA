@@ -19,7 +19,7 @@ import { effectiveHourlyRate, salaryTypeSuffix } from '../lib/staffPay';
 import { DndContext, useDraggable, useDroppable, DragOverlay, PointerSensor, KeyboardSensor, useSensor, useSensors } from '@dnd-kit/core';
 
 const API = process.env.REACT_APP_BACKEND_URL;
-const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
+const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('nua_token')}` });
 
 // ===== Draggable Shift Card (used inside week roster grid) =====
 function DraggableShift({ shift, hours, canManage, onDelete, theme }) {

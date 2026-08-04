@@ -10,7 +10,7 @@ import { toast } from 'sonner';
 import { Sparkles, Play, X, ChevronRight, Loader2, ListChecks, Target, RefreshCw, CheckCircle2, Circle, AlertCircle, TestTube2 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
+const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nua_token')}` });
 
 const STATUS_TONE = {
   proposed: 'bg-indigo-500',

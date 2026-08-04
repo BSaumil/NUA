@@ -10,7 +10,7 @@ API = f"{BASE_URL}/api"
 @pytest.fixture(scope="module")
 def token():
     r = requests.post(f"{API}/auth/login",
-                      json={"email": "owner@nuva.com", "password": "NuvaOwner2026!"},
+                      json={"email": "owner@nua.com", "password": "NuaOwner2026!"},
                       timeout=30)
     assert r.status_code == 200, f"login failed: {r.status_code} {r.text}"
     tok = r.json().get("access_token") or r.json().get("token")

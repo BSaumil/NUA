@@ -6,8 +6,8 @@ import requests
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://pos-checkout-16.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 
-OWNER = {"email": "owner@nuva.com", "password": "NuvaOwner2026!"}
-CASHIER = {"email": "cashier@nuva.com", "password": "Staff2026!"}
+OWNER = {"email": "owner@nua.com", "password": "NuaOwner2026!"}
+CASHIER = {"email": "cashier@nua.com", "password": "Staff2026!"}
 
 
 def _login(creds):
@@ -50,7 +50,7 @@ created_account_id = {"id": None}
 
 
 def test_connect_account_anon_401():
-    r = requests.post(f"{API}/social/accounts", json={"platform": "instagram", "handle": "nuva_qa"}, timeout=15)
+    r = requests.post(f"{API}/social/accounts", json={"platform": "instagram", "handle": "nua_qa"}, timeout=15)
     assert r.status_code == 401
 
 
@@ -62,28 +62,28 @@ def test_connect_account_cashier_403_before_422(cashier_token):
 
 
 def test_connect_account_owner_success(owner_token):
-    # cleanup any prior nuva_qa
+    # cleanup any prior nua_qa
     requests.delete(f"{API}/social/accounts/_purge", headers=hdrs(owner_token), timeout=5)  # noop
     # remove existing
     r0 = requests.get(f"{API}/social/accounts", headers=hdrs(owner_token), timeout=15).json()
     for a in r0:
-        if a.get("platform") == "instagram" and a.get("handle") == "nuva_qa":
+        if a.get("platform") == "instagram" and a.get("handle") == "nua_qa":
             requests.delete(f"{API}/social/accounts/{a['id']}", headers=hdrs(owner_token), timeout=10)
 
     r = requests.post(f"{API}/social/accounts", headers=hdrs(owner_token),
-                      json={"platform": "instagram", "handle": "nuva_qa"}, timeout=15)
+                      json={"platform": "instagram", "handle": "nua_qa"}, timeout=15)
     assert r.status_code == 200, r.text
     data = r.json()
     assert data["platformLabel"] == "Instagram"
     assert data["tokenStatus"] == "mock_active"
-    assert data["handle"] == "nuva_qa"
+    assert data["handle"] == "nua_qa"
     assert "id" in data
     created_account_id["id"] = data["id"]
 
 
 def test_connect_duplicate_409(owner_token):
     r = requests.post(f"{API}/social/accounts", headers=hdrs(owner_token),
-                      json={"platform": "instagram", "handle": "nuva_qa"}, timeout=15)
+                      json={"platform": "instagram", "handle": "nua_qa"}, timeout=15)
     assert r.status_code == 409, r.text
 
 
@@ -97,7 +97,7 @@ def test_list_accounts_includes_new(owner_token):
     r = requests.get(f"{API}/social/accounts", headers=hdrs(owner_token), timeout=15)
     assert r.status_code == 200
     handles = [(a.get("platform"), a.get("handle")) for a in r.json()]
-    assert ("instagram", "nuva_qa") in handles
+    assert ("instagram", "nua_qa") in handles
 
 
 # ============== AI GENERATE ==============
@@ -165,7 +165,7 @@ def test_create_post_requires_connected_account(owner_token):
         if a["platform"] == "facebook":
             requests.delete(f"{API}/social/accounts/{a['id']}", headers=hdrs(owner_token), timeout=10)
     r = requests.post(f"{API}/social/posts", headers=hdrs(owner_token), json={
-        "platform": "facebook", "postType": "post", "caption": "hi", "hashtags": ["#nuva"],
+        "platform": "facebook", "postType": "post", "caption": "hi", "hashtags": ["#nua"],
     }, timeout=15)
     assert r.status_code == 400
 
@@ -173,7 +173,7 @@ def test_create_post_requires_connected_account(owner_token):
 def test_create_post_success(owner_token):
     r = requests.post(f"{API}/social/posts", headers=hdrs(owner_token), json={
         "platform": "instagram", "postType": "post",
-        "caption": "TEST_iter38 caption", "hashtags": ["#nuva", "#test"],
+        "caption": "TEST_iter38 caption", "hashtags": ["#nua", "#test"],
         "status": "draft",
     }, timeout=15)
     assert r.status_code == 200, r.text

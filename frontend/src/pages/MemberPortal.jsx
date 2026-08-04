@@ -190,7 +190,7 @@ export default function MemberPortal() {
                     <MessageCircle size={14} className="mr-1" /> WhatsApp
                   </Button>
                   <Button size="sm" variant="outline" className="flex-1 text-xs border-gray-700"
-                    onClick={() => window.open(`https://www.facebook.com/sharer/sharer.php?u=nuva.com/join?ref=${member.referralCode}`, '_blank')}>
+                    onClick={() => window.open(`https://www.facebook.com/sharer/sharer.php?u=nua.com/join?ref=${member.referralCode}`, '_blank')}>
                     <Facebook size={14} className="mr-1" /> Facebook
                   </Button>
                   <Button size="sm" variant="outline" className="flex-1 text-xs border-gray-700"

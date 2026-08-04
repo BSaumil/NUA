@@ -43,7 +43,7 @@ MUST_BE_SHUT = [
     ("GET", "/api/tables/qr-codes"), ("GET", "/api/staff/commissions"),
     ("GET", "/api/reservations/guest-lookup"), ("GET", "/api/bookings/inbox"),
     ("GET", "/api/automation/alerts"), ("GET", "/api/kitchen/prep-list"),
-    ("GET", "/api/receipt/settings"), ("GET", "/api/printers"),
+    ("GET", "/api/receipt/settings"),
     ("POST", "/api/products"), ("POST", "/api/expenses"), ("POST", "/api/suppliers"),
 ]
 
@@ -118,10 +118,10 @@ def test_owner_reaches_the_money_screens(client, owner_headers):
 
 def test_cashier_is_refused_the_pandl_but_keeps_the_kitchen_board(client, owner_headers):
     req(client, "POST", "/api/auth/staff/add", headers=owner_headers, json={
-        "name": "Gate Cashier", "email": "gate.cashier@nuva.com",
+        "name": "Gate Cashier", "email": "gate.cashier@nua.com",
         "password": "CashierPass1!", "role": "cashier"})
     tok = req(client, "POST", "/api/auth/login", json={
-        "email": "gate.cashier@nuva.com", "password": "CashierPass1!"}).json()
+        "email": "gate.cashier@nua.com", "password": "CashierPass1!"}).json()
     client.cookies.clear()
     assert "token" in tok, str(tok)[:200]
     ch = {"Authorization": f"Bearer {tok['token']}"}

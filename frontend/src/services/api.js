@@ -11,7 +11,7 @@ const api = axios.create({
 
 // Attach auth token to every request
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('nuva_token');
+  const token = localStorage.getItem('nua_token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
@@ -199,13 +199,6 @@ export const modifiersAPI = {
   create: (data) => api.post('/modifiers', data),
 };
 
-// Printers API
-export const printersAPI = {
-  getAll: () => api.get('/printers'),
-  create: (data) => api.post('/printers', data),
-  print: (printerId, transactionId) => api.post(`/printers/${printerId}/print`, null, { params: { transaction_id: transactionId } }),
-};
-
 // Offline Sync API
 export const offlineAPI = {
   sync: (data) => api.post('/offline/sync', data),
@@ -271,7 +264,7 @@ export const coursingAPI = {
   analytics: (days = 7) => api.get('/coursing/analytics', { params: { days } }),
   streamUrl: (tableNumber) =>
     `${API_BASE_URL}/coursing/stream?tableNumber=${encodeURIComponent(tableNumber || '')}`
-    + `&token=${encodeURIComponent(localStorage.getItem('nuva_token') || '')}`,
+    + `&token=${encodeURIComponent(localStorage.getItem('nua_token') || '')}`,
 };
 
 // Two-factor sign-in

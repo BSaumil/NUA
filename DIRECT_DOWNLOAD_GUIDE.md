@@ -1,8 +1,8 @@
-# 💾 Direct Download Guide - Ananta POS
+# 💾 Direct Download Guide - NUA POS
 
 ## Overview
 
-This guide shows you how to download the Ananta POS code directly from the development platform to your Windows PC (without using GitHub).
+This guide shows you how to download the NUA POS code directly from the development platform to your Windows PC (without using GitHub).
 
 **Time Required:** 5-10 minutes
 
@@ -84,7 +84,7 @@ This guide shows you how to download the Ananta POS code directly from the devel
 **What to expect:**
 - File size: ~50-100 MB (depends on node_modules)
 - Download time: 1-5 minutes (depends on connection)
-- File name: Usually `workspace.zip`, `ananta-pos.zip`, or similar
+- File name: Usually `workspace.zip`, `nua-pos.zip`, or similar
 
 **Progress indicators:**
 - Browser shows download progress
@@ -102,7 +102,7 @@ This guide shows you how to download the Ananta POS code directly from the devel
 2. Go to **Downloads** folder
 3. Look for the ZIP file:
    - `workspace.zip`
-   - `ananta-pos.zip`
+   - `nua-pos.zip`
    - Or similar name with today's date
 
 **Default location:**
@@ -118,7 +118,7 @@ C:\Users\YourUsername\Downloads\
 
 **Option A: Documents Folder (Recommended)**
 ```
-C:\Users\YourUsername\Documents\AnantaPOS\
+C:\Users\YourUsername\Documents\NUAPOS\
 ```
 - Easy to find
 - Good organization
@@ -126,7 +126,7 @@ C:\Users\YourUsername\Documents\AnantaPOS\
 
 **Option B: Desktop**
 ```
-C:\Users\YourUsername\Desktop\AnantaPOS\
+C:\Users\YourUsername\Desktop\NUAPOS\
 ```
 - Very accessible
 - Quick access
@@ -134,7 +134,7 @@ C:\Users\YourUsername\Desktop\AnantaPOS\
 
 **Option C: Custom Project Folder**
 ```
-C:\Projects\AnantaPOS\
+C:\Projects\NUAPOS\
 ```
 - Professional setup
 - Keep all projects organized
@@ -177,7 +177,7 @@ C:\Projects\AnantaPOS\
 **Open the extracted folder and check for:**
 
 ```
-AnantaPOS/
+NUAPOS/
 ├── backend/
 │   ├── models/
 │   ├── services/
@@ -232,7 +232,7 @@ AnantaPOS/
 3. Press Enter
 4. Navigate to folder:
    ```bash
-   cd C:\Users\YourUsername\Documents\AnantaPOS
+   cd C:\Users\YourUsername\Documents\NUAPOS
    ```
 
 ---
@@ -250,7 +250,7 @@ python check_prerequisites.py
 **Expected output:**
 ```
 =============================================================
-🔍 Ananta POS - Build Prerequisites Checker
+🔍 NUA POS - Build Prerequisites Checker
 =============================================================
 
 1️⃣  System Requirements
@@ -352,7 +352,7 @@ This will guide you through:
 1. Open Command Prompt normally
 2. Navigate manually:
    ```bash
-   cd C:\Path\To\Your\AnantaPOS\Folder
+   cd C:\Path\To\Your\NUAPOS\Folder
    ```
 3. Or use PowerShell instead (works the same)
 
@@ -369,7 +369,7 @@ This will guide you through:
 **If "No such file":**
 - You're in wrong folder
 - Run: `dir` to see current files
-- Navigate to correct folder: `cd path\to\anantapos`
+- Navigate to correct folder: `cd path\to\nuapos`
 
 ---
 
@@ -379,7 +379,7 @@ This will guide you through:
 Create a dedicated folder structure:
 ```
 C:\Projects\        (Main projects folder)
-  ├── AnantaPOS\   (This project)
+  ├── NUAPOS\   (This project)
   └── OtherProjects\
 ```
 
@@ -391,8 +391,8 @@ After successful build, copy the entire folder to an external drive or cloud sto
 
 ### Path Length
 Keep the extraction path short to avoid Windows path length limits:
-- ✅ Good: `C:\Projects\AnantaPOS\`
-- ❌ Bad: `C:\Users\...\Very\Long\Path\With\Many\Folders\...\AnantaPOS\`
+- ✅ Good: `C:\Projects\NUAPOS\`
+- ❌ Bad: `C:\Users\...\Very\Long\Path\With\Many\Folders\...\NUAPOS\`
 
 ---
 
@@ -401,7 +401,7 @@ Keep the extraction path short to avoid Windows path length limits:
 If you make changes in the platform:
 
 1. Download new ZIP from platform
-2. **Backup your current folder** (rename to `AnantaPOS-old`)
+2. **Backup your current folder** (rename to `NUAPOS-old`)
 3. Extract new ZIP to same location
 4. If you made local changes, manually copy them over
 

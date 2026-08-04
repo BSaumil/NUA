@@ -1,4 +1,4 @@
-# ✅ Ananta POS - Functionality Test Results
+# ✅ NUA POS - Functionality Test Results
 
 **Date:** January 28, 2025
 **Status:** ✅ ALL SYSTEMS OPERATIONAL
@@ -58,7 +58,7 @@ I've tested the system and **both adding products and performing transactions ar
 
 ---
 
-## 📱 How to Use Ananta POS
+## 📱 How to Use NUA POS
 
 ### Making a Sale (Step by Step):
 

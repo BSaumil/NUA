@@ -1,4 +1,4 @@
-# 📥 Ananta POS - Deployment & Access Guide
+# 📥 NUA POS - Deployment & Access Guide
 
 **Version:** 2.0.0
 **Status:** Production Ready
@@ -23,7 +23,7 @@
 
 3. **Get Your Public URL**
    - After deployment: `https://your-app-name.emergent.sh`
-   - Example: `https://ananta-pos.emergent.sh`
+   - Example: `https://nua-pos.emergent.sh`
    - Access from any device with internet
 
 ---
@@ -31,7 +31,7 @@
 ## 🌐 Accessing After Deployment
 
 ### Option 1: Web Access (Recommended)
-**URL:** Your deployment URL (e.g., `ananta-pos.emergent.sh`)
+**URL:** Your deployment URL (e.g., `nua-pos.emergent.sh`)
 
 **Access From:**
 - 💻 Desktop computers (any browser)
@@ -51,10 +51,10 @@
 ```bash
 # 1. Get your repository URL from "Save to GitHub"
 # 2. Clone to any computer
-git clone https://github.com/yourusername/ananta-pos.git
+git clone https://github.com/yourusername/nua-pos.git
 
 # 3. Run locally
-cd ananta-pos
+cd nua-pos
 
 # Backend
 cd backend
@@ -102,7 +102,7 @@ yarn start
 ```bash
 # 1. Clone from GitHub
 git clone YOUR_GITHUB_URL
-cd ananta-pos
+cd nua-pos
 
 # 2. Backend Setup
 cd backend
@@ -156,7 +156,7 @@ REACT_APP_BACKEND_URL=http://localhost:8001
 **Option A: Cloud-First**
 ```
 Store 1 Tablet ─┐
-Store 2 Tablet ─┼─→ ananta-pos.emergent.sh → Cloud Database
+Store 2 Tablet ─┼─→ nua-pos.emergent.sh → Cloud Database
 Store 3 Desktop ─┘
 ```
 - All devices connect to deployed URL
@@ -191,7 +191,7 @@ Tablets/Devices in same network
 ### As Progressive Web App (PWA):
 
 1. **Open on Mobile Browser**
-   - Visit: `https://ananta-pos.emergent.sh`
+   - Visit: `https://nua-pos.emergent.sh`
 
 2. **Install as App**
    - **iOS:** Safari → Share → "Add to Home Screen"
@@ -236,10 +236,10 @@ mongorestore --uri="NEW_MONGO_URL" ./backup
 **Via API:**
 ```bash
 # Export all products
-curl https://ananta-pos.emergent.sh/api/products > products.json
+curl https://nua-pos.emergent.sh/api/products > products.json
 
 # Export all transactions
-curl https://ananta-pos.emergent.sh/api/transactions > transactions.json
+curl https://nua-pos.emergent.sh/api/transactions > transactions.json
 ```
 
 ---
@@ -371,7 +371,7 @@ A: Your GitHub backup lets you deploy anywhere instantly.
 
 <div align="center">
 
-**Your Ananta POS is Ready for Deployment!**
+**Your NUA POS is Ready for Deployment!**
 
 Access it anywhere, anytime - on any device
 

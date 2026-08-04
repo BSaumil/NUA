@@ -1,14 +1,14 @@
-# 🎯 START HERE - Get Your Ananta POS Windows .exe File
+# 🎯 START HERE - Get Your NUA POS Windows .exe File
 
 ## Welcome! 👋
 
-You're looking for a **downloadable .exe file** for Ananta POS. Here's the complete path to get it:
+You're looking for a **downloadable .exe file** for NUA POS. Here's the complete path to get it:
 
 ---
 
 ## 📍 Current Situation
 
-You are currently in a **Linux development environment** where the Ananta POS system was built.
+You are currently in a **Linux development environment** where the NUA POS system was built.
 
 **Important:** The .exe file doesn't exist yet because:
 - Windows executables MUST be built on Windows
@@ -31,7 +31,7 @@ You are currently in a **Linux development environment** where the Ananta POS sy
 │  ⏱️ Time: 20-35 minutes (automated)                     │
 └─────────────────────────────────────────────────────────┘
 
-🎉 Result: Ananta POS-Setup-2.0.1.exe ready to distribute!
+🎉 Result: NUA POS-Setup-2.0.1.exe ready to distribute!
 ```
 
 ---
@@ -103,7 +103,7 @@ After downloading the code, run ONE command:
 build_windows_exe.bat
 ```
 
-**Result:** `/frontend/dist/Ananta POS-Setup-2.0.1.exe`
+**Result:** `/frontend/dist/NUA POS-Setup-2.0.1.exe`
 
 **Time:** 20-35 minutes (automated)
 
@@ -153,7 +153,7 @@ build_windows_exe.bat
    ```
 
 3. **Get .exe:**
-   - Find at: `frontend/dist/Ananta POS-Setup-2.0.1.exe`
+   - Find at: `frontend/dist/NUA POS-Setup-2.0.1.exe`
 
 ---
 
@@ -239,7 +239,7 @@ build_windows_exe.bat
 After building, you'll have:
 
 ```
-📦 Ananta POS-Setup-2.0.1.exe (200-300 MB)
+📦 NUA POS-Setup-2.0.1.exe (200-300 MB)
    ├─ Professional Windows installer
    ├─ Complete POS system
    ├─ Frontend + Backend + Database

@@ -21,7 +21,7 @@ SUPPORTED = {"instagram", "facebook", "tiktok", "x", "google_business"}
 @pytest.fixture(scope="module")
 def owner_token():
     r = requests.post(f"{BASE_URL}/api/auth/login",
-                      json={"email": "owner@nuva.com", "password": "NuvaOwner2026!"},
+                      json={"email": "owner@nua.com", "password": "NuaOwner2026!"},
                       timeout=20)
     assert r.status_code == 200, f"login failed: {r.status_code} {r.text[:200]}"
     tok = r.json().get("token") or r.json().get("access_token")
@@ -44,7 +44,7 @@ def ensure_connected_accounts(auth_headers):
             requests.post(
                 f"{BASE_URL}/api/social/accounts",
                 headers=auth_headers,
-                json={"platform": p, "handle": f"nuva_iter41_{p}", "displayName": f"Iter41 {p}"},
+                json={"platform": p, "handle": f"nua_iter41_{p}", "displayName": f"Iter41 {p}"},
                 timeout=15,
             )
 
@@ -209,8 +209,8 @@ class TestBookingsInboxFallbackHeader:
         if "x-ai-parsed-fallback" not in expose.lower():
             # Fall back to checking actual response headers from POST
             tok = requests.post(f"{BASE_URL}/api/auth/login",
-                                json={"email": "owner@nuva.com",
-                                      "password": "NuvaOwner2026!"},
+                                json={"email": "owner@nua.com",
+                                      "password": "NuaOwner2026!"},
                                 timeout=15).json().get("token")
             r2 = requests.post(
                 f"{BASE_URL}/api/bookings/inbox",
@@ -229,7 +229,7 @@ class TestBookingsInboxFallbackHeader:
 class TestRegression:
     def test_login(self):
         r = requests.post(f"{BASE_URL}/api/auth/login",
-                          json={"email": "owner@nuva.com", "password": "NuvaOwner2026!"},
+                          json={"email": "owner@nua.com", "password": "NuaOwner2026!"},
                           timeout=15)
         assert r.status_code == 200
 

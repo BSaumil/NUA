@@ -1,6 +1,6 @@
 {
-  "appId": "com.nuva.pos",
-  "appName": "NUVA POS",
+  "appId": "com.nua.pos",
+  "appName": "NUA POS",
   "webDir": "build",
   "bundledWebRuntime": false,
   "server": {

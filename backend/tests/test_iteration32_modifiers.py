@@ -10,8 +10,8 @@ import uuid
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL") or os.environ["REACT_APP_BACKEND_URL"]
 BASE_URL = BASE_URL.rstrip("/")
 
-OWNER_EMAIL = "owner@nuva.com"
-OWNER_PASSWORD = "NuvaOwner2026!"
+OWNER_EMAIL = "owner@nua.com"
+OWNER_PASSWORD = "NuaOwner2026!"
 
 
 @pytest.fixture(scope="module")

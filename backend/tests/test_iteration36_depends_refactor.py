@@ -29,8 +29,8 @@ def _load_backend_url():
 BASE_URL = _load_backend_url()
 API = f"{BASE_URL}/api"
 
-OWNER_EMAIL = "owner@nuva.com"
-OWNER_PASSWORD = "NuvaOwner2026!"
+OWNER_EMAIL = "owner@nua.com"
+OWNER_PASSWORD = "NuaOwner2026!"
 
 
 # ---------- fixtures ----------

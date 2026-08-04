@@ -1,4 +1,4 @@
-"""EFTPOS Integration Service for NUVA POS
+"""EFTPOS Integration Service for NUA POS
 
 Supports multiple Australian EFTPOS providers:
 - Linkly (PC-EFTPOS) - Most common, middleware

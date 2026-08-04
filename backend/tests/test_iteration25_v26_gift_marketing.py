@@ -9,7 +9,7 @@ Covers:
   - Auto-roster blackoutDates honouring + excluded[] reason
   - CFD push + enriched (live cart, customer/table/points)
 
-Auth: owner@nuva.com / NuvaOwner2026!
+Auth: owner@nua.com / NuaOwner2026!
 """
 import os
 import time
@@ -33,8 +33,8 @@ def _load_backend_url() -> str:
 
 
 BASE_URL = _load_backend_url()
-OWNER_EMAIL = "owner@nuva.com"
-OWNER_PASSWORD = "NuvaOwner2026!"
+OWNER_EMAIL = "owner@nua.com"
+OWNER_PASSWORD = "NuaOwner2026!"
 
 
 # ---------------------------------------------------------------------------
