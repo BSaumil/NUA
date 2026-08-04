@@ -14,6 +14,21 @@ async def get_user(request: Request) -> dict:
     return await get_current_user(request)
 
 
+async def optional_user(request: Request):
+    """Resolve the current user, or None if there isn't one.
+
+    For the handful of endpoints a guest is genuinely allowed to reach — the
+    kiosk and QR-table menu both read /products before anyone has logged in —
+    but which should still hand a guest less than they hand a staff member.
+    Never raises: an absent or invalid credential just means "guest".
+    """
+    try:
+        from routes.auth import get_current_user
+        return await get_current_user(request)
+    except Exception:
+        return None
+
+
 async def require_owner_or_manager(user: dict = Depends(get_user)) -> dict:
     if user.get("role") not in ("owner", "manager"):
         raise HTTPException(status_code=403, detail="Owner/Manager only")

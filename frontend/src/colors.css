@@ -1,0 +1,9 @@
+/* NUA brand colour tokens — NUA AUS PTY LTD.
+   Import once, globally. See BRAND-SPEC.md §3 for usage rules. */
+:root {
+  --nua-orange: #f58c14;  /* Primary / CTA */
+  --nua-purple: #8b5cf6;  /* AI features ONLY — never decorative */
+  --nua-pink:   #ec4899;  /* Insights / alerts */
+  --nua-ink:    #1c1917;  /* Dark mode / reversed */
+  --nua-paper:  #fdfcfa;  /* Background */
+}

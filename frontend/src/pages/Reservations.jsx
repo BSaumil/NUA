@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   CalendarDays, Clock, Users, Plus, Search, Filter, ChevronLeft, ChevronRight,
   Phone, Mail, Edit2, Trash2, Check, X, UserCheck, AlertTriangle, MapPin
@@ -37,7 +37,7 @@ const STATUS_CONFIG = {
 };
 
 const emptyForm = {
-  guestName: '', guestPhone: '', guestEmail: '', partySize: 2,
+  guestName: '', guestPhone: '', guestEmail: '', customerId: '', partySize: 2,
   date: new Date().toISOString().split('T')[0], time: '19:00', duration: 90,
   tableId: '', section: '', specialRequests: '', notes: '', tags: [],
   depositRequired: 0, source: 'phone',
@@ -53,6 +53,13 @@ export default function Reservations() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editId, setEditId] = useState(null);
   const [form, setForm] = useState({ ...emptyForm });
+  // CRM guest lookup — matches on name, phone, or email so staff can pull up
+  // a returning guest's details instead of retyping them from scratch.
+  const [guestMatches, setGuestMatches] = useState([]);
+  const [guestIntel, setGuestIntel] = useState(null);
+  const [guestSearchOpen, setGuestSearchOpen] = useState(false);
+  const [guestSearching, setGuestSearching] = useState(false);
+  const guestSearchTimer = useRef(null);
   const [view, setView] = useState('list'); // list | calendar | month
   const [mainTab, setMainTab] = useState('bookings'); // bookings | inbox
 
@@ -76,18 +83,69 @@ export default function Reservations() {
     (r.guestPhone && r.guestPhone.includes(search))
   );
 
-  const openNew = () => { setEditId(null); setForm({ ...emptyForm, date: selectedDate }); setDialogOpen(true); };
+  const openNew = () => { setEditId(null); setForm({ ...emptyForm, date: selectedDate }); setGuestMatches([]); setGuestIntel(null); setGuestSearchOpen(false); setDialogOpen(true); };
   const openEdit = (r) => {
     setEditId(r.id);
     setForm({
       guestName: r.guestName, guestPhone: r.guestPhone || '', guestEmail: r.guestEmail || '',
+      customerId: r.customerId || '',
       partySize: r.partySize, date: r.date, time: r.time, duration: r.duration,
       tableId: r.tableId || '', section: r.section || '', specialRequests: r.specialRequests || '',
       notes: r.notes || '', tags: r.tags || [], depositRequired: r.depositRequired || 0,
       source: r.source || 'phone',
     });
+    setGuestMatches([]); setGuestSearchOpen(false);
+    // Editing a booking that's already linked to a guest — pull their history
+    // straight up so the same context is there as when it was first taken.
+    setGuestIntel(null);
+    if (r.customerId) {
+      reservationsAPI.guestIntel(r.customerId)
+        .then(res => setGuestIntel(res.data))
+        .catch(() => {});
+    }
     setDialogOpen(true);
   };
+
+  // Debounced CRM lookup — fires off whichever of name/phone/email the staff
+  // is currently typing into; guest-lookup matches across all three in one
+  // query (phone digit-normalized, so any format matches).
+  const searchGuests = (query, field) => {
+    if (guestSearchTimer.current) clearTimeout(guestSearchTimer.current);
+    const q = query.trim();
+    if (q.length < 2) { setGuestMatches([]); setGuestSearchOpen(false); return; }
+    guestSearchTimer.current = setTimeout(async () => {
+      setGuestSearching(true);
+      try {
+        const params = { limit: 6 };
+        if (field === 'guestPhone') params.phone = q;
+        else if (field === 'guestEmail') params.email = q;
+        else params.q = q;
+        const r = await reservationsAPI.guestLookup(params);
+        setGuestMatches(r.data?.matches || []);
+        setGuestSearchOpen(true);
+      } catch { setGuestMatches([]); }
+      setGuestSearching(false);
+    }, 300);
+  };
+  const updateGuestField = (field, value) => {
+    // Any manual edit after a guest was picked means it may no longer match
+    // that CRM record, so drop the link (and its intel) rather than keep it stale.
+    setForm(f => ({ ...f, [field]: value, customerId: '' }));
+    setGuestIntel(null);
+    searchGuests(value, field);
+  };
+  const selectGuestMatch = (g) => {
+    setForm(f => ({
+      ...f,
+      guestName: g.name, guestPhone: g.phone || '', guestEmail: g.email || '',
+      customerId: g.customerId,
+    }));
+    // guest-lookup already returns the full summary, so the panel fills in
+    // with no extra round-trip.
+    setGuestIntel(g);
+    setGuestMatches([]); setGuestSearchOpen(false);
+  };
+  const unlinkGuest = () => { setForm(f => ({ ...f, customerId: '' })); setGuestIntel(null); };
 
   const handleSave = async () => {
     if (!form.guestName || !form.date || !form.time) {
@@ -453,17 +511,152 @@ export default function Reservations() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
+              <div className="col-span-2 relative">
                 <label className="text-xs font-medium text-gray-500 mb-1 block">Guest Name *</label>
-                <Input data-testid="guest-name-input" value={form.guestName} onChange={e => setForm(f => ({ ...f, guestName: e.target.value }))} placeholder="John Smith" />
+                <div className="relative">
+                  <Input
+                    data-testid="guest-name-input" value={form.guestName}
+                    onChange={e => updateGuestField('guestName', e.target.value)}
+                    onFocus={() => { if (guestMatches.length > 0) setGuestSearchOpen(true); }}
+                    onBlur={() => setTimeout(() => setGuestSearchOpen(false), 150)}
+                    placeholder="John Smith" autoComplete="off"
+                  />
+                  {guestSearching && (
+                    <Search size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-300 animate-pulse" />
+                  )}
+                </div>
+                {guestSearchOpen && guestMatches.length > 0 && (
+                  <div className="absolute z-20 left-0 right-0 mt-1 bg-white border rounded-lg shadow-lg max-h-56 overflow-y-auto" data-testid="guest-crm-matches">
+                    <p className="text-[10px] uppercase tracking-wide text-gray-400 px-3 pt-2 pb-1">From your customer list</p>
+                    {guestMatches.map(c => (
+                      <button
+                        key={c.customerId} type="button"
+                        onMouseDown={() => selectGuestMatch(c)}
+                        className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center justify-between gap-2 border-t first:border-t-0"
+                        data-testid={`guest-match-${c.customerId}`}
+                      >
+                        <span className="min-w-0">
+                          <span className="block text-sm font-medium truncate" style={{ color: theme.text }}>{c.name}</span>
+                          <span className="block text-xs text-gray-400 truncate">{[c.phone, c.email].filter(Boolean).join(' · ')}</span>
+                          {c.lastVisit?.date && (
+                            <span className="block text-[10px] text-gray-400">Last in {c.lastVisit.date}{c.stats?.completedVisits ? ` · ${c.stats.completedVisits} visits` : ''}</span>
+                          )}
+                        </span>
+                        {c.isVip && <Badge className="bg-amber-100 text-amber-700 text-[10px] flex-shrink-0">VIP</Badge>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {form.customerId && (
+                  <p className="text-[11px] text-emerald-600 mt-1 flex items-center gap-1" data-testid="guest-linked-badge">
+                    <UserCheck size={12} /> Linked to guest profile
+                    <button type="button" onClick={unlinkGuest} className="text-gray-400 hover:text-red-500 underline ml-1" data-testid="unlink-guest-btn">unlink</button>
+                  </p>
+                )}
               </div>
+
+              {/* Guest history — what whoever is taking the booking needs to
+                  know before they finish the call. */}
+              {guestIntel && form.customerId && (
+                <div className="col-span-2 rounded-lg border bg-gray-50/70 p-3 space-y-2" data-testid="guest-intel-panel">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-semibold" style={{ color: theme.text }}>{guestIntel.name}</span>
+                    {guestIntel.isVip && <Badge className="bg-amber-100 text-amber-700 text-[10px]">VIP</Badge>}
+                    {guestIntel.membershipTier && <Badge variant="outline" className="text-[10px]">{guestIntel.membershipTier}</Badge>}
+                    {(guestIntel.stats?.noShows > 0) && (
+                      <Badge className="bg-red-100 text-red-700 text-[10px]" data-testid="guest-noshow-badge">
+                        {guestIntel.stats.noShows} no-show{guestIntel.stats.noShows > 1 ? 's' : ''}
+                      </Badge>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-[11px]">
+                    <div>
+                      <span className="text-gray-400 block">Last booked</span>
+                      <span style={{ color: theme.text }} data-testid="intel-last-booked">
+                        {guestIntel.lastBooking?.date
+                          ? `${guestIntel.lastBooking.date} · ${guestIntel.lastBooking.partySize}p`
+                          : 'First booking'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-gray-400 block">Last came in</span>
+                      <span style={{ color: theme.text }} data-testid="intel-last-visit">
+                        {guestIntel.lastVisit?.date || '—'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {guestIntel.lastOrderItems?.length > 0 && (
+                    <div className="text-[11px]" data-testid="intel-last-order">
+                      <span className="text-gray-400 block">Had last time</span>
+                      <span style={{ color: theme.text }}>
+                        {guestIntel.lastOrderItems.map(i => `${i.quantity}× ${i.name}`).join(', ')}
+                      </span>
+                    </div>
+                  )}
+
+                  {guestIntel.topItems?.length > 0 && (
+                    <div className="text-[11px]" data-testid="intel-top-items">
+                      <span className="text-gray-400 block">Orders most</span>
+                      <span className="flex flex-wrap gap-1 mt-0.5">
+                        {guestIntel.topItems.map((i, n) => (
+                          <Badge key={n} variant="outline" className="text-[10px] font-normal">
+                            {i.name} ×{i.timesOrdered}
+                          </Badge>
+                        ))}
+                      </span>
+                    </div>
+                  )}
+
+                  {(guestIntel.frequentRequests?.length > 0 || guestIntel.standingPreferences?.length > 0) && (
+                    <div className="text-[11px]" data-testid="intel-requests">
+                      <span className="text-gray-400 block">Usually asks for</span>
+                      <span className="flex flex-wrap gap-1 mt-0.5">
+                        {guestIntel.standingPreferences?.map((p, n) => (
+                          <Badge key={`p${n}`}
+                            className={`text-[10px] font-normal ${p.type === 'allergy' ? 'bg-red-100 text-red-700' : 'bg-blue-50 text-blue-700'}`}>
+                            {p.type === 'allergy' ? '⚠ ' : ''}{p.value}
+                          </Badge>
+                        ))}
+                        {guestIntel.frequentRequests?.map((f, n) => (
+                          <Badge key={`f${n}`} variant="outline" className="text-[10px] font-normal">
+                            {f.request} ({f.times}×)
+                          </Badge>
+                        ))}
+                      </span>
+                    </div>
+                  )}
+
+                  {guestIntel.frequentRequests?.length > 0 && (
+                    <button type="button"
+                      onClick={() => setForm(f => ({ ...f, specialRequests: guestIntel.frequentRequests[0].request }))}
+                      className="text-[11px] underline text-gray-500 hover:text-gray-800"
+                      data-testid="apply-usual-request-btn">
+                      Use their usual request
+                    </button>
+                  )}
+                </div>
+              )}
               <div>
                 <label className="text-xs font-medium text-gray-500 mb-1 block">Phone</label>
-                <Input data-testid="guest-phone-input" value={form.guestPhone} onChange={e => setForm(f => ({ ...f, guestPhone: e.target.value }))} placeholder="+61 400 000 000" />
+                <Input
+                  data-testid="guest-phone-input" value={form.guestPhone}
+                  onChange={e => updateGuestField('guestPhone', e.target.value)}
+                  onFocus={() => { if (guestMatches.length > 0) setGuestSearchOpen(true); }}
+                  onBlur={() => setTimeout(() => setGuestSearchOpen(false), 150)}
+                  placeholder="+61 400 000 000" autoComplete="off"
+                />
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 mb-1 block">Email</label>
-                <Input data-testid="guest-email-input" value={form.guestEmail} onChange={e => setForm(f => ({ ...f, guestEmail: e.target.value }))} placeholder="guest@email.com" />
+                <Input
+                  data-testid="guest-email-input" value={form.guestEmail}
+                  onChange={e => updateGuestField('guestEmail', e.target.value)}
+                  onFocus={() => { if (guestMatches.length > 0) setGuestSearchOpen(true); }}
+                  onBlur={() => setTimeout(() => setGuestSearchOpen(false), 150)}
+                  placeholder="guest@email.com" autoComplete="off"
+                />
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 mb-1 block">Date *</label>

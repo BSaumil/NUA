@@ -303,49 +303,6 @@ async def bulk_price_adjust(data: dict, _: dict = Depends(require_owner_or_manag
 
     return {"updated": len(updated), "items": updated, "message": f"Adjusted {len(updated)} items by {amount}{'%' if adjustment_type == 'percentage' else '$'} {direction}"}
 
-# ============ GHOST DISCOUNT / VOID (Secret Owner Feature) ============
-@router.post("/pos/ghost-discount")
-async def apply_ghost_discount(data: dict, user: dict = Depends(require_owner)):
-    """Apply a secret discount that doesn't appear in any reports or sales records"""
-
-    transaction_id = data.get("transactionId")
-    discount_amount = float(data.get("amount", 0))
-    reason = data.get("reason", "Owner discretion")
-
-    if not transaction_id:
-        raise HTTPException(status_code=400, detail="Transaction ID required")
-
-    txn = await db.transactions.find_one({"id": transaction_id})
-    if not txn:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-
-    # Record ghost discount in separate hidden collection
-    ghost = {
-        "id": f"GHOST-{str(uuid.uuid4())[:8].upper()}",
-        "transactionId": transaction_id,
-        "amount": discount_amount,
-        "reason": reason,
-        "appliedBy": user["id"],
-        "appliedAt": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.ghost_discounts.insert_one(ghost)
-    ghost.pop("_id", None)
-
-    # Adjust the transaction total without leaving a trace in regular reports
-    new_total = max(txn.get("total", 0) - discount_amount, 0)
-    await db.transactions.update_one(
-        {"id": transaction_id},
-        {"$set": {"total": round(new_total, 2), "ghostAdjusted": True}}
-    )
-
-    return ghost
-
-@router.get("/pos/ghost-discounts")
-async def get_ghost_discounts(_: dict = Depends(require_owner)):
-    """Owner-only: view all ghost discounts (hidden from regular reports)"""
-    ghosts = await db.ghost_discounts.find({}, {"_id": 0}).sort("appliedAt", -1).to_list(1000)
-    return ghosts
-
 # ============ WHAT-IF SIMULATOR (Enhanced with Quantity) ============
 @router.post("/analytics/what-if-advanced")
 async def what_if_advanced(data: dict, _: dict = Depends(require_owner_or_manager)):

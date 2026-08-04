@@ -12,8 +12,10 @@ from database import db, client
 from routes.products import router as products_router
 from routes.transactions import router as transactions_router
 from routes.customers import router as customers_router
+from routes.identity import router as identity_router
 from routes.reservations import router as reservations_router
 from routes.kitchen import router as kitchen_router
+from routes.coursing import router as coursing_router
 from routes.analytics import router as analytics_router
 from routes.automation import router as automation_router
 from routes.settings import router as settings_router
@@ -61,6 +63,7 @@ from routes.audit import router as audit_router
 from routes.approvals import router as approvals_router
 from routes.nua import router as nua_router
 from routes.hq import router as hq_router
+from routes.ops import router as ops_router
 from middleware.license_middleware import LicenseEnforcementMiddleware
 from middleware.actor_context import ActorContextMiddleware
 
@@ -73,8 +76,10 @@ api_router.include_router(auth_router)
 api_router.include_router(products_router)
 api_router.include_router(transactions_router)
 api_router.include_router(customers_router)
+api_router.include_router(identity_router)
 api_router.include_router(reservations_router)
 api_router.include_router(kitchen_router)
+api_router.include_router(coursing_router)
 api_router.include_router(analytics_router)
 api_router.include_router(automation_router)
 api_router.include_router(settings_router)
@@ -121,6 +126,7 @@ api_router.include_router(approvals_router)
 api_router.include_router(nua_router)
 api_router.include_router(hq_router)
 api_router.include_router(multi_tenant_router)
+api_router.include_router(ops_router)
 
 @api_router.get("/")
 async def root():
@@ -169,6 +175,90 @@ def _rate_limit_identity(request) -> str:
     return f"ip:{ip}"
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Default-deny at the door.
+#
+# Auth used to be opt-in: an endpoint was protected only if whoever wrote it
+# remembered a `Depends`. With ~280 GET routes that is a losing game, and it
+# lost — a sweep found the customer list, the P&L, the command centre and the
+# business settings (writable!) all answering with no credential at all.
+#
+# So the default is inverted here. Anything under /api/ needs a valid token
+# unless it is on the list below, and the list is short because the genuinely
+# public surface is small: the booking portal, the QR table menu, the online
+# storefront, the member join page, login, and payment webhooks.
+#
+# This checks the token is *real* (signature, type, expiry) but not who it
+# belongs to — the per-route Depends still do the user lookup and the role and
+# permission checks. This layer only closes "no credential, or a forged one".
+# ═══════════════════════════════════════════════════════════════════════════
+PUBLIC_API_PREFIXES = (
+    "/api/public/",              # booking portal: menu, slots, book, waitlist, events
+    "/api/table/",               # QR table ordering: menu, place order, order status
+    "/api/online/orders/track/", # order tracking by code, from the SMS link
+    "/api/members/share-link/",  # member referral links
+    "/api/stripe/checkout/status/",
+)
+
+PUBLIC_API_PATHS = {
+    "/api/", "/api/health", "/api/healthz",
+    # Auth itself, plus the endpoints the login screen needs before there is a user
+    "/api/auth/login", "/api/auth/register", "/api/auth/logout", "/api/auth/refresh",
+    "/api/auth/me", "/api/auth/forgot-password", "/api/auth/reset-password",
+    # The second half of login: password passed, code still owed. It carries
+    # its own short-lived challenge token in the body instead of a session
+    # token, which this middleware doesn't know how to read — the endpoint
+    # verifies that token itself.
+    "/api/auth/2fa/challenge",
+    "/api/business/theme",       # login-screen branding
+    # The menu, as guests see it. /products strips cost/stock/sku for guests.
+    "/api/products", "/api/categories", "/api/modifiers",
+    "/api/online/categories", "/api/online/products", "/api/online/orders",
+    # Member self-service signup
+    "/api/members/login", "/api/members/signup",
+    # Payment provider callbacks — signed by the provider, not by a user
+    "/api/webhook/stripe", "/api/stripe/webhook",
+}
+
+
+def _is_public_api(path: str) -> bool:
+    return path in PUBLIC_API_PATHS or path.startswith(PUBLIC_API_PREFIXES)
+
+
+class RequireAuthMiddleware(BaseHTTPMiddleware):
+    """Reject /api/ traffic that carries no valid token, before it reaches a route."""
+
+    async def dispatch(self, request, call_next):
+        path = request.url.path
+        if request.method == "OPTIONS" or not path.startswith("/api/"):
+            return await call_next(request)
+        if _is_public_api(path):
+            return await call_next(request)
+
+        token = None
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header[7:].strip()
+        if not token:
+            token = request.cookies.get("access_token")
+        if not token:
+            # EventSource cannot set headers, so the SSE stream passes its JWT
+            # as a query parameter. Same token, verified the same way here.
+            token = request.query_params.get("token")
+        if not token:
+            return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
+
+        try:
+            import jwt
+            payload = jwt.decode(token, os.environ["JWT_SECRET"], algorithms=["HS256"])
+        except Exception:
+            return JSONResponse(status_code=401, content={"detail": "Invalid or expired token"})
+        # A refresh token must not be usable as an access token.
+        if payload.get("type") not in (None, "access"):
+            return JSONResponse(status_code=401, content={"detail": "Invalid token type"})
+        return await call_next(request)
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """120 req/min per (tenant, identity). Excludes static & public booking."""
     def __init__(self, app):
@@ -198,6 +288,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.buckets[key].append(now)
         return await call_next(request)
 
+# Added before RateLimit so RateLimit ends up the outer of the two: an
+# unauthenticated flood is still rate-limited rather than each request paying
+# for a JWT verification.
+app.add_middleware(RequireAuthMiddleware)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(LicenseEnforcementMiddleware)
 app.add_middleware(ActorContextMiddleware)
@@ -241,6 +335,13 @@ app.add_middleware(
     # Custom headers the SPA reads (e.g. AI fallback flag on booking inbox).
     expose_headers=["x-ai-parsed-fallback"],
 )
+
+# Outermost of all: added last, so it wraps everything else (CORS, rate
+# limiting, the auth gate) and logs — and can catch an unhandled exception
+# from — every request that reaches this process, not just the ones that get
+# as far as a route handler.
+from services.observability import ObservabilityMiddleware
+app.add_middleware(ObservabilityMiddleware)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -286,12 +387,59 @@ async def startup():
         start_scheduler()
     except Exception as exc:
         logger.warning("Ash scheduler failed to start: %s", exc)
+    # Analytics filters the course-event trail on time, and the trail needs a
+    # TTL so it can't grow forever.
+    try:
+        from services.course_events import ensure_indexes
+        await ensure_indexes()
+    except Exception as exc:
+        logger.warning("Course event indexes failed: %s", exc)
+    # Course timing rules need minute-level granularity, so they get their own
+    # loop rather than riding the hourly Ash scheduler.
+    try:
+        from services.coursing_scheduler import start_scheduler as start_coursing
+        start_coursing()
+    except Exception as exc:
+        logger.warning("Coursing scheduler failed to start: %s", exc)
+    # Burned TOTP codes and trusted devices both expire on their own.
+    try:
+        from services.two_factor import ensure_indexes as ensure_2fa_indexes
+        await ensure_2fa_indexes()
+    except Exception as exc:
+        logger.warning("2FA indexes failed: %s", exc)
+    # The high-traffic collections (transactions, kitchen orders, customers,
+    # products) get indexes on the fields every dashboard and POS screen
+    # actually filters or sorts by — see services/db_indexes.py for why.
+    try:
+        from services.db_indexes import ensure_indexes as ensure_core_indexes
+        await ensure_core_indexes()
+    except Exception as exc:
+        logger.warning("Core indexes failed: %s", exc)
+    # Captured errors expire on their own after 30 days.
+    try:
+        from services.observability import ensure_indexes as ensure_observability_indexes
+        await ensure_observability_indexes()
+    except Exception as exc:
+        logger.warning("Observability indexes failed: %s", exc)
+    # Ephemeral collections (kiosk carts, notifications, login lockouts)
+    # expire on their own too — see services/retention.py for what's
+    # deliberately NOT on this list (transactions, audit, BAS/GST).
+    try:
+        from services.retention import ensure_indexes as ensure_retention_indexes
+        await ensure_retention_indexes()
+    except Exception as exc:
+        logger.warning("Retention indexes failed: %s", exc)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
     try:
         from services.nua_scheduler import stop_scheduler
         stop_scheduler()
+    except Exception:
+        pass
+    try:
+        from services.coursing_scheduler import stop_scheduler as stop_coursing
+        stop_coursing()
     except Exception:
         pass
     client.close()

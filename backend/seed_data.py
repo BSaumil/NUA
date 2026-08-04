@@ -571,6 +571,7 @@ async def seed_database():
     printers = [
         {
             "id": "printer-1",
+            "businessId": "default",
             "name": "Main Counter Printer",
             "type": "network",
             "ipAddress": "192.168.1.100",
@@ -582,6 +583,7 @@ async def seed_database():
         },
         {
             "id": "printer-2",
+            "businessId": "default",
             "name": "Mall Branch Printer",
             "type": "network",
             "ipAddress": "192.168.1.101",

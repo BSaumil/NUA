@@ -55,6 +55,18 @@ async def member_signup(req: MemberSignup, response: Response):
     member.pop("_id", None)
     member.pop("password_hash", None)
 
+    # Free base identity layer — a loyalty signup is one of the touchpoints
+    # that creates/matches a Customer identity record.
+    try:
+        from services.customer_identity import record_touchpoint, ensure_loyalty_account, addon_enabled
+        identity = await record_touchpoint(
+            phone=req.phone, email=email, name=req.name, source="loyalty_signup",
+        )
+        if identity and await addon_enabled("loyalty.enabled"):
+            await ensure_loyalty_account(identity["id"])
+    except Exception:
+        pass
+
     access = create_access_token(member["id"], email, "member")
     response.set_cookie("member_token", access, httponly=True, secure=False, samesite="lax", max_age=604800, path="/")
     return {"member": member, "token": access}

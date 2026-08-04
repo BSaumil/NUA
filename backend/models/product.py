@@ -37,6 +37,11 @@ class Product(BaseModel):
     onlineChannels: List[str] = []  # uber_eats, doordash, website, etc.
     seoDescription: str = ""
     description: str = ""
+    # Allergens and dietary markers. These belong on the production docket
+    # more than anywhere else in the system — a runner asking the kitchen
+    # "does this have nuts?" mid-service is how the wrong plate goes out.
+    allergens: List[str] = []      # e.g. nuts, shellfish, gluten, dairy
+    dietary: List[str] = []        # e.g. vegan, vegetarian, gluten-free, halal
     # Optional per-language name/description overrides for customer-facing
     # menus (kiosk, QR table order, online storefront), e.g.
     # {"it": {"name": "Margherita", "description": "Pomodoro, mozzarella, basilico"}}.
@@ -68,6 +73,9 @@ class ProductCreate(BaseModel):
     description: str = ""
     translations: Dict[str, Dict[str, str]] = {}
 
+    allergens: List[str] = []
+    dietary: List[str] = []
+
 class ProductUpdate(BaseModel):
     name: Optional[str] = None
     category: Optional[str] = None
@@ -86,3 +94,6 @@ class ProductUpdate(BaseModel):
     description: Optional[str] = None
     translations: Optional[Dict[str, Dict[str, str]]] = None
     eightySixed: Optional[bool] = None
+
+    allergens: Optional[List[str]] = None
+    dietary: Optional[List[str]] = None

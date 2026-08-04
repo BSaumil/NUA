@@ -8,7 +8,7 @@ import {
   ChefHat, BarChart3, Zap, Award, TrendingUp,
   FlaskConical, Sunrise, Brain, Plug, Users2, LogOut, ShieldCheck, Store,
   Mail, ClipboardList, DollarSign, Trophy, Printer, PieChart,
-  ChevronDown, ChevronRight
+  ChevronDown, ChevronRight, Timer
 } from 'lucide-react';
 
 // Progressive disclosure: the everyday screens live in a handful of merged
@@ -18,6 +18,7 @@ const NAV_STRUCTURE = [
   { path: '/today', icon: Sunrise, label: 'Today', access: ['owner', 'manager'] },
   { path: '/pos', icon: ShoppingCart, label: 'POS Terminal', access: ['owner', 'manager', 'cashier'] },
   { path: '/kitchen', icon: ChefHat, label: 'Kitchen', access: ['owner', 'manager', 'kitchen'] },
+  { path: '/coursing-analytics', icon: Timer, label: 'Coursing', access: ['owner', 'manager'] },
   {
     icon: Utensils, label: 'Bookings & Floor', access: ['owner', 'manager', 'cashier', 'kitchen'],
     children: [

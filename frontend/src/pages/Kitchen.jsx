@@ -15,7 +15,10 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../components/ui/select';
 import { useTheme } from '../contexts/ThemeContext';
+import { useLanguage } from '../i18n/useLanguage';
+import { LanguageSelector } from '../i18n/LanguageSelector';
 import { kitchenAPI, productsAPI } from '../services/api';
+import { loadOpenTicketsResilient } from '../lib/offlineQueue';
 import { toast } from 'sonner';
 
 const PRIORITY_CONFIG = {
@@ -50,9 +53,26 @@ function fmtHHMM(iso) {
   } catch { return '—'; }
 }
 
+/** Whole minutes since a timestamp — the live clock on a course's state. */
+function atPassMinutes(iso) {
+  if (!iso) return 0;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return 0;
+  return Math.max(0, Math.floor((Date.now() - t) / 60000));
+}
+
 export default function Kitchen() {
   const { theme } = useTheme();
+  // The KDS is staff-facing and kitchen brigades are commonly multilingual;
+  // the earlier language work only covered customer-facing surfaces.
+  const { lang, setLang, t, dir, languages } = useLanguage('nua_kds_lang');
+  // Which station this screen is. A bar screen showing kitchen tickets is
+  // noise a cook has to filter by eye during service.
+  const [station, setStation] = useState(() => localStorage.getItem('nua_kds_station') || '');
   const [orders, setOrders] = useState([]);
+  // Set only when the board currently on screen came from the offline
+  // cache rather than a live fetch — null the rest of the time.
+  const [offlineTickets, setOfflineTickets] = useState(null);
   const [filter, setFilter] = useState('active');
   const [newOrderDialog, setNewOrderDialog] = useState(false);
   const [products, setProducts] = useState([]);
@@ -76,11 +96,20 @@ export default function Kitchen() {
   }, []);
 
   const fetchOrders = useCallback(async () => {
+    const params = {};
+    if (filter !== 'active' && filter !== 'all') params.status = filter;
+    // A dropped connection used to leave the board silently stale — orders
+    // just stayed whatever they were in memory, with no persistence across
+    // a reload and no signal to the kitchen that what's on screen might be
+    // out of date. This falls back to the last-known ticket list (cached in
+    // IndexedDB) and says so, the same pattern the POS terminal's menu cache
+    // already uses for the same kind of outage. A real server error (not a
+    // network failure) still just logs, same as before this change.
     try {
-      const params = {};
-      if (filter !== 'active' && filter !== 'all') params.status = filter;
-      const res = await kitchenAPI.getOrders(params);
-      setOrders(res.data);
+      const { tickets, offline, cachedAt } = await loadOpenTicketsResilient(
+        () => kitchenAPI.getOrders(params).then(r => r.data));
+      setOrders(tickets);
+      setOfflineTickets(offline ? { cachedAt } : null);
     } catch (e) { console.error(e); }
   }, [filter]);
 
@@ -138,6 +167,9 @@ export default function Kitchen() {
     fire:    async (id, c) => { try { await kitchenAPI.fireCourse(id, c); toast.success(`${COURSE_LABEL[c] || 'C'+c} fired`); fetchOrders(); } catch { toast.error('Failed'); } },
     hold:    async (id, c) => { try { await kitchenAPI.holdCourse(id, c); toast(`${COURSE_LABEL[c] || 'C'+c} held`); fetchOrders(); } catch { toast.error('Failed'); } },
     serveC:  async (id, c) => { try { await kitchenAPI.serveCourse(id, c); toast.success(`${COURSE_LABEL[c] || 'C'+c} served`); fetchOrders(); } catch { toast.error('Failed'); } },
+    // Course-level ready — tells the server this course is up at the pass
+    // instead of making them watch it.
+    readyC:  async (id, c) => { try { await kitchenAPI.readyCourse(id, c); toast.success(`${COURSE_LABEL[c] || 'C'+c} ready — server notified`); fetchOrders(); } catch { toast.error('Failed'); } },
   };
 
   const addItemToOrder = () => {
@@ -168,9 +200,19 @@ export default function Kitchen() {
     } catch { toast.error('Failed to create order'); }
   };
 
-  const displayed = filter === 'active'
+  const byStatus = filter === 'active'
     ? orders.filter(o => ['new', 'preparing', 'ready'].includes(o.status))
     : filter === 'all' ? orders : orders.filter(o => o.status === filter);
+
+  // Every station a ticket fires from is already stamped on its print jobs;
+  // here we match on the item's own category route as recorded on the ticket,
+  // falling back to showing the ticket when we can't tell (better a cook sees
+  // one extra ticket than misses one that was theirs).
+  const stations = [...new Set(orders.flatMap(o => o.orderStations || []))].filter(Boolean);
+  const displayed = !station ? byStatus : byStatus.filter(o => {
+    const list = o.orderStations || [];
+    return list.length === 0 || list.includes(station);
+  });
 
   const sorted = [...displayed].sort((a, b) => {
     if (a.priority === 'rush' && b.priority !== 'rush') return -1;
@@ -198,7 +240,8 @@ export default function Kitchen() {
     const label = COURSE_LABEL[courseNum] || `Course ${courseNum}`;
     const canHold = meta.status === 'queued';
     const canFire = ['queued', 'held'].includes(meta.status);
-    const canServe = meta.status === 'fired';
+    const canReady = meta.status === 'fired';
+    const canServe = ['fired', 'ready'].includes(meta.status);
     return (
       <div key={courseNum} className="border rounded-lg overflow-hidden mb-2" data-testid={`course-block-${order.id}-${courseNum}`}>
         <div className={`flex items-center justify-between px-3 py-1.5 ${COURSE_STATUS_TONE[meta.status] || 'bg-slate-100'}`}>
@@ -216,27 +259,52 @@ export default function Kitchen() {
                 <Pause size={10} /> held {fmtHHMM(meta.heldAt)}
               </span>
             )}
+            {/* Minutes since this course was called ready. Food dying under a
+                lamp is the expensive failure, and it's invisible unless the
+                clock is on screen — so it goes amber, then red. */}
+            {meta.status === 'ready' && meta.readyAt && (
+              <span className={`text-[10px] font-bold px-1.5 rounded flex items-center gap-1 ${
+                atPassMinutes(meta.readyAt) >= 5 ? 'bg-red-600 text-white'
+                : atPassMinutes(meta.readyAt) >= 2 ? 'bg-amber-500 text-white'
+                : 'text-emerald-700'}`}
+                data-testid={`at-pass-${order.id}-${courseNum}`}>
+                <Clock size={10} /> {atPassMinutes(meta.readyAt)}m {t('kitchen.atPass')}
+              </span>
+            )}
+            {meta.status === 'fired' && meta.firedAt && (
+              <span className="text-[10px] text-slate-600 flex items-center gap-1"
+                data-testid={`cooking-${order.id}-${courseNum}`}>
+                <Clock size={10} /> {atPassMinutes(meta.firedAt)}m {t('kitchen.cooking')}
+              </span>
+            )}
           </div>
           <div className="flex gap-1">
             {canHold && (
               <button className="text-[10px] px-2 py-0.5 bg-white rounded border hover:bg-purple-50 flex items-center gap-1"
                 onClick={() => handle.hold(order.id, courseNum)}
                 data-testid={`hold-c${courseNum}-${order.id}`}>
-                <Pause size={10} /> Hold
+                <Pause size={10} /> {t('kitchen.hold')}
               </button>
             )}
             {canFire && (
               <button className="text-[10px] px-2 py-0.5 bg-amber-500 text-white rounded hover:bg-amber-600 flex items-center gap-1"
                 onClick={() => handle.fire(order.id, courseNum)}
                 data-testid={`fire-c${courseNum}-${order.id}`}>
-                <Flame size={10} /> Fire
+                <Flame size={10} /> {t('kitchen.fire')}
+              </button>
+            )}
+            {canReady && (
+              <button className="text-[10px] px-2 py-0.5 bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-1"
+                onClick={() => handle.readyC(order.id, courseNum)}
+                data-testid={`ready-c${courseNum}-${order.id}`}>
+                <Check size={10} /> {t('kitchen.ready')}
               </button>
             )}
             {canServe && (
               <button className="text-[10px] px-2 py-0.5 bg-emerald-500 text-white rounded hover:bg-emerald-600 flex items-center gap-1"
                 onClick={() => handle.serveC(order.id, courseNum)}
                 data-testid={`serve-c${courseNum}-${order.id}`}>
-                <Check size={10} /> Serve
+                <Check size={10} /> {t('kitchen.serve')}
               </button>
             )}
           </div>
@@ -387,6 +455,16 @@ export default function Kitchen() {
 
   return (
     <div className="space-y-6" data-testid="kitchen-page">
+      {/* Offline board banner — dark-on-light-amber, not white-on-amber, for
+          the same contrast reason the POS terminal's equivalent banner uses
+          this pairing rather than the training-mode one's white-on-amber. */}
+      {offlineTickets && (
+        <div className="rounded-lg bg-amber-100 text-amber-900 text-center py-2 text-sm font-semibold"
+          data-testid="offline-tickets-banner">
+          You're offline — showing tickets as of{' '}
+          {offlineTickets.cachedAt ? new Date(offlineTickets.cachedAt).toLocaleTimeString() : 'last sync'}
+        </div>
+      )}
       {/* Average order time — a rough live gauge in the corner so the chef
           can judge pace mid-service without digging into a report. */}
       {avgOrderTime !== null && (
@@ -415,6 +493,17 @@ export default function Kitchen() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <select
+            className="h-9 text-sm border rounded-md px-2 bg-white"
+            value={station}
+            onChange={e => { setStation(e.target.value); localStorage.setItem('nua_kds_station', e.target.value); }}
+            data-testid="kds-station-filter"
+            title={t('kitchen.station')}
+          >
+            <option value="">{t('kitchen.allStations')}</option>
+            {stations.map(st => <option key={st} value={st}>{st}</option>)}
+          </select>
+          <LanguageSelector lang={lang} setLang={setLang} languages={languages} variant="light" />
           <Button variant="outline" onClick={fetchOrders} data-testid="refresh-kitchen-btn">
             <RotateCcw size={14} className="mr-1" /> Refresh
           </Button>

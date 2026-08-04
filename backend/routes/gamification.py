@@ -170,26 +170,22 @@ For each item, suggest ONE replacement with: name, suggested price, estimated fo
         return {"suggestions": f"AI unavailable: {str(e)}", "generatedAt": datetime.now(timezone.utc).isoformat()}
 
 # ============ CATEGORY-WISE PRINT ROUTING ============
+# Drinks must reach the bar, not the kitchen. The seeded drinks catalog uses
+# real category names ("Cocktails", "Wine — Red", "Spirits — Gin", …), so
+# routing on the generic words "Beverages"/"Alcohol" alone silently sent every
+# Negroni to the kitchen printer. These are listed explicitly, and anything
+# else in a drinks category group falls back to the bar via _route_for_item.
+# Routing defaults live with the routing logic so the two cannot drift.
+from services.print_routing import DEFAULT_PRINT_ROUTING
+
+
 @router.get("/print-routing/config")
 async def get_print_routing():
     """Returns the current print-routing config. Auto-heals legacy shapes
     (e.g. an old dict-shaped `routes` field from a pre-v27 save) so the SPA
     can always call `config.routes.map(...)` without crashing."""
-    defaults = {
-        "enabled": True,
-        "routes": [
-            {"category": "Beverages", "printer": "Bar Printer", "priority": 1},
-            {"category": "Alcohol", "printer": "Bar Printer", "priority": 1},
-            {"category": "Food", "printer": "Kitchen Printer", "priority": 2},
-            {"category": "Mains", "printer": "Kitchen Printer", "priority": 2},
-            {"category": "Appetizers", "printer": "Kitchen Printer", "priority": 1},
-            {"category": "Bakery", "printer": "Kitchen Printer", "priority": 3},
-            {"category": "Desserts", "printer": "Kitchen Printer", "priority": 3},
-            {"category": "Pizza", "printer": "Pizza Station", "priority": 1},
-        ],
-        "defaultPrinter": "Kitchen Printer",
-        "defaultPriority": 2,
-    }
+    import copy
+    defaults = copy.deepcopy(DEFAULT_PRINT_ROUTING)
     s = await db.settings.find_one({"key": "print_routing"}, {"_id": 0})
     if not s or not s.get("value"):
         return defaults
@@ -242,66 +238,18 @@ async def save_print_routing(data: dict, _: dict = Depends(require_owner_or_mana
 
 @router.post("/print-routing/send")
 async def send_to_printers(data: dict, _: dict = Depends(get_user)):
-    """Route order items to appropriate printers based on category"""
+    """Route order items to station printers.
 
-    order_items = data.get("items", [])
-    order_id = data.get("orderId", f"ORD-{str(uuid.uuid4())[:8].upper()}")
-    table_number = data.get("tableNumber", None)
-
-    # Get routing config
-    s = await db.settings.find_one({"key": "print_routing"}, {"_id": 0})
-    if s and s.get("value"):
-        config = s["value"]
-    else:
-        # Use defaults
-        config = {
-            "enabled": True,
-            "routes": [
-                {"category": "Beverages", "printer": "Bar Printer", "priority": 1},
-                {"category": "Alcohol", "printer": "Bar Printer", "priority": 1},
-                {"category": "Food", "printer": "Kitchen Printer", "priority": 2},
-                {"category": "Mains", "printer": "Kitchen Printer", "priority": 2},
-                {"category": "Appetizers", "printer": "Kitchen Printer", "priority": 1},
-                {"category": "Bakery", "printer": "Kitchen Printer", "priority": 3},
-                {"category": "Desserts", "printer": "Kitchen Printer", "priority": 3},
-                {"category": "Pizza", "printer": "Pizza Station", "priority": 1},
-            ],
-            "defaultPrinter": "Kitchen Printer",
-            "defaultPriority": 2,
-        }
-    routes = config.get("routes", [])
-    default_printer = config.get("defaultPrinter", "Kitchen Printer")
-    default_priority = config.get("defaultPriority", 2)
-
-    # Group items by printer
-    printer_jobs = {}
-    for item in order_items:
-        cat = item.get("category", "")
-        route = next((r for r in routes if r["category"].lower() == cat.lower()), None)
-        printer_name = route["printer"] if route else default_printer
-        priority = route["priority"] if route else default_priority
-
-        if printer_name not in printer_jobs:
-            printer_jobs[printer_name] = {"printer": printer_name, "items": [], "priority": priority}
-        printer_jobs[printer_name]["items"].append(item)
-        printer_jobs[printer_name]["priority"] = min(printer_jobs[printer_name]["priority"], priority)
-
-    # Create print jobs sorted by priority
-    jobs = sorted(printer_jobs.values(), key=lambda x: x["priority"])
-    print_records = []
-    for job in jobs:
-        record = {
-            "id": f"PRINT-{str(uuid.uuid4())[:8].upper()}",
-            "orderId": order_id, "tableNumber": table_number,
-            "printer": job["printer"], "priority": job["priority"],
-            "items": job["items"], "status": "queued",
-            "createdAt": datetime.now(timezone.utc).isoformat(),
-        }
-        await db.print_jobs.insert_one(record)
-        record.pop("_id", None)
-        print_records.append(record)
-
-    return {"jobs": print_records, "totalPrinters": len(print_records)}
+    The routing itself lives in services/print_routing.py so that firing a
+    single course can queue dockets through exactly the same path.
+    """
+    from services import print_routing
+    records = await print_routing.route_and_queue(
+        data.get("items", []),
+        order_id=data.get("orderId"),
+        table_number=data.get("tableNumber"),
+    )
+    return {"jobs": records, "totalPrinters": len(records)}
 
 @router.get("/print-routing/queue")
 async def get_print_queue(request: Request, printer: str = None):

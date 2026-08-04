@@ -35,6 +35,7 @@ PERMISSION_CATALOG: List[Dict[str, Any]] = [
         ("pre-shift", "Pre-Shift Brief"),
         ("temperature", "HACCP Temperature"),
         ("kitchen-load", "Kitchen Load"),
+        ("fire-course", "Fire / Hold Courses"),
         ("voice-recipe", "Voice Recipe"),
     ]},
     {"section": "Menu & Products", "icon": "Utensils", "features": [
@@ -149,7 +150,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, List[str]] = {
         "pos", "tables", "comp-void", "payment-links", "tip-management",
         "reservations", "bookings-inbox", "waitlist", "floor-plan", "table-layout",
         "booking-settings", "booking-analytics", "booking-heatmap",
-        "kitchen", "pre-shift", "temperature", "kitchen-load",
+        "kitchen", "pre-shift", "temperature", "kitchen-load", "fire-course",
         "products", "categories", "modifiers", "menu-engineering", "what-if",
         "ab-tests", "channel-menus",
         "inventory", "ai-pantry", "measured-stock", "forecasting",
@@ -171,12 +172,15 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, List[str]] = {
     ],
     "cashier": [
         "pos", "tables", "comp-void", "payment-links",
+        # Servers fire and hold courses from the POS cart during service.
+        "fire-course",
         "reservations", "waitlist", "floor-plan",
         "customers", "loyalty-progress", "vouchers",
         "products",
     ],
     "kitchen": [
         "kitchen", "pre-shift", "temperature", "kitchen-load", "voice-recipe",
+        "fire-course",
         "products",
     ],
 }

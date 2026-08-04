@@ -1,12 +1,45 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
 from datetime import datetime
 from database import db
+from deps import get_user
+from services import floor_tables
 from models.reservation import Reservation, ReservationCreate, ReservationUpdate
 from models.floor_plan import FloorPlan, FloorPlanCreate, FloorPlanUpdate
 from models.waitlist import WaitlistEntry, WaitlistEntryCreate, WaitlistEntryUpdate
 
 router = APIRouter()
+
+# ============ GUEST LOOKUP (booking desk + NUA phone agent) ============
+@router.get("/reservations/guest-lookup")
+async def guest_lookup(q: Optional[str] = None, phone: Optional[str] = None,
+                       email: Optional[str] = None, limit: int = 8,
+                       intel: bool = True):
+    """Resolve a caller/typed guest to CRM records, with the booking-desk
+    summary attached (last booking, last visit, what they had, what they
+    order most, standing requests).
+
+    Two front doors, one endpoint:
+      - staff typing a name/phone/email into the New Reservation dialog
+      - the NUA phone agent resolving an inbound caller ID (?phone=...)
+    """
+    from services.guest_intel import lookup
+    if not any([q, phone, email]):
+        return {"matches": []}
+    matches = await lookup(query=q or "", phone=phone or "", email=email or "",
+                           limit=max(1, min(limit, 25)), with_intel=intel)
+    return {"matches": matches}
+
+
+@router.get("/reservations/guest-intel/{customer_id}")
+async def guest_intel(customer_id: str):
+    """Full booking-desk summary for one known guest."""
+    from services.guest_intel import build_guest_intel
+    customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return await build_guest_intel(customer)
+
 
 # ============ RESERVATIONS API ============
 @router.get("/reservations", response_model=List[Reservation])
@@ -114,12 +147,38 @@ async def create_reservation(reservation: ReservationCreate):
         })
     except Exception:
         pass
+    # Mirror to the standalone Bookings platform (nua-native partner) — no-op
+    # unless the integration env vars are configured.
+    try:
+        from services.bookings_partner_client import mirror_reservation_created
+        mirror_reservation_created(res_obj.dict())
+    except Exception:
+        pass
+    # Free base identity layer: recognize this guest across modules.
+    try:
+        from services.customer_identity import record_touchpoint
+        await record_touchpoint(
+            phone=reservation.guestPhone, email=reservation.guestEmail,
+            name=reservation.guestName, source="booking",
+        )
+    except Exception:
+        pass
     return res_obj
 
 @router.put("/reservations/{reservation_id}", response_model=Reservation)
 async def update_reservation(reservation_id: str, update: ReservationUpdate):
+    existing = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Reservation not found")
     update_data = {k: v for k, v in update.dict().items() if v is not None}
     update_data["updatedAt"] = datetime.utcnow().isoformat()
+    # Newly linking (or re-linking) a CRM guest during an edit — same bookkeeping
+    # create_reservation does, so this reservation shows up on the guest's profile.
+    new_customer_id = update_data.get("customerId")
+    if new_customer_id and new_customer_id != existing.get("customerId"):
+        await db.customers.update_one(
+            {"id": new_customer_id}, {"$push": {"reservationIds": reservation_id}}
+        )
     result = await db.reservations.find_one_and_update(
         {"id": reservation_id}, {"$set": update_data}, return_document=True
     )
@@ -139,6 +198,11 @@ async def delete_reservation(reservation_id: str):
             {"$set": {"status": "available", "currentReservationId": None}}
         )
     await db.reservations.delete_one({"id": reservation_id})
+    try:
+        from services.bookings_partner_client import mirror_reservation_status
+        mirror_reservation_status(res, "cancelled")
+    except Exception:
+        pass
     return {"message": "Reservation deleted"}
 
 @router.post("/reservations/{reservation_id}/seat")
@@ -321,6 +385,70 @@ async def update_table_status(table_id: str, status: str, plan_id: Optional[str]
                 {"id": plan_id}, {"$set": {"tables": tables, "updatedAt": datetime.utcnow().isoformat()}}
             )
     return {"message": f"Table {table_id} status updated to {status}"}
+
+# ── Typed-table validation (POS dine-in) ──────────────────────────────────
+# The POS accepts a hand-typed table number. These endpoints are what stop a
+# typo becoming an order on a table that doesn't exist.
+@router.get("/floor-plans/tables/resolve")
+async def resolve_typed_table(number: str, _: dict = Depends(get_user)):
+    """Resolve a typed table number against the configured floor plans.
+
+    Returns `configured: False` when the venue has drawn no floor plan at all —
+    the caller should then accept free text rather than block the sale.
+    """
+    configured = await floor_tables.has_floor_plan()
+    if not configured:
+        return {"configured": False, "found": False, "table": None,
+                "suggestions": [], "message": "No floor plan configured"}
+
+    hit = await floor_tables.resolve_table(number)
+    if not hit:
+        return {
+            "configured": True, "found": False, "table": None,
+            "suggestions": await floor_tables.suggest(number),
+            "message": f"Table '{number}' is not on the floor plan",
+        }
+    table, plan_id = hit
+    return {"configured": True, "found": True, "planId": plan_id,
+            "table": table, "suggestions": [], "message": "ok"}
+
+
+@router.get("/floor-plans/tables/all")
+async def list_floor_tables(_: dict = Depends(get_user)):
+    """Flat list of every configured table, for POS pickers and validation."""
+    tables = await floor_tables.list_tables()
+    return {"configured": len(tables) > 0, "tables": tables}
+
+
+@router.post("/floor-plans/tables/by-number/{number}/occupy")
+async def occupy_table_by_number(number: str, order_id: Optional[str] = None,
+                                 _: dict = Depends(get_user)):
+    """Mark the table a POS order was just assigned to as occupied.
+
+    404s on an unknown table so the POS can surface the error instead of
+    silently losing the association.
+    """
+    hit = await floor_tables.resolve_table(number)
+    if not hit:
+        raise HTTPException(status_code=404,
+                            detail=f"Table '{number}' is not on the floor plan")
+    table, plan_id = hit
+    await floor_tables.set_table_status(table["id"], plan_id, "occupied", order_id)
+    return {"ok": True, "tableId": table["id"], "planId": plan_id,
+            "number": table.get("number"), "status": "occupied"}
+
+
+@router.post("/floor-plans/tables/by-number/{number}/free")
+async def free_table_by_number(number: str, _: dict = Depends(get_user)):
+    hit = await floor_tables.resolve_table(number)
+    if not hit:
+        raise HTTPException(status_code=404,
+                            detail=f"Table '{number}' is not on the floor plan")
+    table, plan_id = hit
+    await floor_tables.set_table_status(table["id"], plan_id, "available")
+    return {"ok": True, "tableId": table["id"], "planId": plan_id,
+            "number": table.get("number"), "status": "available"}
+
 
 @router.post("/floor-plans/sections/{section_id}/assign")
 async def assign_server_to_section(section_id: str, server_id: str, plan_id: str):

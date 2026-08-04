@@ -22,6 +22,7 @@ export const TRANSLATIONS = {
       pointsMissed: 'Sign up to earn {n} points — ask staff to add you!',
     },
     kiosk: { title: 'Self-Service Kiosk', startOrder: 'Start Order', checkout: 'Checkout', orderSent: 'Order sent to kitchen' },
+    kitchen: { fire: 'Fire', hold: 'Hold', ready: 'Ready', serve: 'Serve', atPass: 'at pass', cooking: 'cooking', held: 'held', queued: 'queued', served: 'served', course: 'Course', station: 'Station', allStations: 'All stations', allergens: 'ALLERGENS' },
     tableOrder: {
       loadingMenu: 'Loading menu...', tableLabel: 'Table', ordersBtn: 'Orders', backToMenu: 'Back to Menu',
       yourOrder: 'Your Order', cartEmpty: 'Your cart is empty', namePlaceholder: 'Your name (optional)',
@@ -50,6 +51,7 @@ export const TRANSLATIONS = {
       pointsMissed: 'Iscriviti per guadagnare {n} punti — chiedi al personale di aggiungerti!',
     },
     kiosk: { title: 'Chiosco Self-Service', startOrder: 'Inizia Ordine', checkout: 'Cassa', orderSent: 'Ordine inviato in cucina' },
+    kitchen: { fire: 'Manda', hold: 'Trattieni', ready: 'Pronto', serve: 'Servi', atPass: 'al passe', cooking: 'in cottura', held: 'trattenuto', queued: 'in coda', served: 'servito', course: 'Portata', station: 'Postazione', allStations: 'Tutte le postazioni', allergens: 'ALLERGENI' },
     tableOrder: {
       loadingMenu: 'Caricamento menu...', tableLabel: 'Tavolo', ordersBtn: 'Ordini', backToMenu: 'Torna al Menu',
       yourOrder: 'Il Tuo Ordine', cartEmpty: 'Il carrello è vuoto', namePlaceholder: 'Il tuo nome (opzionale)',
@@ -78,6 +80,7 @@ export const TRANSLATIONS = {
       pointsMissed: '注册即可获得 {n} 积分 — 请让服务员为您添加！',
     },
     kiosk: { title: '自助点餐机', startOrder: '开始点餐', checkout: '结账', orderSent: '订单已发送至厨房' },
+    kitchen: { fire: '出单', hold: '暂缓', ready: '备好', serve: '上菜', atPass: '在出菜口', cooking: '烹饪中', held: '暂缓', queued: '排队中', served: '已上菜', course: '道次', station: '工位', allStations: '全部工位', allergens: '过敏原' },
     tableOrder: {
       loadingMenu: '菜单加载中...', tableLabel: '桌号', ordersBtn: '订单', backToMenu: '返回菜单',
       yourOrder: '您的订单', cartEmpty: '购物车是空的', namePlaceholder: '您的姓名（可选）',
@@ -106,6 +109,7 @@ export const TRANSLATIONS = {
       pointsMissed: '{n} पॉइंट्स कमाने के लिए साइन अप करें — स्टाफ़ से जोड़ने को कहें!',
     },
     kiosk: { title: 'सेल्फ़-सर्विस कियोस्क', startOrder: 'ऑर्डर शुरू करें', checkout: 'चेकआउट', orderSent: 'ऑर्डर रसोई में भेज दिया गया' },
+    kitchen: { fire: 'भेजें', hold: 'रोकें', ready: 'तैयार', serve: 'परोसें', atPass: 'पास पर', cooking: 'पक रहा', held: 'रोका', queued: 'कतार में', served: 'परोसा', course: 'कोर्स', station: 'स्टेशन', allStations: 'सभी स्टेशन', allergens: 'एलर्जन' },
     tableOrder: {
       loadingMenu: 'मेनू लोड हो रहा है...', tableLabel: 'टेबल', ordersBtn: 'ऑर्डर', backToMenu: 'मेनू पर वापस जाएं',
       yourOrder: 'आपका ऑर्डर', cartEmpty: 'आपकी कार्ट खाली है', namePlaceholder: 'आपका नाम (वैकल्पिक)',
@@ -134,6 +138,7 @@ export const TRANSLATIONS = {
       pointsMissed: 'Regístrate para ganar {n} puntos — ¡pide al personal que te agregue!',
     },
     kiosk: { title: 'Quiosco de Autoservicio', startOrder: 'Iniciar Pedido', checkout: 'Pagar', orderSent: 'Pedido enviado a la cocina' },
+    kitchen: { fire: 'Marchar', hold: 'Retener', ready: 'Listo', serve: 'Servir', atPass: 'en el pase', cooking: 'cocinando', held: 'retenido', queued: 'en cola', served: 'servido', course: 'Plato', station: 'Estación', allStations: 'Todas las estaciones', allergens: 'ALÉRGENOS' },
     tableOrder: {
       loadingMenu: 'Cargando menú...', tableLabel: 'Mesa', ordersBtn: 'Pedidos', backToMenu: 'Volver al Menú',
       yourOrder: 'Tu Pedido', cartEmpty: 'Tu carrito está vacío', namePlaceholder: 'Tu nombre (opcional)',
@@ -162,6 +167,7 @@ export const TRANSLATIONS = {
       pointsMissed: 'Đăng ký để nhận {n} điểm — hãy nhờ nhân viên thêm bạn!',
     },
     kiosk: { title: 'Ki-ốt Tự Phục Vụ', startOrder: 'Bắt Đầu Đặt Hàng', checkout: 'Thanh Toán', orderSent: 'Đơn hàng đã được gửi đến bếp' },
+    kitchen: { fire: 'Ra món', hold: 'Giữ lại', ready: 'Sẵn sàng', serve: 'Phục vụ', atPass: 'tại quầy ra món', cooking: 'đang nấu', held: 'đang giữ', queued: 'chờ', served: 'đã phục vụ', course: 'Món', station: 'Trạm', allStations: 'Tất cả các trạm', allergens: 'CHẤT GÂY DỊ ỨNG' },
     tableOrder: {
       loadingMenu: 'Đang tải thực đơn...', tableLabel: 'Bàn', ordersBtn: 'Đơn hàng', backToMenu: 'Quay Lại Thực Đơn',
       yourOrder: 'Đơn Hàng Của Bạn', cartEmpty: 'Giỏ hàng của bạn đang trống', namePlaceholder: 'Tên của bạn (không bắt buộc)',
@@ -190,6 +196,7 @@ export const TRANSLATIONS = {
       pointsMissed: 'سجّل لتحصل على {n} نقطة — اطلب من الموظف إضافتك!',
     },
     kiosk: { title: 'كشك الخدمة الذاتية', startOrder: 'ابدأ الطلب', checkout: 'الدفع', orderSent: 'تم إرسال الطلب إلى المطبخ' },
+    kitchen: { fire: 'إرسال', hold: 'تعليق', ready: 'جاهز', serve: 'تقديم', atPass: 'عند التسليم', cooking: 'قيد الطهي', held: 'معلّق', queued: 'في الانتظار', served: 'تم التقديم', course: 'طبق', station: 'محطة', allStations: 'كل المحطات', allergens: 'مسببات الحساسية' },
     tableOrder: {
       loadingMenu: 'جارٍ تحميل القائمة...', tableLabel: 'طاولة', ordersBtn: 'الطلبات', backToMenu: 'العودة إلى القائمة',
       yourOrder: 'طلبك', cartEmpty: 'سلة التسوق فارغة', namePlaceholder: 'اسمك (اختياري)',
@@ -218,6 +225,7 @@ export const TRANSLATIONS = {
       pointsMissed: 'Cadastre-se para ganhar {n} pontos — peça à equipe para adicionar você!',
     },
     kiosk: { title: 'Quiosque de Autoatendimento', startOrder: 'Iniciar Pedido', checkout: 'Finalizar', orderSent: 'Pedido enviado à cozinha' },
+    kitchen: { fire: 'Enviar', hold: 'Segurar', ready: 'Pronto', serve: 'Servir', atPass: 'no passe', cooking: 'a cozinhar', held: 'retido', queued: 'na fila', served: 'servido', course: 'Prato', station: 'Estação', allStations: 'Todas as estações', allergens: 'ALERGÉNIOS' },
     tableOrder: {
       loadingMenu: 'Carregando cardápio...', tableLabel: 'Mesa', ordersBtn: 'Pedidos', backToMenu: 'Voltar ao Cardápio',
       yourOrder: 'Seu Pedido', cartEmpty: 'Seu carrinho está vazio', namePlaceholder: 'Seu nome (opcional)',

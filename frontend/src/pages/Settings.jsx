@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Palette, MapPin, Users as UsersIcon, Building, GraduationCap, Plus, Edit, Trash2, Save, Receipt, Shield, Monitor, Zap, Printer, Globe, Clock, KeyRound, Target, Gift } from 'lucide-react';
+import { Palette, MapPin, Users as UsersIcon, Building, GraduationCap, Plus, Edit, Trash2, Save, Receipt, Shield, ShieldCheck, Activity, DownloadCloud, Monitor, Zap, Printer, Globe, Clock, KeyRound, Target, Gift, Utensils, LayoutGrid } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -10,6 +10,12 @@ import { useAuth } from '../contexts/AuthContext';
 import { locationsAPI, advancedAPI, staffMgmtAPI, enterpriseAPI, gamificationAPI, finalizeAPI, analyticsAPI, customersAPI } from '../services/api';
 import WalletCredentialsPanel from '../components/settings/WalletCredentialsPanel';
 import PermissionsPanel from '../components/settings/PermissionsPanel';
+import CoursingSettings from '../components/settings/CoursingSettings';
+import PrinterHealthPanel from '../components/settings/PrinterHealthPanel';
+import SecurityPanel from '../components/settings/SecurityPanel';
+import OpsHealthPanel from '../components/settings/OpsHealthPanel';
+import BackupPanel from '../components/settings/BackupPanel';
+import POSLayoutSettings from '../components/settings/POSLayoutSettings';
 import { toast } from 'sonner';
 import axios from 'axios';
 import { salaryTypeSuffix } from '../lib/staffPay';
@@ -158,7 +164,12 @@ const Settings = () => {
     { id: 'targets', label: 'Targets & Offers', icon: Target },
     { id: 'receipt', label: 'Receipt', icon: Receipt },
     { id: 'print-routing', label: 'Print Routing', icon: Printer },
+    { id: 'coursing', label: 'Courses & Firing', icon: Utensils },
+    { id: 'pos-layout', label: 'POS Layout', icon: LayoutGrid },
     { id: 'permissions', label: 'Permissions', icon: Shield },
+    { id: 'security', label: 'Security', icon: ShieldCheck },
+    { id: 'ops', label: 'System Health', icon: Activity },
+    { id: 'backup', label: 'Backup', icon: DownloadCloud },
     { id: 'surcharge', label: 'Surcharges', icon: Zap },
     { id: 'hardware', label: 'Hardware', icon: Monitor },
     { id: 'training', label: 'Training', icon: GraduationCap },
@@ -521,6 +532,14 @@ const Settings = () => {
         </div>
       )}
 
+      {/* Courses & Firing */}
+      {activeTab === 'coursing' && (
+        <CoursingSettings
+          theme={theme}
+          canEdit={['owner', 'manager'].includes(user?.role)}
+        />
+      )}
+
       {/* Business Info */}
       {/* Print Routing */}
       {activeTab === 'print-routing' && printRouting && (
@@ -552,6 +571,18 @@ const Settings = () => {
           }} data-testid="save-pr-btn"><Save size={16} className="mr-1" /> Save Print Routing</Button>
         </CardContent></Card>
       )}
+
+      {/* Sits with print routing because it answers the same question from
+          the other side: the routes are right, but is the device actually on? */}
+      {activeTab === 'print-routing' && <PrinterHealthPanel />}
+
+      {activeTab === 'security' && <SecurityPanel />}
+
+      {activeTab === 'ops' && <OpsHealthPanel />}
+
+      {activeTab === 'backup' && <BackupPanel />}
+
+      {activeTab === 'pos-layout' && <POSLayoutSettings />}
 
       {activeTab === 'wallet' && (
         <WalletCredentialsPanel theme={theme} />

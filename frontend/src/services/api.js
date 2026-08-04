@@ -214,6 +214,10 @@ export const offlineAPI = {
 // Reservations API
 export const reservationsAPI = {
   getAll: (params) => api.get('/reservations', { params }),
+  // Guest lookup + 360 booking summary. Same endpoint serves staff typing a
+  // name/phone/email and the NUA phone agent resolving an inbound caller ID.
+  guestLookup: (params) => api.get('/reservations/guest-lookup', { params }),
+  guestIntel: (customerId) => api.get(`/reservations/guest-intel/${customerId}`),
   get: (id) => api.get(`/reservations/${id}`),
   create: (data) => api.post('/reservations', data),
   update: (id, data) => api.put(`/reservations/${id}`, data),
@@ -238,6 +242,66 @@ export const floorPlansAPI = {
   delete: (id) => api.delete(`/floor-plans/${id}`),
   updateTableStatus: (tableId, status, planId) => api.post(`/floor-plans/tables/${tableId}/status`, null, { params: { status, plan_id: planId } }),
   assignServer: (sectionId, serverId, planId) => api.post(`/floor-plans/sections/${sectionId}/assign`, null, { params: { server_id: serverId, plan_id: planId } }),
+  // Typed-table validation for POS dine-in.
+  listTables: () => api.get('/floor-plans/tables/all'),
+  resolveTable: (number) => api.get('/floor-plans/tables/resolve', { params: { number } }),
+  occupyByNumber: (number, orderId) => api.post(`/floor-plans/tables/by-number/${encodeURIComponent(number)}/occupy`, null, { params: { order_id: orderId } }),
+  freeByNumber: (number) => api.post(`/floor-plans/tables/by-number/${encodeURIComponent(number)}/free`),
+};
+
+// Coursing API — course assignment, fire/hold config, POS -> kitchen
+export const coursingAPI = {
+  getConfig: () => api.get('/coursing/config'),
+  updateConfig: (data) => api.put('/coursing/config', data),
+  preview: (data) => api.post('/coursing/preview', data),
+  sendToKitchen: (data) => api.post('/coursing/send-to-kitchen', data),
+  openOrders: (params) => api.get('/coursing/orders/open', { params }),
+  addRound: (id, data) => api.post(`/coursing/orders/${id}/add-round`, data),
+  autoFireTick: () => api.post('/coursing/auto-fire/tick'),
+  settle: (data) => api.post('/coursing/settle', data),
+  voidItems: (id, data) => api.post(`/coursing/orders/${id}/void`, data),
+  // SSE endpoint — consumed via EventSource, not axios.
+  moveTicket: (fromTable, toTable) => api.post('/coursing/move-ticket', { fromTable, toTable }),
+  timings: (orderId) => api.get(`/kitchen/orders/${orderId}/timings`),
+  printTargets: () => api.get('/print-targets'),
+  setPrintTarget: (printer, data) => api.put(`/print-targets/${encodeURIComponent(printer)}`, data),
+  printEscpos: (jobId) => api.post(`/print-jobs/${jobId}/escpos`),
+  printHealth: () => api.get('/print-targets/health'),
+  printSelfTest: (printer) => api.post(`/print-targets/${encodeURIComponent(printer)}/test`),
+  analytics: (days = 7) => api.get('/coursing/analytics', { params: { days } }),
+  streamUrl: (tableNumber) =>
+    `${API_BASE_URL}/coursing/stream?tableNumber=${encodeURIComponent(tableNumber || '')}`
+    + `&token=${encodeURIComponent(localStorage.getItem('nuva_token') || '')}`,
+};
+
+// Two-factor sign-in
+export const twoFactorAPI = {
+  status: () => api.get('/auth/2fa/status'),
+  setup: () => api.post('/auth/2fa/setup', {}),
+  verify: (code) => api.post('/auth/2fa/verify', { code }),
+  disable: (password) => api.post('/auth/2fa/disable', { password }),
+  regenerateCodes: (password) => api.post('/auth/2fa/recovery-codes', { password }),
+  revokeDevice: (id) => api.delete(`/auth/2fa/devices/${id}`),
+  getPolicy: () => api.get('/auth/2fa/policy'),
+  setPolicy: (required, roles) => api.post('/auth/2fa/policy', { required, roles }),
+};
+
+// Ops: health + recent unhandled-error visibility
+export const opsAPI = {
+  health: () => api.get('/health'),
+  recentErrors: (limit = 50) => api.get('/ops/errors', { params: { limit } }),
+};
+
+// Backup / restore
+export const backupAPI = {
+  download: () => api.get('/ops/backup', { responseType: 'blob' }),
+  runDrill: () => api.post('/ops/backup/drill'),
+};
+
+// POS layout — structured customization (cart side, tile density, quick actions)
+export const posLayoutAPI = {
+  get: () => api.get('/pos/layout'),
+  save: (data) => api.post('/pos/layout', data),
 };
 
 // Waitlist API
@@ -260,6 +324,7 @@ export const kitchenAPI = {
   fireCourse: (id, course) => api.post(`/kitchen/orders/${id}/fire-course/${course}`),
   holdCourse: (id, course) => api.post(`/kitchen/orders/${id}/hold-course/${course}`),
   serveCourse: (id, course) => api.post(`/kitchen/orders/${id}/serve-course/${course}`),
+  readyCourse: (id, course) => api.post(`/kitchen/orders/${id}/ready-course/${course}`),
   setPriority: (id, priority) => api.post(`/kitchen/orders/${id}/priority`, null, { params: { priority } }),
   getPrepList: () => api.get('/kitchen/prep-list'),
   getAvgOrderTime: () => api.get('/kitchen/avg-order-time'),
@@ -411,14 +476,12 @@ export const staffMgmtAPI = {
   saveReceiptSettings: (data) => api.post('/receipt/settings', data),
 };
 
-// Menu Features — AI Import, Price Adjust, Ghost Discount, What-If Advanced
+// Menu Features — AI Import, Price Adjust, What-If Advanced
 export const menuFeaturesAPI = {
   aiImportMenu: (data) => api.post('/menu/ai-import', data),
   aiPreviewMenu: (data) => api.post('/menu/ai-preview', data, { timeout: 90000 }),
   aiCommitMenu: (data) => api.post('/menu/ai-commit', data),
   bulkPriceAdjust: (data) => api.post('/menu/price-adjust', data),
-  ghostDiscount: (data) => api.post('/pos/ghost-discount', data),
-  getGhostDiscounts: () => api.get('/pos/ghost-discounts'),
   whatIfAdvanced: (data) => api.post('/analytics/what-if-advanced', data),
 };
 
@@ -639,6 +702,7 @@ export const v25API = {
   // Should-have
   kioskStart: (data) => api.post('/v25/kiosk/session', data),
   kioskAdd: (sid, item) => api.post(`/v25/kiosk/session/${sid}/add`, { item }),
+  kioskSetCourse: (sid, data) => api.post(`/v25/kiosk/session/${sid}/course`, data),
   kioskCheckout: (sid) => api.post(`/v25/kiosk/session/${sid}/checkout`),
   kioskList: () => api.get('/v25/kiosk/sessions'),
   kioskUpsell: (sid) => api.post(`/v25/kiosk/session/${sid}/upsell`),

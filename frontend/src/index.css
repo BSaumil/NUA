@@ -1,3 +1,8 @@
+/* NUA brand tokens — colours + typography. Must precede the Tailwind
+   directives: CSS requires @import before any other rule. */
+@import './typography.css';
+@import './colors.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -57,7 +62,12 @@ code {
         --popover: 240 10% 8%;
         --popover-foreground: 0 0% 92%;
         --primary: 24 91% 52%;
-        --primary-foreground: 0 0% 100%;
+        /* White-on-orange here measures ~2.4:1 — fails WCAG AA's 4.5:1
+           minimum for text and even the 3:1 floor for large/UI text. That's
+           exactly the buttons a server is reading fastest, in a dining room
+           that's often dim on purpose. A near-black foreground on this same
+           orange measures ~7.4:1 (AAA) without touching the brand hue. */
+        --primary-foreground: 0 0% 9%;
         --secondary: 240 6% 12%;
         --secondary-foreground: 0 0% 92%;
         --muted: 240 6% 12%;
@@ -151,4 +161,30 @@ code {
     .dark .border-gray-200,
     .dark .border-gray-300,
     .dark .border-gray-400 { border-color: hsl(var(--border)); }
+}
+
+/* Anyone who has asked their OS to reduce motion gets it reduced here too —
+   this app never had an opinion on the setting before, which meant it had
+   the default opinion of "ignore it". Scoped to (near-)instant rather than
+   fully `none`: an entirely frozen UI can read as broken (did my tap
+   register?), whereas a few milliseconds still gives that feedback without
+   the sweep/slide someone explicitly asked to not see. */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* A 1px ring (shadcn's default) is easy to lose on a bright kitchen display
+   or a glare-heavy dining room; keyboard/switch-device users depend on this
+   being obvious, not subtle. Only strengthens what already exists —
+   :focus-visible only fires for keyboard/assistive-tech focus, never for
+   an ordinary tap, so this doesn't add a ring to every button someone
+   touches on the floor. */
+:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
 }

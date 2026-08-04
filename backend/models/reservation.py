@@ -30,6 +30,7 @@ class ReservationUpdate(BaseModel):
     guestName: Optional[str] = None
     guestPhone: Optional[str] = None
     guestEmail: Optional[str] = None
+    customerId: Optional[str] = None
     partySize: Optional[int] = None
     date: Optional[str] = None
     time: Optional[str] = None

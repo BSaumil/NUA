@@ -40,7 +40,7 @@ const DESTINATIONS = [
   { label: 'Online Orders', path: '/online-orders', keywords: 'delivery pickup web', roles: ['owner', 'manager'] },
   { label: 'Gift Cards', path: '/gift-cards', keywords: 'sell voucher card barcode reload stop resend', roles: ['owner', 'manager', 'cashier'] },
   { label: 'Pre-Shift Briefing', path: '/pre-shift', keywords: 'briefing vips 86', roles: ['owner', 'manager', 'kitchen'] },
-  { label: 'NUA Intelligence', path: '/ash', keywords: 'ai assistant ash brain', roles: ['owner', 'manager'] },
+  { label: 'NUA AI', path: '/ash', keywords: 'ai assistant intelligence brain ash', roles: ['owner', 'manager'] },
   { label: 'Automation Engine', path: '/automation', keywords: 'rules triggers', roles: ['owner', 'manager'] },
   { label: 'Approvals', path: '/approvals', keywords: 'pending requests', roles: ['owner', 'manager'] },
   { label: 'Audit Log', path: '/audit', keywords: 'history changes who', roles: ['owner'] },

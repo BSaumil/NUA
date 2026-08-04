@@ -93,7 +93,6 @@ ANON_POST_CASES = [
     # menu_features
     ("/menu/ai-import", {}),
     ("/menu/price-adjust", {}),
-    ("/pos/ghost-discount", {}),
     # gamification
     ("/tips/smart-distribute", {}),
     ("/print-routing/config", {}),
@@ -154,8 +153,6 @@ OWNER_GET_CASES = [
     "/online/products",
     "/online/orders",
     "/online/kitchen/load",
-    # menu_features
-    "/pos/ghost-discounts",
     # gamification
     "/staff/leaderboard",
     "/reports/quarterly-review",

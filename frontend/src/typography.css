@@ -1,0 +1,17 @@
+/* NUA typography tokens. Imported once, globally.
+   Roles per BRAND-SPEC.md §5. */
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@500;600;700&family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Caveat:wght@600&display=swap');
+
+:root {
+  /* Marketing wordmark — gradient-filled, hero contexts only */
+  --nua-font-wordmark: 'Instrument Serif', Georgia, serif;
+  /* Display / product headings — in-app, functional UI */
+  --nua-font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  /* Body copy */
+  --nua-font-body: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+  /* Taglines, data, receipts. Track +0.3–0.4em for taglines. */
+  --nua-font-mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+  /* Signature flourish and sign-off line only */
+  --nua-font-signature: 'Caveat', cursive;
+  --nua-tagline-tracking: 0.35em;
+}

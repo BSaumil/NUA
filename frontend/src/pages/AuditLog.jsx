@@ -10,7 +10,6 @@ const TYPE_COLORS = {
   COMP: 'bg-blue-100 text-blue-700',
   VOID: 'bg-red-100 text-red-700',
   REFUND: 'bg-amber-100 text-amber-700',
-  GHOST_DISCOUNT: 'bg-purple-100 text-purple-700',
 };
 
 export default function AuditLog() {
@@ -33,7 +32,7 @@ export default function AuditLog() {
         <h1 className="text-2xl font-bold flex items-center gap-2" style={{ color: theme.text }}>
           <ShieldAlert size={22} /> Audit Log
         </h1>
-        <p className="text-sm text-gray-500">Every sensitive action — voids, refunds, comps, ghost discounts — tracked with timestamp, operator, and amount.</p>
+        <p className="text-sm text-gray-500">Every sensitive action — voids, refunds, comps — tracked with timestamp, operator, and amount.</p>
       </div>
       <Card>
         <CardContent className="p-0">
@@ -44,7 +43,6 @@ export default function AuditLog() {
               <option value="COMP">Comp</option>
               <option value="VOID">Void</option>
               <option value="REFUND">Refund</option>
-              <option value="GHOST_DISCOUNT">Ghost Discount</option>
             </select>
           </div>
           <div className="overflow-x-auto">

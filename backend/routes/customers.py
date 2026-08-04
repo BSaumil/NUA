@@ -20,7 +20,7 @@ def _customer_fallback(c: dict, _err):
 
 # ============ CUSTOMERS API ============
 @router.get("/customers")
-async def get_customers(search: Optional[str] = None):
+async def get_customers(search: Optional[str] = None, _: dict = Depends(get_user)):
     query = {}
     if search:
         query["$or"] = [
@@ -32,7 +32,7 @@ async def get_customers(search: Optional[str] = None):
     return safe_parse_list(customers, Customer, fallback=_customer_fallback, where="customers")
 
 @router.post("/customers", response_model=Customer)
-async def create_customer(customer: CustomerCreate):
+async def create_customer(customer: CustomerCreate, _: dict = Depends(get_user)):
     from services.entity_service import stamped_insert
     customer_dict = customer.dict()
     customer_obj = Customer(**customer_dict)
@@ -46,7 +46,7 @@ async def create_customer(customer: CustomerCreate):
     return doc
 
 @router.put("/customers/{customer_id}", response_model=Customer)
-async def update_customer(customer_id: str, customer_update: CustomerUpdate):
+async def update_customer(customer_id: str, customer_update: CustomerUpdate, _: dict = Depends(get_user)):
     from services.entity_service import stamped_update
     update_data = {k: v for k, v in customer_update.dict().items() if v is not None}
     result = await stamped_update("customers", customer_id, update_data, entity_type="customer")
@@ -56,7 +56,7 @@ async def update_customer(customer_id: str, customer_update: CustomerUpdate):
 
 # ============ CUSTOMER PROFILE (360 Guest CRM) ============
 @router.get("/customers/{customer_id}/profile")
-async def get_customer_profile(customer_id: str):
+async def get_customer_profile(customer_id: str, _: dict = Depends(get_user)):
     customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
@@ -75,7 +75,7 @@ async def get_customer_profile(customer_id: str):
 
 # ============ CUSTOMER WALLET ============
 @router.get("/customers/{customer_id}/wallet")
-async def get_customer_wallet(customer_id: str):
+async def get_customer_wallet(customer_id: str, _: dict = Depends(get_user)):
     """Store credit + points + active vouchers + occasion offers in one view.
     Reading the wallet also lazily issues any due occasion vouchers
     (e.g. birthday month), so offers always show up without a cron job."""
@@ -129,7 +129,7 @@ async def save_wallet_offer_settings(data: dict, _user: dict = Depends(require_o
 
 # ============ FEEDBACK API ============
 @router.get("/feedback", response_model=List[Feedback])
-async def get_feedback(customer_id: Optional[str] = None, status: Optional[str] = None):
+async def get_feedback(customer_id: Optional[str] = None, status: Optional[str] = None, _: dict = Depends(get_user)):
     query = {}
     if customer_id:
         query["customerId"] = customer_id
@@ -139,7 +139,7 @@ async def get_feedback(customer_id: Optional[str] = None, status: Optional[str] 
     return [Feedback(**f) for f in items]
 
 @router.post("/feedback", response_model=Feedback)
-async def create_feedback(fb: FeedbackCreate):
+async def create_feedback(fb: FeedbackCreate, _: dict = Depends(get_user)):
     fb_obj = Feedback(**fb.dict())
     await db.feedback.insert_one(fb_obj.dict())
     if fb.customerId:
@@ -156,7 +156,7 @@ async def create_feedback(fb: FeedbackCreate):
     return fb_obj
 
 @router.put("/feedback/{feedback_id}/respond")
-async def respond_to_feedback(feedback_id: str, response: str = ""):
+async def respond_to_feedback(feedback_id: str, response: str = "", _: dict = Depends(get_user)):
     result = await db.feedback.find_one_and_update(
         {"id": feedback_id},
         {"$set": {"status": "responded", "response": response}},

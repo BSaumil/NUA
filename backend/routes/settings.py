@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from deps import get_user, require_owner_or_manager
 from typing import List, Optional
 from datetime import datetime
 from database import db
@@ -114,19 +115,21 @@ async def create_user(user: UserCreate):
 
 # ============ PRINTER API ============
 @router.get("/printers", response_model=List[PrinterConfig])
-async def get_printers():
-    printers = await db.printers.find().to_list(1000)
+async def get_printers(user: dict = Depends(get_user)):
+    business_id = user.get("businessId") or "default"
+    printers = await db.printers.find({"businessId": business_id}).to_list(1000)
     return [PrinterConfig(**p) for p in printers]
 
 @router.post("/printers", response_model=PrinterConfig)
-async def create_printer(printer: PrinterConfigCreate):
-    printer_obj = PrinterConfig(**printer.dict())
+async def create_printer(printer: PrinterConfigCreate, user: dict = Depends(get_user)):
+    printer_obj = PrinterConfig(**printer.dict(), businessId=user.get("businessId") or "default")
     await db.printers.insert_one(printer_obj.dict())
     return printer_obj
 
 @router.post("/printers/{printer_id}/print")
-async def print_receipt(printer_id: str, transaction_id: str):
-    printer = await db.printers.find_one({"id": printer_id})
+async def print_receipt(printer_id: str, transaction_id: str, user: dict = Depends(get_user)):
+    business_id = user.get("businessId") or "default"
+    printer = await db.printers.find_one({"id": printer_id, "businessId": business_id})
     if not printer:
         raise HTTPException(status_code=404, detail="Printer not found")
     transaction = await db.transactions.find_one({"id": transaction_id})
@@ -209,19 +212,26 @@ async def staff_clock_out(shift_id: str, break_minutes: int = 0):
     return {"total_hours": total_hours}
 
 # ============ EFTPOS API ============
+# Terminal config carries apiKey/apiSecret for the provider account, and
+# these routes previously had no per-route auth at all — only the app-wide
+# "you must be logged in as *someone*" gate applied, meaning any cashier
+# account could read out another payment provider's API secret, or delete a
+# terminal outright. Config and diagnostics are owner/manager; reading which
+# terminals exist and actually taking a payment stay open to any signed-in
+# staff member, since that's the ordinary checkout path.
 @router.get("/eftpos/terminals", response_model=List[EFTPOSConfig])
-async def get_eftpos_terminals():
+async def get_eftpos_terminals(_: dict = Depends(get_user)):
     terminals = await db.eftpos_terminals.find().to_list(1000)
     return [EFTPOSConfig(**t) for t in terminals]
 
 @router.post("/eftpos/terminals", response_model=EFTPOSConfig)
-async def create_eftpos_terminal(terminal: EFTPOSConfigCreate):
+async def create_eftpos_terminal(terminal: EFTPOSConfigCreate, _: dict = Depends(require_owner_or_manager)):
     terminal_obj = EFTPOSConfig(**terminal.dict())
     await db.eftpos_terminals.insert_one(terminal_obj.dict())
     return terminal_obj
 
 @router.put("/eftpos/terminals/{terminal_id}", response_model=EFTPOSConfig)
-async def update_eftpos_terminal(terminal_id: str, terminal: EFTPOSConfigCreate):
+async def update_eftpos_terminal(terminal_id: str, terminal: EFTPOSConfigCreate, _: dict = Depends(require_owner_or_manager)):
     update_data = terminal.dict()
     result = await db.eftpos_terminals.find_one_and_update(
         {"id": terminal_id}, {"$set": update_data}, return_document=True
@@ -231,14 +241,14 @@ async def update_eftpos_terminal(terminal_id: str, terminal: EFTPOSConfigCreate)
     return EFTPOSConfig(**result)
 
 @router.delete("/eftpos/terminals/{terminal_id}")
-async def delete_eftpos_terminal(terminal_id: str):
+async def delete_eftpos_terminal(terminal_id: str, _: dict = Depends(require_owner_or_manager)):
     result = await db.eftpos_terminals.delete_one({"id": terminal_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Terminal not found")
     return {"message": "Terminal deleted successfully"}
 
 @router.post("/eftpos/terminals/{terminal_id}/test")
-async def test_eftpos_connection(terminal_id: str):
+async def test_eftpos_connection(terminal_id: str, _: dict = Depends(require_owner_or_manager)):
     terminal = await db.eftpos_terminals.find_one({"id": terminal_id})
     if not terminal:
         raise HTTPException(status_code=404, detail="Terminal not found")
@@ -257,7 +267,7 @@ async def test_eftpos_connection(terminal_id: str):
         return {"success": False, "message": str(e)}
 
 @router.post("/eftpos/transaction", response_model=EFTPOSTransaction)
-async def process_eftpos_transaction(request: EFTPOSTransactionRequest):
+async def process_eftpos_transaction(request: EFTPOSTransactionRequest, _: dict = Depends(get_user)):
     terminal = await db.eftpos_terminals.find_one({"id": request.terminalId})
     if not terminal:
         raise HTTPException(status_code=404, detail="Terminal not found")
@@ -290,7 +300,9 @@ async def process_eftpos_transaction(request: EFTPOSTransactionRequest):
         return eftpos_txn
 
 @router.get("/eftpos/transactions", response_model=List[EFTPOSTransaction])
-async def get_eftpos_transactions(start_date: Optional[str] = None, end_date: Optional[str] = None, terminal_id: Optional[str] = None):
+async def get_eftpos_transactions(start_date: Optional[str] = None, end_date: Optional[str] = None,
+                                  terminal_id: Optional[str] = None,
+                                  _: dict = Depends(require_owner_or_manager)):
     query = {}
     if terminal_id:
         query["terminalId"] = terminal_id
@@ -300,7 +312,7 @@ async def get_eftpos_transactions(start_date: Optional[str] = None, end_date: Op
     return [EFTPOSTransaction(**t) for t in transactions]
 
 @router.post("/eftpos/terminals/{terminal_id}/settlement")
-async def perform_settlement(terminal_id: str):
+async def perform_settlement(terminal_id: str, _: dict = Depends(require_owner_or_manager)):
     terminal = await db.eftpos_terminals.find_one({"id": terminal_id})
     if not terminal:
         raise HTTPException(status_code=404, detail="Terminal not found")
