@@ -115,19 +115,21 @@ async def create_user(user: UserCreate):
 
 # ============ PRINTER API ============
 @router.get("/printers", response_model=List[PrinterConfig])
-async def get_printers():
-    printers = await db.printers.find().to_list(1000)
+async def get_printers(user: dict = Depends(get_user)):
+    business_id = user.get("businessId") or "default"
+    printers = await db.printers.find({"businessId": business_id}).to_list(1000)
     return [PrinterConfig(**p) for p in printers]
 
 @router.post("/printers", response_model=PrinterConfig)
-async def create_printer(printer: PrinterConfigCreate):
-    printer_obj = PrinterConfig(**printer.dict())
+async def create_printer(printer: PrinterConfigCreate, user: dict = Depends(get_user)):
+    printer_obj = PrinterConfig(**printer.dict(), businessId=user.get("businessId") or "default")
     await db.printers.insert_one(printer_obj.dict())
     return printer_obj
 
 @router.post("/printers/{printer_id}/print")
-async def print_receipt(printer_id: str, transaction_id: str):
-    printer = await db.printers.find_one({"id": printer_id})
+async def print_receipt(printer_id: str, transaction_id: str, user: dict = Depends(get_user)):
+    business_id = user.get("businessId") or "default"
+    printer = await db.printers.find_one({"id": printer_id, "businessId": business_id})
     if not printer:
         raise HTTPException(status_code=404, detail="Printer not found")
     transaction = await db.transactions.find_one({"id": transaction_id})

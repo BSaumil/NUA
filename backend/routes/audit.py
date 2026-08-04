@@ -17,17 +17,18 @@ async def list_events(
     action: Optional[str] = None,
     actor: Optional[str] = None,
     limit: int = 200,
-    _: dict = Depends(get_user),
+    user: dict = Depends(get_user),
 ):
     return await audit_service.list_events(
+        business_id=user.get("businessId") or "default",
         entity_type=entity_type, entity_id=entity_id,
         action=action, actor=actor, limit=limit,
     )
 
 
 @router.get("/history/{entity_type}/{entity_id}")
-async def history(entity_type: str, entity_id: str, _: dict = Depends(get_user)):
-    return await entity_service.get_history(entity_type, entity_id)
+async def history(entity_type: str, entity_id: str, user: dict = Depends(get_user)):
+    return await entity_service.get_history(entity_type, entity_id, business_id=user.get("businessId") or "default")
 
 
 @router.post("/restore/{entity_type}/{entity_id}/{version}")
@@ -52,14 +53,16 @@ async def gdpr_purge(entity_type: str, entity_id: str,
 
 
 @router.get("/summary")
-async def summary(_: dict = Depends(get_user)):
+async def summary(user: dict = Depends(get_user)):
     """Quick actor / action mix over the recent audit stream."""
-    pipeline_action = [{"$group": {"_id": "$action", "count": {"$sum": 1}}}, {"$sort": {"count": -1}}]
-    pipeline_type = [{"$group": {"_id": "$entityType", "count": {"$sum": 1}}}, {"$sort": {"count": -1}}, {"$limit": 20}]
-    pipeline_actor = [{"$group": {"_id": "$actor", "count": {"$sum": 1}}}, {"$sort": {"count": -1}}, {"$limit": 10}]
+    business_id = user.get("businessId") or "default"
+    match = {"$match": {"businessId": business_id}}
+    pipeline_action = [match, {"$group": {"_id": "$action", "count": {"$sum": 1}}}, {"$sort": {"count": -1}}]
+    pipeline_type = [match, {"$group": {"_id": "$entityType", "count": {"$sum": 1}}}, {"$sort": {"count": -1}}, {"$limit": 20}]
+    pipeline_actor = [match, {"$group": {"_id": "$actor", "count": {"$sum": 1}}}, {"$sort": {"count": -1}}, {"$limit": 10}]
     return {
         "byAction": await db.audit_events.aggregate(pipeline_action).to_list(20),
         "byEntity": await db.audit_events.aggregate(pipeline_type).to_list(20),
         "byActor": await db.audit_events.aggregate(pipeline_actor).to_list(10),
-        "total": await db.audit_events.count_documents({}),
+        "total": await db.audit_events.count_documents({"businessId": business_id}),
     }

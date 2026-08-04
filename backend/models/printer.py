@@ -4,6 +4,7 @@ import uuid
 
 class PrinterConfig(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    businessId: Optional[str] = None
     name: str
     type: str  # network, usb, bluetooth
     ipAddress: Optional[str] = None

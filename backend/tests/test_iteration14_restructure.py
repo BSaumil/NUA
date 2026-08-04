@@ -1,7 +1,7 @@
 """
 Iteration 14 Tests: NUVA POS Major Restructure
 - Dashboard: 5 stat cards (Revenue, Active Tables, Transactions, Best Category, Avg Ticket)
-- Dashboard: Recent Transactions with View/Receipt/Print/Refund/Ghost Void actions
+- Dashboard: Recent Transactions with View/Receipt/Print/Refund actions
 - Dashboard: Top 10 Items panel
 - Pre-Shift: No Today's Revenue card
 - Sidebar: Grouped dropdowns (Reservations, Menu Engineering, Team, Customers, Accounting)
@@ -150,40 +150,6 @@ class TestRefundAPI:
             assert response.status_code in [200, 201, 400], f"Expected 200/201/400, got {response.status_code}: {response.text}"
         else:
             pytest.skip("No transactions available to test refund")
-
-
-class TestGhostVoidAPI:
-    """Ghost Void API for dashboard Ghost Void action (owner only)"""
-    
-    def test_ghost_discount_owner(self, owner_token):
-        """Owner can apply ghost discount/void"""
-        headers = {"Authorization": f"Bearer {owner_token}"}
-        # First get a transaction
-        txn_response = requests.get(f"{BASE_URL}/api/transactions", headers=headers)
-        if txn_response.status_code == 200 and len(txn_response.json()) > 0:
-            txn = txn_response.json()[0]
-            ghost_data = {
-                "transactionId": txn.get("id"),
-                "amount": 0.50,
-                "reason": "TEST_ghost_void_from_dashboard"
-            }
-            response = requests.post(f"{BASE_URL}/api/menu/ghost-discount", json=ghost_data, headers=headers)
-            # Accept 200, 201, or 400/404 if feature not available
-            assert response.status_code in [200, 201, 400, 404], f"Expected 200/201/400/404, got {response.status_code}: {response.text}"
-        else:
-            pytest.skip("No transactions available to test ghost void")
-    
-    def test_ghost_discount_manager_denied(self, manager_token):
-        """Manager cannot apply ghost discount"""
-        headers = {"Authorization": f"Bearer {manager_token}"}
-        ghost_data = {
-            "transactionId": "test-id",
-            "amount": 0.50,
-            "reason": "TEST_ghost_void"
-        }
-        response = requests.post(f"{BASE_URL}/api/menu/ghost-discount", json=ghost_data, headers=headers)
-        # Should be denied (403) or not found (404)
-        assert response.status_code in [403, 404], f"Expected 403/404, got {response.status_code}"
 
 
 class TestPreShiftAPI:

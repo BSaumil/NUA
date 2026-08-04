@@ -151,12 +151,12 @@ async def hard_delete(coll_name: str, entity_id: str, *,
     return True
 
 
-async def get_history(entity_type: str, entity_id: str, *, limit: int = 100) -> Dict[str, Any]:
+async def get_history(entity_type: str, entity_id: str, *, business_id: Optional[str] = None, limit: int = 100) -> Dict[str, Any]:
     versions = await db.entity_versions.find(
         {"entityType": entity_type, "entityId": entity_id},
         {"_id": 0},
     ).sort("version", -1).limit(limit).to_list(limit)
-    audit = await audit_service.list_events(entity_type=entity_type, entity_id=entity_id, limit=limit)
+    audit = await audit_service.list_events(business_id=business_id, entity_type=entity_type, entity_id=entity_id, limit=limit)
     return {"versions": versions, "audit": audit}
 
 

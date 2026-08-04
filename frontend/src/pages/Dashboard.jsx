@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  DollarSign, ShoppingBag, Users, TrendingUp, Utensils, Eye, Receipt, RotateCcw, Printer, EyeOff,
+  DollarSign, ShoppingBag, Users, TrendingUp, Utensils, Eye, Receipt, RotateCcw, Printer,
   BarChart3
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -10,7 +10,7 @@ import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
-import { transactionsAPI, customersAPI, enterpriseAPI, refundsAPI, menuFeaturesAPI } from '../services/api';
+import { transactionsAPI, customersAPI, enterpriseAPI, refundsAPI } from '../services/api';
 import { toast } from 'sonner';
 
 const Dashboard = () => {
@@ -82,14 +82,6 @@ const Dashboard = () => {
       toast.success('Refund processed'); setShowRefund(false); fetchAll();
     } catch (e) { toast.error(e.response?.data?.detail || 'Refund failed'); }
   };
-  const handleGhostVoid = async (txn) => {
-    const amt = prompt('Ghost void amount:');
-    if (!amt || isNaN(amt)) return;
-    try {
-      await menuFeaturesAPI.ghostDiscount({ transactionId: txn.id, amount: parseFloat(amt), reason: 'Owner void from dashboard' });
-      toast.success('Ghost void applied'); fetchAll();
-    } catch { toast.error('Failed'); }
-  };
   const printReceipt = () => {
     const t = selectedTxn; if (!t) return;
     const w = window.open('', '_blank', 'width=400,height=600');
@@ -142,7 +134,6 @@ const Dashboard = () => {
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Receipt" onClick={() => openReceipt(txn)}><Receipt size={13} /></Button>
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Print" onClick={() => { setSelectedTxn(txn); printReceipt(); }}><Printer size={13} /></Button>
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-500" title="Refund" onClick={() => openRefund(txn)}><RotateCcw size={13} /></Button>
-                        {user?.role === 'owner' && <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-gray-400" title="Ghost Void" onClick={() => handleGhostVoid(txn)}><EyeOff size={13} /></Button>}
                       </div>
                     </td>
                   </tr>
