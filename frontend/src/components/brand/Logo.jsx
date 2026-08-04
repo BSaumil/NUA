@@ -7,7 +7,7 @@ import Icon from './Icon';
  * variant="product"   — app headers, nav bars, in-product chrome.
  *                       Plain Space Grotesk wordmark, no gradient, no flourish.
  * variant="marketing" — landing hero, login/signup, decks rendered in-app.
- *                       Gradient Instrument Serif wordmark + Caveat flourish.
+ *                       Gradient Bricolage Grotesque wordmark + flourish.
  *
  * Never use the marketing variant in functional UI (buttons, nav, in-app
  * headers) — BRAND-SPEC §3.
@@ -37,21 +37,21 @@ export default function Logo({
               style={{ overflow: 'visible' }}
             >
               <defs>
-                <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0">
-                  <stop offset="0%" stopColor="#f58c14" />
-                  <stop offset="50%" stopColor="#ec4899" />
-                  <stop offset="100%" stopColor="#8b5cf6" />
+                <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0.15">
+                  <stop offset="10%" stopColor="#f58c14" />
+                  <stop offset="55%" stopColor="#8b5cf6" />
+                  <stop offset="90%" stopColor="#ec4899" />
                 </linearGradient>
               </defs>
               <text
                 x="0"
                 y="42"
-                fontFamily="var(--nua-font-wordmark, 'Instrument Serif', Georgia, serif)"
-                fontStyle="italic"
+                fontFamily="var(--nua-font-wordmark, 'Bricolage Grotesque', sans-serif)"
+                fontWeight="700"
                 fontSize="48"
                 fill={`url(#${gradientId})`}
               >
-                Nua
+                NUA
               </text>
               {/* Caveat-spirited flourish — a supporting accent only. */}
               <path

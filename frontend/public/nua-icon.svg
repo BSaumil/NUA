@@ -1,23 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="NUA">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="NUA">
   <title>NUA Pulse Grid</title>
-  <!-- Pulse Grid: a 3x3 tile grid whose filled tiles trace a rising pulse.
-       The single purple tile at the apex is the AI-feature signal — per the
-       brand spec this is the one fixed exception to purple being reserved
-       for AI surfaces. -->
-  <defs>
-    <linearGradient id="nuaTileWarm" x1="0" y1="1" x2="1" y2="0">
-      <stop offset="0%" stop-color="#f58c14"/>
-      <stop offset="100%" stop-color="#f9a03f"/>
-    </linearGradient>
-  </defs>
-
-  <!-- column 1 — base -->
-  <rect x="4"  y="44" width="16" height="16" rx="4.5" fill="url(#nuaTileWarm)" opacity="0.55"/>
-  <!-- column 2 — rising -->
-  <rect x="24" y="24" width="16" height="16" rx="4.5" fill="url(#nuaTileWarm)" opacity="0.8"/>
-  <rect x="24" y="44" width="16" height="16" rx="4.5" fill="url(#nuaTileWarm)"/>
-  <!-- column 3 — apex -->
-  <rect x="44" y="4"  width="16" height="16" rx="4.5" fill="#8b5cf6"/>
-  <rect x="44" y="24" width="16" height="16" rx="4.5" fill="#ec4899"/>
-  <rect x="44" y="44" width="16" height="16" rx="4.5" fill="url(#nuaTileWarm)"/>
+  <rect x="6" y="6" width="40" height="40" rx="10" fill="#f58c14"/>
+  <rect x="54" y="6" width="40" height="40" rx="10" fill="#8b5cf6"/>
+  <rect x="6" y="54" width="40" height="40" rx="10" fill="#ec4899"/>
+  <rect x="54" y="54" width="40" height="40" rx="10" fill="#1c1917"/>
+  <polyline points="60,27 65,27 68,17 72,39 75,27 88,27" fill="none" stroke="#ffffff" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
