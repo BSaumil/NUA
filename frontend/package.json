@@ -101,8 +101,8 @@
     "wait-on": "^9.0.5"
   },
   "build": {
-    "appId": "com.nuva.pos",
-    "productName": "NUVA POS",
+    "appId": "com.nua.pos",
+    "productName": "NUA POS",
     "files": [
       "build/**/*",
       "electron/**/*"

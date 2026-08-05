@@ -124,10 +124,10 @@ def test_a_purchase_is_recorded_in_transaction_history(client, owner_headers):
 
 def test_creating_a_terminal_requires_owner_or_manager(client, owner_headers):
     req(client, "POST", "/api/auth/staff/add", headers=owner_headers, json={
-        "name": "EFTPOS Cashier", "email": "eftpos.cashier@nuva.com",
+        "name": "EFTPOS Cashier", "email": "eftpos.cashier@nua.com",
         "password": "CashierPass1!", "role": "cashier"})
     tok = req(client, "POST", "/api/auth/login",
-              json={"email": "eftpos.cashier@nuva.com", "password": "CashierPass1!"}).json()
+              json={"email": "eftpos.cashier@nua.com", "password": "CashierPass1!"}).json()
     client.cookies.clear()
     ch = {"Authorization": f"Bearer {tok['token']}"}
 

@@ -91,7 +91,7 @@ export default function Kitchen() {
 
   useEffect(() => {
     try {
-      const u = JSON.parse(localStorage.getItem('nuva_user') || '{}');
+      const u = JSON.parse(localStorage.getItem('nua_user') || '{}');
       setRole(u.role || 'cashier');
     } catch { /* ignore */ }
   }, []);

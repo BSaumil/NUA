@@ -18,8 +18,8 @@ from pymongo import MongoClient
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL").rstrip("/")
 API = f"{BASE_URL}/api"
 
-OWNER_EMAIL = "owner@nuva.com"
-OWNER_PASS = "NuvaOwner2026!"
+OWNER_EMAIL = "owner@nua.com"
+OWNER_PASS = "NuaOwner2026!"
 
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "test_database")

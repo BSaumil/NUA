@@ -16,8 +16,8 @@ import requests
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://pos-checkout-16.preview.emergentagent.com").rstrip("/")
 
-OWNER_EMAIL = "owner@nuva.com"
-OWNER_PASS = "NuvaOwner2026!"
+OWNER_EMAIL = "owner@nua.com"
+OWNER_PASS = "NuaOwner2026!"
 
 
 # ─────────────────────────── fixtures ───────────────────────────
@@ -175,7 +175,7 @@ class TestChannelState:
     def test_rbac_forbidden_for_non_owner(self):
         # login as cashier
         lr = requests.post(f"{BASE_URL}/api/auth/login",
-                           json={"email": "cashier@nuva.com", "password": "Staff2026!"}, timeout=15)
+                           json={"email": "cashier@nua.com", "password": "Staff2026!"}, timeout=15)
         if lr.status_code != 200:
             pytest.skip(f"cashier login failed: {lr.status_code}")
         tok = lr.json().get("token") or lr.json().get("access_token")

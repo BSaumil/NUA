@@ -114,12 +114,12 @@ async def seed_default_business():
     if not existing:
         await db.businesses.insert_one({
             "id": "default",
-            "name": "NUVA Restaurant",
+            "name": "NUA Restaurant",
             "type": "restaurant",
             "abn": "",
             "address": "",
             "phone": "",
-            "email": "info@nuva.com",
+            "email": "info@nua.com",
             "timezone": "Australia/Sydney",
             "currency": "AUD",
             "taxRate": 10,

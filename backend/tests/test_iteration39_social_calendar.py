@@ -7,7 +7,7 @@ import requests
 BASE = os.environ.get("REACT_APP_BACKEND_URL", "https://pos-checkout-16.preview.emergentagent.com").rstrip("/")
 API = f"{BASE}/api"
 
-OWNER = {"email": "owner@nuva.com", "password": "NuvaOwner2026!"}
+OWNER = {"email": "owner@nua.com", "password": "NuaOwner2026!"}
 
 
 @pytest.fixture(scope="module")
@@ -28,7 +28,7 @@ def ensure_connected_account(owner_h):
     accs = requests.get(f"{API}/social/accounts", headers=owner_h, timeout=15).json()
     if not accs:
         requests.post(f"{API}/social/accounts", headers=owner_h,
-                      json={"platform": "instagram", "handle": "nuva_iter39", "displayName": "iter39"}, timeout=15)
+                      json={"platform": "instagram", "handle": "nua_iter39", "displayName": "iter39"}, timeout=15)
 
 
 # ============ ai-weekly-plan auth ============

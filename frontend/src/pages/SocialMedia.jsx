@@ -520,7 +520,7 @@ const SocialMedia = () => {
               onChange={e => setConnectPlatform(e.target.value)} data-testid="connect-platform-select">
               {platforms.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
             </select>
-            <Input placeholder="Handle (e.g. nuva_eatery)" value={connectHandle}
+            <Input placeholder="Handle (e.g. nua_eatery)" value={connectHandle}
               onChange={e => setConnectHandle(e.target.value)} data-testid="connect-handle-input" />
             <Input placeholder="Display name (optional)" value={connectDisplayName}
               onChange={e => setConnectDisplayName(e.target.value)} data-testid="connect-displayname-input" />

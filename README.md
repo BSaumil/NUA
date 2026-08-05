@@ -72,10 +72,10 @@ Both services are managed by **supervisord** with hot reload. Use `sudo supervis
 
 | Role     | Email                | Password           |
 | -------- | -------------------- | ------------------ |
-| Owner    | `owner@nuva.com`     | `NuvaOwner2026!`   |
-| Manager  | `manager@nuva.com`   | `Staff2026!`       |
-| Cashier  | `cashier@nuva.com`   | `Staff2026!`       |
-| Kitchen  | `kitchen@nuva.com`   | `Staff2026!`       |
+| Owner    | `owner@nua.com`     | `NuaOwner2026!`   |
+| Manager  | `manager@nua.com`   | `Staff2026!`       |
+| Cashier  | `cashier@nua.com`   | `Staff2026!`       |
+| Kitchen  | `kitchen@nua.com`   | `Staff2026!`       |
 | 2FA code | `123456`             | (demo only)        |
 
 ## Feature map

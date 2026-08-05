@@ -15,7 +15,7 @@ import axios from 'axios';
 import { effectiveHourlyRate, salaryTypeSuffix } from '../lib/staffPay';
 
 const API = process.env.REACT_APP_BACKEND_URL;
-const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
+const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('nua_token')}` });
 
 const ROLE_COLORS = {
   owner: 'bg-purple-100 text-purple-700 border-purple-300',

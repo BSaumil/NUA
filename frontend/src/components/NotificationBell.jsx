@@ -3,7 +3,7 @@ import axios from 'axios';
 import { Bell, Sparkles, ChefHat, Award, Users, ShieldCheck, X, Check } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
+const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nua_token')}` });
 
 const KIND_ICON = {
   loyalty: Award, kitchen: ChefHat, approval: ShieldCheck,

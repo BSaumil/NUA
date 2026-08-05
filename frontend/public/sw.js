@@ -1,5 +1,5 @@
 /* eslint-disable no-restricted-globals */
-const CACHE_NAME = 'ananta-pos-v1';
+const CACHE_NAME = 'nua-pos-v1';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

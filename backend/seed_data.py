@@ -26,8 +26,7 @@ async def seed_database():
     await db.users.delete_many({})
     await db.categories.delete_many({})
     await db.modifiers.delete_many({})
-    await db.printers.delete_many({})
-    
+
     # Seed Products
     print("Seeding products...")
     products = [
@@ -565,36 +564,6 @@ async def seed_database():
         }
     ]
     await db.categories.insert_many(categories)
-    
-    # Seed Printer Configurations
-    print("Seeding printer configurations...")
-    printers = [
-        {
-            "id": "printer-1",
-            "businessId": "default",
-            "name": "Main Counter Printer",
-            "type": "network",
-            "ipAddress": "192.168.1.100",
-            "port": 9100,
-            "paperWidth": 80,
-            "autoprint": True,
-            "location": "Main Street",
-            "status": "active"
-        },
-        {
-            "id": "printer-2",
-            "businessId": "default",
-            "name": "Mall Branch Printer",
-            "type": "network",
-            "ipAddress": "192.168.1.101",
-            "port": 9100,
-            "paperWidth": 80,
-            "autoprint": False,
-            "location": "Mall Branch",
-            "status": "active"
-        }
-    ]
-    await db.printers.insert_many(printers)
     
     # ============ FLOOR PLANS ============
     print("Seeding floor plans...")

@@ -1,7 +1,7 @@
-# NUVA POS — Desktop & Mobile Build Guide
+# NUA POS — Desktop & Mobile Build Guide
 
 ## Overview
-NUVA POS can be packaged as:
+NUA POS can be packaged as:
 - **Android APK** — via Capacitor (WebView wrapper)
 - **Windows .exe** — via Electron + electron-builder
 
@@ -50,12 +50,12 @@ chmod +x build-android.sh
 ./build-android.sh
 ```
 
-The APK will be copied to `dist/NUVA-POS.apk`.
+The APK will be copied to `dist/NUA-POS.apk`.
 
 ### Customization
 - App icon: Replace `android/app/src/main/res/mipmap-*/ic_launcher.png`
 - Splash screen: Configure in `capacitor.config.json`
-- App name: Already set to "NUVA POS" in `capacitor.config.json`
+- App name: Already set to "NUA POS" in `capacitor.config.json`
 
 ---
 
@@ -87,7 +87,7 @@ npx electron-builder --win --publish never
 build-windows.bat
 ```
 
-The installer will be at: `dist/NUVA POS Setup {version}.exe`
+The installer will be at: `dist/NUA POS Setup {version}.exe`
 
 ### Development Mode
 ```bash

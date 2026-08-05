@@ -15,8 +15,8 @@ class TestAuth:
     def test_owner_login(self):
         """Owner login with full access"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "owner@nuva.com",
-            "password": "NuvaOwner2026!"
+            "email": "owner@nua.com",
+            "password": "NuaOwner2026!"
         })
         assert response.status_code == 200, f"Owner login failed: {response.text}"
         data = response.json()
@@ -28,7 +28,7 @@ class TestAuth:
     def test_manager_login(self):
         """Manager login"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "manager@nuva.com",
+            "email": "manager@nua.com",
             "password": "Staff2026!"
         })
         assert response.status_code == 200, f"Manager login failed: {response.text}"
@@ -40,7 +40,7 @@ class TestAuth:
     def test_cashier_login(self):
         """Cashier login"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "cashier@nuva.com",
+            "email": "cashier@nua.com",
             "password": "Staff2026!"
         })
         assert response.status_code == 200, f"Cashier login failed: {response.text}"
@@ -54,8 +54,8 @@ class TestAuth:
 def owner_token():
     """Get owner auth token"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
-        "email": "owner@nuva.com",
-        "password": "NuvaOwner2026!"
+        "email": "owner@nua.com",
+        "password": "NuaOwner2026!"
     })
     if response.status_code != 200:
         pytest.skip("Owner login failed")
@@ -66,7 +66,7 @@ def owner_token():
 def cashier_token():
     """Get cashier auth token"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
-        "email": "cashier@nuva.com",
+        "email": "cashier@nua.com",
         "password": "Staff2026!"
     })
     if response.status_code != 200:
@@ -454,11 +454,11 @@ class TestSettingsBusiness:
     def test_save_business_settings(self, owner_token):
         """POST /api/business/settings saves data"""
         biz_data = {
-            "name": "NUVA POS Test",
+            "name": "NUA POS Test",
             "abn": "12 345 678 901",
             "address": "100 Test Street, Sydney",
             "phone": "02 1234 5678",
-            "email": "test@nuva.com",
+            "email": "test@nua.com",
             "taxId": "TAX123"
         }
         response = requests.post(f"{BASE_URL}/api/business/settings", json=biz_data,

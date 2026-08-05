@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 
 function wsUrl() {
-  const token = localStorage.getItem('nuva_token') || '';
+  const token = localStorage.getItem('nua_token') || '';
   const base = BACKEND_URL.replace(/^http/, 'ws');
   return `${base}/api/ws/live?token=${encodeURIComponent(token)}`;
 }
@@ -21,7 +21,7 @@ export default function useLiveFeed(onEvent) {
   onEventRef.current = onEvent;
 
   useEffect(() => {
-    if (!localStorage.getItem('nuva_token')) return undefined;
+    if (!localStorage.getItem('nua_token')) return undefined;
     let socket;
     let closedByCleanup = false;
     let retryDelay = 1000;

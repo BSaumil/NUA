@@ -7,7 +7,7 @@ import { Building2, Trophy, TrendingUp } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
+const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nua_token')}` });
 
 export default function HQDashboard() {
   const [rollup, setRollup] = useState(null);

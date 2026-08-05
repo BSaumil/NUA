@@ -18,8 +18,8 @@ import requests
 BASE_URL = (os.environ.get("REACT_APP_BACKEND_URL") or "https://pos-checkout-16.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 
-OWNER_EMAIL = "owner@nuva.com"
-OWNER_PASSWORD = "NuvaOwner2026!"
+OWNER_EMAIL = "owner@nua.com"
+OWNER_PASSWORD = "NuaOwner2026!"
 
 
 @pytest.fixture(scope="module")

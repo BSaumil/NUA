@@ -1,5 +1,5 @@
 """
-Iteration 14 Tests: NUVA POS Major Restructure
+Iteration 14 Tests: NUA POS Major Restructure
 - Dashboard: 5 stat cards (Revenue, Active Tables, Transactions, Best Category, Avg Ticket)
 - Dashboard: Recent Transactions with View/Receipt/Print/Refund actions
 - Dashboard: Top 10 Items panel
@@ -19,19 +19,19 @@ class TestAuth:
     def test_owner_login(self):
         """Owner login returns token and user with role=owner"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "owner@nuva.com",
-            "password": "NuvaOwner2026!"
+            "email": "owner@nua.com",
+            "password": "NuaOwner2026!"
         })
         assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
         data = response.json()
         assert "token" in data
         assert data["user"]["role"] == "owner"
-        assert data["user"]["email"] == "owner@nuva.com"
+        assert data["user"]["email"] == "owner@nua.com"
     
     def test_manager_login(self):
         """Manager login returns token and user with role=manager"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "manager@nuva.com",
+            "email": "manager@nua.com",
             "password": "Staff2026!"
         })
         assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
@@ -42,7 +42,7 @@ class TestAuth:
     def test_cashier_login(self):
         """Cashier login returns token and user with role=cashier"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "cashier@nuva.com",
+            "email": "cashier@nua.com",
             "password": "Staff2026!"
         })
         assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
@@ -55,8 +55,8 @@ class TestAuth:
 def owner_token():
     """Get owner auth token"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
-        "email": "owner@nuva.com",
-        "password": "NuvaOwner2026!"
+        "email": "owner@nua.com",
+        "password": "NuaOwner2026!"
     })
     if response.status_code == 200:
         return response.json().get("token")
@@ -67,7 +67,7 @@ def owner_token():
 def manager_token():
     """Get manager auth token"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
-        "email": "manager@nuva.com",
+        "email": "manager@nua.com",
         "password": "Staff2026!"
     })
     if response.status_code == 200:
@@ -79,7 +79,7 @@ def manager_token():
 def cashier_token():
     """Get cashier auth token"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
-        "email": "cashier@nuva.com",
+        "email": "cashier@nua.com",
         "password": "Staff2026!"
     })
     if response.status_code == 200:
@@ -205,7 +205,7 @@ class TestBusinessSettingsAPI:
         """Save business hours with Google Business sync"""
         headers = {"Authorization": f"Bearer {owner_token}"}
         settings_data = {
-            "name": "NUVA POS",
+            "name": "NUA POS",
             "hours": {
                 "openTime": "07:00",
                 "closeTime": "23:00",

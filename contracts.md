@@ -1,4 +1,4 @@
-# Ananta POS Clone - Backend Implementation Contracts
+# NUA POS Clone - Backend Implementation Contracts
 
 ## API Contracts
 

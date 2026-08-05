@@ -1,8 +1,8 @@
-# 📦 Ananta POS - Windows Executable Package
+# 📦 NUA POS - Windows Executable Package
 
 ## 🎯 What You Have
 
-This package contains everything needed to build a **standalone Windows .exe installer** for Ananta POS - a complete Point of Sale system with:
+This package contains everything needed to build a **standalone Windows .exe installer** for NUA POS - a complete Point of Sale system with:
 
 - ✅ Modern React Frontend
 - ✅ FastAPI Backend Server
@@ -41,7 +41,7 @@ This will:
 ### Step 3: Test & Distribute 🎉
 Your installer will be at:
 ```
-/app/frontend/dist/Ananta POS-Setup-2.0.1.exe
+/app/frontend/dist/NUA POS-Setup-2.0.1.exe
 ```
 
 Double-click to install and test!
@@ -130,14 +130,14 @@ yarn electron:build
 
 ```
 /app/frontend/dist/
-├── Ananta POS-Setup-2.0.1.exe          [~200-300 MB]
+├── NUA POS-Setup-2.0.1.exe          [~200-300 MB]
 │   • Full Windows installer
 │   • NSIS-based installation wizard
 │   • Creates Start Menu & Desktop shortcuts
 │   • Professional install/uninstall
 │   • Recommended for distribution
 │
-├── Ananta POS-Portable-2.0.1.exe       [~200-300 MB]
+├── NUA POS-Portable-2.0.1.exe       [~200-300 MB]
 │   • Standalone executable
 │   • No installation required
 │   • Run from any location
@@ -153,7 +153,7 @@ yarn electron:build
 ### What's Inside the Executable:
 
 ```
-📦 Ananta POS Setup.exe
+📦 NUA POS Setup.exe
  ├─ 🎨 React Frontend
  │   ├─ Dashboard
  │   ├─ POS Terminal
@@ -249,7 +249,7 @@ Edit `frontend/electron-package.json`:
 ### Change App Name
 Edit `frontend/electron-package.json`:
 ```json
-"productName": "Ananta POS"  // Change here
+"productName": "NUA POS"  // Change here
 ```
 
 ### Custom Icon
@@ -318,7 +318,7 @@ Output: 2 files (~200-300 MB each)
 ## 📦 Distribution Guide
 
 ### For End Users:
-1. Upload `Ananta POS-Setup-2.0.1.exe` to:
+1. Upload `NUA POS-Setup-2.0.1.exe` to:
    - Google Drive / Dropbox
    - Company website
    - USB drives
@@ -331,7 +331,7 @@ Output: 2 files (~200-300 MB each)
    - Start using immediately
 
 ### For Testing/Demo:
-Use `Ananta POS-Portable-2.0.1.exe`:
+Use `NUA POS-Portable-2.0.1.exe`:
 - No installation needed
 - Run from anywhere
 - Perfect for demos
@@ -341,11 +341,11 @@ Use `Ananta POS-Portable-2.0.1.exe`:
 
 ## 🎨 Branding
 
-All branding uses "Ananta" theme:
-- Application name: **Ananta POS**
-- Window title: **Ananta POS**
-- Installer name: **Ananta POS Setup**
-- Desktop shortcut: **Ananta POS**
+All branding uses "NUA" theme:
+- Application name: **NUA POS**
+- Window title: **NUA POS**
+- Installer name: **NUA POS Setup**
+- Desktop shortcut: **NUA POS**
 
 To rebrand:
 1. Edit `electron-package.json` (productName, description)
@@ -370,7 +370,7 @@ To rebrand:
 
 ### Data Location:
 ```
-C:\Users\[Username]\AppData\Roaming\Ananta POS\
+C:\Users\[Username]\AppData\Roaming\NUA POS\
 ├── mongodb-data\      (Database files)
 ├── logs\              (Application logs)
 └── config\            (Settings)
@@ -405,8 +405,8 @@ After building, verify:
 
 - [x] Backend `/app/backend/dist/server.exe` exists
 - [x] MongoDB `/app/mongodb/bin/mongod.exe` exists
-- [x] Frontend `/app/frontend/dist/Ananta POS-Setup-2.0.1.exe` exists
-- [x] Portable `/app/frontend/dist/Ananta POS-Portable-2.0.1.exe` exists
+- [x] Frontend `/app/frontend/dist/NUA POS-Setup-2.0.1.exe` exists
+- [x] Portable `/app/frontend/dist/NUA POS-Portable-2.0.1.exe` exists
 
 Test the build:
 - [x] Installer runs and installs successfully
@@ -506,4 +506,4 @@ Built with:
 
 ---
 
-**🎉 Thank you for using Ananta POS!**
+**🎉 Thank you for using NUA POS!**

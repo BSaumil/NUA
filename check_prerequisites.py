@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Verify build prerequisites for NUVA POS Windows executable
+Verify build prerequisites for NUA POS Windows executable
 Run this script to check if your system is ready to build
 """
 
@@ -12,7 +12,7 @@ from pathlib import Path
 
 def print_header():
     print("=" * 60)
-    print("🔍 NUVA POS - Build Prerequisites Checker")
+    print("🔍 NUA POS - Build Prerequisites Checker")
     print("=" * 60)
     print()
 
@@ -202,7 +202,7 @@ def main():
     
     if passed == total:
         print("\n🎉 ALL CHECKS PASSED!")
-        print("✅ Your system is ready to build NUVA POS!")
+        print("✅ Your system is ready to build NUA POS!")
         print("\nNext step: Run build_windows_exe.bat")
         return 0
     else:

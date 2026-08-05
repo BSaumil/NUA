@@ -15,7 +15,7 @@ export default function StaffAvailability() {
   const [data, setData] = useState({ weeklyAvailable: [], blackoutDates: [] });
 
   useEffect(() => {
-    fetch(`${process.env.REACT_APP_BACKEND_URL}/api/auth/staff`, { headers: { Authorization: `Bearer ${localStorage.getItem('nuva_token')}` } })
+    fetch(`${process.env.REACT_APP_BACKEND_URL}/api/auth/staff`, { headers: { Authorization: `Bearer ${localStorage.getItem('nua_token')}` } })
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then(d => setStaff(Array.isArray(d) ? d : []))
       .catch(() => { setStaff([]); toast({ title: 'Failed to load staff list', variant: 'destructive' }); });

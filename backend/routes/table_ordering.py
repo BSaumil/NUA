@@ -39,7 +39,7 @@ async def get_table_menu(table_id: str):
         "tableId": table_id,
         "tableInfo": table_info,
         "categories": list(categories.values()),
-        "restaurantName": "NUVA",
+        "restaurantName": "NUA",
     }
 
 @router.post("/table/{table_id}/order")

@@ -5,7 +5,6 @@ from datetime import datetime
 from database import db
 from models.location import Location, LocationCreate
 from models.user import User, UserCreate
-from models.printer import PrinterConfig, PrinterConfigCreate
 from models.table import Table, TableCreate
 from models.eftpos import EFTPOSConfig, EFTPOSConfigCreate, EFTPOSTransaction, EFTPOSTransactionRequest
 from models.integration import Integration, IntegrationCreate, IntegrationUpdate, SyncRequest
@@ -112,49 +111,6 @@ async def create_user(user: UserCreate):
     user_obj = User(**user.dict())
     await db.users.insert_one(user_obj.dict())
     return user_obj
-
-# ============ PRINTER API ============
-@router.get("/printers", response_model=List[PrinterConfig])
-async def get_printers(user: dict = Depends(get_user)):
-    business_id = user.get("businessId") or "default"
-    printers = await db.printers.find({"businessId": business_id}).to_list(1000)
-    return [PrinterConfig(**p) for p in printers]
-
-@router.post("/printers", response_model=PrinterConfig)
-async def create_printer(printer: PrinterConfigCreate, user: dict = Depends(get_user)):
-    printer_obj = PrinterConfig(**printer.dict(), businessId=user.get("businessId") or "default")
-    await db.printers.insert_one(printer_obj.dict())
-    return printer_obj
-
-@router.put("/printers/{printer_id}", response_model=PrinterConfig)
-async def update_printer(printer_id: str, data: dict, user: dict = Depends(get_user)):
-    business_id = user.get("businessId") or "default"
-    allowed = {"name", "type", "ipAddress", "port", "paperWidth", "autoprint",
-               "location", "status", "footerInPerson", "footerOnline", "paddingLines"}
-    update = {k: v for k, v in data.items() if k in allowed}
-    result = await db.printers.find_one_and_update(
-        {"id": printer_id, "businessId": business_id}, {"$set": update}, return_document=True,
-    )
-    if not result:
-        raise HTTPException(status_code=404, detail="Printer not found")
-    return PrinterConfig(**result)
-
-@router.post("/printers/{printer_id}/print")
-async def print_receipt(printer_id: str, transaction_id: str, user: dict = Depends(get_user)):
-    business_id = user.get("businessId") or "default"
-    printer = await db.printers.find_one({"id": printer_id, "businessId": business_id})
-    if not printer:
-        raise HTTPException(status_code=404, detail="Printer not found")
-    transaction = await db.transactions.find_one({"id": transaction_id})
-    if not transaction:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-    return {
-        "message": "Receipt sent to printer",
-        "printerId": printer_id,
-        "transactionId": transaction_id,
-        "printerName": printer.get("name", ""),
-        "status": "queued"
-    }
 
 # ============ OFFLINE SYNC API ============
 @router.post("/offline/sync")

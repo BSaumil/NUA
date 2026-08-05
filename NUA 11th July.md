@@ -377,7 +377,7 @@ sudo supervisorctl restart frontend       # supervisord manages CRA dev on :3000
 
 ### Default credentials
 ```
-owner@nuva.com  /  NuvaOwner2026!
+owner@nua.com  /  NuaOwner2026!
 ```
 
 ---

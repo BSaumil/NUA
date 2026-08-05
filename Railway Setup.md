@@ -128,7 +128,7 @@ Keep that string ready — we'll paste it into the backend in Step 4.
 4. **Networking** tab → **Generate Domain**. Note the URL (e.g. `nua-frontend-production.up.railway.app`).
 
 5. Wait ~5 minutes. Open the frontend URL in your browser. 🎉
-   Log in with `owner@nuva.com` / `NuvaOwner2026!`.
+   Log in with `owner@nua.com` / `NuaOwner2026!`.
 
 ---
 
@@ -271,7 +271,7 @@ That's the whole secret sauce — git push = live in production.
 - [ ] Backend deployed → `/api/` returns JSON
 - [ ] Frontend service added, **Root Directory = `frontend`**, with `REACT_APP_BACKEND_URL` set before the first build
 - [ ] Frontend deployed → loads in browser
-- [ ] Logged in successfully as `owner@nuva.com`
+- [ ] Logged in successfully as `owner@nua.com`
 - [ ] Updated backend's `FRONTEND_URL` to the real frontend URL
 - [ ] (Optional) Custom domain + HTTPS certificate
 - [ ] (Optional) Crew + Pulse: `staff.` and `owner.` custom domains added to the frontend service

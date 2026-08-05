@@ -9,7 +9,7 @@ import { History, Search, User, Shield, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
+const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nua_token')}` });
 
 const ACTION_COLORS = { created: 'bg-emerald-100 text-emerald-700', updated: 'bg-blue-100 text-blue-700', deleted: 'bg-rose-100 text-rose-700', restored: 'bg-purple-100 text-purple-700' };
 

@@ -17,8 +17,8 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 def owner_token():
     """Get owner auth token"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
-        "email": "owner@nuva.com",
-        "password": "NuvaOwner2026!"
+        "email": "owner@nua.com",
+        "password": "NuaOwner2026!"
     })
     assert response.status_code == 200, f"Owner login failed: {response.text}"
     return response.json()["token"]
@@ -27,7 +27,7 @@ def owner_token():
 def manager_token():
     """Get manager auth token"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
-        "email": "manager@nuva.com",
+        "email": "manager@nua.com",
         "password": "Staff2026!"
     })
     assert response.status_code == 200, f"Manager login failed: {response.text}"
@@ -37,7 +37,7 @@ def manager_token():
 def cashier_token():
     """Get cashier auth token"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
-        "email": "cashier@nuva.com",
+        "email": "cashier@nua.com",
         "password": "Staff2026!"
     })
     assert response.status_code == 200, f"Cashier login failed: {response.text}"

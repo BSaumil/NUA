@@ -47,7 +47,7 @@
 **Split Payment — QR/UPI dialog actually shows now** (`pages/POSTerminal.jsx`, `components/pos/PaymentDialogs.jsx`)
 - Root cause: `handlePaySplit` was calling `paymentAPI.generateQR()` and then immediately `paymentAPI.confirm()` **without ever displaying the QR to the guest**. Clicking Pay on a UPI/QR split silently marked it paid.
 - Fix: refactored into two-phase flow —
-  1. `handlePaySplit` generates the QR and opens the `QrPaymentDialog`/`UpiPaymentDialog` stacked on top of the split dialog (with per-split amount + `nuva@upi` copy-to-clipboard).
+  1. `handlePaySplit` generates the QR and opens the `QrPaymentDialog`/`UpiPaymentDialog` stacked on top of the split dialog (with per-split amount + `nua@upi` copy-to-clipboard).
   2. Cashier taps **Confirm Payment Received** → `confirmSplitQr` calls `/payments/confirm` and only then `finaliseSplitPart` marks the row Paid.
   3. Cancel/close in the QR dialog leaves the split row `pending` (no accidental writes).
 - Card and Cash split parts remain instant (no dialog, no external gateway needed).
@@ -128,7 +128,7 @@
 
 ### Verified
 - Preview on a 7-item menu image (Flat White, Cappuccino, Latte, Beef Burger, Chicken Schnitzel, Espresso Martini, Negroni): all 7 fuzzy-matched to existing categories (Coffee, Mains, Cocktails), all flagged as duplicates, "Selected=0 → Import 0 items" (correct).
-- Preview on a fresh 5-item brunch menu (Avocado Smash Bruschetta, Ricotta Hotcakes, Green Goddess Bowl, Berry Kombucha, Golden Latte): 0 duplicates, new categories `BRUNCH` and `DRINKS` proposed in amber. Select-all + Commit → 5 products written with SKUs `AI-…`, `createdBy=owner@nuva.com`, audit stamped.
+- Preview on a fresh 5-item brunch menu (Avocado Smash Bruschetta, Ricotta Hotcakes, Green Goddess Bowl, Berry Kombucha, Golden Latte): 0 duplicates, new categories `BRUNCH` and `DRINKS` proposed in amber. Select-all + Commit → 5 products written with SKUs `AI-…`, `createdBy=owner@nua.com`, audit stamped.
 - Duplicate skip: replaying the same commit → `created=0 skipped=3` with detailed `skippedDetails`.
 
 ### Backlog (unchanged)
@@ -358,7 +358,7 @@
 - **New**: `/app/memory/NUA_POS_Master_Roadmap_v1.txt`.
 
 ### Test credentials
-- `owner@nuva.com` / `NuvaOwner2026!`
+- `owner@nua.com` / `NuaOwner2026!`
 
 ---
 
@@ -420,7 +420,7 @@
 - `/app/frontend/src/pages/LoyaltyProgress.jsx`
 
 ### Test credentials
-- `owner@nuva.com` / `NuvaOwner2026!`
+- `owner@nua.com` / `NuaOwner2026!`
 
 ---
 
@@ -457,7 +457,7 @@
 - Two testing-agent code-review nits fixed post-report: `logging` import added to `routes/ash.py`; `_maybe_send_daily_digest(force=True)` bypass added for manual triggers; AshChat localStorage now scoped per user email.
 
 ### Test credentials
-- `owner@nuva.com` / `NuvaOwner2026!`
+- `owner@nua.com` / `NuaOwner2026!`
 
 ---
 
@@ -519,7 +519,7 @@
 - `POST /api/ash/run` → 3 promotion insights generated (slow-mover heuristic on real DB products).
 - `POST /api/rules` create rule with `create_purchase_order` param `estimatedCost=1250` → `POST /api/rules/emit` returned `outcome.result.status = pending_approval`.
 - `POST /api/approvals/{id}/approve` executed the action → `purchaseOrderId` returned.
-- `GET /api/audit/summary` reports actors/entities/actions correctly (owner@nuva.com most active).
+- `GET /api/audit/summary` reports actors/entities/actions correctly (owner@nua.com most active).
 - `GET /api/hq/leaderboard` returns location rankings.
 - `GET /api/hq/kpi-roll-up?days=30` returns $966 network revenue over 10 covers.
 
@@ -574,7 +574,7 @@
 - AI Builder with GPT-5.2 returned a fully populated rule spec (event, conditions, actions) for a plain-English restock prompt.
 
 ### Test credentials
-- `owner@nuva.com` / `NuvaOwner2026!`
+- `owner@nua.com` / `NuaOwner2026!`
 
 ---
 
@@ -1018,7 +1018,7 @@
 - `App.js` imports unchanged.
 
 ### Iteration 31 Bug Fixes (post-test-agent)
-- `pages/v26/StaffAvailability.jsx` — was reading `localStorage.getItem('token')` (returns `null`) instead of the actual `'nuva_token'` key. Auth-failed response then crashed `.filter`. Fixed key + added `Array.isArray(d) ? d : []` guard. Page now renders cleanly.
+- `pages/v26/StaffAvailability.jsx` — was reading `localStorage.getItem('token')` (returns `null`) instead of the actual `'nua_token'` key. Auth-failed response then crashed `.filter`. Fixed key + added `Array.isArray(d) ? d : []` guard. Page now renders cleanly.
 - `Inventory.jsx` + `Products.jsx` `<img>` tags — added placeholder fallback for empty `product.image` to eliminate 404 spam.
 
 ### Test Status — Iteration 31
@@ -1217,10 +1217,10 @@
 - `/pos` with Sarah Johnson selected → Your Usual block visible ✅
 
 ## Credentials
-Owner: owner@nuva.com / NuvaOwner2026!  
-Manager: manager@nuva.com / Staff2026!  
-Cashier: cashier@nuva.com / Staff2026!  
-Kitchen: kitchen@nuva.com / Staff2026!  
+Owner: owner@nua.com / NuaOwner2026!  
+Manager: manager@nua.com / Staff2026!  
+Cashier: cashier@nua.com / Staff2026!  
+Kitchen: kitchen@nua.com / Staff2026!  
 2FA demo: 123456
 
 ## Backlog

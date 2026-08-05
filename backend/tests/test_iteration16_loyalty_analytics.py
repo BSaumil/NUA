@@ -19,8 +19,8 @@ class TestAuth:
     
     def test_owner_login(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "owner@nuva.com",
-            "password": "NuvaOwner2026!"
+            "email": "owner@nua.com",
+            "password": "NuaOwner2026!"
         })
         assert response.status_code == 200
         data = response.json()
@@ -29,7 +29,7 @@ class TestAuth:
     
     def test_manager_login(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "manager@nuva.com",
+            "email": "manager@nua.com",
             "password": "Staff2026!"
         })
         assert response.status_code == 200
@@ -39,7 +39,7 @@ class TestAuth:
     
     def test_cashier_login(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
-            "email": "cashier@nuva.com",
+            "email": "cashier@nua.com",
             "password": "Staff2026!"
         })
         assert response.status_code == 200
@@ -51,8 +51,8 @@ class TestAuth:
 @pytest.fixture
 def owner_token():
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
-        "email": "owner@nuva.com",
-        "password": "NuvaOwner2026!"
+        "email": "owner@nua.com",
+        "password": "NuaOwner2026!"
     })
     if response.status_code == 200:
         return response.json().get("token")
@@ -61,7 +61,7 @@ def owner_token():
 @pytest.fixture
 def manager_token():
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
-        "email": "manager@nuva.com",
+        "email": "manager@nua.com",
         "password": "Staff2026!"
     })
     if response.status_code == 200:
@@ -71,7 +71,7 @@ def manager_token():
 @pytest.fixture
 def cashier_token():
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
-        "email": "cashier@nuva.com",
+        "email": "cashier@nua.com",
         "password": "Staff2026!"
     })
     if response.status_code == 200:
@@ -296,7 +296,7 @@ class TestSocialAccounts:
     def test_add_social_account_owner(self, owner_token):
         account_data = {
             "platform": "instagram",
-            "accountName": "TEST_nuvatest",
+            "accountName": "TEST_nuatest",
             "accessToken": "test_token_123"
         }
         response = requests.post(f"{BASE_URL}/api/clubmember/social-accounts",
@@ -305,7 +305,7 @@ class TestSocialAccounts:
         assert response.status_code == 200
         data = response.json()
         assert data["platform"] == "instagram"
-        assert data["accountName"] == "TEST_nuvatest"
+        assert data["accountName"] == "TEST_nuatest"
         assert data["connected"] == True
         assert "id" in data
         
@@ -372,8 +372,8 @@ class TestEmailFeatures:
     def test_save_email_settings_owner(self, owner_token):
         settings_data = {
             "testEmail": "sambhatt7@gmail.com",
-            "senderName": "NUVA POS Test",
-            "senderEmail": "noreply@nuva.com"
+            "senderName": "NUA POS Test",
+            "senderEmail": "noreply@nua.com"
         }
         response = requests.post(f"{BASE_URL}/api/email/settings",
             headers={"Authorization": f"Bearer {owner_token}"},

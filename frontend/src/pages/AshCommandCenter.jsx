@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import { Activity, AlertTriangle, TrendingUp, ShieldCheck, RefreshCw, Sparkles, Brain, Sunrise, Wrench } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nuva_token')}` });
+const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nua_token')}` });
 
 const TIER_COLOR = {
   excellent: '#10b981', healthy: '#22c55e', watch: '#f59e0b',

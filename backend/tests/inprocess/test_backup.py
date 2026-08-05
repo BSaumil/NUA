@@ -127,10 +127,10 @@ def test_backup_endpoints_are_owner_only(client, owner_headers):
 
 def test_backup_endpoints_refuse_a_manager(client, owner_headers):
     req(client, "POST", "/api/auth/staff/add", headers=owner_headers, json={
-        "name": "Backup Manager", "email": "backup.mgr@nuva.com",
+        "name": "Backup Manager", "email": "backup.mgr@nua.com",
         "password": "MgrPass123!", "role": "manager"})
     tok = req(client, "POST", "/api/auth/login",
-              json={"email": "backup.mgr@nuva.com", "password": "MgrPass123!"}).json()
+              json={"email": "backup.mgr@nua.com", "password": "MgrPass123!"}).json()
     client.cookies.clear()
     mh = {"Authorization": f"Bearer {tok['token']}"}
     assert req(client, "GET", "/api/ops/backup", headers=mh).status_code == 403

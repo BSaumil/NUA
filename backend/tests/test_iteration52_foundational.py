@@ -12,7 +12,7 @@ import requests
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://pos-checkout-16.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 
-OWNER = {"email": "owner@nuva.com", "password": "NuvaOwner2026!"}
+OWNER = {"email": "owner@nua.com", "password": "NuaOwner2026!"}
 
 
 # ── fixtures ─────────────────────────────────────────────────────────────
@@ -184,7 +184,7 @@ class TestAudit:
         # Post a POS sale
         txn = {"items": [{"productId": "TEST_iter52", "productName": "TEST_iter52 item",
                           "name": "TEST_iter52 item", "price": 5.0, "quantity": 1}],
-                "total": 5.0, "paymentMethod": "cash", "location": "Main", "cashier": "owner@nuva.com"}
+                "total": 5.0, "paymentMethod": "cash", "location": "Main", "cashier": "owner@nua.com"}
         r = client.post(f"{API}/transactions", json=txn, timeout=30)
         assert r.status_code in (200, 201), r.text
         time.sleep(1)
@@ -214,7 +214,7 @@ class TestAudit:
         rows = r2.json()
         created = [x for x in rows if x.get("action") == "created"]
         assert created, f"No customer:created event, rows: {rows}"
-        assert created[0]["actor"] in ("owner@nuva.com", "system"), created[0]
+        assert created[0]["actor"] in ("owner@nua.com", "system"), created[0]
         # Update
         r3 = client.put(f"{API}/customers/{cid}", json={"name": "TEST_iter52 Cust Updated"}, timeout=15)
         assert r3.status_code == 200, r3.text

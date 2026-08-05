@@ -1,6 +1,6 @@
 """
 Iteration 7 Tests: Auth/RBAC, Staff Management, AI Pantry, Member Portal, Multi-Business
-Tests for new features added in NUVA POS v4.0
+Tests for new features added in NUA POS v4.0
 """
 import pytest
 import requests
@@ -10,10 +10,10 @@ import time
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
-OWNER_CREDS = {"email": "owner@nuva.com", "password": "NUVAOwner2026!"}
-MANAGER_CREDS = {"email": "manager@nuva.com", "password": "Staff2026!"}
-CASHIER_CREDS = {"email": "cashier@nuva.com", "password": "Staff2026!"}
-KITCHEN_CREDS = {"email": "kitchen@nuva.com", "password": "Staff2026!"}
+OWNER_CREDS = {"email": "owner@nua.com", "password": "NUAOwner2026!"}
+MANAGER_CREDS = {"email": "manager@nua.com", "password": "Staff2026!"}
+CASHIER_CREDS = {"email": "cashier@nua.com", "password": "Staff2026!"}
+KITCHEN_CREDS = {"email": "kitchen@nua.com", "password": "Staff2026!"}
 
 
 class TestAuthLogin:
@@ -26,7 +26,7 @@ class TestAuthLogin:
         data = response.json()
         assert "user" in data
         assert "token" in data
-        assert data["user"]["email"] == "owner@nuva.com"
+        assert data["user"]["email"] == "owner@nua.com"
         assert data["user"]["role"] == "owner"
         assert len(data["token"]) > 0
         print(f"PASS: Owner login successful, role={data['user']['role']}")

@@ -1,10 +1,10 @@
-# Ananta POS - Windows Executable Build Instructions
+# NUA POS - Windows Executable Build Instructions
 
 ## Complete Guide to Build Standalone Windows .exe
 
 This guide will help you build a complete Windows installer that includes:
-- ✅ Ananta POS Frontend (React)
-- ✅ Ananta POS Backend (FastAPI)
+- ✅ NUA POS Frontend (React)
+- ✅ NUA POS Backend (FastAPI)
 - ✅ MongoDB Database
 - ✅ Node.js Runtime (bundled by Electron)
 - ✅ Python Runtime (bundled by PyInstaller)
@@ -139,8 +139,8 @@ yarn build:portable
 ```
 
 8. The installer will be created in `/app/frontend/dist/`:
-   - **Installer**: `Ananta POS-Setup-2.0.1.exe` (NSIS installer)
-   - **Portable**: `Ananta POS-Portable-2.0.1.exe` (No installation needed)
+   - **Installer**: `NUA POS-Setup-2.0.1.exe` (NSIS installer)
+   - **Portable**: `NUA POS-Portable-2.0.1.exe` (No installation needed)
 
 **Troubleshooting Frontend Build:**
 - If `yarn install` fails: Delete `node_modules` folder and try again
@@ -154,18 +154,18 @@ yarn build:portable
 
 ### Testing the Installer:
 1. Navigate to `/app/frontend/dist/`
-2. Double-click `Ananta POS-Setup-2.0.1.exe`
+2. Double-click `NUA POS-Setup-2.0.1.exe`
 3. Follow the installation wizard
-4. Launch Ananta POS from the Start Menu or Desktop shortcut
+4. Launch NUA POS from the Start Menu or Desktop shortcut
 
 ### Testing the Portable Version:
 1. Navigate to `/app/frontend/dist/`
-2. Double-click `Ananta POS-Portable-2.0.1.exe`
+2. Double-click `NUA POS-Portable-2.0.1.exe`
 3. The app should start directly (no installation)
 
 ### What to Expect:
 - First launch may take 10-15 seconds (MongoDB and backend starting)
-- A window should open showing the Ananta POS interface
+- A window should open showing the NUA POS interface
 - The app should work completely offline
 - All features should be functional
 
@@ -177,8 +177,8 @@ After successful build, you will have:
 
 ```
 /app/frontend/dist/
-├── Ananta POS-Setup-2.0.1.exe          (Full installer, ~200-300 MB)
-├── Ananta POS-Portable-2.0.1.exe       (Portable version, ~200-300 MB)
+├── NUA POS-Setup-2.0.1.exe          (Full installer, ~200-300 MB)
+├── NUA POS-Portable-2.0.1.exe       (Portable version, ~200-300 MB)
 └── win-unpacked/                        (Unpacked app files)
 ```
 
@@ -235,7 +235,7 @@ yarn install
 **Solution**:
 - Check Windows Firewall (may block MongoDB port)
 - Run the portable version first to test
-- Check logs in `%APPDATA%/Ananta POS/logs/`
+- Check logs in `%APPDATA%/NUA POS/logs/`
 
 ---
 
@@ -300,4 +300,4 @@ These sizes are normal for a complete, self-contained POS system.
 
 ---
 
-**🎉 Congratulations! You now have a complete Windows installer for Ananta POS!**
+**🎉 Congratulations! You now have a complete Windows installer for NUA POS!**

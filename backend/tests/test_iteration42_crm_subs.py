@@ -10,8 +10,8 @@ def _load_url():
     raise RuntimeError("no REACT_APP_BACKEND_URL")
 BASE = os.environ.get("REACT_APP_BACKEND_URL") or _load_url()
 BASE = BASE.rstrip("/")
-CRED_OWNER = {"email": "owner@nuva.com", "password": "NuvaOwner2026!"}
-CRED_MGR = {"email": "manager@nuva.com", "password": "Staff2026!"}
+CRED_OWNER = {"email": "owner@nua.com", "password": "NuaOwner2026!"}
+CRED_MGR = {"email": "manager@nua.com", "password": "Staff2026!"}
 
 def _login(c):
     r = c.post(f"{BASE}/api/auth/login", json=CRED_OWNER, timeout=15); r.raise_for_status()

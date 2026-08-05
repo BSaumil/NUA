@@ -10,7 +10,7 @@ import shutil
 from pathlib import Path
 
 def main():
-    print("Building NUVA POS Backend Executable...")
+    print("Building NUA POS Backend Executable...")
     
     # Get paths
     backend_dir = Path(__file__).parent

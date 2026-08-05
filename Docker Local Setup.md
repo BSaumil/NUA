@@ -54,7 +54,7 @@ nua-frontend  | nginx: ready
 | Backend API | http://localhost:8001/api/social/platforms |
 | MongoDB (direct) | `mongodb://localhost:27017` (use Compass to browse) |
 
-Log in as: `owner@nuva.com` / `NuvaOwner2026!`
+Log in as: `owner@nua.com` / `NuaOwner2026!`
 
 ---
 
@@ -112,7 +112,7 @@ This is the same setup the Emergent preview uses internally.
 After `docker compose up --build` completes:
 
 - [ ] http://localhost:3000 loads the landing page
-- [ ] Login with `owner@nuva.com` / `NuvaOwner2026!` succeeds
+- [ ] Login with `owner@nua.com` / `NuaOwner2026!` succeeds
 - [ ] http://localhost:8001/api/social/platforms returns `{"detail":"Not authenticated"}` (proves Python is alive)
 - [ ] Create a product in /products → refresh → it persists (proves Mongo is wired)
 - [ ] Visit /social-media → Calendar tab → "Best time to post" chips render
