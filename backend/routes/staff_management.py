@@ -63,7 +63,7 @@ async def pin_login(data: dict):
     user.pop("_id", None)
     user.pop("password_hash", None)
     token = jwt.encode(
-        {"sub": user["id"], "email": user["email"], "role": user["role"],
+        {"sub": user["id"], "email": user["email"], "role": user["role"], "businessId": user.get("businessId"),
          "exp": datetime.now(timezone.utc) + timedelta(hours=8), "type": "access"},
         os.environ["JWT_SECRET"], algorithm="HS256"
     )

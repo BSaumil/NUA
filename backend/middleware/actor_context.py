@@ -46,13 +46,14 @@ class ActorContextMiddleware(BaseHTTPMiddleware):
         # X-Forwarded-For (Kubernetes ingress) takes precedence
         xff = request.headers.get("x-forwarded-for")
         ip = xff.split(",")[0].strip() if xff else client
-        business_id = request.headers.get("x-tenant-id") or request.headers.get("x-business-id")
+        header_business_id = request.headers.get("x-tenant-id") or request.headers.get("x-business-id")
         location_id = request.headers.get("x-location-id")
 
         # Attempt to decode JWT quickly without triggering auth failures.
         # This is best-effort — protected routes still enforce auth normally.
         email = None
         role = None
+        jwt_business_id = None
         auth = request.headers.get("authorization") or ""
         if auth.lower().startswith("bearer "):
             token = auth.split(" ", 1)[1]
@@ -63,8 +64,15 @@ class ActorContextMiddleware(BaseHTTPMiddleware):
                 data = jwt.decode(token, secret, algorithms=["HS256"], options={"verify_exp": False})
                 email = data.get("email") or data.get("sub")
                 role = data.get("role")
+                jwt_business_id = data.get("businessId")
             except Exception:
                 pass  # Auth will handle its own error on the route
+
+        # X-Tenant-Id/X-Business-Id headers (used by partner/integration
+        # callers that aren't a logged-in staff member) win when present;
+        # otherwise fall back to the businessId already embedded in the
+        # staff member's own access token.
+        business_id = header_business_id or jwt_business_id
 
         ctx = {
             "email": email,

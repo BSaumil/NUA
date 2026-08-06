@@ -77,6 +77,7 @@ async def get_transactions(
 @router.post("/transactions", response_model=Transaction)
 async def create_transaction(transaction: TransactionCreate, user: dict = Depends(get_user)):
     items_list = []
+    earn_lines = []  # [(category, lineTotal)] — for category-multiplier points earning below
     subtotal = 0
     for item in transaction.items:
         if item.quantity <= 0:
@@ -86,7 +87,7 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
         # the request body. Modifier surcharges are added on top (clamped to
         # non-negative). Unknown productIds (open/custom lines) keep the client
         # price, floored at zero.
-        product = await db.products.find_one({"id": item.productId}, {"_id": 0, "price": 1})
+        product = await db.products.find_one({"id": item.productId}, {"_id": 0, "price": 1, "category": 1})
         modifier_surcharge = sum(max(m.price, 0) for m in item.modifiers)
         if product is not None and isinstance(product.get("price"), (int, float)):
             unit_price = float(product["price"]) + modifier_surcharge
@@ -97,6 +98,7 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
         item_dict["total"] = round(item_total, 2)
         subtotal += item_total
         items_list.append(item_dict)
+        earn_lines.append(((product or {}).get("category") or "Other", item_total))
 
     # Apply customer membership-tier discount
     tier_discount = 0
@@ -122,7 +124,38 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
     for d in applied_discounts:
         d["amount"] = max(float(d.get("amount") or 0), 0)
     voucher_discount = sum(d["amount"] for d in applied_discounts)
-    points_discount = max(float(transaction.pointsDiscount or 0), 0)
+
+    # Loyalty config — used for both the redeem check below and the earn
+    # calculation further down, so it's fetched once regardless of which (or
+    # both) apply to this sale.
+    loyalty_cfg = await db.loyalty_config.find_one({"id": "default"}, {"_id": 0}) or {}
+
+    # Points redemption: the client-supplied pointsDiscount is a display hint
+    # only — the value actually deducted from the bill (and the points balance)
+    # is always computed server-side from pointsRedeemed × the configured
+    # redeemRate, exactly the same way the old separate /loyalty/redeem call
+    # used to. The balance is checked and decremented atomically right here,
+    # in this same request, instead of a follow-up call the frontend used to
+    # make best-effort after the fact — that gap could double-spend or lose
+    # points if the second call ever failed.
+    points_redeemed = max(int(transaction.pointsRedeemed or 0), 0)
+    points_discount = 0.0
+    if points_redeemed > 0:
+        if not transaction.customerId:
+            raise HTTPException(status_code=400, detail="pointsRedeemed requires a customerId")
+        min_redeem = int(loyalty_cfg.get("minRedeem", 10))
+        redeem_rate = float(loyalty_cfg.get("redeemRate", 0.01))
+        if points_redeemed < min_redeem:
+            raise HTTPException(status_code=400, detail=f"Minimum {min_redeem} points required to redeem")
+        points_discount = round(points_redeemed * redeem_rate, 2)
+        redeemed_doc = await db.customers.find_one_and_update(
+            {"id": transaction.customerId, "points": {"$gte": points_redeemed}},
+            {"$inc": {"points": -points_redeemed}},
+        )
+        if not redeemed_doc:
+            balance = int((await db.customers.find_one({"id": transaction.customerId}, {"_id": 0, "points": 1}) or {}).get("points", 0))
+            raise HTTPException(status_code=400, detail=f"Insufficient points: {balance} available, {points_redeemed} requested")
+
     discount_total = min(round(tier_discount + voucher_discount + points_discount, 2), round(subtotal, 2))
 
     # Menu/product prices are GST-inclusive — the configured price IS what the
@@ -164,7 +197,22 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
     # GST component contained within the final (GST-inclusive) total, at the
     # standard AU 10%-inclusive rate: gst = total / 11.
     gst = total / 11
-    points_earned = int(total * loyalty_multiplier)
+    # Points earned = post-discount total × membership-tier multiplier ×
+    # earnRate × a blended category multiplier (each line's category weighted
+    # by its share of the subtotal). This used to be split across two places:
+    # this endpoint applied only the tier multiplier directly, while a
+    # separate best-effort frontend call applied earnRate/category
+    # multipliers on top and credited a *different* balance field
+    # (customers.loyaltyPoints vs. customers.points) — so a sale could earn
+    # into a balance no redemption or receipt ever read from. Folding it all
+    # into one calculation, on one field, here.
+    earn_rate = float(loyalty_cfg.get("earnRate", 1.0))
+    category_mults = loyalty_cfg.get("categoryMultipliers", {}) if loyalty_cfg.get("active", True) else {}
+    if loyalty_cfg.get("active", True) and subtotal > 0 and category_mults:
+        category_mult = sum(line_total * float(category_mults.get(cat, 1.0)) for cat, line_total in earn_lines) / subtotal
+    else:
+        category_mult = 1.0
+    points_earned = int(total * loyalty_multiplier * earn_rate * category_mult) if loyalty_cfg.get("active", True) else 0
 
     txn_dict = {
         # 8 hex chars ≈ 4 billion combos/day; 3 chars collided within ~75 sales
@@ -174,8 +222,9 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
         "discount": round(tier_discount, 2),
         "discountAmount": discount_total,
         "appliedDiscounts": applied_discounts,
-        "pointsRedeemed": max(int(transaction.pointsRedeemed or 0), 0),
-        "pointsDiscount": round(points_discount, 2),
+        "pointsRedeemed": points_redeemed,
+        "pointsDiscount": points_discount,
+        "splitDetails": [d.dict() for d in transaction.splitDetails],
         "surchargeAmount": surcharge_amount,
         "surchargePercent": surcharge_percent,
         "surchargeReason": surcharge_reason,
@@ -196,6 +245,23 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
 
     await db.transactions.insert_one(txn_dict)
     txn_dict.pop("_id", None)
+
+    # Record the redemption on the loyalty ledger for history/reporting — the
+    # balance itself was already decremented atomically above, before the
+    # transaction was inserted, so this is audit trail only.
+    if points_redeemed > 0:
+        try:
+            await db.loyalty_ledger.insert_one({
+                "id": f"LP-{str(uuid.uuid4())[:8].upper()}",
+                "customerId": transaction.customerId,
+                "transactionId": txn_dict["id"],
+                "type": "redeem",
+                "points": -points_redeemed,
+                "value": points_discount,
+                "createdAt": datetime.utcnow().isoformat(),
+            })
+        except Exception:
+            pass
 
     # Consume wallet vouchers used as discounts (no-op for v26 commerce
     # vouchers, which track their own redemption counts).
@@ -290,6 +356,18 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
                 "$set": {"lastVisit": datetime.utcnow().isoformat()}
             }
         )
+        if points_earned > 0:
+            try:
+                await db.loyalty_ledger.insert_one({
+                    "id": f"LP-{str(uuid.uuid4())[:8].upper()}",
+                    "customerId": transaction.customerId,
+                    "transactionId": txn_dict["id"],
+                    "type": "earn",
+                    "points": points_earned,
+                    "createdAt": datetime.utcnow().isoformat(),
+                })
+            except Exception:
+                pass
         # Free base identity layer — a repeat contact match at POS checkout is
         # an identity touchpoint (skipped automatically for base-only venues).
         try:

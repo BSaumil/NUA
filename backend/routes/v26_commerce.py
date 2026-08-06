@@ -964,6 +964,8 @@ async def cfd_push(data: dict, user: dict = Depends(get_user)):
         "selectedCustomer": data.get("selectedCustomer"),
         "tableNumber": data.get("tableNumber"),
         "walkInName": data.get("walkInName"),
+        "splitInProgress": bool(data.get("splitInProgress")),
+        "splitParts": data.get("splitParts") or [],
         "updatedAt": _iso(_now()),
         "cashier": user.get("name"),
     }
@@ -1005,6 +1007,8 @@ async def cfd_enriched(request: Request, terminalId: Optional[str] = None):
         "tableNumber": live.get("tableNumber"),
         "pointsEarned": points_earned,
         "pointsMissed": points_missed,
+        "splitInProgress": bool(live.get("splitInProgress")),
+        "splitParts": live.get("splitParts") or [],
         "updatedAt": _iso(_now()),
     }
 

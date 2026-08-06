@@ -106,59 +106,15 @@ async def get_member_vouchers(member_id: str):
         raise HTTPException(status_code=404, detail="Member not found")
     return member.get("vouchers", [])
 
-# ============ VOUCHER MANAGEMENT (Staff) ============
-@router.post("/vouchers/create")
-async def create_voucher(data: dict):
-    voucher = {
-        "id": f"VCH-{str(uuid.uuid4())[:8].upper()}",
-        "name": data.get("name", "Promotion"),
-        "type": data.get("type", "percentage"),  # percentage, fixed, free_item
-        "value": data.get("value", 10),
-        "minSpend": data.get("minSpend", 0),
-        "maxUses": data.get("maxUses", 100),
-        "usedCount": 0,
-        "code": data.get("code", f"PROMO{str(uuid.uuid4())[:4].upper()}"),
-        "expiresAt": data.get("expiresAt", ""),
-        "targetTier": data.get("targetTier"),  # None = all members
-        "status": "active",
-        "createdAt": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.vouchers.insert_one(voucher)
-    voucher.pop("_id", None)
-    return voucher
-
-@router.get("/vouchers")
-async def get_all_vouchers():
-    vouchers = await db.vouchers.find({}, {"_id": 0}).to_list(1000)
-    return vouchers
-
-@router.post("/vouchers/{code}/redeem")
-async def redeem_voucher(code: str, member_id: str, order_total: float = 0):
-    voucher = await db.vouchers.find_one({"code": code, "status": "active"})
-    if not voucher:
-        # Also check member's personal vouchers
-        member = await db.members.find_one({"id": member_id}, {"_id": 0})
-        if member:
-            for v in member.get("vouchers", []):
-                if v.get("code") == code and v.get("status") == "active":
-                    voucher = v
-                    break
-    if not voucher:
-        raise HTTPException(status_code=404, detail="Voucher not found or expired")
-    if voucher.get("minSpend", 0) > order_total:
-        raise HTTPException(status_code=400, detail=f"Minimum spend ${voucher['minSpend']} required")
-
-    discount = 0
-    if voucher["type"] == "percentage":
-        discount = order_total * (voucher["value"] / 100)
-    elif voucher["type"] == "fixed":
-        discount = voucher["value"]
-
-    # Update voucher usage
-    if voucher.get("id") and voucher.get("maxUses"):
-        await db.vouchers.update_one({"id": voucher["id"]}, {"$inc": {"usedCount": 1}})
-
-    return {"discount": round(discount, 2), "voucherName": voucher.get("name", ""), "code": code}
+# ============ VOUCHER MANAGEMENT ============
+# Voucher create/list/redeem used to be reimplemented here too, writing an
+# incompatible schema into the SAME db.vouchers collection commerce_v29.py
+# owns, with none of these three endpoints requiring auth. Worse, this
+# router registers before commerce_v29's, so this module's unauthenticated
+# GET /vouchers was silently shadowing (and being served instead of) the
+# real, authenticated GET /vouchers the frontend actually calls. Removed —
+# routes/commerce_v29.py (POST/GET /vouchers, POST /vouchers/redeem) is the
+# one place that creates, lists, and redeems vouchers now.
 
 # ============ SOCIAL SHARING ============
 @router.get("/members/share-link/{member_id}")

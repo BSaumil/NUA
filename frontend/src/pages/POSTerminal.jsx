@@ -520,17 +520,24 @@ const POSTerminal = () => {
     // Intentionally only depend on cart contents — avoids feedback loop with appliedDiscounts
   }, [cart]);  // eslint-disable-line
 
-  // Push live cart to the customer-facing display (debounced ~400ms)
+  // Push live cart to the customer-facing display (debounced ~400ms) — also
+  // carries split-payment progress while a split is in flight, so a guest
+  // watching the screen can see their own share and whether it's been paid,
+  // not just the whole table's undifferentiated total.
   useEffect(() => {
     const t = setTimeout(() => {
       v26API.cfdPush({
         cart: cart.map(i => ({ id: i.id, name: i.name, price: i.price, quantity: i.quantity, image: i.image, translations: i.translations })),
         selectedCustomer: selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name, membershipTier: selectedCustomer.membershipTier } : null,
         tableNumber, walkInName,
+        splitInProgress: paymentView === 'split',
+        splitParts: paymentView === 'split'
+          ? splitParts.map(s => ({ payerName: s.payerName, amount: s.amount, status: s.status }))
+          : [],
       }).catch(() => {});
     }, 400);
     return () => clearTimeout(t);
-  }, [cart, selectedCustomer, tableNumber, walkInName]);
+  }, [cart, selectedCustomer, tableNumber, walkInName, paymentView, splitParts]);
 
   // Live-update products & categories every 12s + on tab focus so any edit done in
   // another window reflects without a manual refresh.
@@ -874,19 +881,13 @@ const POSTerminal = () => {
         toast({ title: "Saved offline", description: `$${totals.total} sale queued — will sync when back online.` });
         refreshOfflineQueue();
       } else {
-        // Loyalty: redeem first (if applicable), then earn on net spend
-        if (selectedCustomer && pointsToRedeem >= (loyaltyCfg.minRedeem || 10)) {
-          try { await loyaltyEngineAPI.redeem({ customerId: selectedCustomer.id, points: pointsToRedeem, transactionId: res.data?.id }); } catch {}
-        }
-        if (selectedCustomer) {
-          try {
-            await loyaltyEngineAPI.earn({
-              customerId: selectedCustomer.id,
-              transactionId: res.data?.id,
-              items: cart.map(i => ({ category: i.category || 'Other', price: i.price, quantity: i.quantity })),
-            });
-          } catch {}
-        }
+        // Loyalty redeem + earn both happen atomically inside the
+        // /transactions POST itself now (pointsRedeemed/pointsDiscount are
+        // already in buildDiscountPayload() above) — no follow-up call here.
+        // The old separate calls raced this response and wrote to a
+        // different balance field than the one redemption/receipts read
+        // from, so a failed follow-up could silently keep a customer's
+        // points after they'd already gotten the discount.
         toast({ title: "Transaction Complete!", description: `Payment of $${totals.total} via ${paymentMethod}` });
         // Auto-route items to category printers
         try { await gamificationAPI.sendToPrinters({ items: cart.map(i => ({ productName: i.name, category: i.category, quantity: i.quantity })), orderId: res.data?.id, tableNumber: orderType === 'dine-in' ? tableNumber : null }); } catch {}
@@ -1231,7 +1232,10 @@ const POSTerminal = () => {
           items: cart.map(item => toTxItem(item)),
           paymentMethod: 'Split Payment',
           customerId: selectedCustomer?.id || null, location: currentLocation, cashier: currentUser.name,
-          splitDetails: updatedParts.map(s => ({ payerName: s.payerName, amount: s.amount, method: s.method })),
+          splitDetails: updatedParts.map(s => ({
+            payerName: s.payerName, amount: s.amount, method: s.method,
+            items: (s.assignedItems || s.seatItems || []).map(i => ({ name: i.name, quantity: i.quantity })),
+          })),
           ...buildDiscountPayload(),
         });
         toast({ title: "All Splits Paid!", description: `Total $${totalNum.toFixed(2)} collected` });
