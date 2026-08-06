@@ -874,19 +874,13 @@ const POSTerminal = () => {
         toast({ title: "Saved offline", description: `$${totals.total} sale queued — will sync when back online.` });
         refreshOfflineQueue();
       } else {
-        // Loyalty: redeem first (if applicable), then earn on net spend
-        if (selectedCustomer && pointsToRedeem >= (loyaltyCfg.minRedeem || 10)) {
-          try { await loyaltyEngineAPI.redeem({ customerId: selectedCustomer.id, points: pointsToRedeem, transactionId: res.data?.id }); } catch {}
-        }
-        if (selectedCustomer) {
-          try {
-            await loyaltyEngineAPI.earn({
-              customerId: selectedCustomer.id,
-              transactionId: res.data?.id,
-              items: cart.map(i => ({ category: i.category || 'Other', price: i.price, quantity: i.quantity })),
-            });
-          } catch {}
-        }
+        // Loyalty redeem + earn both happen atomically inside the
+        // /transactions POST itself now (pointsRedeemed/pointsDiscount are
+        // already in buildDiscountPayload() above) — no follow-up call here.
+        // The old separate calls raced this response and wrote to a
+        // different balance field than the one redemption/receipts read
+        // from, so a failed follow-up could silently keep a customer's
+        // points after they'd already gotten the discount.
         toast({ title: "Transaction Complete!", description: `Payment of $${totals.total} via ${paymentMethod}` });
         // Auto-route items to category printers
         try { await gamificationAPI.sendToPrinters({ items: cart.map(i => ({ productName: i.name, category: i.category, quantity: i.quantity })), orderId: res.data?.id, tableNumber: orderType === 'dine-in' ? tableNumber : null }); } catch {}

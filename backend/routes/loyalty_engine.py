@@ -89,8 +89,12 @@ async def earn_points(data: dict, _: dict = Depends(get_user)):
         "createdAt": datetime.now(timezone.utc).isoformat(),
     }
     await db.loyalty_ledger.insert_one(entry)
-    # Bump customer balance
-    await db.customers.update_one({"id": customer_id}, {"$inc": {"loyaltyPoints": earned_int}})
+    # Bump customer balance — "points" is the canonical balance field (also
+    # what the Customer model declares and what POS checkout earns/redeems
+    # against); this used to write "loyaltyPoints" instead, a field checkout
+    # never read, so points earned through this endpoint were invisible at
+    # the register.
+    await db.customers.update_one({"id": customer_id}, {"$inc": {"points": earned_int}})
     return {"earned": earned_int, "breakdown": breakdown}
 
 
@@ -108,12 +112,18 @@ async def redeem_points(data: dict, _: dict = Depends(get_user)):
     min_redeem = int(cfg.get("minRedeem", 10))
     if points < min_redeem:
         raise HTTPException(status_code=400, detail=f"Minimum {min_redeem} points required")
-    customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
-    if not customer:
-        raise HTTPException(status_code=404, detail="Customer not found")
-    balance = int(customer.get("loyaltyPoints", 0))
-    if points > balance:
-        raise HTTPException(status_code=400, detail=f"Insufficient points: {balance} available")
+    # Atomic balance-checked decrement — same pattern as the checkout redeem
+    # path, so a double-tap or concurrent call can't take a customer negative.
+    updated = await db.customers.find_one_and_update(
+        {"id": customer_id, "points": {"$gte": points}},
+        {"$inc": {"points": -points}},
+    )
+    if not updated:
+        current = await db.customers.find_one({"id": customer_id}, {"_id": 0, "points": 1})
+        if not current:
+            raise HTTPException(status_code=404, detail="Customer not found")
+        raise HTTPException(status_code=400, detail=f"Insufficient points: {int(current.get('points', 0))} available")
+    balance = int(updated.get("points", 0))
     value = round(points * float(cfg.get("redeemRate", 0.01)), 2)
     entry = {
         "id": f"LP-{str(uuid.uuid4())[:8].upper()}",
@@ -125,7 +135,6 @@ async def redeem_points(data: dict, _: dict = Depends(get_user)):
         "createdAt": datetime.now(timezone.utc).isoformat(),
     }
     await db.loyalty_ledger.insert_one(entry)
-    await db.customers.update_one({"id": customer_id}, {"$inc": {"loyaltyPoints": -points}})
     return {"redeemed": points, "discountValue": value, "newBalance": balance - points}
 
 
@@ -134,7 +143,7 @@ async def get_balance(customer_id: str, _: dict = Depends(get_user)):
     customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
-    pts = int(customer.get("loyaltyPoints", 0))
+    pts = int(customer.get("points", 0))
     cfg = await get_config()
     return {
         "customerId": customer_id,
