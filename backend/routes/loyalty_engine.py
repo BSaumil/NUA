@@ -175,6 +175,94 @@ async def get_ledger(customer_id: str, _: dict = Depends(get_user)):
 
 
 # =============================================================================
+# REPORTS — outstanding liability + fraud signals
+# =============================================================================
+@router.get("/loyalty/reports/liability")
+async def get_liability_report(_: dict = Depends(require_owner_or_manager)):
+    """Points sitting on customer balances are a real liability — the
+    business owes that $ value in future discounts the moment it's earned,
+    same accounting posture as gratuity being tracked as a liability rather
+    than revenue. Nothing already computed this anywhere; it only ever
+    existed implicitly as a sum nobody had run."""
+    cfg = await get_config()
+    redeem_rate = float(cfg.get("redeemRate", 0.01))
+    customers = await db.customers.find({"points": {"$gt": 0}}, {"_id": 0, "id": 1, "name": 1, "points": 1}).to_list(20000)
+    total_points = sum(int(c.get("points", 0)) for c in customers)
+    top_holders = sorted(customers, key=lambda c: c.get("points", 0), reverse=True)[:20]
+    return {
+        "totalPointsOutstanding": total_points,
+        "totalLiabilityValue": round(total_points * redeem_rate, 2),
+        "customersWithBalance": len(customers),
+        "redeemRate": redeem_rate,
+        "topHolders": [{"customerId": c["id"], "name": c.get("name"), "points": c.get("points", 0),
+                         "value": round(c.get("points", 0) * redeem_rate, 2)} for c in top_holders],
+    }
+
+
+@router.get("/loyalty/reports/fraud-flags")
+async def get_fraud_flags(_: dict = Depends(require_owner_or_manager)):
+    """Two concrete, computable signals from data that already exists —
+    not a general fraud model, just the two patterns explicitly called out
+    in the loyalty engine spec's fraud-prevention section that had nothing
+    behind them yet:
+
+    - point_farming: a customer with an unusually high rate of separate
+      earn events in a short window (repeated minimum-value transactions
+      purely to rack up points).
+    - voucher_sharing: the same voucher code redeemed from more than one
+      terminal within a short window (the code changed hands rather than
+      staying with whoever it was issued to).
+    """
+    now = datetime.now(timezone.utc)
+    window_start = (now - timedelta(hours=24)).isoformat()
+
+    farming_flags = []
+    pipeline = [
+        {"$match": {"type": "earn", "createdAt": {"$gte": window_start}}},
+        {"$group": {"_id": "$customerId", "count": {"$sum": 1}, "totalPoints": {"$sum": "$points"}}},
+        {"$match": {"count": {"$gte": 5}}},
+    ]
+    async for row in db.loyalty_ledger.aggregate(pipeline):
+        if not row["_id"]:
+            continue
+        customer = await db.customers.find_one({"id": row["_id"]}, {"_id": 0, "name": 1})
+        farming_flags.append({
+            "type": "point_farming",
+            "customerId": row["_id"],
+            "customerName": (customer or {}).get("name"),
+            "earnEventsLast24h": row["count"],
+            "totalPointsEarned": row["totalPoints"],
+            "reason": f"{row['count']} separate earn events in the last 24h",
+        })
+
+    sharing_flags = []
+    recent_vouchers = await db.vouchers.find(
+        {"redemptions.1": {"$exists": True}}, {"_id": 0, "id": 1, "code": 1, "redemptions": 1}
+    ).to_list(2000)
+    for v in recent_vouchers:
+        redemptions = sorted(v.get("redemptions") or [], key=lambda r: r.get("at", ""))
+        for i in range(len(redemptions) - 1):
+            a, b = redemptions[i], redemptions[i + 1]
+            if not a.get("terminalId") or not b.get("terminalId") or a["terminalId"] == b["terminalId"]:
+                continue
+            try:
+                t_a = datetime.fromisoformat(a["at"].replace("Z", "+00:00"))
+                t_b = datetime.fromisoformat(b["at"].replace("Z", "+00:00"))
+            except Exception:
+                continue
+            if abs((t_b - t_a).total_seconds()) <= 600:  # 10 minutes
+                sharing_flags.append({
+                    "type": "voucher_sharing",
+                    "voucherId": v["id"], "code": v.get("code"),
+                    "terminals": [a["terminalId"], b["terminalId"]],
+                    "reason": "Same code redeemed from two different terminals within 10 minutes",
+                })
+                break  # one flag per voucher is enough signal
+
+    return {"flags": farming_flags + sharing_flags, "checkedAt": now.isoformat()}
+
+
+# =============================================================================
 # AUTONOMOUS AI AGENT (Ash) — observes, decides, acts
 # =============================================================================
 async def _segment_customers():
