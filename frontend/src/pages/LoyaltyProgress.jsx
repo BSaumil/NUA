@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import {
   Award, RefreshCw, Sparkles, Coffee, Heart, Trophy, DollarSign, Crown, Sunrise,
   Wine, Users, Gift, Search, Plus, Trash2, Lock, CheckCircle2, Target, UserPlus,
+  AlertTriangle, Wallet,
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -76,6 +77,88 @@ function LeaderboardPanel() {
         ))}
       </div>
     </CardContent></Card>
+  );
+}
+
+
+function ReportsPanel() {
+  const [liability, setLiability] = React.useState(null);
+  const [flags, setFlags] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const load = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const [l, f] = await Promise.all([
+        axios.get(`${API}/loyalty/reports/liability`, { headers: H() }),
+        axios.get(`${API}/loyalty/reports/fraud-flags`, { headers: H() }),
+      ]);
+      setLiability(l.data);
+      setFlags(f.data);
+    } catch { toast.error('Failed to load loyalty reports'); }
+    finally { setLoading(false); }
+  }, []);
+  React.useEffect(() => { load(); }, [load]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button size="sm" variant="outline" onClick={load} disabled={loading} data-testid="reports-refresh">
+          <RefreshCw size={12} className={`mr-1 ${loading ? 'animate-spin' : ''}`} /> Refresh
+        </Button>
+      </div>
+
+      <Card><CardContent className="p-5">
+        <h3 className="font-semibold flex items-center gap-2 mb-1"><Wallet size={16} /> Outstanding Points Liability</h3>
+        <p className="text-xs text-slate-500 mb-4">Points sitting on customer balances are $ the business owes in future discounts — same accounting posture as gratuity being tracked as a liability, not revenue.</p>
+        {liability && (
+          <div className="grid grid-cols-3 gap-4 mb-4">
+            <div className="text-center p-3 rounded border bg-slate-50">
+              <p className="text-2xl font-bold" data-testid="liability-value">${liability.totalLiabilityValue.toLocaleString()}</p>
+              <p className="text-[11px] text-slate-500 uppercase tracking-wide">Liability value</p>
+            </div>
+            <div className="text-center p-3 rounded border bg-slate-50">
+              <p className="text-2xl font-bold">{liability.totalPointsOutstanding.toLocaleString()}</p>
+              <p className="text-[11px] text-slate-500 uppercase tracking-wide">Points outstanding</p>
+            </div>
+            <div className="text-center p-3 rounded border bg-slate-50">
+              <p className="text-2xl font-bold">{liability.customersWithBalance.toLocaleString()}</p>
+              <p className="text-[11px] text-slate-500 uppercase tracking-wide">Customers with balance</p>
+            </div>
+          </div>
+        )}
+        {liability?.topHolders?.length > 0 && (
+          <div className="space-y-1">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Top balance holders</p>
+            {liability.topHolders.slice(0, 8).map(h => (
+              <div key={h.customerId} className="flex justify-between text-sm py-1 border-b last:border-0" data-testid={`liability-holder-${h.customerId}`}>
+                <span>{h.name}</span>
+                <span className="text-slate-500">{h.points.toLocaleString()} pts · ${h.value.toFixed(2)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent></Card>
+
+      <Card><CardContent className="p-5">
+        <h3 className="font-semibold flex items-center gap-2 mb-1"><AlertTriangle size={16} className="text-amber-500" /> Fraud Flags</h3>
+        <p className="text-xs text-slate-500 mb-4">Point farming (unusually many earn events in 24h) and voucher sharing (same code redeemed from different terminals within 10 minutes).</p>
+        {flags?.flags?.length === 0 && <p className="text-center text-sm text-slate-400 py-6">No flags — nothing unusual in the last check.</p>}
+        <div className="space-y-2">
+          {(flags?.flags || []).map((f, i) => (
+            <div key={i} className="flex items-start gap-3 p-3 rounded border border-amber-200 bg-amber-50" data-testid={`fraud-flag-${i}`}>
+              <AlertTriangle size={14} className="text-amber-500 mt-0.5 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">
+                  {f.type === 'point_farming' ? `${f.customerName || f.customerId} — point farming` : `Voucher ${f.code || f.voucherId} — possible sharing`}
+                </p>
+                <p className="text-xs text-slate-500">{f.reason}</p>
+              </div>
+              <Badge variant="outline" className="text-[10px] flex-shrink-0">{f.type.replace('_', ' ')}</Badge>
+            </div>
+          ))}
+        </div>
+      </CardContent></Card>
+    </div>
   );
 }
 
@@ -281,6 +364,7 @@ export default function LoyaltyProgress() {
           <TabsTrigger value="leaderboard" data-testid="tab-leaderboard"><Trophy size={14} className="mr-1" /> Leaderboard</TabsTrigger>
           <TabsTrigger value="referrals" data-testid="tab-referrals"><UserPlus size={14} className="mr-1" /> Referrals</TabsTrigger>
           <TabsTrigger value="challenges" data-testid="tab-challenges"><Target size={14} className="mr-1" /> Challenges</TabsTrigger>
+          <TabsTrigger value="reports" data-testid="tab-reports"><AlertTriangle size={14} className="mr-1" /> Reports</TabsTrigger>
         </TabsList>
 
         <TabsContent value="customer" className="space-y-4">
@@ -545,6 +629,10 @@ export default function LoyaltyProgress() {
               </div>
             )}
           </CardContent></Card>
+        </TabsContent>
+
+        <TabsContent value="reports">
+          <ReportsPanel />
         </TabsContent>
       </Tabs>
     </div>

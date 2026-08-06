@@ -100,22 +100,20 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
         items_list.append(item_dict)
         earn_lines.append(((product or {}).get("category") or "Other", item_total))
 
-    # Apply customer membership-tier discount
+    # Apply customer membership-tier discount — reads the owner-editable
+    # loyalty_tiers ladder (Settings > Loyalty > Tiers) instead of a fixed
+    # Silver/Gold/Platinum percentage baked into this function, so a tier's
+    # discount%/points-multiplier can actually be changed without a deploy.
     tier_discount = 0
     loyalty_multiplier = 1.0
     if transaction.customerId:
         customer = await db.customers.find_one({"id": transaction.customerId})
         if customer:
-            tier = customer.get("membershipTier", "Bronze")
-            if tier == "Silver":
-                tier_discount = subtotal * 0.03
-                loyalty_multiplier = 1.25
-            elif tier == "Gold":
-                tier_discount = subtotal * 0.05
-                loyalty_multiplier = 1.5
-            elif tier == "Platinum":
-                tier_discount = subtotal * 0.10
-                loyalty_multiplier = 2.0
+            tier_name = customer.get("membershipTier", "Bronze")
+            tier_doc = await db.loyalty_tiers.find_one({"name": tier_name}, {"_id": 0})
+            if tier_doc:
+                tier_discount = subtotal * (float(tier_doc.get("discountPercent", 0)) / 100)
+                loyalty_multiplier = float(tier_doc.get("multiplier", 1.0))
 
     # Voucher/promotion discounts applied at the POS + loyalty-point redemption.
     # Amounts are clamped non-negative and the combined discount can never
@@ -138,23 +136,40 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
     # in this same request, instead of a follow-up call the frontend used to
     # make best-effort after the fact — that gap could double-spend or lose
     # points if the second call ever failed.
+    min_redeem = int(loyalty_cfg.get("minRedeem", 10))
+    redeem_rate = float(loyalty_cfg.get("redeemRate", 0.01))
+
+    async def _redeem(customer_id: str, points: int) -> float:
+        """Atomically check-and-decrement one customer's points balance.
+        Raises 400 on insufficient balance/below minimum. Returns the $
+        value to apply as a discount."""
+        if points < min_redeem:
+            raise HTTPException(status_code=400, detail=f"Minimum {min_redeem} points required to redeem")
+        redeemed_doc = await db.customers.find_one_and_update(
+            {"id": customer_id, "points": {"$gte": points}},
+            {"$inc": {"points": -points}},
+        )
+        if not redeemed_doc:
+            balance = int((await db.customers.find_one({"id": customer_id}, {"_id": 0, "points": 1}) or {}).get("points", 0))
+            raise HTTPException(status_code=400, detail=f"Insufficient points: {balance} available, {points} requested")
+        return round(points * redeem_rate, 2)
+
     points_redeemed = max(int(transaction.pointsRedeemed or 0), 0)
     points_discount = 0.0
     if points_redeemed > 0:
         if not transaction.customerId:
             raise HTTPException(status_code=400, detail="pointsRedeemed requires a customerId")
-        min_redeem = int(loyalty_cfg.get("minRedeem", 10))
-        redeem_rate = float(loyalty_cfg.get("redeemRate", 0.01))
-        if points_redeemed < min_redeem:
-            raise HTTPException(status_code=400, detail=f"Minimum {min_redeem} points required to redeem")
-        points_discount = round(points_redeemed * redeem_rate, 2)
-        redeemed_doc = await db.customers.find_one_and_update(
-            {"id": transaction.customerId, "points": {"$gte": points_redeemed}},
-            {"$inc": {"points": -points_redeemed}},
-        )
-        if not redeemed_doc:
-            balance = int((await db.customers.find_one({"id": transaction.customerId}, {"_id": 0, "points": 1}) or {}).get("points", 0))
-            raise HTTPException(status_code=400, detail=f"Insufficient points: {balance} available, {points_redeemed} requested")
+        points_discount = await _redeem(transaction.customerId, points_redeemed)
+
+    # Split payments: each guest can redeem against their OWN loyalty balance
+    # instead of only the one customerId attached to the whole sale — a split
+    # used to have no concept of "guest 2's" points at all. Their discount
+    # rolls into the same bill-level discount_total below; per-guest points
+    # earning happens later, once the transaction total (and each guest's
+    # correct share of it) is known.
+    for part in transaction.splitDetails:
+        if part.customerId and part.pointsRedeemed > 0:
+            points_discount += await _redeem(part.customerId, part.pointsRedeemed)
 
     discount_total = min(round(tier_discount + voucher_discount + points_discount, 2), round(subtotal, 2))
 
@@ -380,6 +395,40 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
                 )
         except Exception:
             pass
+
+    # Split payments: each guest with their own customerId earns points on
+    # their own share of the bill (part.amount), at their own tier's
+    # multiplier — previously only transaction.customerId (the one "selected
+    # customer" for the whole sale) ever earned anything, so guests 2/3/4 on
+    # a split got no loyalty credit for their own payment at all. Skips
+    # transaction.customerId if it's also listed as a split guest, so that
+    # person doesn't get credited twice for the same money.
+    if loyalty_cfg.get("active", True):
+        earn_rate = float(loyalty_cfg.get("earnRate", 1.0))
+        for part in transaction.splitDetails:
+            if not part.customerId or part.customerId == transaction.customerId:
+                continue
+            guest = await db.customers.find_one({"id": part.customerId}, {"_id": 0, "membershipTier": 1})
+            if not guest:
+                continue
+            tier_doc = await db.loyalty_tiers.find_one({"name": guest.get("membershipTier", "Bronze")}, {"_id": 0})
+            mult = float(tier_doc.get("multiplier", 1.0)) if tier_doc else 1.0
+            part_points = int(round(float(part.amount) * earn_rate * mult))
+            await db.customers.update_one(
+                {"id": part.customerId},
+                {"$inc": {"totalSpent": part.amount, "visits": 1, "points": part_points},
+                 "$set": {"lastVisit": datetime.utcnow().isoformat()}},
+            )
+            if part_points > 0:
+                try:
+                    await db.loyalty_ledger.insert_one({
+                        "id": f"LP-{str(uuid.uuid4())[:8].upper()}",
+                        "customerId": part.customerId, "transactionId": txn_dict["id"],
+                        "type": "earn", "points": part_points,
+                        "createdAt": datetime.utcnow().isoformat(),
+                    })
+                except Exception:
+                    pass
 
     return Transaction(**txn_dict)
 

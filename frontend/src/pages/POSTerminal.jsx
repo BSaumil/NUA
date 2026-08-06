@@ -1235,6 +1235,8 @@ const POSTerminal = () => {
           splitDetails: updatedParts.map(s => ({
             payerName: s.payerName, amount: s.amount, method: s.method,
             items: (s.assignedItems || s.seatItems || []).map(i => ({ name: i.name, quantity: i.quantity })),
+            customerId: s.customerId || null,
+            pointsRedeemed: s.customerId ? (Number(s.pointsRedeemed) || 0) : 0,
           })),
           ...buildDiscountPayload(),
         });
@@ -2209,6 +2211,7 @@ const POSTerminal = () => {
         cartItems={cartWithCourses}
         itemAssignments={itemAssignments}
         onAdjustItemAssignment={adjustItemAssignment}
+        customers={customers}
         onSetMode={(m) => {
           if (m === 'seat') {
             if (!initSeatSplitParts()) {

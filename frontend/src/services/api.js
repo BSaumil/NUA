@@ -634,6 +634,8 @@ export const loyaltyEngineAPI = {
   redeem: (data) => api.post('/loyalty/redeem', data),
   getBalance: (customerId) => api.get(`/loyalty/balance/${customerId}`),
   getLedger: (customerId) => api.get(`/loyalty/ledger/${customerId}`),
+  getLiabilityReport: () => api.get('/loyalty/reports/liability'),
+  getFraudFlags: () => api.get('/loyalty/reports/fraud-flags'),
 };
 export const agentAPI = {
   getSegments: () => api.get('/agent/segments'),

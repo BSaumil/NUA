@@ -88,6 +88,7 @@ export default function LoyaltyEvents() {
                         <Input className="h-8 text-sm font-bold" value={editingTier.name} onChange={e => setEditingTier({ ...editingTier, name: e.target.value })} />
                         <Input type="number" className="h-8 text-sm" placeholder="Min Points" value={editingTier.minPoints} onChange={e => setEditingTier({ ...editingTier, minPoints: parseInt(e.target.value) || 0 })} />
                         <Input type="number" step="0.1" className="h-8 text-sm" placeholder="Multiplier" value={editingTier.multiplier} onChange={e => setEditingTier({ ...editingTier, multiplier: parseFloat(e.target.value) || 1 })} />
+                        <Input type="number" step="1" min="0" max="100" className="h-8 text-sm" placeholder="Discount % at checkout" value={editingTier.discountPercent ?? 0} onChange={e => setEditingTier({ ...editingTier, discountPercent: parseFloat(e.target.value) || 0 })} data-testid={`tier-discount-input-${tier.id}`} />
                         <textarea className="w-full p-2 text-xs border rounded" placeholder="Perks (one per line)" value={(editingTier.perks || []).join('\n')} onChange={e => setEditingTier({ ...editingTier, perks: e.target.value.split('\n').filter(Boolean) })} rows={4} />
                         <div className="flex gap-2"><Button size="sm" style={{ backgroundColor: theme.primary }} onClick={() => saveTier(editingTier)} data-testid={`save-tier-${tier.id}`}><Save size={12} className="mr-1" /> Save</Button><Button size="sm" variant="outline" onClick={() => setEditingTier(null)}>Cancel</Button></div>
                       </div>
@@ -97,7 +98,7 @@ export default function LoyaltyEvents() {
                           <h3 className="font-bold" style={{ color }}>{tier.name}</h3>
                           <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setEditingTier({ ...tier })} data-testid={`edit-tier-${tier.id}`}><Edit size={12} /></Button>
                         </div>
-                        <p className="text-xs text-gray-500 mb-1">{tier.minPoints}+ pts | {tier.multiplier}x multiplier</p>
+                        <p className="text-xs text-gray-500 mb-1">{tier.minPoints}+ pts | {tier.multiplier}x multiplier{tier.discountPercent ? ` | ${tier.discountPercent}% off at checkout` : ''}</p>
                         <div className="space-y-1">{(tier.perks || []).map((p, i) => <p key={i} className="text-xs text-gray-600 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />{p}</p>)}</div>
                       </>
                     )}
