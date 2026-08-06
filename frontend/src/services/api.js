@@ -624,6 +624,7 @@ export const onlineAPI = {
   recomputeEta: (id) => api.post(`/online/orders/${id}/eta`),
   track: (code) => api.get(`/online/orders/track/${code}`),
   kitchenLoad: () => api.get('/online/kitchen/load'),
+  checkVoucher: (code, cart) => api.post('/vouchers/public-check', { code, cart }),
 };
 
 // v17 — Loyalty engine + AI Agent (Ash)
@@ -1017,6 +1018,18 @@ export const nuaAPI = {
   dismissInsight: (id) => api.post(`/nua/insights/${id}/dismiss`),
   getHealthScore: () => api.get('/nua/health-score'),
   chat: (data) => api.post('/nua/chat', data),
+};
+
+// Multi-Business / Multi-Tenant — create/list/edit businesses, tenant data
+// export, and the one-time businessId backfill migration for pre-tenancy data
+export const businessAPI = {
+  create: (data) => api.post('/business/create', data),
+  list: () => api.get('/business/list'),
+  get: (id) => api.get(`/business/${id}`),
+  update: (id, data) => api.put(`/business/${id}`, data),
+  summary: (id) => api.get(`/business/${id}/summary`),
+  exportData: (id, collection) => api.get(`/business/${id}/export`, { params: collection ? { collection } : {} }),
+  backfillTenant: () => api.post('/business/backfill-tenant'),
 };
 
 export default api;

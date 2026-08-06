@@ -214,6 +214,9 @@ PUBLIC_API_PATHS = {
     # The menu, as guests see it. /products strips cost/stock/sku for guests.
     "/api/products", "/api/categories", "/api/modifiers",
     "/api/online/categories", "/api/online/products", "/api/online/orders",
+    # Guest-facing voucher check (online ordering, table QR) — dry-run only,
+    # deliberately returns nothing beyond a discount amount + label.
+    "/api/vouchers/public-check",
     # Member self-service signup
     "/api/members/login", "/api/members/signup",
     # Payment provider callbacks — signed by the provider, not by a user

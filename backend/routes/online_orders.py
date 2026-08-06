@@ -20,6 +20,7 @@ import json
 import uuid
 
 from utils.notifications import notify_order
+from routes.commerce_v29 import _resolve_voucher, _validate_voucher_rules
 
 router = APIRouter()
 
@@ -193,7 +194,25 @@ async def place_order(data: dict):
     # Menu prices are GST-inclusive — the listed price is what the customer
     # pays, GST is disclosed as the component within it, not added on top.
     subtotal = sum(float(i.get("price", 0)) * int(i.get("quantity", 1)) for i in items)
-    total = round(subtotal, 2)
+    # Voucher discount is re-validated server-side here, not trusted from the
+    # client — same voucher document commerce_v29's staff-facing apply uses.
+    voucher_code = (data.get("voucherCode") or "").strip()
+    voucher_discount = 0.0
+    voucher_label = None
+    if voucher_code:
+        try:
+            v = await _resolve_voucher(voucher_code, None)
+            if not _validate_voucher_rules(v, cart=items):
+                if v["valueType"] == "percentage":
+                    voucher_discount = round(subtotal * (float(v["value"]) / 100), 2)
+                else:
+                    cap = float(v.get("residualValue", v["value"])) if v.get("partialRedeemable") else float(v["value"])
+                    voucher_discount = round(min(float(v["value"]), cap), 2)
+                voucher_discount = min(voucher_discount, subtotal)
+                voucher_label = v.get("label")
+        except HTTPException:
+            voucher_code = ""
+    total = round(max(0.0, subtotal - voucher_discount), 2)
     gst = round(total / 11, 2)
     code = _uid("ORD")
     load = await _kitchen_load()
@@ -204,6 +223,9 @@ async def place_order(data: dict):
         "customer": customer,
         "items": items,
         "subtotal": round(subtotal, 2),
+        "voucherCode": voucher_code or None,
+        "voucherDiscount": voucher_discount,
+        "voucherLabel": voucher_label,
         "gst": gst,
         "total": total,
         "status": "pending",

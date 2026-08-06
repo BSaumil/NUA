@@ -13,6 +13,7 @@ class Refund(BaseModel):
     customerId: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     status: str = "completed"
+    businessId: Optional[str] = None
 
 class RefundCreate(BaseModel):
     originalTransactionId: str

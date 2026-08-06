@@ -6,6 +6,7 @@ from database import db
 from models.bas_report import BASReport, BASReportCreate
 from models.expense import Expense, ExpenseCreate
 from models.supplier import Supplier, SupplierCreate, PurchaseOrder, PurchaseOrderCreate
+from middleware.actor_context import tenant_scope_filter
 import uuid
 import random
 import math
@@ -56,8 +57,8 @@ COGS_CATEGORIES = ("Ingredients", "Food Supplies", "Beverages")
 # ============ ACCOUNTING API ============
 @router.get("/accounting/summary")
 async def get_accounting_summary(start_date: Optional[str] = None, end_date: Optional[str] = None,
-                                 _: dict = Depends(require_owner_or_manager)):
-    txn_totals = await _sum_transactions(_date_match("timestamp", start_date, end_date))
+                                 user: dict = Depends(require_owner_or_manager)):
+    txn_totals = await _sum_transactions({**_date_match("timestamp", start_date, end_date), **tenant_scope_filter(user.get("businessId"))})
     expense_rows = await _sum_expenses(_date_match("date", start_date, end_date))
     total_expenses = sum(r["amount"] for r in expense_rows)
     total_gst_paid = sum(r["gst"] for r in expense_rows)
@@ -72,8 +73,8 @@ async def get_accounting_summary(start_date: Optional[str] = None, end_date: Opt
 
 @router.get("/accounting/p-and-l")
 async def get_p_and_l(start_date: Optional[str] = None, end_date: Optional[str] = None,
-                      _: dict = Depends(require_owner_or_manager)):
-    txn_totals = await _sum_transactions(_date_match("timestamp", start_date, end_date))
+                      user: dict = Depends(require_owner_or_manager)):
+    txn_totals = await _sum_transactions({**_date_match("timestamp", start_date, end_date), **tenant_scope_filter(user.get("businessId"))})
     expense_rows = await _sum_expenses(_date_match("date", start_date, end_date))
     revenue = txn_totals["revenue"]
     cogs = sum(r["amount"] for r in expense_rows if r["_id"] in COGS_CATEGORIES)
@@ -296,8 +297,10 @@ async def create_purchase_order(po: PurchaseOrderCreate):
 
 # ============ REPORTS API ============
 @router.get("/reports/sales-summary")
-async def get_sales_summary(start_date: str, end_date: str, location: Optional[str] = None):
-    query = {"timestamp": {"$gte": datetime.fromisoformat(start_date), "$lte": datetime.fromisoformat(end_date)}}
+async def get_sales_summary(start_date: str, end_date: str, location: Optional[str] = None,
+                            user: dict = Depends(get_user)):
+    query = {"timestamp": {"$gte": datetime.fromisoformat(start_date), "$lte": datetime.fromisoformat(end_date)},
+             **tenant_scope_filter(user.get("businessId"))}
     if location:
         query["location"] = location
     transactions = await db.transactions.find(query).to_list(10000)

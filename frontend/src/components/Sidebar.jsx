@@ -112,6 +112,7 @@ const NAV_STRUCTURE = [
       { path: '/audit', label: 'Audit Log' },
       { path: '/ash-permissions', label: 'AI Permissions' },
       { path: '/hq', label: 'HQ Roll-up' },
+      { path: '/multi-business', label: 'Multi-Business' },
       { path: '/license', label: 'License' },
     ],
   },

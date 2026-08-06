@@ -43,6 +43,7 @@ Gift Card 2.0 (extends existing gift-card sale)
 """
 from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Depends, Query
+from pydantic import BaseModel
 from datetime import datetime, timezone, timedelta, date
 from typing import Optional, List, Dict, Any
 from database import db
@@ -285,6 +286,38 @@ async def validate_voucher(body: VoucherValidateRequest, _: dict = Depends(get_u
     if reason:
         return {"valid": False, "voucher": v, "reason": reason}
     return {"valid": True, "voucher": v}
+
+
+class PublicVoucherCheck(BaseModel):
+    code: str
+    cart: Optional[list] = None
+
+
+@router.post("/vouchers/public-check")
+async def public_check_voucher(body: PublicVoucherCheck):
+    """Unauthenticated counterpart to /vouchers/validate — for guest-facing
+    surfaces (online ordering, table QR ordering) that have no staff login
+    to attach. Deliberately minimal: no customer/staff auth is required to
+    call this, so the response only ever returns a discount amount + label,
+    never the underlying voucher document (customerId, metadata, full
+    redemption history) an anonymous caller has no business seeing.
+    Doesn't commit anything — same as the staff-facing validate endpoint,
+    this is a dry-run check only."""
+    try:
+        v = await _resolve_voucher(body.code, None)
+    except HTTPException:
+        return {"valid": False, "reason": "Code not found"}
+    reason = _validate_voucher_rules(v, cart=body.cart)
+    if reason:
+        return {"valid": False, "reason": reason}
+    subtotal = sum(float(i.get("price", 0)) * int(i.get("quantity", 1)) for i in (body.cart or []))
+    if v["valueType"] == "percentage":
+        discount = round(subtotal * (float(v["value"]) / 100), 2)
+    else:
+        discount = round(min(float(v["value"]), float(v.get("residualValue", v["value"])) if v.get("partialRedeemable") else float(v["value"])), 2)
+    if discount <= 0:
+        return {"valid": False, "reason": "Voucher has no remaining value"}
+    return {"valid": True, "discount": discount, "label": v.get("label"), "voucherId": v["id"]}
 
 
 @router.post("/vouchers/redeem")

@@ -71,6 +71,7 @@ import MeasuredStock from './pages/MeasuredStock';
 import Approvals from './pages/Approvals';
 import AuditLogUniversal from './pages/AuditLogUniversal';
 import HQDashboard from './pages/HQDashboard';
+import MultiBusiness from './pages/MultiBusiness';
 import AshChat from './components/AshChat';
 import NotificationBell from './components/NotificationBell';
 import Temperature from './pages/Temperature';
@@ -226,6 +227,7 @@ function ProtectedRoutes() {
         <Route path="/approvals" element={<Approvals />} />
         <Route path="/audit" element={<AuditLogUniversal />} />
         <Route path="/hq" element={<HQDashboard />} />
+        <Route path="/multi-business" element={<MultiBusiness />} />
         <Route path="/bas-gst" element={<BASGST />} />
         <Route path="/super" element={<Super />} />
         <Route path="/payroll" element={<Payroll />} />

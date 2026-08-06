@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request, Depends
 from deps import get_user, require_owner, require_owner_or_manager
 from database import db
+from middleware.actor_context import tenant_scope_filter
 from datetime import datetime, timezone, timedelta
 import uuid
 
@@ -85,10 +86,10 @@ async def check_gratuity(covers: int = None):
 
 # ============ LIVE SALES REPORTING ============
 @router.get("/live-sales")
-async def get_live_sales(_: dict = Depends(require_owner_or_manager)):
+async def get_live_sales(user: dict = Depends(require_owner_or_manager)):
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    all_txns = await db.transactions.find({}, {"_id": 0}).to_list(50000)
+    all_txns = await db.transactions.find(tenant_scope_filter(user.get("businessId")), {"_id": 0}).to_list(50000)
     # Filter today's transactions
     today_txns = []
     for t in all_txns:

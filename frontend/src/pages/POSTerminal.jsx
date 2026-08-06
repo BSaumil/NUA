@@ -130,6 +130,7 @@ const POSTerminal = () => {
   const [voucherLoading, setVoucherLoading] = useState(false);
   const [showDiscountPicker, setShowDiscountPicker] = useState(false);
   const [availableVouchers, setAvailableVouchers] = useState([]);
+  const [universalVouchers, setUniversalVouchers] = useState([]);
 
   // Gift-card tender
   const [giftCodeInput, setGiftCodeInput] = useState('');
@@ -556,11 +557,28 @@ const POSTerminal = () => {
     return () => { clearInterval(id); window.removeEventListener('focus', onFocus); };
   }, []);
 
-  // Load available vouchers once when discount picker opens
+  // Load available vouchers once when discount picker opens — both the v26
+  // promo-code system AND commerce_v29's universal voucher engine (campaign/
+  // referral/refund/promotion-issued codes). The picker used to only ever
+  // show v26's list, so a customer's own campaign voucher was invisible
+  // here even after the scan/type flow was taught to accept the code.
   useEffect(() => {
     if (!showDiscountPicker) return;
-    v26API.listVouchers().then(r => setAvailableVouchers(r.data || [])).catch(() => {});
-  }, [showDiscountPicker]);
+    v26API.listVouchers().then(r => setAvailableVouchers((r.data || []).map(v => ({ ...v, _source: 'v26' })))).catch(() => {});
+    const params = { status: 'active' };
+    if (selectedCustomer?.id) params.customer_id = selectedCustomer.id;
+    finalizeAPI.listVouchers(params).then(r => setUniversalVouchers(
+      (r.data || [])
+        .filter(v => !v.customerId || v.customerId === selectedCustomer?.id)
+        .map(v => ({
+          id: v.id, name: v.label, manualCode: v.code,
+          discountType: v.valueType === 'percentage' ? 'percent' : 'fixed',
+          value: v.value, residualValue: v.residualValue,
+          active: v.status === 'active' || v.status === 'partial',
+          _source: 'v29',
+        }))
+    )).catch(() => {});
+  }, [showDiscountPicker, selectedCustomer]);
 
   useEffect(() => {
     if (cartTab !== 'individual') return;
@@ -619,8 +637,26 @@ const POSTerminal = () => {
   };
 
   const applyAvailableVoucher = async (v) => {
+    const items = cart.map(i => ({ productId: i.id, id: i.id, name: i.name, price: i.price, quantity: i.quantity, category: i.category }));
+    if (v._source === 'v29') {
+      // Same simplified math as the manual-code fallback in applyManualCode
+      // — good enough for a picker tap, not a byte-for-byte match with what
+      // /vouchers/redeem computes server-side (eligibleItems/Categories
+      // scoping isn't recomputed client-side).
+      const subtotal = items.reduce((s, i) => s + i.price * i.quantity, 0);
+      const discount = v.discountType === 'percent'
+        ? Math.round(subtotal * (Number(v.value) / 100) * 100) / 100
+        : Math.min(Number(v.value) || 0, Number(v.residualValue ?? v.value));
+      if (discount <= 0) {
+        toast({ title: 'Could not apply', description: 'Voucher has no remaining value', variant: 'destructive' });
+        return;
+      }
+      addDiscount({ voucherId: v.id, label: `${v.name} · -$${discount.toFixed(2)}`, discount, code: v.manualCode });
+      toast({ title: 'Applied', description: `-$${discount.toFixed(2)}` });
+      setShowDiscountPicker(false);
+      return;
+    }
     try {
-      const items = cart.map(i => ({ productId: i.id, id: i.id, name: i.name, price: i.price, quantity: i.quantity, category: i.category }));
       const r = await v26API.applyVoucher(v.manualCode || v.barcode || v.id, items);
       addDiscount({ voucherId: v.id, label: `${v.name} · ${r.data.message}`, discount: r.data.discount, code: v.manualCode });
       toast({ title: 'Applied', description: r.data.message });
@@ -2074,11 +2110,11 @@ const POSTerminal = () => {
                     {giftLoading ? '…' : '🎁 Apply'}
                   </Button>
                 </div>
-                {availableVouchers.length > 0 && (
+                {(availableVouchers.length > 0 || universalVouchers.length > 0) && (
                   <div className="space-y-1 max-h-44 overflow-y-auto" data-testid="voucher-list">
                     <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Available</p>
-                    {availableVouchers.filter(v => v.active).map(v => (
-                      <button key={v.id} onClick={() => applyAvailableVoucher(v)}
+                    {[...availableVouchers, ...universalVouchers].filter(v => v.active).map(v => (
+                      <button key={`${v._source}-${v.id}`} onClick={() => applyAvailableVoucher(v)}
                         className="w-full text-left p-2 border rounded text-xs hover:bg-amber-50 hover:border-amber-300 transition" data-testid={`voucher-${v.id}`}>
                         <div className="flex justify-between font-semibold"><span>{v.name}</span><span className="text-amber-700">{v.discountType === 'percent' ? `${v.value}%` : `$${v.value}`} off</span></div>
                         <div className="text-[10px] text-gray-500 font-mono">{v.manualCode}</div>
