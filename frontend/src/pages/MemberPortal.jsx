@@ -74,7 +74,6 @@ export default function MemberPortal() {
       {/* Header */}
       <header className="p-4 text-center border-b border-gray-800">
         <h1 className="text-2xl font-bold tracking-tight">NUA Members</h1>
-        <p className="text-sm text-gray-400">Exclusive rewards, vouchers & perks</p>
       </header>
 
       <div className="max-w-md mx-auto px-4 py-8">

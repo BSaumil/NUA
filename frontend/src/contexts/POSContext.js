@@ -68,6 +68,20 @@ export const POSProvider = ({ children }) => {
     setCart(prev => prev.map(item => item.id === productId ? { ...item, quantity } : item));
   };
 
+  // Re-pick modifiers on an existing cart line (tapped from the cart) instead
+  // of removing it and re-adding — keeps quantity, position and any seat/course
+  // assignment on the line intact.
+  const updateCartItemModifiers = (lineId, selectedModifiers, extraPrice) => {
+    setCart(prev => prev.map(item => item.id === lineId
+      ? {
+          ...item,
+          selectedModifiers,
+          price: (item.basePrice ?? item.price) + (extraPrice || 0),
+          modifierSurcharge: extraPrice || 0,
+        }
+      : item));
+  };
+
   const clearCart = () => {
     setCart([]);
     setSelectedCustomer(null);
@@ -139,7 +153,7 @@ export const POSProvider = ({ children }) => {
   return (
     <POSContext.Provider
       value={{
-        cart, addToCart, removeFromCart, updateQuantity, clearCart, calculateTotal,
+        cart, addToCart, removeFromCart, updateQuantity, updateCartItemModifiers, clearCart, calculateTotal,
         selectedCustomer, setSelectedCustomer,
         currentLocation, setCurrentLocation,
         currentUser, setCurrentUser,

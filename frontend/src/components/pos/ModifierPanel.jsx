@@ -15,15 +15,22 @@ import { Check, X } from 'lucide-react';
  * once selected (e.g. "Oat Milk" -> "Sweetness Level"), up to 3 levels deep.
  *
  * Props:
- *  - product:         the product being added
- *  - modifiers:       full list of modifier defs from /api/modifiers
- *  - open:            boolean
- *  - onClose:         () => void
- *  - onConfirm:       (selections, totalExtra) => void
+ *  - product:            the product being added (pass basePrice as `price`
+ *                         when editing an existing cart line, so previously
+ *                         chosen extras aren't double-counted)
+ *  - modifiers:          full list of modifier defs from /api/modifiers
+ *  - open:               boolean
+ *  - onClose:             () => void
+ *  - onConfirm:          (selections, totalExtra) => void
  *      selections shape: [{ modifierId, modifierName, options: [{name, price}] }]
- *  - themeColor:      brand primary (NUA orange)
+ *  - themeColor:         brand primary (NUA orange)
+ *  - initialSelections:  when editing an existing cart line, that line's
+ *                        current `selectedModifiers` — pre-fills the picker
+ *                        instead of starting blank
+ *  - confirmLabel:       override the confirm button's leading label
+ *                        (defaults to "Add"; pass "Update" when editing)
  */
-export default function ModifierPanel({ product, modifiers, open, onClose, onConfirm, themeColor = '#f58c14' }) {
+export default function ModifierPanel({ product, modifiers, open, onClose, onConfirm, themeColor = '#f58c14', initialSelections = null, confirmLabel = 'Add' }) {
   const productModifiers = useMemo(() => {
     if (!product) return [];
     const ids = product.modifierIds || [];
@@ -36,10 +43,18 @@ export default function ModifierPanel({ product, modifiers, open, onClose, onCon
   const [selected, setSelected] = useState({});
   const [lastProductId, setLastProductId] = useState(null);
 
-  // Reset selection when a different product is opened.
+  // Reset (or seed, when editing) selection when a different product is opened.
   if (open && product?.id && product.id !== lastProductId) {
     setLastProductId(product.id);
-    setSelected({});
+    if (initialSelections && initialSelections.length > 0) {
+      const seeded = {};
+      initialSelections.forEach(sel => {
+        seeded[sel.modifierId] = new Set((sel.options || []).map(o => o.name));
+      });
+      setSelected(seeded);
+    } else {
+      setSelected({});
+    }
   }
 
   // Nested modifiers: a chosen option can reveal follow-up modifier group(s)
@@ -209,7 +224,7 @@ export default function ModifierPanel({ product, modifiers, open, onClose, onCon
             style={{ background: themeColor }}
             data-testid="mod-confirm"
           >
-            Add — ${total.toFixed(2)}
+            {confirmLabel} — ${total.toFixed(2)}
           </Button>
         </div>
       </div>

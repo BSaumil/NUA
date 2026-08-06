@@ -80,7 +80,6 @@ export default function Login() {
               gradient lockup (BRAND-SPEC §3). */}
           <div className="flex flex-col items-center mb-6">
             <Logo variant="marketing" size={34} />
-            <p className="text-gray-400 text-sm mt-2">Staff Portal</p>
           </div>
 
           {/* Second factor — replaces the whole form rather than sitting

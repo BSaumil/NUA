@@ -41,7 +41,7 @@ const POSTerminal = () => {
   const { theme } = useTheme();
   const { queuedCount, refresh: refreshOfflineQueue } = useOfflineQueue();
   const { user, hasPermission } = useAuth();
-  const { cart, addToCart, removeFromCart, updateQuantity, clearCart, calculateTotal, selectedCustomer, setSelectedCustomer, currentUser, currentLocation, appliedDiscounts, addDiscount, removeDiscount, appliedGiftCards, addGiftCard, removeGiftCard, pendingGiftActivations, storeCreditApplied, setStoreCreditApplied } = usePOS();
+  const { cart, addToCart, removeFromCart, updateQuantity, updateCartItemModifiers, clearCart, calculateTotal, selectedCustomer, setSelectedCustomer, currentUser, currentLocation, appliedDiscounts, addDiscount, removeDiscount, appliedGiftCards, addGiftCard, removeGiftCard, pendingGiftActivations, storeCreditApplied, setStoreCreditApplied } = usePOS();
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -77,9 +77,14 @@ const POSTerminal = () => {
   const [qrData, setQrData] = useState(null);
 
   // Split payment state
-  const [splitMode, setSplitMode] = useState('equal'); // equal | custom
+  const [splitMode, setSplitMode] = useState('equal'); // equal | custom | items | seat
   const [splitCount, setSplitCount] = useState(2);
   const [splitParts, setSplitParts] = useState([]);
+  // "By item" split: which guest each unit of each cart line is assigned to —
+  // { [cartLineId]: { [guestIdx]: qty } }. Whatever's left unassigned is
+  // spread evenly, same fallback initSeatSplitParts uses, so the parts always
+  // balance even mid-assignment.
+  const [itemAssignments, setItemAssignments] = useState({});
   const [activeSplitIndex, setActiveSplitIndex] = useState(null);
   // When a split part uses QR/UPI, we surface a scan dialog instead of silently
   // confirming — the cashier confirms once the guest actually pays.
@@ -155,6 +160,10 @@ const POSTerminal = () => {
   // Modifier definitions (loaded once); ModifierSheet state for click-to-add flow
   const [modifiers, setModifiers] = useState([]);
   const [modifierSheetProduct, setModifierSheetProduct] = useState(null);
+  // Set when the panel was opened by tapping an EXISTING cart line rather than
+  // a product tile — routes onConfirm to update that line instead of adding
+  // a new one, and carries its current selections in to pre-fill the picker.
+  const [editingLineId, setEditingLineId] = useState(null);
 
   // Smart add-to-cart: if a product has modifierIds, open the picker first.
   // If modifier defs haven't loaded yet but the product has modifierIds,
@@ -168,6 +177,15 @@ const POSTerminal = () => {
       addToCart(product);
     }
   }, [addToCart]);
+
+  // Tapped an existing cart line that has modifiers — open the same panel,
+  // pre-filled with what's already selected, so it can be changed in place.
+  const handleEditCartModifiers = useCallback((item) => {
+    setEditingLineId(item.id);
+    // basePrice (not price, which already has the old extras baked in) so the
+    // panel's running total doesn't double-count the item's current modifiers.
+    setModifierSheetProduct({ ...item, price: item.basePrice ?? item.price });
+  }, []);
 
   // Map a cart line into a backend TransactionItem (flattens selectedModifiers
   // → modifiers list of {modifierId, modifierName, optionId, optionName, price}).
@@ -506,7 +524,7 @@ const POSTerminal = () => {
   useEffect(() => {
     const t = setTimeout(() => {
       v26API.cfdPush({
-        cart: cart.map(i => ({ id: i.id, name: i.name, price: i.price, quantity: i.quantity, image: i.image })),
+        cart: cart.map(i => ({ id: i.id, name: i.name, price: i.price, quantity: i.quantity, image: i.image, translations: i.translations })),
         selectedCustomer: selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name, membershipTier: selectedCustomer.membershipTier } : null,
         tableNumber, walkInName,
       }).catch(() => {});
@@ -1025,9 +1043,75 @@ const POSTerminal = () => {
     });
   };
 
+  /** "By item" split — rebuild each guest's amount from itemAssignments.
+   *  Preserves payerName/method/status already on splitParts (keyed by
+   *  index) so re-assigning one item doesn't blank out names already typed
+   *  or drop a guest who's already paid. Unassigned quantity is spread
+   *  evenly across guests, same as the seat-based split, so the parts
+   *  always sum to the bill even mid-assignment. */
+  const recalcItemSplitParts = useCallback((assignments, count) => {
+    setSplitParts(prev => {
+      const guestAmounts = Array.from({ length: count }, () => 0);
+      const guestItems = Array.from({ length: count }, () => []);
+      let unassignedValue = 0;
+      let grossValue = 0;
+      cartWithCourses.forEach(item => {
+        const unitPrice = item.price || 0;
+        const qty = item.quantity || 0;
+        grossValue += unitPrice * qty;
+        const perGuest = assignments[item.id] || {};
+        let assignedQty = 0;
+        for (let g = 0; g < count; g++) {
+          const q = perGuest[g] || 0;
+          if (q > 0) {
+            guestAmounts[g] += unitPrice * q;
+            guestItems[g].push({ name: item.name, quantity: q });
+            assignedQty += q;
+          }
+        }
+        unassignedValue += unitPrice * Math.max(0, qty - assignedQty);
+      });
+      const share = count > 0 ? unassignedValue / count : 0;
+      const scale = grossValue > 0 ? totalNum / grossValue : 1;
+      const parts = Array.from({ length: count }, (_, i) => {
+        const existing = prev[i];
+        return {
+          payerName: existing?.payerName || `Guest ${i + 1}`,
+          method: existing?.method || 'Card',
+          status: existing?.status === 'confirmed' ? 'confirmed' : 'pending',
+          assignedItems: guestItems[i],
+          amount: Math.round((guestAmounts[i] + share) * scale * 100) / 100,
+        };
+      });
+      const sum = parts.reduce((s, p) => s + p.amount, 0);
+      const drift = Math.round((totalNum - sum) * 100) / 100;
+      if (drift !== 0 && parts.length) parts[0].amount = Math.round((parts[0].amount + drift) * 100) / 100;
+      return parts;
+    });
+  }, [cartWithCourses, totalNum]);
+
+  /** Move one unit of a cart line's quantity onto/off a guest. Clamped so the
+   *  total assigned for that line can never exceed its cart quantity. */
+  const adjustItemAssignment = (lineId, guestIdx, delta) => {
+    setItemAssignments(prev => {
+      const item = cartWithCourses.find(i => i.id === lineId);
+      if (!item) return prev;
+      const perGuest = { ...(prev[lineId] || {}) };
+      const assignedToOthers = Object.entries(perGuest)
+        .reduce((s, [g, q]) => s + (Number(g) === guestIdx ? 0 : (q || 0)), 0);
+      const current = perGuest[guestIdx] || 0;
+      const next = Math.max(0, Math.min((item.quantity || 0) - assignedToOthers, current + delta));
+      perGuest[guestIdx] = next;
+      const updated = { ...prev, [lineId]: perGuest };
+      recalcItemSplitParts(updated, splitCount);
+      return updated;
+    });
+  };
+
   const recalcEqualSplit = (count) => {
     setSplitCount(count);
     if (splitMode === 'equal') initSplitParts(count, 'equal');
+    else if (splitMode === 'items') recalcItemSplitParts(itemAssignments, count);
   };
 
   const splitPaid = splitParts.filter(s => s.status === 'confirmed').reduce((sum, s) => sum + s.amount, 0);
@@ -1450,17 +1534,26 @@ const POSTerminal = () => {
 
       {/* Modifier picker — docked next to the cart when a product with
           attached modifierIds is tapped, instead of a full-screen popup, so
-          the cart stays visible while modifiers are picked. */}
+          the cart stays visible while modifiers are picked. Also opens (in
+          edit mode) when an existing cart line with modifiers is tapped. */}
       <ModifierPanel
         product={modifierSheetProduct}
         modifiers={modifiers}
         open={!!modifierSheetProduct}
-        onClose={() => setModifierSheetProduct(null)}
+        onClose={() => { setModifierSheetProduct(null); setEditingLineId(null); }}
         themeColor={theme.primary}
+        initialSelections={editingLineId ? modifierSheetProduct?.selectedModifiers || [] : null}
+        confirmLabel={editingLineId ? 'Update' : 'Add'}
         onConfirm={(selections, extra) => {
-          addToCart(modifierSheetProduct, 1, selections, extra);
-          toast({ title: 'Added', description: `${modifierSheetProduct.name} with ${selections.length} option${selections.length !== 1 ? 's' : ''}` });
+          if (editingLineId) {
+            updateCartItemModifiers(editingLineId, selections, extra);
+            toast({ title: 'Updated', description: `${modifierSheetProduct.name} modifiers changed` });
+          } else {
+            addToCart(modifierSheetProduct, 1, selections, extra);
+            toast({ title: 'Added', description: `${modifierSheetProduct.name} with ${selections.length} option${selections.length !== 1 ? 's' : ''}` });
+          }
           setModifierSheetProduct(null);
+          setEditingLineId(null);
         }}
       />
 
@@ -1739,6 +1832,7 @@ const POSTerminal = () => {
                           onUpdateQty={updateQuantityCoursed}
                           onRemove={removeFromCartCoursed}
                           onRepeat={(it) => { addToCart(it); toast({ title: 'Repeated', description: `Added another ${it.name}` }); }}
+                          onEditModifiers={handleEditCartModifiers}
                         />
                         {/* Move a single dish to another course — the kitchen
                             ticket is built from these, not from the category
@@ -1790,6 +1884,7 @@ const POSTerminal = () => {
                   onUpdateQty={updateQuantity}
                   onRemove={removeFromCart}
                   onRepeat={(it) => { addToCart(it); toast({ title: 'Repeated', description: `Added another ${it.name}` }); }}
+                  onEditModifiers={handleEditCartModifiers}
                 />
               ))}
             </div>
@@ -2107,6 +2202,9 @@ const POSTerminal = () => {
         total={totalNum}
         splitParts={splitParts} splitMode={splitMode} splitCount={splitCount}
         seatsAvailable={useSeats && cartWithCourses.some(i => i.seat != null)}
+        cartItems={cartWithCourses}
+        itemAssignments={itemAssignments}
+        onAdjustItemAssignment={adjustItemAssignment}
         onSetMode={(m) => {
           if (m === 'seat') {
             if (!initSeatSplitParts()) {
@@ -2114,6 +2212,12 @@ const POSTerminal = () => {
               return;
             }
             setSplitMode('seat');
+            return;
+          }
+          if (m === 'items') {
+            setItemAssignments({});
+            setSplitMode('items');
+            recalcItemSplitParts({}, splitCount);
             return;
           }
           setSplitMode(m);

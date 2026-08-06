@@ -68,9 +68,13 @@ export function SplitPaymentDialog({
   open, onClose, total, splitParts, splitMode, splitCount,
   onSetMode, onChangeCount, onUpdatePart, onPayPart, splitRemaining, loading, activeSplitIndex,
   seatsAvailable = false,
+  cartItems = [], itemAssignments = {}, onAdjustItemAssignment,
 }) {
   const paidSoFar = Math.max(0, Math.round((Number(total) - Number(splitRemaining)) * 100) / 100);
   const allPaid = splitRemaining === 0 && splitParts.length > 0;
+  // Once anyone's paid, assignments are locked — reshuffling items after a
+  // guest has already been charged would silently change what everyone owes.
+  const assignmentsLocked = splitParts.some(p => p.status === 'confirmed');
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto" data-testid="split-payment-dialog">
@@ -118,15 +122,60 @@ export function SplitPaymentDialog({
               </div>
             </div>
             <div className="flex gap-1 ml-auto">
-              {['equal', 'custom', ...(seatsAvailable ? ['seat'] : [])].map(m => (
+              {['equal', 'custom', 'items', ...(seatsAvailable ? ['seat'] : [])].map(m => (
                 <button key={m} onClick={() => onSetMode(m)}
                   className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${splitMode === m ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
                   data-testid={`split-mode-${m}`}>
-                  {m === 'equal' ? 'Equal' : m === 'custom' ? 'Custom' : 'By seat'}
+                  {m === 'equal' ? 'Equal' : m === 'custom' ? 'Custom' : m === 'items' ? 'By item' : 'By seat'}
                 </button>
               ))}
             </div>
           </div>
+          {splitMode === 'items' && (
+            <div className="space-y-2 border rounded-lg p-2.5 bg-gray-50" data-testid="split-item-assignment">
+              {assignmentsLocked && (
+                <p className="text-[10px] text-amber-600">Assignments are locked — someone's already paid.</p>
+              )}
+              {cartItems.length === 0 ? (
+                <p className="text-xs text-gray-400 text-center py-2">Cart is empty</p>
+              ) : cartItems.map(item => {
+                const perGuest = itemAssignments[item.id] || {};
+                const assigned = Object.values(perGuest).reduce((s, q) => s + (q || 0), 0);
+                const unassigned = Math.max(0, (item.quantity || 0) - assigned);
+                return (
+                  <div key={item.id} className="bg-white border rounded-md p-2" data-testid={`split-item-row-${item.id}`}>
+                    <div className="flex items-center justify-between text-xs mb-1.5">
+                      <span className="font-medium truncate">{item.quantity}× {item.name}</span>
+                      {unassigned > 0 && (
+                        <span className="text-amber-600 font-medium whitespace-nowrap ml-2" data-testid={`split-item-unassigned-${item.id}`}>
+                          {unassigned} unassigned
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {Array.from({ length: splitCount }, (_, g) => g).map(g => (
+                        <div key={g} className="flex items-center border rounded-md overflow-hidden" data-testid={`split-item-guest-${item.id}-${g}`}>
+                          <button
+                            className="px-1.5 py-0.5 text-xs hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                            disabled={assignmentsLocked || (perGuest[g] || 0) <= 0}
+                            onClick={() => onAdjustItemAssignment(item.id, g, -1)}
+                            data-testid={`split-item-minus-${item.id}-${g}`}>-</button>
+                          <span className="px-1.5 text-[11px] font-semibold border-x min-w-[2.75rem] text-center" data-testid={`split-item-qty-${item.id}-${g}`}>
+                            G{g + 1}: {perGuest[g] || 0}
+                          </span>
+                          <button
+                            className="px-1.5 py-0.5 text-xs hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                            disabled={assignmentsLocked || unassigned <= 0}
+                            onClick={() => onAdjustItemAssignment(item.id, g, 1)}
+                            data-testid={`split-item-plus-${item.id}-${g}`}>+</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <div className="space-y-3">
             {splitParts.map((part, idx) => (
               <Card key={idx} className={`border ${part.status === 'confirmed' ? 'border-green-300 bg-green-50/50' : ''}`}
@@ -137,9 +186,9 @@ export function SplitPaymentDialog({
                       {part.status === 'confirmed' ? <Check size={16} /> : idx + 1}
                     </div>
                     <div className="flex-1 space-y-2">
-                      {part.seatItems && part.seatItems.length > 0 && (
+                      {(part.seatItems || part.assignedItems)?.length > 0 && (
                         <p className="text-[10px] text-gray-500 leading-tight" data-testid={`split-seat-items-${idx}`}>
-                          {part.seatItems.map(i => `${i.quantity}× ${i.name}`).join(' · ')}
+                          {(part.seatItems || part.assignedItems).map(i => `${i.quantity}× ${i.name}`).join(' · ')}
                         </p>
                       )}
                       <div className="flex gap-2">
