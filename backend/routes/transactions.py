@@ -146,9 +146,13 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
         if points < min_redeem:
             raise HTTPException(status_code=400, detail=f"Minimum {min_redeem} points required to redeem")
         redeemed_doc = await db.customers.find_one_and_update(
-            {"id": customer_id, "points": {"$gte": points}},
+            {"id": customer_id, "points": {"$gte": points}, "loyaltyLocked": {"$ne": True}},
             {"$inc": {"points": -points}},
         )
+        if not redeemed_doc:
+            locked = await db.customers.find_one({"id": customer_id, "loyaltyLocked": True}, {"_id": 0, "id": 1})
+            if locked:
+                raise HTTPException(status_code=403, detail="Loyalty account locked pending fraud review")
         if not redeemed_doc:
             balance = int((await db.customers.find_one({"id": customer_id}, {"_id": 0, "points": 1}) or {}).get("points", 0))
             raise HTTPException(status_code=400, detail=f"Insufficient points: {balance} available, {points} requested")

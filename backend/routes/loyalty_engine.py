@@ -122,6 +122,9 @@ async def redeem_points(data: dict, _: dict = Depends(get_user)):
     transaction_id = data.get("transactionId")
     if not customer_id or points <= 0:
         raise HTTPException(status_code=400, detail="customerId + points (>0) required")
+    locked_check = await db.customers.find_one({"id": customer_id}, {"_id": 0, "loyaltyLocked": 1})
+    if locked_check and locked_check.get("loyaltyLocked"):
+        raise HTTPException(status_code=403, detail="Loyalty account locked pending fraud review")
     cfg = await get_config()
     min_redeem = int(cfg.get("minRedeem", 10))
     if points < min_redeem:
@@ -199,8 +202,7 @@ async def get_liability_report(_: dict = Depends(require_owner_or_manager)):
     }
 
 
-@router.get("/loyalty/reports/fraud-flags")
-async def get_fraud_flags(_: dict = Depends(require_owner_or_manager)):
+async def _compute_fraud_signals() -> list:
     """Two concrete, computable signals from data that already exists —
     not a general fraud model, just the two patterns explicitly called out
     in the loyalty engine spec's fraud-prevention section that had nothing
@@ -213,10 +215,9 @@ async def get_fraud_flags(_: dict = Depends(require_owner_or_manager)):
       terminal within a short window (the code changed hands rather than
       staying with whoever it was issued to).
     """
-    now = datetime.now(timezone.utc)
-    window_start = (now - timedelta(hours=24)).isoformat()
+    window_start = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
 
-    farming_flags = []
+    signals = []
     pipeline = [
         {"$match": {"type": "earn", "createdAt": {"$gte": window_start}}},
         {"$group": {"_id": "$customerId", "count": {"$sum": 1}, "totalPoints": {"$sum": "$points"}}},
@@ -226,7 +227,7 @@ async def get_fraud_flags(_: dict = Depends(require_owner_or_manager)):
         if not row["_id"]:
             continue
         customer = await db.customers.find_one({"id": row["_id"]}, {"_id": 0, "name": 1})
-        farming_flags.append({
+        signals.append({
             "type": "point_farming",
             "customerId": row["_id"],
             "customerName": (customer or {}).get("name"),
@@ -235,7 +236,6 @@ async def get_fraud_flags(_: dict = Depends(require_owner_or_manager)):
             "reason": f"{row['count']} separate earn events in the last 24h",
         })
 
-    sharing_flags = []
     recent_vouchers = await db.vouchers.find(
         {"redemptions.1": {"$exists": True}}, {"_id": 0, "id": 1, "code": 1, "redemptions": 1}
     ).to_list(2000)
@@ -251,7 +251,7 @@ async def get_fraud_flags(_: dict = Depends(require_owner_or_manager)):
             except Exception:
                 continue
             if abs((t_b - t_a).total_seconds()) <= 600:  # 10 minutes
-                sharing_flags.append({
+                signals.append({
                     "type": "voucher_sharing",
                     "voucherId": v["id"], "code": v.get("code"),
                     "terminals": [a["terminalId"], b["terminalId"]],
@@ -259,7 +259,97 @@ async def get_fraud_flags(_: dict = Depends(require_owner_or_manager)):
                 })
                 break  # one flag per voucher is enough signal
 
-    return {"flags": farming_flags + sharing_flags, "checkedAt": now.isoformat()}
+    return signals
+
+
+def _flag_dedup_key(signal: dict) -> dict:
+    """One open flag per underlying issue — re-computing signals on every
+    report view (or agent tick) shouldn't spam a fresh flag each time."""
+    if signal["type"] == "point_farming":
+        return {"type": "point_farming", "customerId": signal["customerId"]}
+    return {"type": "voucher_sharing", "voucherId": signal["voucherId"]}
+
+
+async def _persist_fraud_flags(signals: list) -> int:
+    created = 0
+    for signal in signals:
+        key = _flag_dedup_key(signal)
+        existing = await db.loyalty_fraud_flags.find_one({**key, "status": "open"}, {"_id": 0, "id": 1})
+        if existing:
+            continue
+        await db.loyalty_fraud_flags.insert_one({
+            "id": f"FLAG-{str(uuid.uuid4())[:8].upper()}",
+            **signal,
+            "status": "open",
+            "reviewedBy": None, "reviewedAt": None, "reviewReason": None,
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+        })
+        created += 1
+    return created
+
+
+@router.get("/loyalty/reports/fraud-flags")
+async def get_fraud_flags(status: str = "open", _: dict = Depends(require_owner_or_manager)):
+    signals = await _compute_fraud_signals()
+    await _persist_fraud_flags(signals)
+    query = {} if status == "all" else {"status": status}
+    flags = await db.loyalty_fraud_flags.find(query, {"_id": 0}).sort("createdAt", -1).to_list(500)
+    return {"flags": flags, "checkedAt": datetime.now(timezone.utc).isoformat()}
+
+
+@router.put("/loyalty/reports/fraud-flags/{flag_id}")
+async def resolve_fraud_flag(flag_id: str, data: dict, user: dict = Depends(require_owner_or_manager)):
+    """Close the loop on a flag: mark it reviewed, or confirm abuse and take
+    the matching action — lock the customer's loyalty account (point
+    farming) or revoke the voucher (sharing). Previously a flag was just
+    information with nothing to do about it."""
+    new_status = data.get("status")
+    if new_status not in ("reviewed_ok", "confirmed_abuse"):
+        raise HTTPException(status_code=400, detail="status must be reviewed_ok or confirmed_abuse")
+    flag = await db.loyalty_fraud_flags.find_one({"id": flag_id}, {"_id": 0})
+    if not flag:
+        raise HTTPException(status_code=404, detail="Flag not found")
+    if flag["status"] != "open":
+        raise HTTPException(status_code=400, detail=f"Flag already {flag['status']}")
+
+    action_taken = None
+    if new_status == "confirmed_abuse":
+        if flag["type"] == "point_farming" and flag.get("customerId"):
+            await db.customers.update_one({"id": flag["customerId"]}, {"$set": {"loyaltyLocked": True}})
+            action_taken = "Loyalty account locked — redemption blocked until unlocked"
+        elif flag["type"] == "voucher_sharing" and flag.get("voucherId"):
+            await db.vouchers.update_one({"id": flag["voucherId"]}, {"$set": {
+                "status": "revoked",
+                "revokedAt": datetime.now(timezone.utc).isoformat(),
+                "revokedBy": user.get("email"),
+                "revokeReason": "Confirmed voucher sharing (fraud flag)",
+            }})
+            action_taken = "Voucher revoked"
+
+    await db.loyalty_fraud_flags.update_one({"id": flag_id}, {"$set": {
+        "status": new_status,
+        "reviewedBy": user.get("email"), "reviewedAt": datetime.now(timezone.utc).isoformat(),
+        "reviewReason": data.get("reason"),
+        "actionTaken": action_taken,
+    }})
+    try:
+        from services.audit_service import log_event
+        await log_event(entity_type="loyalty_fraud_flag", entity_id=flag_id, action=new_status,
+                         memo=f"{flag['type']} flag resolved: {new_status}" + (f" — {action_taken}" if action_taken else ""))
+    except Exception:
+        pass
+    return {"ok": True, "status": new_status, "actionTaken": action_taken}
+
+
+@router.post("/loyalty/customers/{customer_id}/unlock")
+async def unlock_loyalty_account(customer_id: str, user: dict = Depends(require_owner)):
+    """Reverse a loyaltyLocked from a confirmed_abuse flag — owner only,
+    since re-enabling redemption after a fraud confirmation is a judgment
+    call worth restricting more tightly than reviewing the flag itself."""
+    result = await db.customers.update_one({"id": customer_id}, {"$set": {"loyaltyLocked": False}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return {"ok": True}
 
 
 # =============================================================================
