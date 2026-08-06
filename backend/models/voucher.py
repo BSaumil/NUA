@@ -86,6 +86,11 @@ class Voucher(BaseModel):
     customerEmail: Optional[str] = None
     customerName: Optional[str] = None
     assignable: bool = True
+    # Tenant — which business issued this voucher, from the issuing staff
+    # member's own token (see middleware/actor_context.py). Optional/nullable
+    # for now: stamped on new vouchers going forward, not backfilled onto
+    # existing ones, so no read-side filtering depends on it yet.
+    businessId: Optional[str] = None
     # Rules
     rules: VoucherRules = Field(default_factory=VoucherRules)
     # Lifecycle

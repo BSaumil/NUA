@@ -30,6 +30,9 @@ class LedgerEntry(BaseModel):
     note: Optional[str] = None
     createdAt: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
     metadata: Dict[str, Any] = {}
+    # Optional/nullable, stamped on new entries going forward — see
+    # models/voucher.py's businessId field for the same rationale.
+    businessId: Optional[str] = None
 
 
 class LedgerEntryCreate(BaseModel):

@@ -58,8 +58,11 @@ def verify_password(plain: str, hashed: str) -> bool:
     except ValueError:
         return False
 
-def create_access_token(user_id: str, email: str, role: str) -> str:
-    payload = {"sub": user_id, "email": email, "role": role,
+def create_access_token(user_id: str, email: str, role: str, business_id: str = None) -> str:
+    # businessId travels in the token (not just a header) so ActorContextMiddleware
+    # can stamp createdBy/businessId on every write without a DB round-trip per
+    # request — see middleware/actor_context.py.
+    payload = {"sub": user_id, "email": email, "role": role, "businessId": business_id,
                "exp": datetime.now(timezone.utc) + timedelta(hours=8), "type": "access"}
     return jwt.encode(payload, _secret(), algorithm=JWT_ALGORITHM)
 
@@ -211,7 +214,7 @@ def read_challenge_token(token: str, purpose: str = "2fa") -> str:
 
 
 async def _complete_login(user: dict, response: Response) -> dict:
-    access = create_access_token(user["id"], user["email"], user["role"])
+    access = create_access_token(user["id"], user["email"], user["role"], user.get("businessId"))
     refresh = create_refresh_token(user["id"])
     _set_tokens(response, access, refresh)
     user = dict(user)
@@ -305,7 +308,7 @@ async def register(req: RegisterRequest, response: Response):
     await db.auth_users.insert_one(user_doc)
     user_doc.pop("_id", None)
     user_doc.pop("password_hash", None)
-    access = create_access_token(user_doc["id"], email, user_doc["role"])
+    access = create_access_token(user_doc["id"], email, user_doc["role"], user_doc.get("businessId"))
     refresh = create_refresh_token(user_doc["id"])
     _set_tokens(response, access, refresh)
     return {"user": user_doc, "token": access}
@@ -334,7 +337,7 @@ async def refresh_token(request: Request, response: Response):
         user = await db.auth_users.find_one({"id": payload["sub"]})
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
-        access = create_access_token(user["id"], user["email"], user["role"])
+        access = create_access_token(user["id"], user["email"], user["role"], user.get("businessId"))
         response.set_cookie("access_token", access, httponly=True, secure=_cookie_secure(), samesite="lax", max_age=28800, path="/")
         return {"message": "Token refreshed"}
     except jwt.InvalidTokenError:

@@ -47,6 +47,7 @@ from datetime import datetime, timezone, timedelta, date
 from typing import Optional, List, Dict, Any
 from database import db
 from deps import get_user
+from middleware.actor_context import get_actor_context
 from models.voucher import Voucher, VoucherCreate, VoucherRedeemRequest, VoucherValidateRequest, VoucherRedemption, VoucherRules
 from models.wallet_ledger import LedgerEntry, LedgerEntryCreate
 import base64
@@ -135,6 +136,7 @@ async def _issue_voucher(payload: dict, user: Optional[dict] = None) -> dict:
         issuedBy=(user or {}).get("email"),
         freeItemId=payload.get("freeItemId"),
         metadata=payload.get("metadata") or {},
+        businessId=payload.get("businessId") or (user or {}).get("businessId") or get_actor_context().get("businessId"),
     )
     doc = v.dict()
     await db.vouchers.insert_one(dict(doc))
@@ -411,6 +413,7 @@ async def _ledger_write(*, customer_id: str, type_: str, sign: int, amount: floa
         balanceAfter=round(prev_bal + delta, 2),
         sourceType=source_type, sourceRef=source_ref, note=note,
         metadata=metadata or {},
+        businessId=get_actor_context().get("businessId"),
     ).dict()
     await db.wallet_ledger.insert_one(dict(entry))
     entry.pop("_id", None)
