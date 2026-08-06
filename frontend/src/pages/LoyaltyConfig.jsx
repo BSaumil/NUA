@@ -10,7 +10,10 @@ import { toast } from 'sonner';
 
 export default function LoyaltyConfig() {
   const { theme } = useTheme();
-  const [cfg, setCfg] = useState({ earnRate: 1, redeemRate: 0.01, minRedeem: 50, categoryMultipliers: {}, active: true });
+  const [cfg, setCfg] = useState({
+    earnRate: 1, redeemRate: 0.01, minRedeem: 50, categoryMultipliers: {}, active: true,
+    pointsExpiryDays: 0, downgradeEnabled: false, downgradeGraceDays: 30,
+  });
   const [newCat, setNewCat] = useState('');
   const [newMult, setNewMult] = useState('');
 
@@ -59,6 +62,33 @@ export default function LoyaltyConfig() {
           <div className="bg-blue-50 p-3 rounded text-xs text-blue-700 flex items-start gap-2">
             <Sparkles size={14} className="mt-0.5" />
             <span>Default: $1 spent = 1 point · 1 point = ¢1 face value · min {cfg.minRedeem} pts to redeem. Owner-configurable category multipliers below boost earnings for strategic items.</span>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="p-6 space-y-4">
+          <h2 className="font-bold text-sm uppercase tracking-wider text-gray-500">Expiry & Tier Downgrade</h2>
+          <p className="text-xs text-gray-500">Both run automatically the next time the Ash agent tick executes — Settings &gt; Ash &gt; Run Tick, or the "agent_tick" voice command.</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs uppercase tracking-wider text-gray-500">Points expire after (days of inactivity)</label>
+              <Input type="number" min="0" value={cfg.pointsExpiryDays}
+                onChange={e => setCfg({ ...cfg, pointsExpiryDays: parseInt(e.target.value) || 0 })}
+                data-testid="points-expiry-days" />
+              <p className="text-[11px] text-gray-400 mt-1">0 = points never expire. Otherwise, a customer's balance is zeroed once this many days pass with no earn or redeem activity.</p>
+            </div>
+            <div>
+              <label className="flex items-center gap-2 text-sm mb-1">
+                <input type="checkbox" checked={cfg.downgradeEnabled}
+                  onChange={e => setCfg({ ...cfg, downgradeEnabled: e.target.checked })}
+                  data-testid="downgrade-enabled" /> Allow tier downgrades
+              </label>
+              <Input type="number" min="1" value={cfg.downgradeGraceDays} disabled={!cfg.downgradeEnabled}
+                onChange={e => setCfg({ ...cfg, downgradeGraceDays: parseInt(e.target.value) || 1 })}
+                data-testid="downgrade-grace-days" placeholder="Grace period (days)" />
+              <p className="text-[11px] text-gray-400 mt-1">Tiers only ever went up before. When enabled, a customer whose points balance falls below their tier's threshold is downgraded after this many days below it — not immediately.</p>
+            </div>
           </div>
         </CardContent>
       </Card>

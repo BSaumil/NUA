@@ -26,6 +26,17 @@ DEFAULT_CONFIG = {
     "minRedeem": 10,         # minimum 10 points (= $0.10) to redeem
     "categoryMultipliers": {},  # { "Coffee": 2.0, "Pastry": 1.5 }
     "active": True,
+    "pointsExpiryDays": 0,      # 0 = never expire. Otherwise: zero a customer's
+                                 # balance once this many days pass with no earn
+                                 # or redeem activity at all (inactivity-based,
+                                 # not FIFO-per-earn — simpler and matches how
+                                 # most POS loyalty programs actually expire).
+    "downgradeEnabled": False,  # tiers only ever went up before; this lets them
+                                 # come back down when a customer's balance
+                                 # genuinely drops below their tier's threshold.
+    "downgradeGraceDays": 30,   # days a customer can sit below-threshold before
+                                 # actually being downgraded — a slow month
+                                 # shouldn't cost someone their tier overnight.
 }
 
 
@@ -41,7 +52,10 @@ async def get_loyalty_config(_: dict = Depends(get_user)):
 
 @router.put("/loyalty/config")
 async def update_loyalty_config(data: dict, _: dict = Depends(require_owner)):
-    update = {k: v for k, v in data.items() if k in ("earnRate", "redeemRate", "minRedeem", "categoryMultipliers", "active")}
+    update = {k: v for k, v in data.items() if k in (
+        "earnRate", "redeemRate", "minRedeem", "categoryMultipliers", "active",
+        "pointsExpiryDays", "downgradeEnabled", "downgradeGraceDays",
+    )}
     update["updatedAt"] = datetime.now(timezone.utc).isoformat()
     await db.loyalty_config.update_one({"id": "default"}, {"$set": {"id": "default", **update}}, upsert=True)
     return await get_config()
@@ -199,6 +213,102 @@ async def _record_decision(action_type: str, summary: str, payload: dict, status
     return rec
 
 
+# =============================================================================
+# POINTS EXPIRY (inactivity-based, opt-in via loyalty_config.pointsExpiryDays)
+# =============================================================================
+async def _expire_inactive_points(cfg: dict) -> list:
+    """Zero out a customer's points balance once pointsExpiryDays have passed
+    since their last earn/redeem activity. Inactivity-based rather than
+    FIFO-per-earn (which would need tracking an expiry date per earn ledger
+    entry and partially consuming it on redemption) — simpler, and matches
+    how most POS loyalty programs actually communicate expiry to customers
+    ("use your points within a year of your last visit")."""
+    days = int(cfg.get("pointsExpiryDays") or 0)
+    if days <= 0:
+        return []
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    customers = await db.customers.find({"points": {"$gt": 0}}, {"_id": 0, "id": 1, "points": 1}).to_list(20000)
+    expired = []
+    for c in customers:
+        last = await db.loyalty_ledger.find_one(
+            {"customerId": c["id"]}, {"_id": 0, "createdAt": 1}, sort=[("createdAt", -1)]
+        )
+        last_activity = (last or {}).get("createdAt")
+        if not last_activity or last_activity >= cutoff:
+            continue
+        pts = int(c.get("points", 0))
+        if pts <= 0:
+            continue
+        await db.customers.update_one({"id": c["id"]}, {"$inc": {"points": -pts}})
+        await db.loyalty_ledger.insert_one({
+            "id": f"LP-{str(uuid.uuid4())[:8].upper()}",
+            "customerId": c["id"], "type": "expire", "points": -pts,
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+        })
+        expired.append({"customerId": c["id"], "points": pts})
+    return expired
+
+
+# =============================================================================
+# TIER RE-EVALUATION (upgrade always; downgrade opt-in, with a grace period)
+# =============================================================================
+async def _reevaluate_tiers(cfg: dict) -> dict:
+    """Recompute each customer's tier from their current points balance
+    against routes/loyalty.py's owner-editable loyalty_tiers ladder.
+    Upgrades apply immediately (unchanged from before). Downgrades only
+    happen when downgradeEnabled is on, and only after the customer has sat
+    below their tier's threshold continuously for downgradeGraceDays — a
+    single slow week shouldn't cost someone their tier the moment this
+    tick runs."""
+    tiers = await db.loyalty_tiers.find({}, {"_id": 0}).to_list(20)
+    if not tiers:
+        return {"downgraded": [], "upgraded": []}
+    tiers_desc = sorted(tiers, key=lambda t: t.get("minPoints", 0), reverse=True)
+    downgrade_enabled = bool(cfg.get("downgradeEnabled", False))
+    grace_days = int(cfg.get("downgradeGraceDays") or 30)
+    now = datetime.now(timezone.utc)
+
+    customers = await db.customers.find(
+        {"membershipTier": {"$exists": True}},
+        {"_id": 0, "id": 1, "points": 1, "membershipTier": 1, "tierGraceStartedAt": 1},
+    ).to_list(20000)
+    downgraded, upgraded = [], []
+    for c in customers:
+        pts = int(c.get("points", 0))
+        qualifying = next((t["name"] for t in tiers_desc if pts >= t.get("minPoints", 0)), tiers_desc[-1]["name"])
+        current = c.get("membershipTier", tiers_desc[-1]["name"])
+        rank = {t["name"]: i for i, t in enumerate(tiers_desc)}  # 0 = highest tier
+        cur_rank = rank.get(current, len(tiers_desc) - 1)
+        qual_rank = rank.get(qualifying, len(tiers_desc) - 1)
+
+        if qual_rank < cur_rank:
+            # Balance now qualifies for a HIGHER tier than currently held.
+            await db.customers.update_one(
+                {"id": c["id"]}, {"$set": {"membershipTier": qualifying}, "$unset": {"tierGraceStartedAt": ""}}
+            )
+            upgraded.append({"customerId": c["id"], "from": current, "to": qualifying})
+        elif qual_rank > cur_rank:
+            # Balance has fallen below the current tier's threshold.
+            if not downgrade_enabled:
+                continue
+            started = c.get("tierGraceStartedAt")
+            if not started:
+                await db.customers.update_one({"id": c["id"]}, {"$set": {"tierGraceStartedAt": now.isoformat()}})
+                continue
+            started_dt = datetime.fromisoformat(started.replace("Z", "+00:00")) if isinstance(started, str) else started
+            if started_dt.tzinfo is None:
+                started_dt = started_dt.replace(tzinfo=timezone.utc)
+            if (now - started_dt).days >= grace_days:
+                await db.customers.update_one(
+                    {"id": c["id"]}, {"$set": {"membershipTier": qualifying}, "$unset": {"tierGraceStartedAt": ""}}
+                )
+                downgraded.append({"customerId": c["id"], "from": current, "to": qualifying})
+        elif c.get("tierGraceStartedAt"):
+            # Back at/above threshold before the grace period ran out — clear it.
+            await db.customers.update_one({"id": c["id"]}, {"$unset": {"tierGraceStartedAt": ""}})
+    return {"downgraded": downgraded, "upgraded": upgraded}
+
+
 @router.get("/agent/segments")
 async def get_segments(_: dict = Depends(require_owner_or_manager)):
     s = await _segment_customers()
@@ -261,6 +371,23 @@ async def agent_tick(request: Request, user: dict = Depends(require_owner_or_man
             f"Only {bookings_today} bookings tonight — suggest 20% off SMS blast to VIPs",
             {"bookingsToday": bookings_today, "vipCount": len(segs["vip"])},
             status="suggested"))
+    # 6. Points expiry + 7. Tier re-evaluation — both opt-in via loyalty_config
+    # (pointsExpiryDays / downgradeEnabled), no-ops otherwise.
+    cfg = await get_config()
+    expired = await _expire_inactive_points(cfg)
+    if expired:
+        decisions.append(await _record_decision("points_expired",
+            f"Expired inactive points for {len(expired)} customer(s)",
+            {"expired": expired[:20]}))
+    tier_changes = await _reevaluate_tiers(cfg)
+    if tier_changes["upgraded"]:
+        decisions.append(await _record_decision("tier_upgraded",
+            f"{len(tier_changes['upgraded'])} customer(s) auto-upgraded to a higher tier",
+            {"upgraded": tier_changes["upgraded"][:20]}))
+    if tier_changes["downgraded"]:
+        decisions.append(await _record_decision("tier_downgraded",
+            f"{len(tier_changes['downgraded'])} customer(s) downgraded after {cfg.get('downgradeGraceDays', 30)} days below their tier's threshold",
+            {"downgraded": tier_changes["downgraded"][:20]}))
     return {"decisionsCount": len(decisions), "decisions": decisions, "segments": {k: len(v) for k, v in segs.items()}}
 
 
