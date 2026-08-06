@@ -4,6 +4,10 @@ import { Monitor } from 'lucide-react';
 import { useLanguage } from '../../i18n/useLanguage';
 import { LanguageSelector } from '../../i18n/LanguageSelector';
 
+function itemName(item, lang) {
+  return item?.translations?.[lang]?.name || item.name;
+}
+
 export default function CFD() {
   const [data, setData] = useState({ cart: [] });
   const { lang, setLang, t, dir, languages } = useLanguage('nua_cfd_lang');
@@ -36,7 +40,7 @@ export default function CFD() {
       <div className="space-y-3">
         {(data.cart || []).map((it, i) => (
           <div key={i} className="flex justify-between text-2xl border-b border-gray-700 pb-2">
-            <span>{it.quantity || 1}× {it.name}</span>
+            <span>{it.quantity || 1}× {itemName(it, lang)}</span>
             <span>${((it.price || 0) * (it.quantity || 1)).toFixed(2)}</span>
           </div>
         ))}

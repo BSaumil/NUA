@@ -1,27 +1,32 @@
 import React, { useState, useRef } from 'react';
-import { Minus, Plus } from 'lucide-react';
+import { Minus, Plus, SlidersHorizontal } from 'lucide-react';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 
 /**
- * Left-swipe deletes a cart line; right-swipe repeats (+1 quantity).
+ * Left-swipe deletes a cart line; right-swipe repeats (+1 quantity); a plain
+ * tap (no meaningful drag) on an item that has modifiers opens them for
+ * editing in place — re-picking options shouldn't mean delete-and-re-add.
  * Uses BOTH pointer events (desktop / most modern browsers) AND explicit
  * touch events (older tablet browsers / iPadOS Safari where setPointerCapture
  * is flaky) so the swipe works everywhere a POS runs.
  */
-export default function SwipeableCartItem({ item, onUpdateQty, onRemove, onRepeat, theme }) {
+export default function SwipeableCartItem({ item, onUpdateQty, onRemove, onRepeat, onEditModifiers, theme }) {
   const [dragX, setDragX] = useState(0);
   const startXRef = useRef(null);
   const startYRef = useRef(null);
   const isDraggingRef = useRef(false);
   const axisRef = useRef(null); // 'x' | 'y' | null — locked after ~6px of movement
+  const movedRef = useRef(false); // true once an axis has locked, in EITHER direction
   const THRESHOLD = 80;
+  const hasModifiers = !!(item.modifierIds && item.modifierIds.length > 0);
 
   const beginDrag = (clientX, clientY) => {
     startXRef.current = clientX;
     startYRef.current = clientY;
     isDraggingRef.current = true;
     axisRef.current = null;
+    movedRef.current = false;
     setDragX(0);
   };
   const moveDrag = (clientX, clientY, evt) => {
@@ -33,6 +38,7 @@ export default function SwipeableCartItem({ item, onUpdateQty, onRemove, onRepea
       const ax = Math.abs(dx), ay = Math.abs(dy);
       if (ax < 6 && ay < 6) return;
       axisRef.current = ax > ay ? 'x' : 'y';
+      movedRef.current = true;
     }
     if (axisRef.current !== 'x') return; // vertical scroll — let the page have it
     // Block native scroll only while we're horizontally dragging.
@@ -43,9 +49,11 @@ export default function SwipeableCartItem({ item, onUpdateQty, onRemove, onRepea
     if (!isDraggingRef.current) return;
     isDraggingRef.current = false;
     const finalX = dragX;
+    const wasTap = !movedRef.current; // no axis ever locked — a real tap, not a swipe or scroll
     axisRef.current = null;
     startXRef.current = null;
     startYRef.current = null;
+    movedRef.current = false;
     if (finalX <= -THRESHOLD) {
       setDragX(-400);
       setTimeout(() => onRemove(item.id), 180);
@@ -54,6 +62,7 @@ export default function SwipeableCartItem({ item, onUpdateQty, onRemove, onRepea
       setDragX(0);
     } else {
       setDragX(0);
+      if (wasTap && hasModifiers && onEditModifiers) onEditModifiers(item);
     }
   };
 
@@ -111,7 +120,7 @@ export default function SwipeableCartItem({ item, onUpdateQty, onRemove, onRepea
           touchAction: 'pan-y',
           userSelect: 'none',
         }}
-        className="relative bg-white cursor-grab active:cursor-grabbing select-none"
+        className={`relative bg-white cursor-grab active:cursor-grabbing select-none ${hasModifiers ? 'hover:bg-gray-50' : ''}`}
         data-testid={`cart-item-${item.id}`}
       >
         <CardContent className="p-3">
@@ -119,7 +128,7 @@ export default function SwipeableCartItem({ item, onUpdateQty, onRemove, onRepea
             <div className="flex-1 min-w-0">
               <p className="font-semibold text-sm truncate">{item.name}</p>
               <p className="text-xs text-gray-500">${item.price.toFixed(2)} each</p>
-              {item.selectedModifiers && item.selectedModifiers.length > 0 && (
+              {item.selectedModifiers && item.selectedModifiers.length > 0 ? (
                 <div className="mt-0.5 space-y-0.5" data-testid={`cart-mods-${item.id}`}>
                   {item.selectedModifiers.map((sm, i) => (
                     <p key={i} className="text-[10px] text-gray-600 leading-tight">
@@ -127,8 +136,15 @@ export default function SwipeableCartItem({ item, onUpdateQty, onRemove, onRepea
                       {(sm.options || []).map(o => o.name + (o.price > 0 ? ` (+$${o.price.toFixed(2)})` : '')).join(', ')}
                     </p>
                   ))}
+                  <p className="flex items-center gap-1 text-[9px] text-gray-400 italic pt-0.5">
+                    <SlidersHorizontal size={9} /> tap to change
+                  </p>
                 </div>
-              )}
+              ) : hasModifiers ? (
+                <p className="flex items-center gap-1 text-[10px] text-amber-600 mt-0.5">
+                  <SlidersHorizontal size={10} /> tap to add modifiers
+                </p>
+              ) : null}
             </div>
             <div className="flex items-center gap-1.5" data-no-swipe>
               <Button size="sm" variant="outline" onClick={() => onUpdateQty(item.id, item.quantity - 1)} className="w-7 h-7 p-0" data-testid={`cart-minus-${item.id}`}><Minus size={12} /></Button>
