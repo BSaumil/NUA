@@ -59,7 +59,7 @@ COGS_CATEGORIES = ("Ingredients", "Food Supplies", "Beverages")
 async def get_accounting_summary(start_date: Optional[str] = None, end_date: Optional[str] = None,
                                  user: dict = Depends(require_owner_or_manager)):
     txn_totals = await _sum_transactions({**_date_match("timestamp", start_date, end_date), **tenant_scope_filter(user.get("businessId"))})
-    expense_rows = await _sum_expenses(_date_match("date", start_date, end_date))
+    expense_rows = await _sum_expenses({**_date_match("date", start_date, end_date), **tenant_scope_filter(user.get("businessId"))})
     total_expenses = sum(r["amount"] for r in expense_rows)
     total_gst_paid = sum(r["gst"] for r in expense_rows)
     return {
@@ -75,7 +75,7 @@ async def get_accounting_summary(start_date: Optional[str] = None, end_date: Opt
 async def get_p_and_l(start_date: Optional[str] = None, end_date: Optional[str] = None,
                       user: dict = Depends(require_owner_or_manager)):
     txn_totals = await _sum_transactions({**_date_match("timestamp", start_date, end_date), **tenant_scope_filter(user.get("businessId"))})
-    expense_rows = await _sum_expenses(_date_match("date", start_date, end_date))
+    expense_rows = await _sum_expenses({**_date_match("date", start_date, end_date), **tenant_scope_filter(user.get("businessId"))})
     revenue = txn_totals["revenue"]
     cogs = sum(r["amount"] for r in expense_rows if r["_id"] in COGS_CATEGORIES)
     operating = sum(r["amount"] for r in expense_rows if r["_id"] not in COGS_CATEGORIES)
@@ -248,8 +248,8 @@ async def bas_worksheet(period_start: str, period_end: str):
 
 # ============ EXPENSES API ============
 @router.get("/expenses", response_model=List[Expense])
-async def get_expenses(start_date: Optional[str] = None, end_date: Optional[str] = None, category: Optional[str] = None, _: dict = Depends(require_owner_or_manager)):
-    query = {}
+async def get_expenses(start_date: Optional[str] = None, end_date: Optional[str] = None, category: Optional[str] = None, user: dict = Depends(require_owner_or_manager)):
+    query = tenant_scope_filter(user.get("businessId"))
     if category:
         query["category"] = category
     if start_date and end_date:
@@ -258,20 +258,20 @@ async def get_expenses(start_date: Optional[str] = None, end_date: Optional[str]
     return [Expense(**e) for e in expenses]
 
 @router.post("/expenses", response_model=Expense)
-async def create_expense(expense: ExpenseCreate, _: dict = Depends(require_owner_or_manager)):
-    expense_obj = Expense(**expense.dict())
+async def create_expense(expense: ExpenseCreate, user: dict = Depends(require_owner_or_manager)):
+    expense_obj = Expense(**expense.dict(), businessId=user.get("businessId"))
     await db.expenses.insert_one(expense_obj.dict())
     return expense_obj
 
 # ============ SUPPLIERS API ============
 @router.get("/suppliers", response_model=List[Supplier])
-async def get_suppliers(_: dict = Depends(get_user)):
-    suppliers = await db.suppliers.find().to_list(1000)
+async def get_suppliers(user: dict = Depends(get_user)):
+    suppliers = await db.suppliers.find(tenant_scope_filter(user.get("businessId"))).to_list(1000)
     return [Supplier(**s) for s in suppliers]
 
 @router.post("/suppliers", response_model=Supplier)
-async def create_supplier(supplier: SupplierCreate, _: dict = Depends(require_owner_or_manager)):
-    supplier_obj = Supplier(**supplier.dict())
+async def create_supplier(supplier: SupplierCreate, user: dict = Depends(require_owner_or_manager)):
+    supplier_obj = Supplier(**supplier.dict(), businessId=user.get("businessId"))
     await db.suppliers.insert_one(supplier_obj.dict())
     return supplier_obj
 
