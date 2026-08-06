@@ -6,6 +6,7 @@ from deps import get_user, require_owner_or_manager
 from models.promotion import Promotion, PromotionCreate
 from models.transaction import Transaction, TransactionCreate
 from models.refund import Refund, RefundCreate
+from middleware.actor_context import tenant_scope_filter, tenant_owns
 import uuid
 
 router = APIRouter()
@@ -60,7 +61,7 @@ async def get_transactions(
     location: Optional[str] = None,
     _user: dict = Depends(get_user),
 ):
-    query = {}
+    query = tenant_scope_filter(_user.get("businessId"))
     if payment_method:
         query["paymentMethod"] = payment_method
     if location:
@@ -260,6 +261,7 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
         "timestamp": datetime.utcnow(),
         "status": "completed",
         "receiptNumber": f"R-{str(uuid.uuid4())[:8].upper()}",
+        "businessId": user.get("businessId"),
     }
 
     await db.transactions.insert_one(txn_dict)
@@ -441,7 +443,7 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
 # otherwise "hourly" is captured as a txn_id and always 404s.
 @router.get("/transactions/hourly")
 async def get_hourly_transactions(_user: dict = Depends(get_user)):
-    transactions = await db.transactions.find().to_list(10000)
+    transactions = await db.transactions.find(tenant_scope_filter(_user.get("businessId"))).to_list(10000)
     hourly = {}
     for txn in transactions:
         ts = txn.get("timestamp")
@@ -454,7 +456,7 @@ async def get_hourly_transactions(_user: dict = Depends(get_user)):
 @router.get("/transactions/{txn_id}")
 async def get_transaction_detail(txn_id: str, _user: dict = Depends(get_user)):
     txn = await db.transactions.find_one({"id": txn_id}, {"_id": 0})
-    if not txn:
+    if not txn or not tenant_owns(txn.get("businessId"), _user.get("businessId")):
         raise HTTPException(status_code=404, detail="Transaction not found")
     # Attach any refunds for this transaction
     refunds = await db.refunds.find({"originalTransactionId": txn_id}, {"_id": 0}).to_list(100)
@@ -527,7 +529,7 @@ async def _reverse_loyalty_for_refund(original_txn: dict, refund_amount: float) 
 # ============ REFUNDS API ============
 @router.get("/refunds", response_model=List[Refund])
 async def get_refunds(_user: dict = Depends(get_user)):
-    refunds = await db.refunds.find().to_list(1000)
+    refunds = await db.refunds.find(tenant_scope_filter(_user.get("businessId"))).to_list(1000)
     return [Refund(**r) for r in refunds]
 
 @router.post("/refunds", response_model=Refund)
@@ -546,7 +548,7 @@ async def create_refund(refund: RefundCreate, _user: dict = Depends(require_owne
             status_code=400,
             detail=f"Refund exceeds remaining refundable amount (${refundable:.2f})"
         )
-    refund_obj = Refund(**refund.dict())
+    refund_obj = Refund(**refund.dict(), businessId=original_txn.get("businessId"))
     await db.refunds.insert_one(refund_obj.dict())
     # Auto-post refund reversal to ledger
     try:

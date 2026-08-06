@@ -92,6 +92,7 @@ class Transaction(BaseModel):
     smsReceipt: Optional[str] = None
     tableNumber: Optional[str] = None
     orderType: str = "retail"
+    businessId: Optional[str] = None
 
 class TransactionCreate(BaseModel):
     items: List[TransactionItem]
