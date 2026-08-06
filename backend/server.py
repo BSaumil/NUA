@@ -258,7 +258,20 @@ class RequireAuthMiddleware(BaseHTTPMiddleware):
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """120 req/min per (tenant, identity). Excludes static & public booking."""
+    """120 req/min per (tenant, identity). Excludes static & public booking.
+
+    A handful of paths get a stricter, IP-only override instead of the
+    default — specifically ones that are unauthenticated by design and
+    where the normal per-(tenant, identity) bucket is too generous. An
+    anonymous caller hammering /vouchers/public-check to brute-force valid
+    voucher codes has no `identity` beyond "unauthenticated", so without
+    this override every guessed code would share the same generous 120/min
+    room as every other anonymous request across the whole API.
+    """
+    PATH_OVERRIDES = {
+        "/api/vouchers/public-check": (10, 60),  # 10 req/min per IP
+    }
+
     def __init__(self, app):
         super().__init__(app)
         self.buckets = defaultdict(list)
@@ -270,9 +283,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         if not path.startswith("/api/") or path.startswith("/api/public") or path.startswith("/api/table"):
             return await call_next(request)
-        tenant = request.headers.get("X-Tenant-Id", "default")
-        identity = _rate_limit_identity(request)
-        key = f"{tenant}:{identity}"
+        override = self.PATH_OVERRIDES.get(path)
+        if override:
+            limit, window = override
+            key = f"path:{path}:{request.client.host if request.client else 'unknown'}"
+        else:
+            limit, window = self.limit, self.window
+            tenant = request.headers.get("X-Tenant-Id", "default")
+            identity = _rate_limit_identity(request)
+            key = f"{tenant}:{identity}"
         now = time()
         # Evict idle clients every 5 min so the bucket dict can't grow unbounded
         if now - self._last_evict > 300:
@@ -280,9 +299,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             stale = [k for k, ts in self.buckets.items() if not ts or now - ts[-1] > self.window]
             for k in stale:
                 del self.buckets[k]
-        self.buckets[key] = [t for t in self.buckets[key] if now - t < self.window]
-        if len(self.buckets[key]) >= self.limit:
-            return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded — 120 req/min per tenant"})
+        self.buckets[key] = [t for t in self.buckets[key] if now - t < window]
+        if len(self.buckets[key]) >= limit:
+            return JSONResponse(status_code=429, content={"detail": f"Rate limit exceeded — {limit} req/{window}s"})
         self.buckets[key].append(now)
         return await call_next(request)
 
