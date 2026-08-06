@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { v25API, v26API } from '../../services/api';
-import { Monitor } from 'lucide-react';
+import { Monitor, Flame } from 'lucide-react';
 import { useLanguage } from '../../i18n/useLanguage';
 import { LanguageSelector } from '../../i18n/LanguageSelector';
 
@@ -10,16 +10,31 @@ function itemName(item, lang) {
 
 export default function CFD() {
   const [data, setData] = useState({ cart: [] });
+  const [fetchedAt, setFetchedAt] = useState(null);
+  const [nowTick, setNowTick] = useState(Date.now());
   const { lang, setLang, t, dir, languages } = useLanguage('nua_cfd_lang');
   useEffect(() => {
     const tick = () => v26API.cfdEnriched()
-      .then(r => setData(r.data || { cart: [] }))
-      .catch(() => v25API.cfdCurrent().then(r => setData(r.data || { cart: [] })));
+      .then(r => { setData(r.data || { cart: [] }); setFetchedAt(Date.now()); })
+      .catch(() => v25API.cfdCurrent().then(r => { setData(r.data || { cart: [] }); setFetchedAt(Date.now()); }));
     tick();
     const id = setInterval(tick, 5000);
     return () => clearInterval(id);
   }, []);
+  // Ticks the promo countdown down to the second between 5s data refreshes,
+  // instead of the display jumping in 5-second steps.
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
   const total = (data.cart || []).reduce((s, i) => s + (i.price || 0) * (i.quantity || 1), 0);
+  const activePromotions = (data.activePromotions || []).map(p => {
+    if (p.endsInMinutes == null || fetchedAt == null) return { ...p, remainingLabel: null };
+    const elapsedSec = Math.max(0, Math.floor((nowTick - fetchedAt) / 1000));
+    const remainingSec = Math.max(0, p.endsInMinutes * 60 - elapsedSec);
+    const m = Math.floor(remainingSec / 60), s = remainingSec % 60;
+    return { ...p, remainingLabel: `${m}:${String(s).padStart(2, '0')}`, remainingSec };
+  }).filter(p => p.remainingSec == null || p.remainingSec > 0);
   return (
     <div className="min-h-screen bg-black text-white p-8 -m-6" dir={dir} data-testid="cfd-page">
       <div className="flex justify-between items-start mb-6">
@@ -32,6 +47,22 @@ export default function CFD() {
           <LanguageSelector lang={lang} setLang={setLang} languages={languages} variant="dark" label={t('common.language')} />
         </div>
       </div>
+      {activePromotions.length > 0 && (
+        <div className="mb-4 flex flex-wrap gap-2" data-testid="cfd-active-promotions">
+          {activePromotions.map(p => (
+            <div key={p.id} className="flex items-center gap-2 bg-gradient-to-r from-orange-600 to-red-600 rounded-xl px-4 py-2.5" data-testid={`cfd-promo-${p.id}`}>
+              <Flame size={20} className="text-yellow-200" />
+              <span className="font-bold text-lg">{p.name}</span>
+              {p.pricingMode === 'percentage' && p.discount > 0 && (
+                <span className="text-yellow-200 font-bold">{p.discount}% OFF</span>
+              )}
+              {p.remainingLabel && (
+                <span className="text-sm bg-black/25 rounded-full px-2.5 py-0.5 font-mono">ends in {p.remainingLabel}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       {data.customerName && (
         <p className="text-2xl text-amber-300 mb-4" data-testid="cfd-customer">
           {data.isMember ? '★ ' : ''}{data.customerName}{data.membershipTier ? ` · ${data.membershipTier}` : ''}
