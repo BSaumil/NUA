@@ -42,6 +42,9 @@ export const TRANSLATIONS = {
       pickupWord: 'pickup', deliveryWord: 'delivery', toastNameRequired: 'Name required', toastCartEmpty: 'Cart is empty',
       toastAddressRequired: 'Delivery address required', toastOrderPlaced: 'Order placed!', toastTrackingCode: 'Tracking code: {code}',
       toastFailed: 'Failed',
+      voucherPlaceholder: 'Voucher code', voucherApplyBtn: 'Apply', voucherApplying: 'Checking…',
+      voucherAppliedLabel: 'Applied: {label}', voucherRemove: 'Remove', voucherInvalid: 'Voucher not valid for this order',
+      voucherRecheckPrompt: 'Cart changed — re-apply your voucher',
     },
   },
   it: {

@@ -34,6 +34,10 @@ export default function OrderOnline() {
   const [address, setAddress] = useState('');
   const [notes, setNotes] = useState('');
   const [placing, setPlacing] = useState(false);
+  const [voucherCode, setVoucherCode] = useState('');
+  const [voucherApplied, setVoucherApplied] = useState(null); // { code, discount, label }
+  const [voucherChecking, setVoucherChecking] = useState(false);
+  const [voucherError, setVoucherError] = useState('');
 
   useEffect(() => {
     Promise.all([onlineAPI.publicProducts(), onlineAPI.publicCategories()])
@@ -50,8 +54,38 @@ export default function OrderOnline() {
 
   // Menu prices already include GST — it's disclosed below, not added on top.
   const subtotal = cart.reduce((s, i) => s + i.price * i.quantity, 0);
-  const total = subtotal;
+  const voucherDiscount = voucherApplied ? Math.min(voucherApplied.discount, subtotal) : 0;
+  const total = Math.max(0, subtotal - voucherDiscount);
   const gst = total / 11;
+
+  // Discount is re-checked against the live cart whenever it changes so a
+  // stale "applied" voucher can't silently overstate its discount.
+  useEffect(() => {
+    setVoucherApplied(prev => {
+      if (!prev) return prev;
+      setVoucherError(t('orderOnline.voucherRecheckPrompt'));
+      return null;
+    });
+    // eslint-disable-next-line
+  }, [cart]);
+
+  const applyVoucher = async () => {
+    if (!voucherCode.trim()) return;
+    setVoucherChecking(true);
+    setVoucherError('');
+    try {
+      const r = await onlineAPI.checkVoucher(voucherCode.trim(), cart.map(i => ({ price: i.price, quantity: i.quantity, category: i.category, id: i.id })));
+      if (r.data?.valid) {
+        setVoucherApplied({ code: voucherCode.trim(), discount: r.data.discount, label: r.data.label });
+      } else {
+        setVoucherApplied(null);
+        setVoucherError(r.data?.reason || t('orderOnline.voucherInvalid'));
+      }
+    } catch (e) {
+      setVoucherApplied(null);
+      setVoucherError(e?.response?.data?.detail || t('orderOnline.voucherInvalid'));
+    } finally { setVoucherChecking(false); }
+  };
 
   const maxPrepMin = useMemo(() => {
     if (cart.length === 0) return 0;
@@ -82,6 +116,7 @@ export default function OrderOnline() {
         channel,
         customerName: name, customerPhone: phone, customerEmail: email,
         address: channel === 'delivery' ? address : '', notes,
+        voucherCode: voucherApplied?.code || undefined,
       });
       toast({ title: t('orderOnline.toastOrderPlaced'), description: t('orderOnline.toastTrackingCode', { code: r.data.id }) });
       navigate(`/track/${r.data.id}`);
@@ -184,7 +219,29 @@ export default function OrderOnline() {
                     </div>
                   ))}
 
+                  <div className="pt-2 border-t space-y-1.5">
+                    {voucherApplied ? (
+                      <div className="flex items-center justify-between text-xs bg-green-50 border border-green-200 rounded-md px-2 py-1.5" data-testid="online-voucher-applied">
+                        <span className="text-green-700 font-medium">{t('orderOnline.voucherAppliedLabel', { label: voucherApplied.label || voucherApplied.code })} · -${voucherDiscount.toFixed(2)}</span>
+                        <button onClick={() => { setVoucherApplied(null); setVoucherCode(''); }} className="text-green-700 underline">{t('orderOnline.voucherRemove')}</button>
+                      </div>
+                    ) : (
+                      <div className="flex gap-1.5">
+                        <Input placeholder={t('orderOnline.voucherPlaceholder')} value={voucherCode}
+                          onChange={e => { setVoucherCode(e.target.value); setVoucherError(''); }}
+                          className="h-8 text-xs" data-testid="online-voucher-code" />
+                        <Button size="sm" variant="outline" className="h-8 text-xs shrink-0" disabled={voucherChecking || !voucherCode.trim()} onClick={applyVoucher} data-testid="online-voucher-apply">
+                          {voucherChecking ? t('orderOnline.voucherApplying') : t('orderOnline.voucherApplyBtn')}
+                        </Button>
+                      </div>
+                    )}
+                    {voucherError && <p className="text-[11px] text-red-600">{voucherError}</p>}
+                  </div>
+
                   <div className="pt-2 border-t text-sm space-y-1">
+                    {voucherDiscount > 0 && (
+                      <div className="flex justify-between text-[11px] text-green-700"><span>Subtotal</span><span>${subtotal.toFixed(2)} - ${voucherDiscount.toFixed(2)}</span></div>
+                    )}
                     <div className="flex justify-between font-bold"><span>{t('common.total')}</span><span>${total.toFixed(2)}</span></div>
                     <div className="flex justify-between text-[11px] text-gray-400"><span>{t('common.gstIncluded')}</span><span>${gst.toFixed(2)}</span></div>
                     <p className="text-[10px] text-gray-400 text-center">{t('common.pricesIncludeGst')}</p>

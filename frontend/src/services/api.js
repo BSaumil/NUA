@@ -624,6 +624,7 @@ export const onlineAPI = {
   recomputeEta: (id) => api.post(`/online/orders/${id}/eta`),
   track: (code) => api.get(`/online/orders/track/${code}`),
   kitchenLoad: () => api.get('/online/kitchen/load'),
+  checkVoucher: (code, cart) => api.post('/vouchers/public-check', { code, cart }),
 };
 
 // v17 — Loyalty engine + AI Agent (Ash)
