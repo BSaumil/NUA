@@ -46,6 +46,7 @@ class Promotion(BaseModel):
     # "functions" type) without needing to know its name in advance.
     channels: List[str] = []  # subset of ["dine-in", "takeaway"]
     createdAt: datetime = Field(default_factory=datetime.utcnow)
+    businessId: Optional[str] = None
 
 
 class PromotionCreate(BaseModel):

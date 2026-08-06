@@ -100,7 +100,7 @@ async def get_business_summary(business_id: str, _: dict = Depends(require_owner
     # its (single, real) numbers instead of zero.
     biz_or_untagged = {"$or": [{"businessId": business_id}, {"businessId": None}, {"businessId": {"$exists": False}}]}
     txns = await db.transactions.find(biz_or_untagged, {"_id": 0}).to_list(10000)
-    products = await db.products.find({}, {"_id": 0}).to_list(1000)
+    products = await db.products.find(biz_or_untagged, {"_id": 0}).to_list(1000)
     customers = await db.customers.find(biz_or_untagged, {"_id": 0}).to_list(10000)
     members = await db.members.find(biz_or_untagged, {"_id": 0}).to_list(10000)
     staff = await db.auth_users.find({"businessId": business_id}, {"_id": 0, "password_hash": 0}).to_list(100)
@@ -146,7 +146,7 @@ async def seed_default_business():
 # filtering: filtering today, before this runs, would make untagged data
 # disappear rather than isolate it.
 _BACKFILL_COLLECTIONS = ["customers", "vouchers", "wallet_ledger", "loyalty_ledger", "members",
-                          "transactions", "refunds", "products", "expenses", "suppliers"]
+                          "transactions", "refunds", "products", "expenses", "suppliers", "promotions"]
 
 
 @router.post("/backfill-tenant")

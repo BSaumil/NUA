@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { Clock, ChefHat, Bike, CheckCircle, Sparkles, RefreshCw, Bell, Package } from 'lucide-react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { Clock, ChefHat, Bike, CheckCircle, Sparkles, RefreshCw, Bell, Package, CreditCard, Loader2 } from 'lucide-react';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
-import { onlineAPI } from '../services/api';
+import { onlineAPI, stripeAPI } from '../services/api';
 
 const STEPS = [
   { key: 'pending', label: 'Order received', icon: Bell, color: '#f59e0b' },
@@ -20,10 +20,13 @@ const stepIdx = (status) => STEPS.findIndex(s => s.key === status);
 export default function TrackOrder() {
   const { code: codeFromUrl } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const sessionId = searchParams.get('session_id');
   const [code, setCode] = useState(codeFromUrl || '');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
+  const [paymentPolling, setPaymentPolling] = useState(!!sessionId);
 
   const fetchData = useCallback(async (c) => {
     if (!c) return;
@@ -41,6 +44,32 @@ export default function TrackOrder() {
     const t = setInterval(() => fetchData(data.id), 12000);
     return () => clearInterval(t);
   }, [data, fetchData]);
+
+  // Coming back from Stripe checkout — poll until the webhook/status-check
+  // has flipped paymentStatus, then refresh the order so the "paid" banner
+  // reflects reality instead of trusting the redirect alone.
+  useEffect(() => {
+    if (!sessionId || !data) return;
+    if (data.paymentStatus === 'paid') { setPaymentPolling(false); return; }
+    let attempts = 0;
+    let cancelled = false;
+    const poll = async () => {
+      if (cancelled || attempts >= 8) { setPaymentPolling(false); return; }
+      attempts++;
+      try {
+        const r = await stripeAPI.checkStatus(sessionId);
+        if (r.data?.paymentStatus === 'paid') {
+          await fetchData(data.id);
+          setPaymentPolling(false);
+          return;
+        }
+      } catch { /* keep polling until attempts run out */ }
+      if (!cancelled) setTimeout(poll, 2000);
+    };
+    poll();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line
+  }, [sessionId, data?.id]);
 
   // For delivery the flow includes out_for_delivery; for pickup/dine-in it skips that.
   const stepsForChannel = (() => {
@@ -67,6 +96,20 @@ export default function TrackOrder() {
         )}
 
         {err && <p className="text-sm text-center text-red-600">{err}</p>}
+
+        {data && sessionId && (
+          <Card className={paymentPolling ? 'border-blue-200 bg-blue-50/60' : data.paymentStatus === 'paid' ? 'border-emerald-200 bg-emerald-50/60' : 'border-amber-200 bg-amber-50/60'} data-testid="track-payment-status">
+            <CardContent className="p-3 flex items-center gap-2 text-sm">
+              {paymentPolling ? (
+                <><Loader2 size={16} className="animate-spin text-blue-600" /> Confirming your payment…</>
+              ) : data.paymentStatus === 'paid' ? (
+                <><CreditCard size={16} className="text-emerald-600" /> <span className="font-medium text-emerald-800">Payment confirmed — nothing to pay on arrival.</span></>
+              ) : (
+                <><CreditCard size={16} className="text-amber-600" /> <span className="text-amber-800">We couldn't confirm payment yet. You can pay at pickup/delivery instead.</span></>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {data && (
           <>

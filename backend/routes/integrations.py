@@ -7,6 +7,22 @@ import uuid
 
 router = APIRouter()
 
+
+async def _mark_online_order_paid_if_applicable(session_id: str):
+    """A payment_transactions doc tagged kind='online_order' (set by
+    routes/online_orders.py's checkout endpoint) means this Stripe session
+    is paying for an online order, not a POS sale — flip that order's
+    paymentStatus too, not just the generic payment ledger, so staff and the
+    guest's tracking page both see it as paid."""
+    payment = await db.payment_transactions.find_one({"sessionId": session_id}, {"_id": 0})
+    if not payment or payment.get("kind") != "online_order" or not payment.get("orderId"):
+        return
+    await db.online_orders.update_one(
+        {"id": payment["orderId"]},
+        {"$set": {"paymentStatus": "paid", "paidAt": datetime.utcnow().isoformat()}},
+    )
+
+
 # ============ STRIPE CHECKOUT API ============
 @router.post("/stripe/checkout")
 async def create_stripe_checkout(data: dict, http_request: Request):
@@ -88,6 +104,8 @@ async def get_stripe_checkout_status(session_id: str, http_request: Request):
                 {"sessionId": session_id},
                 {"$set": {"status": new_status, "paymentStatus": status.payment_status, "updatedAt": datetime.utcnow().isoformat()}}
             )
+            if status.payment_status == "paid":
+                await _mark_online_order_paid_if_applicable(session_id)
 
     return {
         "status": status.status,
@@ -119,6 +137,7 @@ async def stripe_webhook(request: Request):
                 {"sessionId": event.session_id},
                 {"$set": {"status": "completed", "paymentStatus": "paid", "updatedAt": datetime.utcnow().isoformat()}}
             )
+            await _mark_online_order_paid_if_applicable(event.session_id)
         return {"received": True}
     except Exception as e:
         return {"received": True, "note": str(e)}

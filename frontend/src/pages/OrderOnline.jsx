@@ -119,6 +119,13 @@ export default function OrderOnline() {
         voucherCode: voucherApplied?.code || undefined,
       });
       toast({ title: t('orderOnline.toastOrderPlaced'), description: t('orderOnline.toastTrackingCode', { code: r.data.id }) });
+      // If Stripe is configured, send the guest to pay now instead of the
+      // old "pay at pickup" default — falls back to the tracking page (same
+      // as before this existed) if payments aren't set up for this venue.
+      try {
+        const pay = await onlineAPI.checkout(r.data.id, window.location.origin);
+        if (pay.data?.configured && pay.data?.url) { window.location.href = pay.data.url; return; }
+      } catch { /* fall through to tracking page */ }
       navigate(`/track/${r.data.id}`);
     } catch (e) {
       toast({ title: t('orderOnline.toastFailed'), description: e?.response?.data?.detail, variant: 'destructive' });

@@ -7,7 +7,7 @@ from deps import get_user, optional_user, require_owner_or_manager
 from models.product import Product, ProductCreate, ProductUpdate
 from models.category import Category, CategoryCreate
 from models.modifier import Modifier, ModifierCreate
-from middleware.actor_context import tenant_scope_filter
+from middleware.actor_context import tenant_scope_filter, tenant_owns
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -55,8 +55,11 @@ async def create_product(product: ProductCreate, _: dict = Depends(require_owner
     return Product(**doc)
 
 @router.put("/products/{product_id}", response_model=Product)
-async def update_product(product_id: str, product_update: ProductUpdate, _: dict = Depends(require_owner_or_manager)):
+async def update_product(product_id: str, product_update: ProductUpdate, user: dict = Depends(require_owner_or_manager)):
     from services.entity_service import stamped_update
+    existing = await db.products.find_one({"id": product_id}, {"_id": 0, "businessId": 1})
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Product not found")
     update_data = {k: v for k, v in product_update.dict().items() if v is not None}
     result = await stamped_update("products", product_id, update_data, entity_type="product")
     if not result:
@@ -64,19 +67,22 @@ async def update_product(product_id: str, product_update: ProductUpdate, _: dict
     return Product(**result)
 
 @router.delete("/products/{product_id}")
-async def delete_product(product_id: str, _: dict = Depends(require_owner_or_manager)):
+async def delete_product(product_id: str, user: dict = Depends(require_owner_or_manager)):
     from services.entity_service import soft_delete
+    existing = await db.products.find_one({"id": product_id}, {"_id": 0, "businessId": 1})
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Product not found")
     result = await soft_delete("products", product_id, entity_type="product")
     if not result:
         raise HTTPException(status_code=404, detail="Product not found")
     return {"message": "Product soft-deleted", "id": product_id}
 
 @router.post("/products/{product_id}/adjust-stock")
-async def adjust_stock(product_id: str, data: dict, _: dict = Depends(get_user)):
+async def adjust_stock(product_id: str, data: dict, user: dict = Depends(get_user)):
     adjustment = data.get("adjustment", 0)
     reason = data.get("reason", "Manual adjustment")
     product = await db.products.find_one({"id": product_id})
-    if not product:
+    if not product or not tenant_owns(product.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Product not found")
     new_stock = product.get("stock", 0) + adjustment
     if new_stock < 0:
@@ -142,9 +148,11 @@ async def bulk_edit_products(payload: BulkProductEdit, user: dict = Depends(requ
     if payload.replaceModifierIds is not None:
         common["modifierIds"] = list(payload.replaceModifierIds)
 
+    tenant_filter = tenant_scope_filter(user.get("businessId"))
+
     if not needs_per_row:
         res = await db.products.update_many(
-            {"id": {"$in": payload.productIds}},
+            {"id": {"$in": payload.productIds}, **tenant_filter},
             {"$set": common},
         )
         return {"updated": res.modified_count, "failed": [], "mode": "update_many"}
@@ -153,7 +161,7 @@ async def bulk_edit_products(payload: BulkProductEdit, user: dict = Depends(requ
     updated = 0
     failed: List[str] = []
     for pid in payload.productIds:
-        prod = await db.products.find_one({"id": pid})
+        prod = await db.products.find_one({"id": pid, **tenant_filter})
         if not prod:
             failed.append(pid)
             continue

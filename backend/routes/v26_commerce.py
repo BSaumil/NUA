@@ -25,6 +25,7 @@ field so cashiers can scan OR key in by hand.
 from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request, Depends
 from deps import get_user, require_owner, require_owner_or_manager
+from middleware.actor_context import tenant_scope_filter
 from database import db
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -254,7 +255,7 @@ def _promotion_active_now(promo: dict) -> bool:
 
 
 @router.post("/cart/apply-promos")
-async def apply_promos_to_cart(data: dict, _: dict = Depends(get_user)):
+async def apply_promos_to_cart(data: dict, user: dict = Depends(get_user)):
     """Given a cart, return every promotion that auto-fires *right now* plus the
     computed discount. Supports:
       • pricingMode="percentage" — subtotal × discount%
@@ -266,7 +267,8 @@ async def apply_promos_to_cart(data: dict, _: dict = Depends(get_user)):
     if not cart:
         return {"applied": [], "totalDiscount": 0}
 
-    promos = await db.promotions.find({"active": True}, {"_id": 0}).to_list(200)
+    query = {"active": True, **tenant_scope_filter(user.get("businessId"))}
+    promos = await db.promotions.find(query, {"_id": 0}).to_list(200)
     applied = []
     total = 0.0
     for p in promos:
@@ -346,11 +348,12 @@ async def apply_promos_to_cart(data: dict, _: dict = Depends(get_user)):
 
 
 @router.get("/promotions/active-now")
-async def list_active_promotions_now(_: dict = Depends(get_user)):
+async def list_active_promotions_now(user: dict = Depends(get_user)):
     """POS-facing: returns every promotion that is *currently* live based on
     today's date, weekday, and current time of day. Staff use this so they know
     exactly what's running without scrolling through inactive promos."""
-    promos = await db.promotions.find({"active": True}, {"_id": 0}).to_list(500)
+    query = {"active": True, **tenant_scope_filter(user.get("businessId"))}
+    promos = await db.promotions.find(query, {"_id": 0}).to_list(500)
     return [p for p in promos if _promotion_active_now(p)]
 
 
@@ -989,25 +992,44 @@ async def cfd_push(data: dict, user: dict = Depends(get_user)):
         "selectedCustomer": data.get("selectedCustomer"),
         "tableNumber": data.get("tableNumber"),
         "walkInName": data.get("walkInName"),
+        "orderType": data.get("orderType"),
         "splitInProgress": bool(data.get("splitInProgress")),
         "splitParts": data.get("splitParts") or [],
         "updatedAt": _iso(_now()),
         "cashier": user.get("name"),
+        "businessId": user.get("businessId"),
     }
     await db.cfd_live.update_one({"terminalId": terminal_id}, {"$set": doc}, upsert=True)
     return {"pushed": True}
 
 
+def _promo_ends_in_minutes(promo: dict) -> Optional[int]:
+    """Minutes until this promo's daily window closes, or None if it has no
+    endTime (an all-day / date-range-only promo has nothing to count down to)."""
+    if not promo.get("endTime"):
+        return None
+    try:
+        end_h, end_m = (int(x) for x in promo["endTime"].split(":"))
+    except (ValueError, AttributeError):
+        return None
+    now = _now()
+    end_dt = now.replace(hour=end_h, minute=end_m, second=0, microsecond=0)
+    if end_dt <= now:
+        return None
+    return int((end_dt - now).total_seconds() // 60)
+
+
 @router.get("/cfd/enriched")
-async def cfd_enriched(request: Request, terminalId: Optional[str] = None):
+async def cfd_enriched(request: Request, terminalId: Optional[str] = None, user: dict = Depends(get_user)):
     """Live cart + customer name OR walk-in booking name, table number, and
     points earned/missed this visit. Prefers a live pushed feed; falls back to
     pos_tabs for legacy callers."""
+    tenant_filter = tenant_scope_filter(user.get("businessId"))
     live = None
     if terminalId:
-        live = await db.cfd_live.find_one({"terminalId": terminalId}, {"_id": 0})
+        live = await db.cfd_live.find_one({"terminalId": terminalId, **tenant_filter}, {"_id": 0})
     if not live:
-        live = await db.cfd_live.find_one({}, {"_id": 0}, sort=[("updatedAt", -1)])
+        live = await db.cfd_live.find_one(tenant_filter, {"_id": 0}, sort=[("updatedAt", -1)])
     if not live:
         tab = await db.pos_tabs.find_one({"status": {"$in": ["open", "active", None]}}, {"_id": 0}, sort=[("createdAt", -1)])
         live = {
@@ -1024,6 +1046,25 @@ async def cfd_enriched(request: Request, terminalId: Optional[str] = None):
     points_earned = int(subtotal * earn_rate) if customer else 0
     points_missed = 0 if customer else int(subtotal * earn_rate)
     name_display = (customer or {}).get("name") if customer else live.get("walkInName")
+
+    # Active promotions for the CURRENT order type only — a takeaway sale on
+    # the customer display shouldn't advertise a dine-in-only Happy Hour it
+    # will never actually get.
+    order_type = live.get("orderType")
+    promos = await db.promotions.find({"active": True, **tenant_filter}, {"_id": 0}).to_list(200)
+    active_promos = []
+    for p in promos:
+        if not _promotion_active_now(p):
+            continue
+        channels = p.get("channels") or []
+        if channels and order_type not in channels:
+            continue
+        active_promos.append({
+            "id": p["id"], "name": p["name"],
+            "discount": p.get("discount"), "pricingMode": p.get("pricingMode"),
+            "endsInMinutes": _promo_ends_in_minutes(p),
+        })
+
     return {
         "cart": cart, "subtotal": round(subtotal, 2),
         "customerName": name_display,
@@ -1034,6 +1075,7 @@ async def cfd_enriched(request: Request, terminalId: Optional[str] = None):
         "pointsMissed": points_missed,
         "splitInProgress": bool(live.get("splitInProgress")),
         "splitParts": live.get("splitParts") or [],
+        "activePromotions": active_promos,
         "updatedAt": _iso(_now()),
     }
 

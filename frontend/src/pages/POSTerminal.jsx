@@ -532,7 +532,7 @@ const POSTerminal = () => {
       v26API.cfdPush({
         cart: cart.map(i => ({ id: i.id, name: i.name, price: i.price, quantity: i.quantity, image: i.image, translations: i.translations })),
         selectedCustomer: selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name, membershipTier: selectedCustomer.membershipTier } : null,
-        tableNumber, walkInName,
+        tableNumber, walkInName, orderType,
         splitInProgress: paymentView === 'split',
         splitParts: paymentView === 'split'
           ? splitParts.map(s => ({ payerName: s.payerName, amount: s.amount, status: s.status }))
@@ -540,7 +540,7 @@ const POSTerminal = () => {
       }).catch(() => {});
     }, 400);
     return () => clearTimeout(t);
-  }, [cart, selectedCustomer, tableNumber, walkInName, paymentView, splitParts]);
+  }, [cart, selectedCustomer, tableNumber, walkInName, orderType, paymentView, splitParts]);
 
   // Live-update products & categories every 12s + on tab focus so any edit done in
   // another window reflects without a manual refresh.

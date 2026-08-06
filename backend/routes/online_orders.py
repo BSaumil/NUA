@@ -229,6 +229,13 @@ async def place_order(data: dict):
         "gst": gst,
         "total": total,
         "status": "pending",
+        # "unpaid" until a Stripe checkout for this order actually confirms —
+        # set by /online/orders/{id}/checkout + the shared Stripe status/webhook
+        # handlers in routes/integrations.py. Orders placed with Stripe not
+        # configured (or where the guest abandons checkout) simply stay
+        # "unpaid" forever, same as the "pay at pickup/delivery" model this
+        # replaces for anyone who does complete payment.
+        "paymentStatus": "unpaid",
         "eta": eta,
         "etaMessage": await _ai_eta_explanation({"channel": channel, "items": items}, eta),
         "events": [], "notifications": [],
@@ -241,6 +248,76 @@ async def place_order(data: dict):
     order["deliveryReceipts"] = receipts
     await db.online_orders.insert_one(order); order.pop("_id", None)
     return order
+
+
+# =============================================================================
+# PAYMENT — Stripe Checkout for an already-placed online order
+# =============================================================================
+# Online orders previously never got paid through this system at all — the
+# order was created, a tracking code handed back, and actual payment
+# happened entirely out of band (staff took payment at pickup/delivery,
+# with nothing here recording it). This endpoint is the missing prerequisite
+# for online ordering to be a sellable, complete product on its own: it
+# reuses the exact Stripe Checkout flow the in-store POS already uses
+# (routes/integrations.py), just pointed at an online order's total instead
+# of a POS cart, and tagged so the shared status-poll/webhook handlers know
+# to flip the ORDER's paymentStatus too, not just the generic payment ledger.
+@router.post("/online/orders/checkout")
+async def create_online_order_checkout(data: dict, http_request: Request):
+    """Public — a guest who just placed an order has no session to attach.
+    Takes orderId in the body rather than the URL (POST /online/orders/{id}/checkout
+    would need a path-param-aware entry in server.py's public-path matcher,
+    which only does prefix matching — a body field keeps this an exact,
+    easily-audited allowlist entry instead)."""
+    from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
+
+    order_id = data.get("orderId")
+    if not order_id:
+        raise HTTPException(status_code=400, detail="orderId is required")
+    order = await db.online_orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.get("paymentStatus") == "paid":
+        raise HTTPException(status_code=400, detail="Order is already paid")
+
+    api_key = os.environ.get("STRIPE_API_KEY")
+    if not api_key:
+        # Not a hard failure — the guest just falls back to paying at
+        # pickup/delivery like every online order before this endpoint existed.
+        return {"configured": False, "url": None}
+
+    origin_url = data.get("originUrl", str(http_request.base_url).rstrip("/"))
+    host_url = str(http_request.base_url).rstrip("/")
+    webhook_url = f"{host_url}/api/webhook/stripe"
+    stripe_checkout = StripeCheckout(api_key=api_key, webhook_url=webhook_url)
+
+    success_url = f"{origin_url}/track/{order_id}?session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{origin_url}/track/{order_id}"
+
+    checkout_request = CheckoutSessionRequest(
+        amount=float(order["total"]),
+        currency="aud",
+        success_url=success_url,
+        cancel_url=cancel_url,
+        metadata={"orderId": order_id, "source": "nua_pos", "kind": "online_order"},
+    )
+    session = await stripe_checkout.create_checkout_session(checkout_request)
+
+    payment_doc = {
+        "id": f"SPAY-{uuid.uuid4().hex[:8].upper()}",
+        "sessionId": session.session_id,
+        "orderId": order_id,
+        "amount": float(order["total"]),
+        "currency": "aud",
+        "status": "initiated",
+        "paymentStatus": "pending",
+        "provider": "stripe",
+        "kind": "online_order",
+        "createdAt": _iso(_now()),
+    }
+    await db.payment_transactions.insert_one(payment_doc)
+    await db.online_orders.update_one({"id": order_id}, {"$set": {"paymentSessionId": session.session_id}})
+    return {"configured": True, "url": session.url, "sessionId": session.session_id}
 
 
 # =============================================================================

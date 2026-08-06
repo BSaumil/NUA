@@ -13,25 +13,29 @@ router = APIRouter()
 
 # ============ PROMOTIONS API ============
 @router.get("/promotions")
-async def get_promotions():
+async def get_promotions(user: dict = Depends(get_user)):
     from utils.mongo_safe import safe_parse_list
-    promotions = await db.promotions.find({}, {"_id": 0}).to_list(1000)
+    promotions = await db.promotions.find(tenant_scope_filter(user.get("businessId")), {"_id": 0}).to_list(1000)
     return safe_parse_list(promotions, Promotion, where="promotions")
 
 @router.get("/promotions/active")
-async def get_active_promotions():
+async def get_active_promotions(user: dict = Depends(get_user)):
     from utils.mongo_safe import safe_parse_list
-    promotions = await db.promotions.find({"active": True}, {"_id": 0}).to_list(1000)
+    query = {"active": True, **tenant_scope_filter(user.get("businessId"))}
+    promotions = await db.promotions.find(query, {"_id": 0}).to_list(1000)
     return safe_parse_list(promotions, Promotion, where="promotions")
 
 @router.post("/promotions", response_model=Promotion)
-async def create_promotion(promotion: PromotionCreate, _user: dict = Depends(require_owner_or_manager)):
-    promo_obj = Promotion(**promotion.dict())
+async def create_promotion(promotion: PromotionCreate, user: dict = Depends(require_owner_or_manager)):
+    promo_obj = Promotion(**promotion.dict(), businessId=user.get("businessId"))
     await db.promotions.insert_one(promo_obj.dict())
     return promo_obj
 
 @router.put("/promotions/{promo_id}")
-async def update_promotion(promo_id: str, data: dict, _user: dict = Depends(require_owner_or_manager)):
+async def update_promotion(promo_id: str, data: dict, user: dict = Depends(require_owner_or_manager)):
+    existing = await db.promotions.find_one({"id": promo_id}, {"_id": 0, "businessId": 1})
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Promotion not found")
     allowed = {"name", "type", "discount", "active", "schedule",
                "products", "category", "categories",
                "pricingMode", "bundlePrice",
@@ -46,7 +50,10 @@ async def update_promotion(promo_id: str, data: dict, _user: dict = Depends(requ
     return result
 
 @router.delete("/promotions/{promo_id}")
-async def delete_promotion(promo_id: str, _user: dict = Depends(require_owner_or_manager)):
+async def delete_promotion(promo_id: str, user: dict = Depends(require_owner_or_manager)):
+    existing = await db.promotions.find_one({"id": promo_id}, {"_id": 0, "businessId": 1})
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Promotion not found")
     result = await db.promotions.delete_one({"id": promo_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Promotion not found")
