@@ -100,22 +100,20 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
         items_list.append(item_dict)
         earn_lines.append(((product or {}).get("category") or "Other", item_total))
 
-    # Apply customer membership-tier discount
+    # Apply customer membership-tier discount — reads the owner-editable
+    # loyalty_tiers ladder (Settings > Loyalty > Tiers) instead of a fixed
+    # Silver/Gold/Platinum percentage baked into this function, so a tier's
+    # discount%/points-multiplier can actually be changed without a deploy.
     tier_discount = 0
     loyalty_multiplier = 1.0
     if transaction.customerId:
         customer = await db.customers.find_one({"id": transaction.customerId})
         if customer:
-            tier = customer.get("membershipTier", "Bronze")
-            if tier == "Silver":
-                tier_discount = subtotal * 0.03
-                loyalty_multiplier = 1.25
-            elif tier == "Gold":
-                tier_discount = subtotal * 0.05
-                loyalty_multiplier = 1.5
-            elif tier == "Platinum":
-                tier_discount = subtotal * 0.10
-                loyalty_multiplier = 2.0
+            tier_name = customer.get("membershipTier", "Bronze")
+            tier_doc = await db.loyalty_tiers.find_one({"name": tier_name}, {"_id": 0})
+            if tier_doc:
+                tier_discount = subtotal * (float(tier_doc.get("discountPercent", 0)) / 100)
+                loyalty_multiplier = float(tier_doc.get("multiplier", 1.0))
 
     # Voucher/promotion discounts applied at the POS + loyalty-point redemption.
     # Amounts are clamped non-negative and the combined discount can never
