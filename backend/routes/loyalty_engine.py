@@ -31,6 +31,10 @@ DEFAULT_CONFIG = {
                                  # or redeem activity at all (inactivity-based,
                                  # not FIFO-per-earn — simpler and matches how
                                  # most POS loyalty programs actually expire).
+    "expiryWarnDays": 7,        # send a one-time "your points expire soon" notice
+                                 # this many days before pointsExpiryDays actually
+                                 # zeroes the balance. Only matters when
+                                 # pointsExpiryDays > 0.
     "downgradeEnabled": False,  # tiers only ever went up before; this lets them
                                  # come back down when a customer's balance
                                  # genuinely drops below their tier's threshold.
@@ -54,7 +58,7 @@ async def get_loyalty_config(_: dict = Depends(get_user)):
 async def update_loyalty_config(data: dict, _: dict = Depends(require_owner)):
     update = {k: v for k, v in data.items() if k in (
         "earnRate", "redeemRate", "minRedeem", "categoryMultipliers", "active",
-        "pointsExpiryDays", "downgradeEnabled", "downgradeGraceDays",
+        "pointsExpiryDays", "expiryWarnDays", "downgradeEnabled", "downgradeGraceDays",
     )}
     update["updatedAt"] = datetime.now(timezone.utc).isoformat()
     await db.loyalty_config.update_one({"id": "default"}, {"$set": {"id": "default", **update}}, upsert=True)
@@ -427,6 +431,58 @@ async def _expire_inactive_points(cfg: dict) -> list:
     return expired
 
 
+async def _warn_expiring_points(cfg: dict) -> list:
+    """One-time "your points expire soon" notice, sent expiryWarnDays before
+    pointsExpiryDays actually zeroes a balance. Expiry used to run
+    completely silently — a customer only found out their balance was gone
+    after the fact, with no chance to use it first."""
+    expiry_days = int(cfg.get("pointsExpiryDays") or 0)
+    warn_days = int(cfg.get("expiryWarnDays") or 7)
+    if expiry_days <= 0 or warn_days <= 0:
+        return []
+    from utils.notifications import send_email, send_sms
+    now = datetime.now(timezone.utc)
+    warn_cutoff = (now - timedelta(days=max(expiry_days - warn_days, 0))).isoformat()
+    expire_cutoff = (now - timedelta(days=expiry_days)).isoformat()
+    customers = await db.customers.find(
+        {"points": {"$gt": 0}},
+        {"_id": 0, "id": 1, "name": 1, "email": 1, "phone": 1, "points": 1, "loyaltyExpiryWarnedAt": 1},
+    ).to_list(20000)
+    warned = []
+    for c in customers:
+        last = await db.loyalty_ledger.find_one(
+            {"customerId": c["id"]}, {"_id": 0, "createdAt": 1}, sort=[("createdAt", -1)]
+        )
+        last_activity = (last or {}).get("createdAt")
+        # In the warning window: inactive long enough to be within
+        # warn_days of expiring, but not already expired (that's
+        # _expire_inactive_points's job, run separately in the same tick).
+        if not last_activity or not (expire_cutoff < last_activity <= warn_cutoff):
+            continue
+        already_warned = c.get("loyaltyExpiryWarnedAt")
+        if already_warned and already_warned >= last_activity:
+            continue  # already warned for this inactivity stretch — new activity would push last_activity forward
+        if not c.get("email") and not c.get("phone"):
+            continue
+        try:
+            last_dt = datetime.fromisoformat(last_activity.replace("Z", "+00:00"))
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            continue
+        days_left = max(0, (last_dt + timedelta(days=expiry_days) - now).days)
+        pts = int(c.get("points", 0))
+        msg = f"You have {pts} points expiring in {days_left} day{'s' if days_left != 1 else ''} — visit us to keep them active!"
+        if c.get("email"):
+            await send_email(c["email"], "Your points are expiring soon",
+                              f"<p>Hi {c.get('name', '')},</p><p>{msg}</p>")
+        if c.get("phone"):
+            await send_sms(c["phone"], msg)
+        await db.customers.update_one({"id": c["id"]}, {"$set": {"loyaltyExpiryWarnedAt": now.isoformat()}})
+        warned.append({"customerId": c["id"], "points": pts, "daysLeft": days_left})
+    return warned
+
+
 # =============================================================================
 # TIER RE-EVALUATION (upgrade always; downgrade opt-in, with a grace period)
 # =============================================================================
@@ -549,9 +605,16 @@ async def agent_tick(request: Request, user: dict = Depends(require_owner_or_man
             f"Only {bookings_today} bookings tonight — suggest 20% off SMS blast to VIPs",
             {"bookingsToday": bookings_today, "vipCount": len(segs["vip"])},
             status="suggested"))
-    # 6. Points expiry + 7. Tier re-evaluation — both opt-in via loyalty_config
-    # (pointsExpiryDays / downgradeEnabled), no-ops otherwise.
+    # 6. Points expiry warning + 7. Points expiry + 8. Tier re-evaluation —
+    # all opt-in via loyalty_config (pointsExpiryDays / downgradeEnabled),
+    # no-ops otherwise. Warning runs before expiry so a customer who's about
+    # to lose points this tick was at least told last tick, not the same run.
     cfg = await get_config()
+    warned = await _warn_expiring_points(cfg)
+    if warned:
+        decisions.append(await _record_decision("points_expiry_warned",
+            f"Sent expiry warning to {len(warned)} customer(s) with points expiring soon",
+            {"warned": warned[:20]}))
     expired = await _expire_inactive_points(cfg)
     if expired:
         decisions.append(await _record_decision("points_expired",
