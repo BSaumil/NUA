@@ -509,7 +509,7 @@ const POSTerminal = () => {
         const items = cart.map(i => ({
           productId: i.id, id: i.id, name: i.name, price: i.price, quantity: i.quantity, category: i.category,
         }));
-        const r = await v26API.applyPromos(items);
+        const r = await v26API.applyPromos(items, orderType);
         if (cancelled) return;
         (r.data?.applied || []).forEach(p => addDiscount({
           promotionId: p.promotionId, label: p.label, discount: p.discount, auto: true,
@@ -518,8 +518,10 @@ const POSTerminal = () => {
     };
     run();
     return () => { cancelled = true; };
-    // Intentionally only depend on cart contents — avoids feedback loop with appliedDiscounts
-  }, [cart]);  // eslint-disable-line
+    // Intentionally only depend on cart contents + orderType — avoids feedback loop with appliedDiscounts.
+    // orderType is included so switching dine-in <-> takeaway immediately drops/re-adds
+    // channel-restricted promos (e.g. a dine-in-only Happy Hour) instead of leaving a stale one applied.
+  }, [cart, orderType]);  // eslint-disable-line
 
   // Push live cart to the customer-facing display (debounced ~400ms) — also
   // carries split-payment progress while a split is in flight, so a guest
@@ -1583,12 +1585,14 @@ const POSTerminal = () => {
             </div>
           )}
         </div>
-        {/* Active Promotions */}
-        {promotions.filter(p => p.active).length > 0 && (
+        {/* Active Promotions — only ones that can actually fire for the
+            current order type, so a dine-in-only Happy Hour doesn't show as
+            "active" while ringing up a takeaway sale it will never apply to. */}
+        {promotions.filter(p => p.active && (!p.channels?.length || p.channels.includes(orderType))).length > 0 && (
           <div className="mt-2 p-2.5 bg-gradient-to-r from-yellow-50 to-orange-50 rounded-lg border border-yellow-200">
             <div className="flex gap-2 overflow-x-auto items-center">
               <h3 className="text-[10px] font-bold uppercase text-yellow-700 whitespace-nowrap">Promotions</h3>
-              {promotions.filter(p => p.active).map(promo => (
+              {promotions.filter(p => p.active && (!p.channels?.length || p.channels.includes(orderType))).map(promo => (
                 <div key={promo.id} className="bg-white px-3 py-1.5 rounded-md border text-xs whitespace-nowrap">
                   <span className="font-medium">{promo.name}</span>
                   <span className="ml-2 font-bold" style={{ color: theme.accent }}>{promo.discount}% OFF</span>

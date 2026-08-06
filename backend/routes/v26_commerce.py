@@ -262,6 +262,7 @@ async def apply_promos_to_cart(data: dict, _: dict = Depends(get_user)):
       • matching by categories[] AND/OR products[]
     """
     cart = data.get("cart") or []
+    order_type = data.get("orderType")
     if not cart:
         return {"applied": [], "totalDiscount": 0}
 
@@ -270,6 +271,14 @@ async def apply_promos_to_cart(data: dict, _: dict = Depends(get_user)):
     total = 0.0
     for p in promos:
         if not _promotion_active_now(p):
+            continue
+        # channels is an allow-list: a Happy Hour promo scoped to
+        # ["dine-in"] must not fire on a takeaway sale (or anything else
+        # this system doesn't even have a name for yet, e.g. functions) —
+        # an empty list means unrestricted, same as every promo created
+        # before this field existed.
+        channels = p.get("channels") or []
+        if channels and order_type not in channels:
             continue
 
         # Determine which cart lines this promo applies to.

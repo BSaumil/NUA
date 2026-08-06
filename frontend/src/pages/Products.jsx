@@ -31,6 +31,7 @@ const makeEmptyPromo = () => ({
   category: '', categories: [], products: [],
   startDate: '', endDate: '',
   activeDays: [], startTime: '', endTime: '',
+  channels: [],
 });
 const emptyBulkPatch = () => ({
   image: '', addModifierIds: [], removeModifierIds: [],
@@ -200,6 +201,7 @@ const Products = () => {
       products: p.products || [],
       startDate: p.startDate || '', endDate: p.endDate || '',
       activeDays: p.activeDays || [], startTime: p.startTime || '', endTime: p.endTime || '',
+      channels: p.channels || [],
     });
     setShowPromoDialog(true);
   };
@@ -659,6 +661,13 @@ const Products = () => {
                           {(promo.startTime || promo.endTime) && (
                             <span>{promo.startTime || '00:00'}–{promo.endTime || '23:59'}</span>
                           )}
+                        </div>
+                      )}
+                      {(promo.channels || []).length > 0 && (
+                        <div className="mt-1 text-xs">
+                          <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">
+                            {promo.channels.map(c => c === 'dine-in' ? 'Dine-in' : 'Takeaway').join(' + ')} only
+                          </span>
                         </div>
                       )}
                     </div>

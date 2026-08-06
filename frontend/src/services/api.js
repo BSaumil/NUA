@@ -776,7 +776,7 @@ export const v26API = {
   applyVoucher: (code, cart) => api.post(`/v26/vouchers/${code}/apply`, { cart }),
   recordRedemption: (vid, data) => api.post(`/v26/vouchers/${vid}/redeem`, data),
   // Auto-apply promotions
-  applyPromos: (cart) => api.post('/v26/cart/apply-promos', { cart }),
+  applyPromos: (cart, orderType) => api.post('/v26/cart/apply-promos', { cart, orderType }),
   activePromos: () => api.get('/v26/promotions/active-now'),
   // Subscriptions
   updateSubPlan: (id, data) => api.patch(`/v26/subscriptions/plans/${id}`, data),

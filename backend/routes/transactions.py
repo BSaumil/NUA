@@ -37,7 +37,7 @@ async def update_promotion(promo_id: str, data: dict, _user: dict = Depends(requ
                "pricingMode", "bundlePrice",
                "originalPrice", "discountedPrice",
                "minQuantity", "maxQuantity", "stackable",
-               "startDate", "endDate", "activeDays", "startTime", "endTime"}
+               "startDate", "endDate", "activeDays", "startTime", "endTime", "channels"}
     update_data = {k: v for k, v in data.items() if k in allowed}
     result = await db.promotions.find_one_and_update({"id": promo_id}, {"$set": update_data}, return_document=True)
     if not result:
