@@ -69,6 +69,7 @@ export function SplitPaymentDialog({
   onSetMode, onChangeCount, onUpdatePart, onPayPart, splitRemaining, loading, activeSplitIndex,
   seatsAvailable = false,
   cartItems = [], itemAssignments = {}, onAdjustItemAssignment,
+  customers = [],
 }) {
   const paidSoFar = Math.max(0, Math.round((Number(total) - Number(splitRemaining)) * 100) / 100);
   const allPaid = splitRemaining === 0 && splitParts.length > 0;
@@ -212,6 +213,32 @@ export function SplitPaymentDialog({
                           </button>
                         ))}
                       </div>
+                      {customers.length > 0 && (
+                        <div className="flex items-center gap-1.5">
+                          <select
+                            className="h-7 text-[11px] border rounded px-1.5 bg-white flex-1 min-w-0"
+                            value={part.customerId || ''}
+                            disabled={part.status === 'confirmed'}
+                            onChange={e => {
+                              const c = customers.find(x => x.id === e.target.value);
+                              onUpdatePart(idx, 'customerId', c ? c.id : null);
+                              onUpdatePart(idx, 'pointsRedeemed', 0);
+                            }}
+                            data-testid={`split-customer-${idx}`}
+                          >
+                            <option value="">No loyalty account</option>
+                            {customers.map(c => (
+                              <option key={c.id} value={c.id}>{c.name} {c.points ? `(${c.points} pts)` : ''}</option>
+                            ))}
+                          </select>
+                          {part.customerId && (
+                            <Input type="number" min="0" step="1" placeholder="Redeem pts" value={part.pointsRedeemed || ''}
+                              className="h-7 text-[11px] w-24"
+                              onChange={e => onUpdatePart(idx, 'pointsRedeemed', parseInt(e.target.value) || 0)}
+                              disabled={part.status === 'confirmed'} data-testid={`split-points-${idx}`} />
+                          )}
+                        </div>
+                      )}
                     </div>
                     {part.status !== 'confirmed' ? (
                       <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white h-8 px-3 disabled:opacity-50 disabled:cursor-not-allowed"

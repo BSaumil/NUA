@@ -43,11 +43,19 @@ class SplitDetail(BaseModel):
     """One guest's share of a split-payment sale — who paid, how much, by
     what method, and (for a 'by item'/'by seat' split) which items were
     actually theirs, so a receipt can be itemized per guest instead of just
-    showing one undifferentiated bill."""
+    showing one undifferentiated bill.
+
+    customerId/pointsRedeemed let EACH guest redeem against their OWN
+    loyalty balance rather than only the one customer attached to the whole
+    sale — a split used to only ever earn/redeem against transaction-level
+    customerId, so guests other than whoever the cashier had selected got no
+    loyalty benefit (or cost) from their own payment at all."""
     payerName: str
     amount: float
     method: str
     items: List[SplitDetailItem] = []
+    customerId: Optional[str] = None
+    pointsRedeemed: int = 0
 
 class Transaction(BaseModel):
     id: str
