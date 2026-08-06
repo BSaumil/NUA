@@ -13,7 +13,7 @@ import {
 } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { usePOS } from '../contexts/POSContext';
-import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API, v26API, floorPlansAPI, itemsSystemAPI, kitchenAPI, coursingAPI, posLayoutAPI } from '../services/api';
+import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API, v26API, floorPlansAPI, itemsSystemAPI, kitchenAPI, coursingAPI, posLayoutAPI, finalizeAPI } from '../services/api';
 import { useToast } from '../hooks/use-toast';
 import { useAuth } from '../contexts/AuthContext';
 import VoiceOrderButton from '../components/VoiceOrderButton';
@@ -572,16 +572,41 @@ const POSTerminal = () => {
     const code = (codeOverride ?? voucherCode ?? '').trim().toUpperCase();
     if (!code) return;
     setVoucherLoading(true);
+    const items = cart.map(i => ({ productId: i.id, id: i.id, name: i.name, price: i.price, quantity: i.quantity, category: i.category }));
     try {
-      const items = cart.map(i => ({ productId: i.id, id: i.id, name: i.name, price: i.price, quantity: i.quantity, category: i.category }));
       const r = await v26API.applyVoucher(code, items);
       const v = r.data?.voucher || {};
       addDiscount({ voucherId: v.id, label: `${v.name} · ${r.data.message}`, discount: r.data.discount, code });
       toast({ title: 'Voucher applied', description: r.data.message });
       setVoucherCode('');
       setShowDiscountPicker(false);
-    } catch (e) {
-      toast({ title: 'Could not apply', description: e?.response?.data?.detail || 'Invalid code', variant: 'destructive' });
+      setVoucherLoading(false);
+      return;
+    } catch {
+      // Not a v26 promo code — fall through and check the universal voucher
+      // engine (commerce_v29) below. Campaign/referral/refund-issued codes
+      // live in db.vouchers, a completely separate system this scan flow
+      // never used to check at all, so those codes just silently "didn't
+      // work" at the register no matter how valid they were.
+    }
+    try {
+      const subtotal = items.reduce((s, i) => s + i.price * i.quantity, 0);
+      const r2 = await finalizeAPI.validateVoucher({ code, cart: items, customerId: selectedCustomer?.id || undefined });
+      if (!r2.data?.valid) throw new Error(r2.data?.reason || 'Invalid code');
+      const v = r2.data.voucher;
+      // Simplified vs. the full server-side redemption math (which also
+      // scopes amount-type discounts to eligibleItems/eligibleCategories) —
+      // good enough to make an otherwise-inapplicable code usable at all.
+      const discount = v.valueType === 'percentage'
+        ? Math.round(subtotal * (Number(v.value) / 100) * 100) / 100
+        : Math.min(Number(v.value) || 0, v.partialRedeemable ? Number(v.residualValue ?? v.value) : Number(v.value));
+      if (discount <= 0) throw new Error('Voucher has no remaining value');
+      addDiscount({ voucherId: v.id, label: `${v.label} · -$${discount.toFixed(2)}`, discount, code });
+      toast({ title: 'Voucher applied', description: `-$${discount.toFixed(2)}` });
+      setVoucherCode('');
+      setShowDiscountPicker(false);
+    } catch (e2) {
+      toast({ title: 'Could not apply', description: e2?.response?.data?.detail || e2.message || 'Invalid code', variant: 'destructive' });
     } finally { setVoucherLoading(false); }
   };
 

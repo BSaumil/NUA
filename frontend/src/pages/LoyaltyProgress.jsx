@@ -99,6 +99,17 @@ function ReportsPanel() {
   }, []);
   React.useEffect(() => { load(); }, [load]);
 
+  const [resolving, setResolving] = React.useState(null);
+  const resolveFlag = async (flagId, status) => {
+    setResolving(flagId);
+    try {
+      const r = await axios.put(`${API}/loyalty/reports/fraud-flags/${flagId}`, { status }, { headers: H() });
+      toast.success(status === 'confirmed_abuse' ? (r.data.actionTaken || 'Confirmed') : 'Marked reviewed');
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to resolve flag'); }
+    finally { setResolving(null); }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
@@ -144,16 +155,37 @@ function ReportsPanel() {
         <p className="text-xs text-slate-500 mb-4">Point farming (unusually many earn events in 24h) and voucher sharing (same code redeemed from different terminals within 10 minutes).</p>
         {flags?.flags?.length === 0 && <p className="text-center text-sm text-slate-400 py-6">No flags — nothing unusual in the last check.</p>}
         <div className="space-y-2">
-          {(flags?.flags || []).map((f, i) => (
-            <div key={i} className="flex items-start gap-3 p-3 rounded border border-amber-200 bg-amber-50" data-testid={`fraud-flag-${i}`}>
+          {(flags?.flags || []).map((f) => (
+            <div key={f.id} className="flex items-start gap-3 p-3 rounded border border-amber-200 bg-amber-50" data-testid={`fraud-flag-${f.id}`}>
               <AlertTriangle size={14} className="text-amber-500 mt-0.5 flex-shrink-0" />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium">
                   {f.type === 'point_farming' ? `${f.customerName || f.customerId} — point farming` : `Voucher ${f.code || f.voucherId} — possible sharing`}
                 </p>
                 <p className="text-xs text-slate-500">{f.reason}</p>
+                {f.status !== 'open' && (
+                  <p className="text-xs mt-1">
+                    <Badge className={f.status === 'confirmed_abuse' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}>
+                      {f.status === 'confirmed_abuse' ? 'Confirmed abuse' : 'Reviewed OK'}
+                    </Badge>
+                    {f.actionTaken && <span className="text-slate-400 ml-2">{f.actionTaken}</span>}
+                  </p>
+                )}
               </div>
-              <Badge variant="outline" className="text-[10px] flex-shrink-0">{f.type.replace('_', ' ')}</Badge>
+              {f.status === 'open' ? (
+                <div className="flex gap-1.5 flex-shrink-0">
+                  <Button size="sm" variant="outline" className="h-7 text-xs" disabled={resolving === f.id}
+                    onClick={() => resolveFlag(f.id, 'reviewed_ok')} data-testid={`flag-ok-${f.id}`}>
+                    Reviewed OK
+                  </Button>
+                  <Button size="sm" className="h-7 text-xs bg-red-600 hover:bg-red-700 text-white" disabled={resolving === f.id}
+                    onClick={() => resolveFlag(f.id, 'confirmed_abuse')} data-testid={`flag-confirm-${f.id}`}>
+                    Confirm Abuse
+                  </Button>
+                </div>
+              ) : (
+                <Badge variant="outline" className="text-[10px] flex-shrink-0">{f.type.replace('_', ' ')}</Badge>
+              )}
             </div>
           ))}
         </div>

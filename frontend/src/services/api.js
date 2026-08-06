@@ -635,7 +635,9 @@ export const loyaltyEngineAPI = {
   getBalance: (customerId) => api.get(`/loyalty/balance/${customerId}`),
   getLedger: (customerId) => api.get(`/loyalty/ledger/${customerId}`),
   getLiabilityReport: () => api.get('/loyalty/reports/liability'),
-  getFraudFlags: () => api.get('/loyalty/reports/fraud-flags'),
+  getFraudFlags: (status = 'open') => api.get('/loyalty/reports/fraud-flags', { params: { status } }),
+  resolveFraudFlag: (id, data) => api.put(`/loyalty/reports/fraud-flags/${id}`, data),
+  unlockLoyaltyAccount: (customerId) => api.post(`/loyalty/customers/${customerId}/unlock`),
 };
 export const agentAPI = {
   getSegments: () => api.get('/agent/segments'),

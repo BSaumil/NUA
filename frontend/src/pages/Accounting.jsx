@@ -12,6 +12,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { transactionsAPI, refundsAPI, accountingAPI } from '../services/api';
 import RefundDialog from '../components/payments/RefundDialog';
 import { toast } from 'sonner';
+import { buildReceiptHtml } from '../lib/receiptHtml';
 
 const Accounting = () => {
   const { theme } = useTheme();
@@ -69,18 +70,7 @@ const Accounting = () => {
 
   const printReceipt = () => {
     const w = window.open('', '_blank', 'width=400,height=600');
-    const t = selectedTxn;
-    w.document.write(`<html><head><title>Receipt</title><style>body{font-family:monospace;max-width:320px;margin:20px auto;font-size:12px}h2{text-align:center;margin:0}hr{border:1px dashed #ccc}.row{display:flex;justify-content:space-between}.total{font-weight:bold;font-size:14px}</style></head><body>
-      <h2>NUA</h2><p style="text-align:center">Receipt #${t.receiptNumber || t.id}</p><hr/>
-      <p>Date: ${new Date(t.timestamp).toLocaleString()}</p>
-      <p>Cashier: ${t.cashier || 'Staff'}</p><hr/>
-      ${(t.items || []).map(i => `<div class="row"><span>${i.productName} x${i.quantity}</span><span>$${(i.price * i.quantity).toFixed(2)}</span></div>`).join('')}
-      <hr/><div class="row"><span>Subtotal</span><span>$${(t.subtotal || 0).toFixed(2)}</span></div>
-      ${t.discount ? `<div class="row"><span>Discount</span><span>-$${t.discount.toFixed(2)}</span></div>` : ''}
-      <div class="row"><span>GST</span><span>$${(t.gst || 0).toFixed(2)}</span></div>
-      <div class="row total"><span>TOTAL</span><span>$${(t.total || 0).toFixed(2)}</span></div><hr/>
-      <p>Payment: ${t.paymentMethod}</p><p style="text-align:center;margin-top:20px">Thank you!</p>
-    </body></html>`);
+    w.document.write(buildReceiptHtml(selectedTxn));
     w.document.close();
     w.print();
   };

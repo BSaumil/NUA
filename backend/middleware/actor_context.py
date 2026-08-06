@@ -56,6 +56,19 @@ def tenant_scope_filter(business_id: Optional[str] = None) -> Dict[str, Any]:
     return {"$or": [{"businessId": biz}, {"businessId": None}, {"businessId": {"$exists": False}}]}
 
 
+def tenant_owns(doc_business_id: Optional[str], business_id: Optional[str] = None) -> bool:
+    """Single-resource counterpart to tenant_scope_filter() — for a GET-by-id
+    route that fetches one document (a customer's wallet, their loyalty
+    ledger) rather than a list. Same safe defaults: an unknown caller
+    businessId or an untagged document both mean "allow", so this only ever
+    starts rejecting once both sides of the comparison are real values that
+    actually disagree."""
+    biz = business_id or get_actor_context().get("businessId")
+    if not biz or not doc_business_id:
+        return True
+    return doc_business_id == biz
+
+
 class ActorContextMiddleware(BaseHTTPMiddleware):
     """Populates the contextvar from request headers + JWT.
 

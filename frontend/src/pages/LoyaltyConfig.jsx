@@ -12,7 +12,7 @@ export default function LoyaltyConfig() {
   const { theme } = useTheme();
   const [cfg, setCfg] = useState({
     earnRate: 1, redeemRate: 0.01, minRedeem: 50, categoryMultipliers: {}, active: true,
-    pointsExpiryDays: 0, downgradeEnabled: false, downgradeGraceDays: 30,
+    pointsExpiryDays: 0, expiryWarnDays: 7, downgradeEnabled: false, downgradeGraceDays: 30,
   });
   const [newCat, setNewCat] = useState('');
   const [newMult, setNewMult] = useState('');
@@ -77,6 +77,15 @@ export default function LoyaltyConfig() {
                 onChange={e => setCfg({ ...cfg, pointsExpiryDays: parseInt(e.target.value) || 0 })}
                 data-testid="points-expiry-days" />
               <p className="text-[11px] text-gray-400 mt-1">0 = points never expire. Otherwise, a customer's balance is zeroed once this many days pass with no earn or redeem activity.</p>
+              {cfg.pointsExpiryDays > 0 && (
+                <div className="mt-2">
+                  <label className="text-xs uppercase tracking-wider text-gray-500">Warn this many days before expiry</label>
+                  <Input type="number" min="1" value={cfg.expiryWarnDays}
+                    onChange={e => setCfg({ ...cfg, expiryWarnDays: parseInt(e.target.value) || 1 })}
+                    data-testid="expiry-warn-days" />
+                  <p className="text-[11px] text-gray-400 mt-1">Sends a one-time email/SMS ("your points expire in N days") to customers with an email or phone on file, instead of letting the balance vanish with no warning.</p>
+                </div>
+              )}
             </div>
             <div>
               <label className="flex items-center gap-2 text-sm mb-1">
