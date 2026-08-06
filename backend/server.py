@@ -25,7 +25,6 @@ from routes.table_ordering import router as table_ordering_router
 from routes.integrations import router as integrations_router
 from routes.auth import router as auth_router, seed_admin
 from routes.ai_pantry import router as ai_pantry_router
-from routes.members import router as members_router
 from routes.multi_tenant import router as multi_tenant_router, seed_default_business
 from routes.advanced_features import router as advanced_features_router
 from routes.realtime import router as realtime_router
@@ -91,7 +90,6 @@ api_router.include_router(public_router)
 api_router.include_router(table_ordering_router)
 api_router.include_router(integrations_router)
 api_router.include_router(ai_pantry_router)
-api_router.include_router(members_router)
 api_router.include_router(advanced_features_router)  # Must be before multi_tenant to avoid /business/settings conflict
 api_router.include_router(realtime_router)
 api_router.include_router(staff_mgmt_router)
@@ -196,7 +194,6 @@ PUBLIC_API_PREFIXES = (
     "/api/public/",              # booking portal: menu, slots, book, waitlist, events
     "/api/table/",               # QR table ordering: menu, place order, order status
     "/api/online/orders/track/", # order tracking by code, from the SMS link
-    "/api/members/share-link/",  # member referral links
     "/api/stripe/checkout/status/",
 )
 
@@ -217,8 +214,6 @@ PUBLIC_API_PATHS = {
     # Guest-facing voucher check (online ordering, table QR) — dry-run only,
     # deliberately returns nothing beyond a discount amount + label.
     "/api/vouchers/public-check",
-    # Member self-service signup
-    "/api/members/login", "/api/members/signup",
     # Payment provider callbacks — signed by the provider, not by a user
     "/api/webhook/stripe", "/api/stripe/webhook",
 }
