@@ -230,6 +230,23 @@ const Dashboard = () => {
                 <hr className="border-dashed" />
                 <div className="flex justify-between font-bold"><span>TOTAL</span><span>${(selectedTxn.total || 0).toFixed(2)}</span></div>
                 <p className="text-center text-xs text-gray-500">Payment: {selectedTxn.paymentMethod}</p>
+                {(selectedTxn.splitDetails || []).length > 0 && (
+                  <>
+                    <hr className="border-dashed" />
+                    <p className="text-xs font-bold uppercase tracking-wide text-gray-500">Split payment</p>
+                    {selectedTxn.splitDetails.map((s, i) => (
+                      <div key={i} className="text-xs" data-testid={`receipt-split-${i}`}>
+                        <div className="flex justify-between">
+                          <span>{s.payerName} ({s.method})</span>
+                          <span>${(s.amount || 0).toFixed(2)}</span>
+                        </div>
+                        {(s.items || []).length > 0 && (
+                          <p className="text-gray-400 pl-2">{s.items.map(it => `${it.quantity}× ${it.name}`).join(' · ')}</p>
+                        )}
+                      </div>
+                    ))}
+                  </>
+                )}
               </div>
               <div className="flex gap-2 mt-4">
                 <Button variant="outline" className="flex-1" onClick={printReceipt}><Printer size={14} className="mr-1" /> Print</Button>

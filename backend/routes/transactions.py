@@ -224,6 +224,7 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
         "appliedDiscounts": applied_discounts,
         "pointsRedeemed": points_redeemed,
         "pointsDiscount": points_discount,
+        "splitDetails": [d.dict() for d in transaction.splitDetails],
         "surchargeAmount": surcharge_amount,
         "surchargePercent": surcharge_percent,
         "surchargeReason": surcharge_reason,

@@ -228,6 +228,23 @@ const Accounting = () => {
                 <div className="flex justify-between font-bold"><span>TOTAL</span><span>${(selectedTxn.total || 0).toFixed(2)}</span></div>
                 <hr className="border-dashed" />
                 <p className="text-center text-xs text-gray-500">Payment: {selectedTxn.paymentMethod}</p>
+                {(selectedTxn.splitDetails || []).length > 0 && (
+                  <>
+                    <hr className="border-dashed" />
+                    <p className="text-xs font-bold uppercase tracking-wide text-gray-500">Split payment</p>
+                    {selectedTxn.splitDetails.map((s, i) => (
+                      <div key={i} className="text-xs" data-testid={`receipt-split-${i}`}>
+                        <div className="flex justify-between">
+                          <span>{s.payerName} ({s.method})</span>
+                          <span>${(s.amount || 0).toFixed(2)}</span>
+                        </div>
+                        {(s.items || []).length > 0 && (
+                          <p className="text-gray-400 pl-2">{s.items.map(it => `${it.quantity}× ${it.name}`).join(' · ')}</p>
+                        )}
+                      </div>
+                    ))}
+                  </>
+                )}
                 <p className="text-center text-xs mt-2">Thank you!</p>
               </div>
               <div className="flex gap-2 mt-4">

@@ -520,17 +520,24 @@ const POSTerminal = () => {
     // Intentionally only depend on cart contents — avoids feedback loop with appliedDiscounts
   }, [cart]);  // eslint-disable-line
 
-  // Push live cart to the customer-facing display (debounced ~400ms)
+  // Push live cart to the customer-facing display (debounced ~400ms) — also
+  // carries split-payment progress while a split is in flight, so a guest
+  // watching the screen can see their own share and whether it's been paid,
+  // not just the whole table's undifferentiated total.
   useEffect(() => {
     const t = setTimeout(() => {
       v26API.cfdPush({
         cart: cart.map(i => ({ id: i.id, name: i.name, price: i.price, quantity: i.quantity, image: i.image, translations: i.translations })),
         selectedCustomer: selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name, membershipTier: selectedCustomer.membershipTier } : null,
         tableNumber, walkInName,
+        splitInProgress: paymentView === 'split',
+        splitParts: paymentView === 'split'
+          ? splitParts.map(s => ({ payerName: s.payerName, amount: s.amount, status: s.status }))
+          : [],
       }).catch(() => {});
     }, 400);
     return () => clearTimeout(t);
-  }, [cart, selectedCustomer, tableNumber, walkInName]);
+  }, [cart, selectedCustomer, tableNumber, walkInName, paymentView, splitParts]);
 
   // Live-update products & categories every 12s + on tab focus so any edit done in
   // another window reflects without a manual refresh.
@@ -1225,7 +1232,10 @@ const POSTerminal = () => {
           items: cart.map(item => toTxItem(item)),
           paymentMethod: 'Split Payment',
           customerId: selectedCustomer?.id || null, location: currentLocation, cashier: currentUser.name,
-          splitDetails: updatedParts.map(s => ({ payerName: s.payerName, amount: s.amount, method: s.method })),
+          splitDetails: updatedParts.map(s => ({
+            payerName: s.payerName, amount: s.amount, method: s.method,
+            items: (s.assignedItems || s.seatItems || []).map(i => ({ name: i.name, quantity: i.quantity })),
+          })),
           ...buildDiscountPayload(),
         });
         toast({ title: "All Splits Paid!", description: `Total $${totalNum.toFixed(2)} collected` });

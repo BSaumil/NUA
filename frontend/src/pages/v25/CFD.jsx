@@ -58,6 +58,24 @@ export default function CFD() {
           {t('cfd.pointsMissed', { n: data.pointsMissed })}
         </p>
       )}
+      {data.splitInProgress && (data.splitParts || []).length > 0 && (
+        <div className="mt-8 border-t-2 border-white pt-4" data-testid="cfd-split">
+          <p className="text-2xl font-bold text-amber-400 mb-3">{t('cfd.splitPayment')}</p>
+          <div className="space-y-2">
+            {data.splitParts.map((s, i) => (
+              <div key={i} className="flex justify-between items-center text-xl" data-testid={`cfd-split-part-${i}`}>
+                <span>{s.payerName}</span>
+                <span className="flex items-center gap-3">
+                  <span>${Number(s.amount || 0).toFixed(2)}</span>
+                  <span className={`text-sm px-2 py-0.5 rounded-full ${s.status === 'confirmed' ? 'bg-emerald-900 text-emerald-300' : 'bg-gray-800 text-gray-400'}`}>
+                    {s.status === 'confirmed' ? t('cfd.paid') : t('cfd.waiting')}
+                  </span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

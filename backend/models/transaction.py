@@ -35,6 +35,20 @@ class PaymentSplit(BaseModel):
     amount: float
     reference: Optional[str] = None  # gift card code, transaction ref
 
+class SplitDetailItem(BaseModel):
+    name: str
+    quantity: int = 1
+
+class SplitDetail(BaseModel):
+    """One guest's share of a split-payment sale — who paid, how much, by
+    what method, and (for a 'by item'/'by seat' split) which items were
+    actually theirs, so a receipt can be itemized per guest instead of just
+    showing one undifferentiated bill."""
+    payerName: str
+    amount: float
+    method: str
+    items: List[SplitDetailItem] = []
+
 class Transaction(BaseModel):
     id: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
@@ -58,6 +72,7 @@ class Transaction(BaseModel):
     paymentMethod: str
     paymentSplits: List[PaymentSplit] = []
     isSplitPayment: bool = False
+    splitDetails: List[SplitDetail] = []
     customerId: Optional[str] = None
     customerName: Optional[str] = None
     location: str
@@ -75,6 +90,7 @@ class TransactionCreate(BaseModel):
     paymentMethod: str
     paymentSplits: List[PaymentSplit] = []
     isSplitPayment: bool = False
+    splitDetails: List[SplitDetail] = []
     tipAmount: float = 0.0
     customerId: Optional[str] = None
     location: str
