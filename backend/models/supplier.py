@@ -13,6 +13,7 @@ class Supplier(BaseModel):
     paymentTerms: str  # "Net 30", "COD", etc
     status: str = "active"
     createdAt: datetime = Field(default_factory=datetime.utcnow)
+    businessId: Optional[str] = None
 
 class SupplierCreate(BaseModel):
     name: str

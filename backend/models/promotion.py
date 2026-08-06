@@ -35,6 +35,16 @@ class Promotion(BaseModel):
     activeDays: List[str] = []  # ["Monday","Tuesday",...]
     startTime: Optional[str] = None  # "11:00"
     endTime: Optional[str] = None    # "14:00"
+    # Which POS order types this promo is allowed to fire on. Empty list =
+    # unrestricted (applies to every order type, including any future ones)
+    # — this is what every promo created before this field existed already
+    # means, so it stays the default rather than silently narrowing them.
+    # A non-empty list is an ALLOW-list, not a block-list: only the order
+    # types named here qualify. That's deliberate — it's what lets a Happy
+    # Hour promo set to ["dine-in"] correctly exclude takeaway, delivery,
+    # and any order type this system doesn't even have yet (e.g. a future
+    # "functions" type) without needing to know its name in advance.
+    channels: List[str] = []  # subset of ["dine-in", "takeaway"]
     createdAt: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -59,3 +69,4 @@ class PromotionCreate(BaseModel):
     activeDays: List[str] = []
     startTime: Optional[str] = None
     endTime: Optional[str] = None
+    channels: List[str] = []

@@ -7,6 +7,7 @@ from deps import get_user, optional_user, require_owner_or_manager
 from models.product import Product, ProductCreate, ProductUpdate
 from models.category import Category, CategoryCreate
 from models.modifier import Modifier, ModifierCreate
+from middleware.actor_context import tenant_scope_filter
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -23,8 +24,14 @@ GUEST_HIDDEN_PRODUCT_FIELDS = ("cost", "stock", "sku")
 async def get_products(category: Optional[str] = None, search: Optional[str] = None,
                        include_deleted: bool = False, user=Depends(optional_user)):
     query = {}
+    and_clauses = []
     if not include_deleted:
-        query["$or"] = [{"deletedAt": None}, {"deletedAt": {"$exists": False}}]
+        and_clauses.append({"$or": [{"deletedAt": None}, {"deletedAt": {"$exists": False}}]})
+    tenant_filter = tenant_scope_filter(user.get("businessId") if user else None)
+    if tenant_filter:
+        and_clauses.append(tenant_filter)
+    if and_clauses:
+        query["$and"] = and_clauses
     if category:
         query["category"] = category
     if search:

@@ -14,6 +14,7 @@ class Expense(BaseModel):
     location: str
     date: datetime = Field(default_factory=datetime.utcnow)
     createdBy: str
+    businessId: Optional[str] = None
 
 class ExpenseCreate(BaseModel):
     category: str

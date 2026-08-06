@@ -124,6 +124,11 @@ export default function OnlineOrders() {
                     </div>
                     <p className="text-sm font-medium truncate">{(o.customer || {}).name}</p>
                     <p className="text-xs text-gray-500 capitalize">{o.channel} · {o.items.length} items</p>
+                    {o.voucherDiscount > 0 && (
+                      <Badge variant="outline" className="text-emerald-700 border-emerald-300 text-[9px]" data-testid={`order-voucher-badge-${o.id}`}>
+                        Voucher −${o.voucherDiscount.toFixed(2)}
+                      </Badge>
+                    )}
                     {o.eta && (
                       <div className="flex items-center gap-1 text-[11px] text-gray-600 mt-1">
                         <Clock size={11} /> {o.eta.etaMinutes} min
@@ -186,7 +191,23 @@ export default function OnlineOrders() {
                     <span className="font-mono">${(it.price * it.quantity).toFixed(2)}</span>
                   </div>
                 ))}
+                {opened.voucherDiscount > 0 && (
+                  <div className="pt-2 space-y-0.5" data-testid="order-voucher-line">
+                    <div className="flex justify-between text-sm text-gray-500">
+                      <span>Subtotal</span><span>${opened.subtotal.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm text-emerald-700">
+                      <span>Voucher {opened.voucherCode ? `(${opened.voucherCode})` : ''} {opened.voucherLabel ? `— ${opened.voucherLabel}` : ''}</span>
+                      <span>−${opened.voucherDiscount.toFixed(2)}</span>
+                    </div>
+                  </div>
+                )}
                 <div className="flex justify-between text-sm pt-2 font-bold"><span>Total</span><span>${opened.total.toFixed(2)}</span></div>
+                {opened.voucherDiscount > 0 && (
+                  <p className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1">
+                    Voucher already deducted above — charge exactly ${opened.total.toFixed(2)} when you process payment for this order.
+                  </p>
+                )}
               </div>
 
               {STAGE_NEXT[opened.status] && (

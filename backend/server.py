@@ -25,7 +25,6 @@ from routes.table_ordering import router as table_ordering_router
 from routes.integrations import router as integrations_router
 from routes.auth import router as auth_router, seed_admin
 from routes.ai_pantry import router as ai_pantry_router
-from routes.members import router as members_router
 from routes.multi_tenant import router as multi_tenant_router, seed_default_business
 from routes.advanced_features import router as advanced_features_router
 from routes.realtime import router as realtime_router
@@ -91,7 +90,6 @@ api_router.include_router(public_router)
 api_router.include_router(table_ordering_router)
 api_router.include_router(integrations_router)
 api_router.include_router(ai_pantry_router)
-api_router.include_router(members_router)
 api_router.include_router(advanced_features_router)  # Must be before multi_tenant to avoid /business/settings conflict
 api_router.include_router(realtime_router)
 api_router.include_router(staff_mgmt_router)
@@ -196,7 +194,6 @@ PUBLIC_API_PREFIXES = (
     "/api/public/",              # booking portal: menu, slots, book, waitlist, events
     "/api/table/",               # QR table ordering: menu, place order, order status
     "/api/online/orders/track/", # order tracking by code, from the SMS link
-    "/api/members/share-link/",  # member referral links
     "/api/stripe/checkout/status/",
 )
 
@@ -217,8 +214,6 @@ PUBLIC_API_PATHS = {
     # Guest-facing voucher check (online ordering, table QR) — dry-run only,
     # deliberately returns nothing beyond a discount amount + label.
     "/api/vouchers/public-check",
-    # Member self-service signup
-    "/api/members/login", "/api/members/signup",
     # Payment provider callbacks — signed by the provider, not by a user
     "/api/webhook/stripe", "/api/stripe/webhook",
 }
@@ -263,7 +258,20 @@ class RequireAuthMiddleware(BaseHTTPMiddleware):
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """120 req/min per (tenant, identity). Excludes static & public booking."""
+    """120 req/min per (tenant, identity). Excludes static & public booking.
+
+    A handful of paths get a stricter, IP-only override instead of the
+    default — specifically ones that are unauthenticated by design and
+    where the normal per-(tenant, identity) bucket is too generous. An
+    anonymous caller hammering /vouchers/public-check to brute-force valid
+    voucher codes has no `identity` beyond "unauthenticated", so without
+    this override every guessed code would share the same generous 120/min
+    room as every other anonymous request across the whole API.
+    """
+    PATH_OVERRIDES = {
+        "/api/vouchers/public-check": (10, 60),  # 10 req/min per IP
+    }
+
     def __init__(self, app):
         super().__init__(app)
         self.buckets = defaultdict(list)
@@ -275,9 +283,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         if not path.startswith("/api/") or path.startswith("/api/public") or path.startswith("/api/table"):
             return await call_next(request)
-        tenant = request.headers.get("X-Tenant-Id", "default")
-        identity = _rate_limit_identity(request)
-        key = f"{tenant}:{identity}"
+        override = self.PATH_OVERRIDES.get(path)
+        if override:
+            limit, window = override
+            key = f"path:{path}:{request.client.host if request.client else 'unknown'}"
+        else:
+            limit, window = self.limit, self.window
+            tenant = request.headers.get("X-Tenant-Id", "default")
+            identity = _rate_limit_identity(request)
+            key = f"{tenant}:{identity}"
         now = time()
         # Evict idle clients every 5 min so the bucket dict can't grow unbounded
         if now - self._last_evict > 300:
@@ -285,9 +299,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             stale = [k for k, ts in self.buckets.items() if not ts or now - ts[-1] > self.window]
             for k in stale:
                 del self.buckets[k]
-        self.buckets[key] = [t for t in self.buckets[key] if now - t < self.window]
-        if len(self.buckets[key]) >= self.limit:
-            return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded — 120 req/min per tenant"})
+        self.buckets[key] = [t for t in self.buckets[key] if now - t < window]
+        if len(self.buckets[key]) >= limit:
+            return JSONResponse(status_code=429, content={"detail": f"Rate limit exceeded — {limit} req/{window}s"})
         self.buckets[key].append(now)
         return await call_next(request)
 

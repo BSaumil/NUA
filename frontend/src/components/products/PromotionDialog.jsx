@@ -61,6 +61,18 @@ export const PromotionDialog = ({
   const selectedCategories = promoForm.categories || (promoForm.category ? [promoForm.category] : []);
   const selectedProducts = promoForm.products || [];
 
+  // An empty channels[] means "unrestricted" (both boxes show checked), so a
+  // promo created before this field existed keeps behaving exactly as it did.
+  const ALL_CHANNELS = ['dine-in', 'takeaway'];
+  const selectedChannels = (promoForm.channels && promoForm.channels.length) ? promoForm.channels : ALL_CHANNELS;
+  const toggleChannel = (ch) => {
+    const next = selectedChannels.includes(ch)
+      ? selectedChannels.filter(c => c !== ch)
+      : [...selectedChannels, ch];
+    if (next.length === 0) return; // at least one channel must stay selected
+    setPromoForm({ ...promoForm, channels: next.length === ALL_CHANNELS.length ? [] : next });
+  };
+
   const toggleCategory = (name) => {
     const cur = new Set(selectedCategories);
     if (cur.has(name)) cur.delete(name); else cur.add(name);
@@ -367,6 +379,26 @@ export const PromotionDialog = ({
               <Input type="time" value={promoForm.endTime}
                 onChange={e => setPromoForm({ ...promoForm, endTime: e.target.value })}
                 data-testid="promo-end-time" />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-gray-500 mb-1 block">
+              Applies to <span className="text-gray-400">(e.g. a Happy Hour drinks promo should be dine-in only)</span>
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              {[{ v: 'dine-in', label: 'Dine-in' }, { v: 'takeaway', label: 'Takeaway' }].map(ch => {
+                const on = selectedChannels.includes(ch.v);
+                return (
+                  <button
+                    key={ch.v} type="button"
+                    onClick={() => toggleChannel(ch.v)}
+                    className={`px-2.5 py-1 text-xs rounded-full font-medium transition-colors ${on ? 'text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                    style={on ? { background: theme?.primary || '#f97316' } : {}}
+                    data-testid={`promo-channel-${ch.v}`}
+                  >{ch.label}</button>
+                );
+              })}
             </div>
           </div>
 
