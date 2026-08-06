@@ -208,11 +208,27 @@ async def apply_voucher(code: str, data: dict, _: dict = Depends(get_user)):
 
 @router.post("/vouchers/{vid}/redeem")
 async def record_redemption(vid: str, data: dict, user: dict = Depends(get_user)):
-    """Called by the POS once a transaction completes with the voucher attached."""
+    """Called by the POS once a transaction completes with the voucher attached.
+
+    Used to unconditionally $inc usedCount with no existence check, no
+    maxUses enforcement at redemption time (only at apply-time, so a race
+    between two terminals applying the same near-exhausted code could both
+    succeed), and no duplicate guard — a retried request (or the same
+    double-click-protection gap points redemption had) would double-count."""
+    tx_id = data.get("txId")
+    if tx_id:
+        existing = await db.voucher_redemptions.find_one({"voucherId": vid, "txId": tx_id}, {"_id": 0, "id": 1})
+        if existing:
+            return {"recorded": True, "duplicate": True}
+    v = await db.commerce_vouchers.find_one({"id": vid}, {"_id": 0})
+    if not v:
+        raise HTTPException(status_code=404, detail="Voucher not found")
+    if v.get("maxUses", 0) and v.get("usedCount", 0) >= v["maxUses"]:
+        raise HTTPException(status_code=400, detail="Voucher has reached max redemptions")
     await db.commerce_vouchers.update_one({"id": vid}, {"$inc": {"usedCount": 1}})
     await db.voucher_redemptions.insert_one({
         "id": _uid("RED"), "voucherId": vid,
-        "txId": data.get("txId"), "customerId": data.get("customerId"),
+        "txId": tx_id, "customerId": data.get("customerId"),
         "amount": float(data.get("amount", 0)),
         "createdAt": _iso(_now()), "createdBy": user["id"],
     })
