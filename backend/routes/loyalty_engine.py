@@ -9,6 +9,7 @@ Loyalty rules (user spec):
 from fastapi import APIRouter, HTTPException, Request, Depends
 from deps import get_user, require_owner, require_owner_or_manager
 from database import db
+from middleware.actor_context import tenant_owns
 from datetime import datetime, timezone, timedelta
 import uuid
 import os
@@ -160,9 +161,9 @@ async def redeem_points(data: dict, _: dict = Depends(get_user)):
 
 
 @router.get("/loyalty/balance/{customer_id}")
-async def get_balance(customer_id: str, _: dict = Depends(get_user)):
+async def get_balance(customer_id: str, user: dict = Depends(get_user)):
     customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
-    if not customer:
+    if not customer or not tenant_owns(customer.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Customer not found")
     pts = int(customer.get("points", 0))
     cfg = await get_config()
@@ -176,7 +177,10 @@ async def get_balance(customer_id: str, _: dict = Depends(get_user)):
 
 
 @router.get("/loyalty/ledger/{customer_id}")
-async def get_ledger(customer_id: str, _: dict = Depends(get_user)):
+async def get_ledger(customer_id: str, user: dict = Depends(get_user)):
+    customer = await db.customers.find_one({"id": customer_id}, {"_id": 0, "businessId": 1})
+    if not customer or not tenant_owns(customer.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Customer not found")
     entries = await db.loyalty_ledger.find({"customerId": customer_id}, {"_id": 0}).sort("createdAt", -1).to_list(100)
     return entries
 

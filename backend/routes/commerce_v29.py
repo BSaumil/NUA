@@ -47,7 +47,7 @@ from datetime import datetime, timezone, timedelta, date
 from typing import Optional, List, Dict, Any
 from database import db
 from deps import get_user
-from middleware.actor_context import get_actor_context, tenant_scope_filter
+from middleware.actor_context import get_actor_context, tenant_scope_filter, tenant_owns
 from models.voucher import Voucher, VoucherCreate, VoucherRedeemRequest, VoucherValidateRequest, VoucherRedemption, VoucherRules
 from models.wallet_ledger import LedgerEntry, LedgerEntryCreate
 import base64
@@ -421,9 +421,9 @@ async def _ledger_write(*, customer_id: str, type_: str, sign: int, amount: floa
 
 
 @router.get("/wallet/{customer_id}")
-async def get_wallet(customer_id: str, _: dict = Depends(get_user)):
+async def get_wallet(customer_id: str, user: dict = Depends(get_user)):
     c = await db.customers.find_one({"id": customer_id}, {"_id": 0})
-    if not c:
+    if not c or not tenant_owns(c.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Customer not found")
     entries = await db.wallet_ledger.find({"customerId": customer_id}, {"_id": 0}).sort("createdAt", -1).to_list(2000)
     balances = {b: 0.0 for b in _BUCKETS}
