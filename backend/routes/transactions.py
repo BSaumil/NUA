@@ -467,6 +467,63 @@ async def get_transaction_detail(txn_id: str, _user: dict = Depends(get_user)):
 # unreachable, incompatible schema (field `balance` instead of
 # `currentBalance`) — removed rather than fixed, since nothing called it.
 
+async def _reverse_loyalty_for_refund(original_txn: dict, refund_amount: float) -> list:
+    """Refunding a sale used to leave loyalty completely untouched: a
+    customer who redeemed 500 points for a discount kept the refunded money
+    AND lost the points permanently (never restored), while a customer who
+    earned points on that sale kept them even though the money came back.
+
+    Reverses both, proportional to how much of the sale was actually
+    refunded (a partial refund only reverses that fraction) — using the
+    loyalty_ledger entries already written for this transactionId at
+    checkout, not the top-level pointsRedeemed field, so this correctly
+    covers per-guest split-payment redemptions too, not just the one
+    customerId attached to the whole sale.
+    """
+    total = float(original_txn.get("total") or 0)
+    fraction = min(1.0, refund_amount / total) if total > 0 else 1.0
+    entries = await db.loyalty_ledger.find(
+        {"transactionId": original_txn["id"], "type": {"$in": ["earn", "redeem"]}},
+        {"_id": 0, "customerId": 1, "type": 1, "points": 1},
+    ).to_list(200)
+    by_customer: dict = {}
+    for e in entries:
+        cid = e.get("customerId")
+        if not cid:
+            continue
+        by_customer.setdefault(cid, {"earned": 0, "redeemed": 0})
+        if e["type"] == "earn":
+            by_customer[cid]["earned"] += int(e.get("points", 0))
+        else:  # redeem entries are stored as negative points
+            by_customer[cid]["redeemed"] += abs(int(e.get("points", 0)))
+
+    reversed_for = []
+    for customer_id, totals in by_customer.items():
+        earn_clawback = round(totals["earned"] * fraction)
+        redeem_restore = round(totals["redeemed"] * fraction)
+        if earn_clawback <= 0 and redeem_restore <= 0:
+            continue
+        # Clawback capped at whatever the customer still has — never drive
+        # a balance negative because they already spent points earned here
+        # on something else entirely.
+        current = await db.customers.find_one({"id": customer_id}, {"_id": 0, "points": 1})
+        available = int((current or {}).get("points", 0))
+        actual_clawback = min(earn_clawback, available)
+        net = redeem_restore - actual_clawback
+        if net == 0:
+            continue
+        await db.customers.update_one({"id": customer_id}, {"$inc": {"points": net}})
+        await db.loyalty_ledger.insert_one({
+            "id": f"LP-{str(uuid.uuid4())[:8].upper()}",
+            "customerId": customer_id, "transactionId": original_txn["id"],
+            "type": "refund_reversal", "points": net,
+            "earnClawedBack": actual_clawback, "redeemRestored": redeem_restore,
+            "createdAt": datetime.utcnow().isoformat(),
+        })
+        reversed_for.append({"customerId": customer_id, "earnClawedBack": actual_clawback, "redeemRestored": redeem_restore})
+    return reversed_for
+
+
 # ============ REFUNDS API ============
 @router.get("/refunds", response_model=List[Refund])
 async def get_refunds(_user: dict = Depends(get_user)):
@@ -529,4 +586,11 @@ async def create_refund(refund: RefundCreate, _user: dict = Depends(require_owne
     except Exception as e:
         import logging
         logging.getLogger(__name__).warning(f"Refund kitchen/stock reversal skipped: {e}")
+
+    try:
+        await _reverse_loyalty_for_refund(original_txn, refund.amount)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Refund loyalty reversal skipped: {e}")
+
     return refund_obj
