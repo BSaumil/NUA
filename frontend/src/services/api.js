@@ -1020,4 +1020,16 @@ export const nuaAPI = {
   chat: (data) => api.post('/nua/chat', data),
 };
 
+// Multi-Business / Multi-Tenant — create/list/edit businesses, tenant data
+// export, and the one-time businessId backfill migration for pre-tenancy data
+export const businessAPI = {
+  create: (data) => api.post('/business/create', data),
+  list: () => api.get('/business/list'),
+  get: (id) => api.get(`/business/${id}`),
+  update: (id, data) => api.put(`/business/${id}`, data),
+  summary: (id) => api.get(`/business/${id}/summary`),
+  exportData: (id, collection) => api.get(`/business/${id}/export`, { params: collection ? { collection } : {} }),
+  backfillTenant: () => api.post('/business/backfill-tenant'),
+};
+
 export default api;
