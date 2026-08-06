@@ -47,7 +47,7 @@ from datetime import datetime, timezone, timedelta, date
 from typing import Optional, List, Dict, Any
 from database import db
 from deps import get_user
-from middleware.actor_context import get_actor_context
+from middleware.actor_context import get_actor_context, tenant_scope_filter
 from models.voucher import Voucher, VoucherCreate, VoucherRedeemRequest, VoucherValidateRequest, VoucherRedemption, VoucherRules
 from models.wallet_ledger import LedgerEntry, LedgerEntryCreate
 import base64
@@ -172,9 +172,9 @@ async def list_vouchers(status: Optional[str] = None,
                          customer_id: Optional[str] = None,
                          source_type: Optional[str] = None,
                          limit: int = 200,
-                         _: dict = Depends(get_user)):
+                         user: dict = Depends(get_user)):
     from utils.mongo_safe import safe_parse_list
-    q: Dict[str, Any] = {}
+    q: Dict[str, Any] = tenant_scope_filter(user.get("businessId"))
     if status: q["status"] = status
     if customer_id: q["customerId"] = customer_id
     if source_type: q["sourceType"] = source_type

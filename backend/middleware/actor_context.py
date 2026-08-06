@@ -31,6 +31,31 @@ def set_actor_context(ctx: Dict[str, Any]) -> None:
     _actor_ctx.set(ctx)
 
 
+def tenant_scope_filter(business_id: Optional[str] = None) -> Dict[str, Any]:
+    """A Mongo filter clause that scopes a query to one business, WITHOUT
+    ever hiding data that predates tenant stamping.
+
+    Pass the caller's businessId explicitly (from `user.get("businessId")`)
+    when you have it in scope, or omit it to read from the actor context.
+    Matches documents tagged for this business, plus any document that has
+    no businessId at all (missing field or null) — the untagged case is the
+    normal state for every document written before the tenant-stamping fix,
+    and for collections `routes/multi_tenant.py`'s `/business/backfill-tenant`
+    hasn't been pointed at yet. Once a business's data is fully backfilled
+    there's nothing left to match the untagged branch, so this quietly
+    becomes a strict filter with no further code change needed.
+
+    Returns {} (no-op — matches everything) when no businessId is known at
+    all, e.g. an old token issued before businessId was embedded in it. An
+    empty filter is the safe default: never hide data because the *signal*
+    for whose data it is happens to be missing.
+    """
+    biz = business_id or get_actor_context().get("businessId")
+    if not biz:
+        return {}
+    return {"$or": [{"businessId": biz}, {"businessId": None}, {"businessId": {"$exists": False}}]}
+
+
 class ActorContextMiddleware(BaseHTTPMiddleware):
     """Populates the contextvar from request headers + JWT.
 

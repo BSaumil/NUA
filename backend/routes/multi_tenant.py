@@ -128,3 +128,28 @@ async def seed_default_business():
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "settings": {"autoGratuity": 0, "serviceCharge": 0, "bookingEnabled": True, "tableOrderingEnabled": True}
         })
+
+
+# Collections that get a businessId at write time now (see
+# middleware/actor_context.py + entity_service.py) but predate that fix —
+# every document in them either has no businessId field at all, or has it
+# explicitly set to null (stamped_insert's setdefault wrote null before the
+# actor context ever had a real value to give it). Backfilling them to
+# "default" is the prerequisite for turning on any read-side tenant
+# filtering: filtering today, before this runs, would make untagged data
+# disappear rather than isolate it.
+_BACKFILL_COLLECTIONS = ["customers", "vouchers", "wallet_ledger", "loyalty_ledger", "members"]
+
+
+@router.post("/backfill-tenant")
+async def backfill_tenant(user: dict = Depends(require_owner)):
+    """One-time (but safe to re-run — idempotent) migration: stamp
+    businessId="default" onto any document in the collections above that's
+    missing one. Only ever sets a currently-absent-or-null value; never
+    overwrites a businessId a document already has."""
+    results = {}
+    query = {"$or": [{"businessId": {"$exists": False}}, {"businessId": None}]}
+    for name in _BACKFILL_COLLECTIONS:
+        r = await db[name].update_many(query, {"$set": {"businessId": "default"}})
+        results[name] = r.modified_count
+    return {"backfilled": results, "total": sum(results.values())}

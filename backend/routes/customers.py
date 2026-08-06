@@ -3,6 +3,7 @@ from typing import List, Optional
 from datetime import datetime
 from database import db
 from deps import get_user, require_owner_or_manager
+from middleware.actor_context import tenant_scope_filter
 from models.customer import Customer, CustomerCreate, CustomerUpdate
 from models.feedback import Feedback, FeedbackCreate
 from utils.mongo_safe import safe_parse_list
@@ -20,14 +21,16 @@ def _customer_fallback(c: dict, _err):
 
 # ============ CUSTOMERS API ============
 @router.get("/customers")
-async def get_customers(search: Optional[str] = None, _: dict = Depends(get_user)):
-    query = {}
+async def get_customers(search: Optional[str] = None, user: dict = Depends(get_user)):
+    clauses = [tenant_scope_filter(user.get("businessId"))]
     if search:
-        query["$or"] = [
+        clauses.append({"$or": [
             {"name": {"$regex": search, "$options": "i"}},
             {"email": {"$regex": search, "$options": "i"}},
             {"phone": {"$regex": search, "$options": "i"}}
-        ]
+        ]})
+    clauses = [c for c in clauses if c]  # tenant_scope_filter can return {} (no-op)
+    query = {"$and": clauses} if len(clauses) > 1 else (clauses[0] if clauses else {})
     customers = await db.customers.find(query, {"_id": 0}).to_list(1000)
     return safe_parse_list(customers, Customer, fallback=_customer_fallback, where="customers")
 
