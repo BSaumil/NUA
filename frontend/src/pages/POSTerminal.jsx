@@ -20,7 +20,7 @@ import VoiceOrderButton from '../components/VoiceOrderButton';
 import SwipeableCartItem from '../components/pos/SwipeableCartItem';
 import CustomerCombobox from '../components/pos/CustomerCombobox';
 import { QrPaymentDialog, UpiPaymentDialog, SplitPaymentDialog } from '../components/pos/PaymentDialogs';
-import ModifierSheet from '../components/pos/ModifierSheet';
+import ModifierPanel from '../components/pos/ModifierPanel';
 import POSHeaderBar from '../components/pos/POSHeaderBar';
 import ScanVoucherButton from '../components/pos/ScanVoucherButton';
 import TableNumberField from '../components/pos/TableNumberField';
@@ -1448,6 +1448,22 @@ const POSTerminal = () => {
         )}
       </div>
 
+      {/* Modifier picker — docked next to the cart when a product with
+          attached modifierIds is tapped, instead of a full-screen popup, so
+          the cart stays visible while modifiers are picked. */}
+      <ModifierPanel
+        product={modifierSheetProduct}
+        modifiers={modifiers}
+        open={!!modifierSheetProduct}
+        onClose={() => setModifierSheetProduct(null)}
+        themeColor={theme.primary}
+        onConfirm={(selections, extra) => {
+          addToCart(modifierSheetProduct, 1, selections, extra);
+          toast({ title: 'Added', description: `${modifierSheetProduct.name} with ${selections.length} option${selections.length !== 1 ? 's' : ''}` });
+          setModifierSheetProduct(null);
+        }}
+      />
+
       {/* Cart Panel — bigger for easier billing */}
       {/* Same min-h-0 fix as the products column — the cart-items list below
           uses flex-1 overflow-y-auto and needs this to actually scroll. */}
@@ -2296,20 +2312,6 @@ const POSTerminal = () => {
           </div>
         </DialogContent>
       </Dialog>
-
-      {/* Modifier picker — opens when a product with attached modifierIds is tapped */}
-      <ModifierSheet
-        product={modifierSheetProduct}
-        modifiers={modifiers}
-        open={!!modifierSheetProduct}
-        onClose={() => setModifierSheetProduct(null)}
-        themeColor={theme.primary}
-        onConfirm={(selections, extra) => {
-          addToCart(modifierSheetProduct, 1, selections, extra);
-          toast({ title: 'Added', description: `${modifierSheetProduct.name} with ${selections.length} option${selections.length !== 1 ? 's' : ''}` });
-          setModifierSheetProduct(null);
-        }}
-      />
 
     </div>
   );
