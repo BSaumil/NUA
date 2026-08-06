@@ -625,6 +625,7 @@ export const onlineAPI = {
   track: (code) => api.get(`/online/orders/track/${code}`),
   kitchenLoad: () => api.get('/online/kitchen/load'),
   checkVoucher: (code, cart) => api.post('/vouchers/public-check', { code, cart }),
+  checkout: (orderId, originUrl) => api.post('/online/orders/checkout', { orderId, originUrl }),
 };
 
 // v17 — Loyalty engine + AI Agent (Ash)
