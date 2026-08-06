@@ -25,6 +25,7 @@ field so cashiers can scan OR key in by hand.
 from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request, Depends
 from deps import get_user, require_owner, require_owner_or_manager
+from middleware.actor_context import tenant_scope_filter
 from database import db
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -254,7 +255,7 @@ def _promotion_active_now(promo: dict) -> bool:
 
 
 @router.post("/cart/apply-promos")
-async def apply_promos_to_cart(data: dict, _: dict = Depends(get_user)):
+async def apply_promos_to_cart(data: dict, user: dict = Depends(get_user)):
     """Given a cart, return every promotion that auto-fires *right now* plus the
     computed discount. Supports:
       • pricingMode="percentage" — subtotal × discount%
@@ -266,7 +267,8 @@ async def apply_promos_to_cart(data: dict, _: dict = Depends(get_user)):
     if not cart:
         return {"applied": [], "totalDiscount": 0}
 
-    promos = await db.promotions.find({"active": True}, {"_id": 0}).to_list(200)
+    query = {"active": True, **tenant_scope_filter(user.get("businessId"))}
+    promos = await db.promotions.find(query, {"_id": 0}).to_list(200)
     applied = []
     total = 0.0
     for p in promos:
@@ -346,11 +348,12 @@ async def apply_promos_to_cart(data: dict, _: dict = Depends(get_user)):
 
 
 @router.get("/promotions/active-now")
-async def list_active_promotions_now(_: dict = Depends(get_user)):
+async def list_active_promotions_now(user: dict = Depends(get_user)):
     """POS-facing: returns every promotion that is *currently* live based on
     today's date, weekday, and current time of day. Staff use this so they know
     exactly what's running without scrolling through inactive promos."""
-    promos = await db.promotions.find({"active": True}, {"_id": 0}).to_list(500)
+    query = {"active": True, **tenant_scope_filter(user.get("businessId"))}
+    promos = await db.promotions.find(query, {"_id": 0}).to_list(500)
     return [p for p in promos if _promotion_active_now(p)]
 
 

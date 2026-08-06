@@ -146,7 +146,7 @@ async def seed_default_business():
 # filtering: filtering today, before this runs, would make untagged data
 # disappear rather than isolate it.
 _BACKFILL_COLLECTIONS = ["customers", "vouchers", "wallet_ledger", "loyalty_ledger", "members",
-                          "transactions", "refunds", "products", "expenses", "suppliers"]
+                          "transactions", "refunds", "products", "expenses", "suppliers", "promotions"]
 
 
 @router.post("/backfill-tenant")
