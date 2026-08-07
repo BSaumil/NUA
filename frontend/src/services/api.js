@@ -823,6 +823,8 @@ export const finalizeAPI = {
   payrunCommit: (data) => api.post('/payroll/payrun/commit', data),
   payrollRegister: (days = 90) => api.get(`/payroll/register?days=${days}`),
   rosterCompliance: (daysAhead = 14) => api.get(`/payroll/roster-compliance?days_ahead=${daysAhead}`),
+  payrollYtd: (staffId) => api.get(`/payroll/ytd/${staffId}`),
+  payslipPdf: (runId, staffId) => api.get(`/payroll/payslip/${runId}/${staffId}/pdf`, { responseType: 'blob' }),
 
   // Wallet credentials
   walletCredentialsStatus: () => api.get('/settings/wallet-credentials'),
