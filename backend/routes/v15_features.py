@@ -229,8 +229,9 @@ async def open_cash_drawer(data: dict, user: dict = Depends(require_permission("
         await log_event(entity_type="cash_drawer", entity_id=event["id"], action="executed",
                         after=event, memo=f"No-sale drawer open — {reason}" + (f" ({note})" if note else ""),
                         severity="notice")
-    except Exception:
-        pass
+    except Exception as e:
+        from utils.errors import log_and_continue
+        log_and_continue(logger, f"No-sale drawer-open audit log write failed for {event['id']}", e)
     return event
 
 

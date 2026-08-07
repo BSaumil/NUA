@@ -14,6 +14,9 @@ from datetime import datetime, timezone, timedelta
 import uuid
 import os
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -367,8 +370,9 @@ async def resolve_fraud_flag(flag_id: str, data: dict, user: dict = Depends(requ
         from services.audit_service import log_event
         await log_event(entity_type="loyalty_fraud_flag", entity_id=flag_id, action=new_status,
                          memo=f"{flag['type']} flag resolved: {new_status}" + (f" — {action_taken}" if action_taken else ""))
-    except Exception:
-        pass
+    except Exception as e:
+        from utils.errors import log_and_continue
+        log_and_continue(logger, f"Fraud flag audit log write failed for {flag_id}", e)
     return {"ok": True, "status": new_status, "actionTaken": action_taken}
 
 
