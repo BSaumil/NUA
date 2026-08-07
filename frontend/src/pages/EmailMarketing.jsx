@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Mail, Send, Plus, Users, Trash2, Clock, CheckCircle, Edit2, Sparkles, Ticket, Wand2, LayoutTemplate, Filter, Save
+  Mail, Send, Plus, Users, Trash2, Clock, CheckCircle, Edit2, Sparkles, Ticket, Wand2, LayoutTemplate, Filter, Save, Pencil, List, X
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -21,7 +21,7 @@ const EMPTY_FORM = {
   voucherExpiresInDays: 30, voucherMinSpend: 0,
 };
 
-const EMPTY_SEGMENT_RULES = { minSpend: '', minVisits: '', inactiveForDays: '' };
+const EMPTY_SEGMENT_RULES = { minSpend: '', minVisits: '', inactiveForDays: '', spendInLastDays: '', minSpendInWindow: '' };
 
 export default function EmailMarketing() {
   const { theme } = useTheme();
@@ -42,6 +42,10 @@ export default function EmailMarketing() {
   const [previewing, setPreviewing] = useState(false);
   const [segmentName, setSegmentName] = useState('');
   const [savingSegment, setSavingSegment] = useState(false);
+  const [editingSegmentId, setEditingSegmentId] = useState(null);
+  const [fullListSegment, setFullListSegment] = useState(null);
+  const [fullList, setFullList] = useState(null);
+  const [loadingFullList, setLoadingFullList] = useState(false);
 
   useEffect(() => { fetchData(); }, []);
 
@@ -66,6 +70,7 @@ export default function EmailMarketing() {
     setSegmentRules(EMPTY_SEGMENT_RULES);
     setSegmentPreview(null);
     setSegmentName('');
+    setEditingSegmentId(null);
     setShowCreate(true);
     if (templates.length === 0) {
       try {
@@ -86,6 +91,8 @@ export default function EmailMarketing() {
     if (segmentRules.minSpend !== '') r.minSpend = Number(segmentRules.minSpend);
     if (segmentRules.minVisits !== '') r.minVisits = Number(segmentRules.minVisits);
     if (segmentRules.inactiveForDays !== '') r.inactiveForDays = Number(segmentRules.inactiveForDays);
+    if (segmentRules.spendInLastDays !== '') r.spendInLastDays = Number(segmentRules.spendInLastDays);
+    if (segmentRules.minSpendInWindow !== '') r.minSpendInWindow = Number(segmentRules.minSpendInWindow);
     return r;
   };
 
@@ -98,17 +105,46 @@ export default function EmailMarketing() {
     finally { setPreviewing(false); }
   };
 
+  const startEditingSegment = (segment) => {
+    setEditingSegmentId(segment.id);
+    setSegmentId('');
+    setSegmentName(segment.name);
+    setSegmentRules({ ...EMPTY_SEGMENT_RULES, ...segment.rules });
+    setSegmentPreview(null);
+  };
+
+  const cancelEditingSegment = () => {
+    setEditingSegmentId(null);
+    setSegmentName('');
+    setSegmentRules(EMPTY_SEGMENT_RULES);
+    setSegmentPreview(null);
+  };
+
   const saveSegment = async () => {
     if (!segmentName.trim()) return toast.error('Give the segment a name to save it');
     setSavingSegment(true);
     try {
-      const r = await advancedAPI.createSegment({ name: segmentName.trim(), rules: rulesPayload() });
-      toast.success('Segment saved');
-      setSegments(s => [r.data, ...s]);
+      const r = editingSegmentId
+        ? await advancedAPI.updateSegment(editingSegmentId, { name: segmentName.trim(), rules: rulesPayload() })
+        : await advancedAPI.createSegment({ name: segmentName.trim(), rules: rulesPayload() });
+      toast.success(editingSegmentId ? 'Segment updated' : 'Segment saved');
+      setSegments(s => editingSegmentId ? s.map(x => x.id === r.data.id ? r.data : x) : [r.data, ...s]);
       setSegmentId(r.data.id);
       setSegmentName('');
+      setEditingSegmentId(null);
     } catch (e) { toast.error(e.response?.data?.detail || 'Failed to save segment'); }
     finally { setSavingSegment(false); }
+  };
+
+  const viewFullList = async (segment) => {
+    setFullListSegment(segment);
+    setFullList(null);
+    setLoadingFullList(true);
+    try {
+      const r = await advancedAPI.getSegmentCustomers(segment.id);
+      setFullList(r.data);
+    } catch { toast.error('Could not load the full segment list'); }
+    finally { setLoadingFullList(false); }
   };
 
   const applyTemplate = (t) => {
@@ -341,14 +377,38 @@ export default function EmailMarketing() {
               ) : (
                 <div className="space-y-2">
                   {segments.length > 0 && (
-                    <select className="w-full p-2 border rounded-md text-sm" value={segmentId}
-                      onChange={e => { setSegmentId(e.target.value); setSegmentPreview(null); }} data-testid="segment-select">
-                      <option value="">— Build a new segment below —</option>
-                      {segments.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
+                    <div className="flex gap-1 items-center">
+                      <select className="flex-1 p-2 border rounded-md text-sm" value={segmentId}
+                        onChange={e => { setSegmentId(e.target.value); setEditingSegmentId(null); setSegmentPreview(null); }} data-testid="segment-select">
+                        <option value="">— Build a new segment below —</option>
+                        {segments.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                      {segmentId && (
+                        <>
+                          <Button type="button" size="icon" variant="ghost"
+                            onClick={() => startEditingSegment(segments.find(s => s.id === segmentId))}
+                            data-testid="segment-edit-btn" title="Edit this segment">
+                            <Pencil size={14} />
+                          </Button>
+                          <Button type="button" size="icon" variant="ghost"
+                            onClick={() => viewFullList(segments.find(s => s.id === segmentId))}
+                            data-testid="segment-list-btn" title="View full matching list">
+                            <List size={14} />
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   )}
-                  {!segmentId && (
+                  {(!segmentId || editingSegmentId) && (
                     <>
+                      {editingSegmentId && (
+                        <div className="flex items-center justify-between text-xs text-violet-700 bg-violet-50 rounded px-2 py-1">
+                          <span>Editing "{segments.find(s => s.id === editingSegmentId)?.name}"</span>
+                          <button type="button" onClick={cancelEditingSegment} data-testid="segment-cancel-edit">
+                            <X size={12} />
+                          </button>
+                        </div>
+                      )}
                       <div className="grid grid-cols-3 gap-2">
                         <Input type="number" placeholder="Min spend ($)" value={segmentRules.minSpend}
                           onChange={e => { setSegmentRules({ ...segmentRules, minSpend: e.target.value }); setSegmentPreview(null); }}
@@ -360,9 +420,18 @@ export default function EmailMarketing() {
                           onChange={e => { setSegmentRules({ ...segmentRules, inactiveForDays: e.target.value }); setSegmentPreview(null); }}
                           data-testid="segment-inactive-days" />
                       </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Input type="number" placeholder="Spent ≥ $ ..." value={segmentRules.minSpendInWindow}
+                          onChange={e => { setSegmentRules({ ...segmentRules, minSpendInWindow: e.target.value }); setSegmentPreview(null); }}
+                          data-testid="segment-min-spend-window" />
+                        <Input type="number" placeholder="...in the last N days" value={segmentRules.spendInLastDays}
+                          onChange={e => { setSegmentRules({ ...segmentRules, spendInLastDays: e.target.value }); setSegmentPreview(null); }}
+                          data-testid="segment-spend-window-days" />
+                      </div>
                       <p className="text-[11px] text-gray-400">
-                        Total spend and visits are lifetime-to-date, not a time window. "Inactive for" catches customers
-                        who haven't visited in that many days (or never have).
+                        Min spend/visits above are lifetime-to-date. The spend window pair is the real "spent $X in the
+                        last N days" rule — both fields are required together. "Inactive for" catches customers who
+                        haven't visited in that many days (or never have).
                       </p>
                       <div className="flex gap-2 items-center flex-wrap">
                         <Button type="button" size="sm" variant="outline" onClick={previewCustomSegment} disabled={previewing}
@@ -374,11 +443,11 @@ export default function EmailMarketing() {
                             <Users size={10} className="mr-1" /> {segmentPreview.count} match
                           </Badge>
                         )}
-                        <Input placeholder="Save as… (optional)" value={segmentName}
+                        <Input placeholder="Save as… (name)" value={segmentName}
                           onChange={e => setSegmentName(e.target.value)} className="text-sm w-40" data-testid="segment-name" />
                         <Button type="button" size="sm" variant="outline" onClick={saveSegment} disabled={savingSegment}
                           data-testid="segment-save-btn">
-                          <Save size={12} className="mr-1" /> {savingSegment ? 'Saving…' : 'Save'}
+                          <Save size={12} className="mr-1" /> {savingSegment ? 'Saving…' : editingSegmentId ? 'Update' : 'Save'}
                         </Button>
                       </div>
                     </>
@@ -416,6 +485,26 @@ export default function EmailMarketing() {
 
             <Button className="w-full" style={{ backgroundColor: theme.primary }} onClick={handleCreate} disabled={creating}
               data-testid="confirm-create-campaign">{creating ? 'Creating…' : 'Create Campaign'}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Full segment customer list */}
+      <Dialog open={!!fullListSegment} onOpenChange={o => { if (!o) { setFullListSegment(null); setFullList(null); } }}>
+        <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto" data-testid="segment-full-list-dialog">
+          <DialogHeader><DialogTitle>{fullListSegment?.name} — {fullList ? fullList.count : '…'} matching</DialogTitle></DialogHeader>
+          <div className="space-y-1">
+            {loadingFullList && <p className="text-sm text-gray-400 text-center py-6">Loading…</p>}
+            {fullList?.customers?.length === 0 && <p className="text-sm text-gray-400 text-center py-6">No customers match this segment.</p>}
+            {fullList?.customers?.map(c => (
+              <div key={c.id} className="flex justify-between items-center text-sm py-1.5 border-b last:border-0" data-testid={`segment-list-row-${c.id}`}>
+                <div>
+                  <p className="font-medium">{c.name}</p>
+                  <p className="text-xs text-gray-500">{c.email}</p>
+                </div>
+                <p className="text-xs text-gray-500">${(c.totalSpent || 0).toFixed(0)} · {c.visits || 0} visits</p>
+              </div>
+            ))}
           </div>
         </DialogContent>
       </Dialog>

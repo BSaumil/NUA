@@ -465,8 +465,27 @@ def _build_segment_query(rules: dict) -> dict:
     return q
 
 
+async def _customer_ids_spending_in_window(days: int, min_spend: float) -> set:
+    """"Spent >= $X in the last N days" — totalSpent on the customer record
+    is a lifetime total, so this can't be a customer-field filter; it needs
+    an aggregation over actual transactions in the window."""
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+    pipeline = [
+        {"$match": {"customerId": {"$ne": None}, "timestamp": {"$gte": cutoff}}},
+        {"$group": {"_id": "$customerId", "spend": {"$sum": "$total"}}},
+        {"$match": {"spend": {"$gte": min_spend}}},
+    ]
+    rows = await db.transactions.aggregate(pipeline).to_list(20000)
+    return {r["_id"] for r in rows}
+
+
 async def _resolve_segment_customers(rules: dict, *, limit: int = 10000) -> list:
     query = _build_segment_query(rules)
+    window_days = rules.get("spendInLastDays")
+    window_min = rules.get("minSpendInWindow")
+    if window_days not in (None, "") and window_min not in (None, "", 0):
+        ids = await _customer_ids_spending_in_window(int(window_days), float(window_min))
+        query["id"] = {"$in": list(ids)}
     return await db.customers.find(query, {"_id": 0, "password_hash": 0}).to_list(limit)
 
 
@@ -483,6 +502,37 @@ async def preview_segment(data: dict, _: dict = Depends(require_owner_or_manager
 @router.get("/marketing/segments")
 async def list_segments(_: dict = Depends(require_owner_or_manager)):
     return await db.customer_segments.find({}, {"_id": 0}).sort("createdAt", -1).to_list(200)
+
+
+@router.get("/marketing/segments/{segment_id}/customers")
+async def get_segment_customers(segment_id: str, limit: int = 500, _: dict = Depends(require_owner_or_manager)):
+    """The full matching list, not just preview's 20-row sample — for an
+    owner who wants to actually see (or export) who's in a segment."""
+    segment = await db.customer_segments.find_one({"id": segment_id}, {"_id": 0})
+    if not segment:
+        raise HTTPException(status_code=404, detail="Segment not found")
+    customers = await _resolve_segment_customers(segment.get("rules") or {}, limit=min(limit, 5000))
+    return {
+        "segment": segment,
+        "count": len(customers),
+        "customers": [{"id": c["id"], "name": c.get("name"), "email": c.get("email"),
+                       "totalSpent": c.get("totalSpent", 0), "visits": c.get("visits", 0),
+                       "membershipTier": c.get("membershipTier")} for c in customers],
+    }
+
+
+@router.put("/marketing/segments/{segment_id}")
+async def update_segment(segment_id: str, data: dict, user: dict = Depends(require_owner_or_manager)):
+    existing = await db.customer_segments.find_one({"id": segment_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Segment not found")
+    name = (data.get("name") or existing["name"]).strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Segment name is required")
+    updated = {**existing, "name": name, "rules": data.get("rules", existing["rules"]),
+               "updatedBy": user["id"], "updatedAt": datetime.now(timezone.utc).isoformat()}
+    await db.customer_segments.replace_one({"id": segment_id}, updated)
+    return updated
 
 
 @router.post("/marketing/segments")
