@@ -737,3 +737,25 @@ async def auto_post_deposit_applied(deposit: Dict[str, Any], transaction: Dict[s
         source_type="deposit_applied",
         source_ref=deposit.get("id"),
     )
+
+
+async def auto_post_deposit_refunded(deposit: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Held deposit paid back to the customer (booking fell through) → Held
+    deposit liability DR, Bank CR. Mirrors auto_post_deposit_applied's
+    liability release but the money leaves the business instead of
+    becoming revenue."""
+    amount = float(deposit.get("amount") or 0)
+    if amount <= 0:
+        return None
+    lines = [
+        {"accountCode": "2320", "debit": amount, "credit": 0.0, "description": "Deposit refunded",
+         "contactId": deposit.get("customerId")},
+        {"accountCode": "1000", "debit": 0.0, "credit": amount, "description": f"Refund to {deposit.get('customerName')}"},
+    ]
+    return await post_entry(
+        lines,
+        entry_date=datetime.now(timezone.utc).date().isoformat(),
+        memo=f"Deposit refunded — {deposit.get('bookingId') or ''}",
+        source_type="deposit_refunded",
+        source_ref=deposit.get("id"),
+    )

@@ -7,7 +7,7 @@ import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../../components/ui/select';
-import { PlusCircle, X } from 'lucide-react';
+import { PlusCircle, X, Pencil, Trash2 } from 'lucide-react';
 import { FMT, fyStart } from './helpers';
 
 const fyEnd = (start) => `${parseInt(start.slice(0, 4), 10) + 1}-06-30`;
@@ -18,6 +18,7 @@ const Budgets = () => {
   const [selectedBudget, setSelectedBudget] = useState('');
   const [report, setReport] = useState(null);
   const [show, setShow] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({ name: 'FY Budget', fyStart: fyStart(), fyEnd: fyEnd(fyStart()), lines: [] });
 
   const load = useCallback(async () => {
@@ -44,16 +45,44 @@ const Budgets = () => {
   }));
   const removeLine = (i) => setForm(f => ({ ...f, lines: f.lines.filter((_, idx) => idx !== i) }));
 
+  const closeDialog = () => {
+    setShow(false); setEditingId(null);
+    setForm({ name: 'FY Budget', fyStart: fyStart(), fyEnd: fyEnd(fyStart()), lines: [] });
+  };
+
+  const openEdit = () => {
+    const b = budgets.find(x => x.id === selectedBudget);
+    if (!b) return;
+    setEditingId(b.id);
+    setForm({ name: b.name, fyStart: b.fyStart, fyEnd: b.fyEnd, lines: b.lines.map(l => ({ ...l })) });
+    setShow(true);
+  };
+
   const save = async () => {
     if (!form.name || form.lines.length === 0) return toast.error('Name + at least one line required');
+    const payload = {
+      ...form,
+      lines: form.lines.filter(l => l.accountCode).map(l => ({ ...l, monthlyAmount: parseFloat(l.monthlyAmount) || 0 })),
+    };
     try {
-      const r = await financeAPI.createBudget({
-        ...form,
-        lines: form.lines.filter(l => l.accountCode).map(l => ({ ...l, monthlyAmount: parseFloat(l.monthlyAmount) || 0 })),
-      });
-      toast.success('Budget created'); setShow(false);
-      setForm({ name: 'FY Budget', fyStart: fyStart(), fyEnd: fyEnd(fyStart()), lines: [] });
+      const r = editingId
+        ? await financeAPI.updateBudget(editingId, payload)
+        : await financeAPI.createBudget(payload);
+      toast.success(editingId ? 'Budget updated' : 'Budget created');
+      closeDialog();
       setSelectedBudget(r.data.id);
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed'); }
+  };
+
+  const remove = async () => {
+    const b = budgets.find(x => x.id === selectedBudget);
+    if (!b) return;
+    if (!window.confirm(`Delete budget "${b.name}"? This cannot be undone.`)) return;
+    try {
+      await financeAPI.deleteBudget(b.id);
+      toast.success('Budget deleted');
+      setSelectedBudget('');
       load();
     } catch (e) { toast.error(e.response?.data?.detail || 'Failed'); }
   };
@@ -69,12 +98,20 @@ const Budgets = () => {
       </div>
 
       {budgets.length > 0 && (
-        <Select value={selectedBudget} onValueChange={setSelectedBudget}>
-          <SelectTrigger className="max-w-xs" data-testid="budget-select"><SelectValue placeholder="Select a budget" /></SelectTrigger>
-          <SelectContent>
-            {budgets.map(b => <SelectItem key={b.id} value={b.id}>{b.name} ({b.fyStart} → {b.fyEnd})</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-2">
+          <Select value={selectedBudget} onValueChange={setSelectedBudget}>
+            <SelectTrigger className="max-w-xs" data-testid="budget-select"><SelectValue placeholder="Select a budget" /></SelectTrigger>
+            <SelectContent>
+              {budgets.map(b => <SelectItem key={b.id} value={b.id}>{b.name} ({b.fyStart} → {b.fyEnd})</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Button size="icon" variant="ghost" onClick={openEdit} disabled={!selectedBudget} data-testid="budget-edit-btn">
+            <Pencil size={14} />
+          </Button>
+          <Button size="icon" variant="ghost" onClick={remove} disabled={!selectedBudget} data-testid="budget-delete-btn">
+            <Trash2 size={14} className="text-rose-600" />
+          </Button>
+        </div>
       )}
 
       {report && (
@@ -110,9 +147,9 @@ const Budgets = () => {
         <Card><CardContent className="p-8 text-center text-slate-400">No budgets yet — create one to start tracking against it.</CardContent></Card>
       )}
 
-      <Dialog open={show} onOpenChange={setShow}>
+      <Dialog open={show} onOpenChange={o => { if (!o) closeDialog(); else setShow(true); }}>
         <DialogContent className="max-w-lg" data-testid="budget-new-dialog">
-          <DialogHeader><DialogTitle>New Budget</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editingId ? 'Edit Budget' : 'New Budget'}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <Input placeholder="Budget name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} data-testid="budget-name" />
             <div className="grid grid-cols-2 gap-3">
@@ -136,7 +173,7 @@ const Budgets = () => {
               ))}
               <Button size="sm" variant="outline" onClick={addLine} data-testid="budget-add-line">+ Add account</Button>
             </div>
-            <Button className="w-full" onClick={save} data-testid="budget-save-btn">Create Budget</Button>
+            <Button className="w-full" onClick={save} data-testid="budget-save-btn">{editingId ? 'Save Changes' : 'Create Budget'}</Button>
           </div>
         </DialogContent>
       </Dialog>

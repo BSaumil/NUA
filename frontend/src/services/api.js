@@ -146,6 +146,7 @@ export const financeAPI = {
   listDeposits: (status) => api.get('/accounting/deposits', { params: status ? { status } : {} }),
   createDeposit: (data) => api.post('/accounting/deposits', data),
   applyDeposit: (id, data) => api.post(`/accounting/deposits/${id}/apply`, data),
+  refundDeposit: (id) => api.post(`/accounting/deposits/${id}/refund`),
   // Bank rec
   bankStatement: (code, params) => api.get(`/accounting/bank/statement/${code}`, { params }),
   importBank: (data) => api.post('/accounting/bank/import', data),
@@ -154,6 +155,8 @@ export const financeAPI = {
   // Budgets
   listBudgets: () => api.get('/accounting/budgets'),
   createBudget: (data) => api.post('/accounting/budgets', data),
+  updateBudget: (id, data) => api.put(`/accounting/budgets/${id}`, data),
+  deleteBudget: (id) => api.delete(`/accounting/budgets/${id}`),
   budgetVsActual: (params) => api.get('/accounting/reports/budget-vs-actual', { params }),
   // KPIs
   kpis: () => api.get('/accounting/kpis'),
