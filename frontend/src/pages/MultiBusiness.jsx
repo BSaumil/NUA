@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Building2, Plus, RefreshCw, DollarSign, Users, Package, Award, ShieldCheck } from 'lucide-react';
+import { Building2, Plus, RefreshCw, DollarSign, Users, Package, Award, ShieldCheck, CreditCard, AlertTriangle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -150,6 +150,18 @@ export default function MultiBusiness() {
                     </div>
                   ) : (
                     <p className="text-xs text-gray-300 pt-2 border-t">Loading summary…</p>
+                  )}
+                  {s && ((s.onlineOrdersPaid || 0) + (s.onlineOrdersRefunded || 0) + (s.onlineOrdersRefundFailed || 0) > 0) && (
+                    <div className="flex items-center gap-3 pt-2 border-t text-xs" data-testid={`business-payments-${b.id}`}>
+                      <span className="flex items-center gap-1 text-gray-500"><CreditCard size={12} /> Online payments</span>
+                      <span className="text-emerald-600 font-medium">{s.onlineOrdersPaid} paid</span>
+                      {s.onlineOrdersRefunded > 0 && <span className="text-gray-500">{s.onlineOrdersRefunded} refunded</span>}
+                      {s.onlineOrdersRefundFailed > 0 && (
+                        <span className="flex items-center gap-1 text-red-600 font-medium">
+                          <AlertTriangle size={12} /> {s.onlineOrdersRefundFailed} refund failed
+                        </span>
+                      )}
+                    </div>
                   )}
                 </CardContent>
               </Card>

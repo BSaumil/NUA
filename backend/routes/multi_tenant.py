@@ -104,6 +104,18 @@ async def get_business_summary(business_id: str, _: dict = Depends(require_owner
     customers = await db.customers.find(biz_or_untagged, {"_id": 0}).to_list(10000)
     members = await db.members.find(biz_or_untagged, {"_id": 0}).to_list(10000)
     staff = await db.auth_users.find({"businessId": business_id}, {"_id": 0, "password_hash": 0}).to_list(100)
+    # Online orders have no businessId field at all yet — there's no
+    # per-business storefront/slug for a guest to pick which business
+    # they're ordering from, so biz_or_untagged matches every online order
+    # on the deployment here, same as it would for any other untagged
+    # collection. On a real multi-business deployment these counts are
+    # deployment-wide until online ordering gets a businessId of its own.
+    online_orders = await db.online_orders.find(biz_or_untagged, {"_id": 0, "paymentStatus": 1}).to_list(10000)
+    payment_counts = {"paid": 0, "refunded": 0, "refund_failed": 0}
+    for o in online_orders:
+        status = o.get("paymentStatus")
+        if status in payment_counts:
+            payment_counts[status] += 1
 
     return {
         "businessId": business_id,
@@ -113,6 +125,9 @@ async def get_business_summary(business_id: str, _: dict = Depends(require_owner
         "totalCustomers": len(customers),
         "totalMembers": len(members),
         "totalStaff": len(staff),
+        "onlineOrdersPaid": payment_counts["paid"],
+        "onlineOrdersRefunded": payment_counts["refunded"],
+        "onlineOrdersRefundFailed": payment_counts["refund_failed"],
     }
 
 # Seed default business
