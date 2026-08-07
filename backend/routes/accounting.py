@@ -174,8 +174,9 @@ async def create_journal(body: dict, user: dict = Depends(require_owner_or_manag
             from services.audit_service import log_event
             await log_event(entity_type="journal_entry", entity_id=je.get("id"),
                             action="created", after=je, memo=f"Manual journal {je.get('journalNumber')}")
-        except Exception:
-            pass
+        except Exception as e:
+            from utils.errors import log_and_continue
+            log_and_continue(logger, f"Journal entry audit log write failed for {je.get('id')}", e)
         return je
     except ValueError as e:
         raise HTTPException(400, str(e))

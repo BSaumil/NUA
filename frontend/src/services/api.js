@@ -83,6 +83,8 @@ export const eftposAPI = {
   updateTerminal: (id, data) => api.put(`/eftpos/terminals/${id}`, data),
   deleteTerminal: (id) => api.delete(`/eftpos/terminals/${id}`),
   testTerminal: (id) => api.post(`/eftpos/terminals/${id}/test`),
+  listTransactions: (terminalId) => api.get('/eftpos/transactions', { params: terminalId ? { terminal_id: terminalId } : {} }),
+  testHistory: (id) => api.get(`/eftpos/terminals/${id}/test-history`),
 };
 
 // Promotions API
@@ -436,6 +438,8 @@ export const advancedAPI = {
   getCampaigns: () => api.get('/marketing/campaigns'),
   createCampaign: (data) => api.post('/marketing/campaigns', data),
   sendCampaign: (id) => api.post(`/marketing/campaigns/${id}/send`),
+  runCampaignNow: (id) => api.post(`/marketing/campaigns/${id}/run-now`),
+  runDueCampaigns: () => api.post('/marketing/campaigns/run-due'),
   deleteCampaign: (id) => api.delete(`/marketing/campaigns/${id}`),
   getCampaignTemplates: () => api.get('/marketing/campaigns/templates'),
   draftCampaign: (data) => api.post('/marketing/campaigns/draft', data),
@@ -443,7 +447,9 @@ export const advancedAPI = {
   previewSegment: (rules) => api.post('/marketing/segments/preview', { rules }),
   getSegments: () => api.get('/marketing/segments'),
   createSegment: (data) => api.post('/marketing/segments', data),
+  updateSegment: (id, data) => api.put(`/marketing/segments/${id}`, data),
   deleteSegment: (id) => api.delete(`/marketing/segments/${id}`),
+  getSegmentCustomers: (id) => api.get(`/marketing/segments/${id}/customers`),
 };
 
 // Staff Management — PIN, Timecards, Roster, Payrun

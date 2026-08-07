@@ -330,7 +330,7 @@ async def draft_campaign(body: dict, user: dict = Depends(require_owner_or_manag
 
     # ── Gather grounding data ──
     try:
-        churning = await db.customers.count_documents({"totalVisits": {"$gte": 3}})
+        churning = await db.customers.count_documents({"visits": {"$gte": 3}})
     except Exception:
         churning = 0
     try:

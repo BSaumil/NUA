@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Request, Depends
 from deps import get_user
 import logging
 from database import db
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 import os
 import json
@@ -26,9 +26,7 @@ from middleware.actor_context import tenant_scope_filter, tenant_owns
 router = APIRouter()
 
 
-def _now(): return datetime.now(timezone.utc)
-def _iso(dt): return dt.isoformat() if isinstance(dt, datetime) else dt
-def _uid(prefix: str) -> str: return f"{prefix}-{uuid.uuid4().hex[:8].upper()}"
+from utils.ids import now_utc as _now, to_iso as _iso, gen_uid as _uid
 
 
 # Allowed lifecycle transitions per channel.

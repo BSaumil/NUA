@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Mail, Send, Plus, Users, Trash2, Clock, CheckCircle, Edit2, Sparkles, Ticket, Wand2, LayoutTemplate, Filter, Save
+  Mail, Send, Plus, Users, Trash2, Clock, CheckCircle, Edit2, Sparkles, Ticket, Wand2, LayoutTemplate, Filter, Save, Pencil, List, X, Repeat, PlayCircle
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -19,9 +19,10 @@ const EMPTY_FORM = {
   name: '', subject: '', body: '', targetTier: '',
   voucherEnabled: false, voucherValueType: 'percent', voucherValue: 15,
   voucherExpiresInDays: 30, voucherMinSpend: 0,
+  recurringEnabled: false, recurringIntervalDays: 7,
 };
 
-const EMPTY_SEGMENT_RULES = { minSpend: '', minVisits: '', inactiveForDays: '' };
+const EMPTY_SEGMENT_RULES = { minSpend: '', minVisits: '', inactiveForDays: '', spendInLastDays: '', minSpendInWindow: '' };
 
 export default function EmailMarketing() {
   const { theme } = useTheme();
@@ -42,6 +43,10 @@ export default function EmailMarketing() {
   const [previewing, setPreviewing] = useState(false);
   const [segmentName, setSegmentName] = useState('');
   const [savingSegment, setSavingSegment] = useState(false);
+  const [editingSegmentId, setEditingSegmentId] = useState(null);
+  const [fullListSegment, setFullListSegment] = useState(null);
+  const [fullList, setFullList] = useState(null);
+  const [loadingFullList, setLoadingFullList] = useState(false);
 
   useEffect(() => { fetchData(); }, []);
 
@@ -66,6 +71,7 @@ export default function EmailMarketing() {
     setSegmentRules(EMPTY_SEGMENT_RULES);
     setSegmentPreview(null);
     setSegmentName('');
+    setEditingSegmentId(null);
     setShowCreate(true);
     if (templates.length === 0) {
       try {
@@ -86,6 +92,8 @@ export default function EmailMarketing() {
     if (segmentRules.minSpend !== '') r.minSpend = Number(segmentRules.minSpend);
     if (segmentRules.minVisits !== '') r.minVisits = Number(segmentRules.minVisits);
     if (segmentRules.inactiveForDays !== '') r.inactiveForDays = Number(segmentRules.inactiveForDays);
+    if (segmentRules.spendInLastDays !== '') r.spendInLastDays = Number(segmentRules.spendInLastDays);
+    if (segmentRules.minSpendInWindow !== '') r.minSpendInWindow = Number(segmentRules.minSpendInWindow);
     return r;
   };
 
@@ -98,17 +106,46 @@ export default function EmailMarketing() {
     finally { setPreviewing(false); }
   };
 
+  const startEditingSegment = (segment) => {
+    setEditingSegmentId(segment.id);
+    setSegmentId('');
+    setSegmentName(segment.name);
+    setSegmentRules({ ...EMPTY_SEGMENT_RULES, ...segment.rules });
+    setSegmentPreview(null);
+  };
+
+  const cancelEditingSegment = () => {
+    setEditingSegmentId(null);
+    setSegmentName('');
+    setSegmentRules(EMPTY_SEGMENT_RULES);
+    setSegmentPreview(null);
+  };
+
   const saveSegment = async () => {
     if (!segmentName.trim()) return toast.error('Give the segment a name to save it');
     setSavingSegment(true);
     try {
-      const r = await advancedAPI.createSegment({ name: segmentName.trim(), rules: rulesPayload() });
-      toast.success('Segment saved');
-      setSegments(s => [r.data, ...s]);
+      const r = editingSegmentId
+        ? await advancedAPI.updateSegment(editingSegmentId, { name: segmentName.trim(), rules: rulesPayload() })
+        : await advancedAPI.createSegment({ name: segmentName.trim(), rules: rulesPayload() });
+      toast.success(editingSegmentId ? 'Segment updated' : 'Segment saved');
+      setSegments(s => editingSegmentId ? s.map(x => x.id === r.data.id ? r.data : x) : [r.data, ...s]);
       setSegmentId(r.data.id);
       setSegmentName('');
+      setEditingSegmentId(null);
     } catch (e) { toast.error(e.response?.data?.detail || 'Failed to save segment'); }
     finally { setSavingSegment(false); }
+  };
+
+  const viewFullList = async (segment) => {
+    setFullListSegment(segment);
+    setFullList(null);
+    setLoadingFullList(true);
+    try {
+      const r = await advancedAPI.getSegmentCustomers(segment.id);
+      setFullList(r.data);
+    } catch { toast.error('Could not load the full segment list'); }
+    finally { setLoadingFullList(false); }
   };
 
   const applyTemplate = (t) => {
@@ -148,8 +185,11 @@ export default function EmailMarketing() {
           enabled: true, valueType: form.voucherValueType, value: Number(form.voucherValue) || 0,
           expiresInDays: Number(form.voucherExpiresInDays) || 30, minSpend: Number(form.voucherMinSpend) || 0,
         } : undefined,
+        recurring: form.recurringEnabled ? {
+          enabled: true, intervalDays: Number(form.recurringIntervalDays) || 7,
+        } : undefined,
       });
-      toast.success('Campaign created');
+      toast.success(form.recurringEnabled ? 'Recurring campaign created — it will run on its schedule' : 'Campaign created');
       setShowCreate(false);
       setForm(EMPTY_FORM);
       fetchData();
@@ -163,6 +203,25 @@ export default function EmailMarketing() {
       toast.success(res.data.message);
       fetchData();
     } catch { toast.error('Failed to send'); }
+  };
+
+  const handleRunNow = async (id) => {
+    try {
+      const res = await advancedAPI.runCampaignNow(id);
+      toast.success(res.data.message);
+      fetchData();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to run'); }
+  };
+
+  const [runningDue, setRunningDue] = useState(false);
+  const handleRunDue = async () => {
+    setRunningDue(true);
+    try {
+      const res = await advancedAPI.runDueCampaigns();
+      toast.success(res.data.ran > 0 ? `Ran ${res.data.ran} due campaign(s)` : 'No campaigns due right now');
+      fetchData();
+    } catch { toast.error('Failed to run due campaigns'); }
+    finally { setRunningDue(false); }
   };
 
   const handleDelete = async (id) => {
@@ -182,10 +241,17 @@ export default function EmailMarketing() {
             {memberStats?.totalMembers || 0} members &middot; {campaigns.length} campaigns
           </p>
         </div>
-        <Button onClick={openCreate} style={{ backgroundColor: theme.primary }}
-          data-testid="create-campaign-btn">
-          <Plus size={18} className="mr-1" /> New Campaign
-        </Button>
+        <div className="flex gap-2">
+          {campaigns.some(c => c.status === 'recurring') && (
+            <Button variant="outline" onClick={handleRunDue} disabled={runningDue} data-testid="run-due-campaigns-btn">
+              <PlayCircle size={16} className="mr-1" /> {runningDue ? 'Running…' : 'Run due campaigns'}
+            </Button>
+          )}
+          <Button onClick={openCreate} style={{ backgroundColor: theme.primary }}
+            data-testid="create-campaign-btn">
+            <Plus size={18} className="mr-1" /> New Campaign
+          </Button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -219,8 +285,13 @@ export default function EmailMarketing() {
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="font-semibold">{c.name}</h3>
-                    <Badge className={c.status === 'sent' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}>
-                      {c.status === 'sent' ? <><CheckCircle size={12} className="mr-0.5" /> Sent</> : <><Edit2 size={12} className="mr-0.5" /> Draft</>}
+                    <Badge className={
+                      c.status === 'recurring' ? 'bg-violet-100 text-violet-700'
+                        : c.status === 'sent' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'
+                    }>
+                      {c.status === 'recurring' ? <><Repeat size={12} className="mr-0.5" /> Recurring</>
+                        : c.status === 'sent' ? <><CheckCircle size={12} className="mr-0.5" /> Sent</>
+                        : <><Edit2 size={12} className="mr-0.5" /> Draft</>}
                     </Badge>
                     {c.targetTier && <Badge variant="outline">{c.targetTier} tier</Badge>}
                     {c.segmentId && (
@@ -243,6 +314,12 @@ export default function EmailMarketing() {
                   <p className="text-xs text-gray-400 mt-0.5">
                     <Users size={12} className="inline mr-1" />{c.recipientCount} recipients
                     {c.sentAt && <> &middot; <Clock size={12} className="inline mx-1" />Sent {new Date(c.sentAt).toLocaleDateString()}</>}
+                    {c.status === 'recurring' && (
+                      <> &middot; every {c.recurring?.intervalDays || 7}d
+                        {c.runCount > 0 && <> &middot; ran {c.runCount}× (last {new Date(c.lastRunAt).toLocaleDateString()})</>}
+                        {c.nextRunAt && <> &middot; next {new Date(c.nextRunAt).toLocaleDateString()}</>}
+                      </>
+                    )}
                   </p>
                 </div>
                 <div className="flex gap-2">
@@ -250,6 +327,12 @@ export default function EmailMarketing() {
                     <Button size="sm" onClick={() => handleSend(c.id)} style={{ backgroundColor: theme.primary }}
                       data-testid={`send-${c.id}`}>
                       <Send size={14} className="mr-1" /> Send
+                    </Button>
+                  )}
+                  {c.status === 'recurring' && (
+                    <Button size="sm" variant="outline" onClick={() => handleRunNow(c.id)}
+                      data-testid={`run-now-${c.id}`}>
+                      <PlayCircle size={14} className="mr-1" /> Run now
                     </Button>
                   )}
                   <Button size="sm" variant="ghost" className="text-red-500" onClick={() => handleDelete(c.id)}>
@@ -341,14 +424,38 @@ export default function EmailMarketing() {
               ) : (
                 <div className="space-y-2">
                   {segments.length > 0 && (
-                    <select className="w-full p-2 border rounded-md text-sm" value={segmentId}
-                      onChange={e => { setSegmentId(e.target.value); setSegmentPreview(null); }} data-testid="segment-select">
-                      <option value="">— Build a new segment below —</option>
-                      {segments.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
+                    <div className="flex gap-1 items-center">
+                      <select className="flex-1 p-2 border rounded-md text-sm" value={segmentId}
+                        onChange={e => { setSegmentId(e.target.value); setEditingSegmentId(null); setSegmentPreview(null); }} data-testid="segment-select">
+                        <option value="">— Build a new segment below —</option>
+                        {segments.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                      {segmentId && (
+                        <>
+                          <Button type="button" size="icon" variant="ghost"
+                            onClick={() => startEditingSegment(segments.find(s => s.id === segmentId))}
+                            data-testid="segment-edit-btn" title="Edit this segment">
+                            <Pencil size={14} />
+                          </Button>
+                          <Button type="button" size="icon" variant="ghost"
+                            onClick={() => viewFullList(segments.find(s => s.id === segmentId))}
+                            data-testid="segment-list-btn" title="View full matching list">
+                            <List size={14} />
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   )}
-                  {!segmentId && (
+                  {(!segmentId || editingSegmentId) && (
                     <>
+                      {editingSegmentId && (
+                        <div className="flex items-center justify-between text-xs text-violet-700 bg-violet-50 rounded px-2 py-1">
+                          <span>Editing "{segments.find(s => s.id === editingSegmentId)?.name}"</span>
+                          <button type="button" onClick={cancelEditingSegment} data-testid="segment-cancel-edit">
+                            <X size={12} />
+                          </button>
+                        </div>
+                      )}
                       <div className="grid grid-cols-3 gap-2">
                         <Input type="number" placeholder="Min spend ($)" value={segmentRules.minSpend}
                           onChange={e => { setSegmentRules({ ...segmentRules, minSpend: e.target.value }); setSegmentPreview(null); }}
@@ -360,9 +467,18 @@ export default function EmailMarketing() {
                           onChange={e => { setSegmentRules({ ...segmentRules, inactiveForDays: e.target.value }); setSegmentPreview(null); }}
                           data-testid="segment-inactive-days" />
                       </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Input type="number" placeholder="Spent ≥ $ ..." value={segmentRules.minSpendInWindow}
+                          onChange={e => { setSegmentRules({ ...segmentRules, minSpendInWindow: e.target.value }); setSegmentPreview(null); }}
+                          data-testid="segment-min-spend-window" />
+                        <Input type="number" placeholder="...in the last N days" value={segmentRules.spendInLastDays}
+                          onChange={e => { setSegmentRules({ ...segmentRules, spendInLastDays: e.target.value }); setSegmentPreview(null); }}
+                          data-testid="segment-spend-window-days" />
+                      </div>
                       <p className="text-[11px] text-gray-400">
-                        Total spend and visits are lifetime-to-date, not a time window. "Inactive for" catches customers
-                        who haven't visited in that many days (or never have).
+                        Min spend/visits above are lifetime-to-date. The spend window pair is the real "spent $X in the
+                        last N days" rule — both fields are required together. "Inactive for" catches customers who
+                        haven't visited in that many days (or never have).
                       </p>
                       <div className="flex gap-2 items-center flex-wrap">
                         <Button type="button" size="sm" variant="outline" onClick={previewCustomSegment} disabled={previewing}
@@ -374,11 +490,11 @@ export default function EmailMarketing() {
                             <Users size={10} className="mr-1" /> {segmentPreview.count} match
                           </Badge>
                         )}
-                        <Input placeholder="Save as… (optional)" value={segmentName}
+                        <Input placeholder="Save as… (name)" value={segmentName}
                           onChange={e => setSegmentName(e.target.value)} className="text-sm w-40" data-testid="segment-name" />
                         <Button type="button" size="sm" variant="outline" onClick={saveSegment} disabled={savingSegment}
                           data-testid="segment-save-btn">
-                          <Save size={12} className="mr-1" /> {savingSegment ? 'Saving…' : 'Save'}
+                          <Save size={12} className="mr-1" /> {savingSegment ? 'Saving…' : editingSegmentId ? 'Update' : 'Save'}
                         </Button>
                       </div>
                     </>
@@ -414,8 +530,54 @@ export default function EmailMarketing() {
               )}
             </div>
 
+            {/* Recurring */}
+            <div className="rounded-lg border border-violet-200 bg-violet-50/60 p-3 space-y-2">
+              <label className="flex items-center gap-2 text-sm font-semibold text-violet-800">
+                <input type="checkbox" checked={form.recurringEnabled}
+                  onChange={e => setForm({ ...form, recurringEnabled: e.target.checked })} data-testid="recurring-enable-toggle" />
+                <Repeat size={14} /> Make this recurring
+              </label>
+              {form.recurringEnabled && (
+                <div className="pt-1 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-violet-700">Every</span>
+                    <Input type="number" className="w-20" value={form.recurringIntervalDays}
+                      onChange={e => setForm({ ...form, recurringIntervalDays: e.target.value })} data-testid="recurring-interval-days" />
+                    <span className="text-sm text-violet-700">days</span>
+                  </div>
+                  <p className="text-[11px] text-violet-700/80">
+                    The audience (loyalty tier or segment above) is re-checked fresh on every run — a "hasn't visited in
+                    30 days" segment picks up whoever's newly inactive each time, not a one-off snapshot. Starts
+                    immediately and keeps running until deleted.
+                  </p>
+                </div>
+              )}
+            </div>
+
             <Button className="w-full" style={{ backgroundColor: theme.primary }} onClick={handleCreate} disabled={creating}
-              data-testid="confirm-create-campaign">{creating ? 'Creating…' : 'Create Campaign'}</Button>
+              data-testid="confirm-create-campaign">
+              {creating ? 'Creating…' : form.recurringEnabled ? 'Create Recurring Campaign' : 'Create Campaign'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Full segment customer list */}
+      <Dialog open={!!fullListSegment} onOpenChange={o => { if (!o) { setFullListSegment(null); setFullList(null); } }}>
+        <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto" data-testid="segment-full-list-dialog">
+          <DialogHeader><DialogTitle>{fullListSegment?.name} — {fullList ? fullList.count : '…'} matching</DialogTitle></DialogHeader>
+          <div className="space-y-1">
+            {loadingFullList && <p className="text-sm text-gray-400 text-center py-6">Loading…</p>}
+            {fullList?.customers?.length === 0 && <p className="text-sm text-gray-400 text-center py-6">No customers match this segment.</p>}
+            {fullList?.customers?.map(c => (
+              <div key={c.id} className="flex justify-between items-center text-sm py-1.5 border-b last:border-0" data-testid={`segment-list-row-${c.id}`}>
+                <div>
+                  <p className="font-medium">{c.name}</p>
+                  <p className="text-xs text-gray-500">{c.email}</p>
+                </div>
+                <p className="text-xs text-gray-500">${(c.totalSpent || 0).toFixed(0)} · {c.visits || 0} visits</p>
+              </div>
+            ))}
           </div>
         </DialogContent>
       </Dialog>

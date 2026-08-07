@@ -53,8 +53,8 @@ async def auto_tag_vips():
     promoted = []
     customers = await db.customers.find({}, {"_id": 0}).to_list(5000)
     for c in customers:
-        spend = float(c.get("totalSpend", 0) or 0)
-        visits = int(c.get("totalVisits", 0) or 0)
+        spend = float(c.get("totalSpent", 0) or 0)
+        visits = int(c.get("visits", 0) or 0)
         current_tier = c.get("membershipTier", "Bronze")
         if spend >= cfg.get("autoVipThresholdSpend", 500) and visits >= cfg.get("autoVipThresholdVisits", 10):
             if current_tier != "VIP":

@@ -7,9 +7,12 @@ from models.promotion import Promotion, PromotionCreate
 from models.transaction import Transaction, TransactionCreate
 from models.refund import Refund, RefundCreate
 from middleware.actor_context import tenant_scope_filter, tenant_owns
+from utils.errors import log_and_continue
+import logging
 import uuid
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # ============ PROMOTIONS API ============
 @router.get("/promotions")
@@ -315,14 +318,16 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
                 await redeem_wallet_voucher(d["voucherId"], txn_dict["id"], d["amount"])
     except Exception:
         pass
-    # Audit trail — POS transactions are ledger-grade, always logged
+    # Audit trail — POS transactions are ledger-grade, always logged. If
+    # this write itself silently failed, "always logged" wasn't true and
+    # nothing said so.
     try:
         from services.audit_service import log_event
         await log_event(entity_type="transaction", entity_id=txn_dict["id"],
                         action="created", after=txn_dict,
                         memo=f"POS sale {txn_dict['paymentMethod']} ${txn_dict['total']}")
-    except Exception:
-        pass
+    except Exception as e:
+        log_and_continue(logger, f"POS sale audit log write failed for txn {txn_dict['id']}", e)
 
     # Auto-post to double-entry ledger
     try:
@@ -331,8 +336,7 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
         auto_txn = {**txn_dict, "timestamp": txn_dict["timestamp"].isoformat() if hasattr(txn_dict["timestamp"], "isoformat") else txn_dict["timestamp"]}
         await auto_post_pos_sale(auto_txn)
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(f"POS ledger auto-post skipped: {e}")
+        log_and_continue(logger, "POS ledger auto-post skipped", e)
 
     # Fire rules-engine event: pos.sale.completed
     try:
@@ -362,22 +366,29 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
     from routes.inventory_accounting import deduct_recipe_stock
     from services import measured_inventory_service as _mi
     _actor = getattr(transaction, "cashier", None) or "pos"
+
+    # Base stock decrement is independent per item, so it's one bulk
+    # round trip instead of N sequential ones — recipe/measured-stock
+    # deduction and event emission below stay per-item since they carry
+    # real per-item side effects (container tracking, rules-engine emits)
+    # that don't reduce to a single batched write.
+    if transaction.items:
+        from pymongo import UpdateOne
+        await db.products.bulk_write([
+            UpdateOne({"id": item.productId}, {"$inc": {"stock": -item.quantity}})
+            for item in transaction.items
+        ])
+
     for item in transaction.items:
-        await db.products.update_one(
-            {"id": item.productId},
-            {"$inc": {"stock": -item.quantity}}
-        )
         try:
             await deduct_recipe_stock(item.productId, item.quantity)
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Recipe stock deduction failed for {item.productId}: {e}")
+            log_and_continue(logger, f"Recipe stock deduction failed for {item.productId}", e)
         # Measured-stock deduction — silent no-op for whole-unit products.
         try:
             await _mi.deduct_on_sale(item.productId, item.quantity, _actor)
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Measured-stock deduction failed for {item.productId}: {e}")
+            log_and_continue(logger, f"Measured-stock deduction failed for {item.productId}", e)
         # Emit inventory events for rules engine
         try:
             p = await db.products.find_one({"id": item.productId}, {"_id": 0})
@@ -402,7 +413,16 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
                     "visits": 1,
                     "points": points_earned,
                 },
-                "$set": {"lastVisit": datetime.utcnow().isoformat()}
+                # Two fields for the same fact, kept in lockstep on purpose:
+                # lastVisit (bare ISO string) is what nua_intelligence.py,
+                # nua_tools.py and v25_suite.py already read; lastVisitDate is
+                # the Customer model's declared field (models/customer.py) and
+                # what loyalty_engine's segmentation and the marketing segment
+                # builder's "inactive for N days" rule read. Only writing one
+                # of the two silently starved the other's readers of any real
+                # data — every customer looked permanently brand-new to them.
+                "$set": {"lastVisit": datetime.utcnow().isoformat(),
+                         "lastVisitDate": datetime.utcnow().date().isoformat()}
             }
         )
         if points_earned > 0:
@@ -451,7 +471,8 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
             await db.customers.update_one(
                 {"id": part.customerId},
                 {"$inc": {"totalSpent": part.amount, "visits": 1, "points": part_points},
-                 "$set": {"lastVisit": datetime.utcnow().isoformat()}},
+                 "$set": {"lastVisit": datetime.utcnow().isoformat(),
+                          "lastVisitDate": datetime.utcnow().date().isoformat()}},
             )
             if part_points > 0:
                 try:
@@ -583,8 +604,7 @@ async def create_refund(refund: RefundCreate, _user: dict = Depends(require_owne
         from services.accounting_service import auto_post_refund
         await auto_post_refund({**refund_obj.dict(), "timestamp": datetime.utcnow().isoformat()})
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(f"Refund ledger auto-post skipped: {e}")
+        log_and_continue(logger, "Refund ledger auto-post skipped", e)
     # Fire rules-engine event: pos.refund.issued
     try:
         from services.rules_engine import safe_emit
@@ -614,13 +634,11 @@ async def create_refund(refund: RefundCreate, _user: dict = Depends(require_owne
             {"id": refund_obj_dict["id"]},
             {"$set": {"kitchenEffects": refund_obj_dict["kitchenEffects"]}})
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(f"Refund kitchen/stock reversal skipped: {e}")
+        log_and_continue(logger, "Refund kitchen/stock reversal skipped", e)
 
     try:
         await _reverse_loyalty_for_refund(original_txn, refund.amount)
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(f"Refund loyalty reversal skipped: {e}")
+        log_and_continue(logger, "Refund loyalty reversal skipped", e)
 
     return refund_obj

@@ -164,9 +164,14 @@ async def evaluate_customer(customer_id: str) -> Dict[str, Any]:
             }
             await db.customer_badges.insert_one(dict(doc))
             if doc["pointsAwarded"]:
+                # "points" is the canonical balance field (Customer model,
+                # POS checkout earn/redeem) — "loyaltyPoints" doesn't exist
+                # on the customer document, so badge point awards were
+                # invisible everywhere else: checkout redemption, the
+                # wallet, the liability report, tier progress below.
                 await db.customers.update_one(
                     {"id": customer_id},
-                    {"$inc": {"loyaltyPoints": doc["pointsAwarded"]}},
+                    {"$inc": {"points": doc["pointsAwarded"]}},
                 )
             awarded_badges.append(doc)
 
@@ -188,7 +193,7 @@ async def evaluate_customer(customer_id: str) -> Dict[str, Any]:
         await db.customer_milestones.insert_one(dict(rec))
         # Apply the reward
         if reward.get("type") == "points":
-            await db.customers.update_one({"id": customer_id}, {"$inc": {"loyaltyPoints": int(reward.get("value") or 0)}})
+            await db.customers.update_one({"id": customer_id}, {"$inc": {"points": int(reward.get("value") or 0)}})
         elif reward.get("type") == "tier":
             await db.customers.update_one({"id": customer_id}, {"$set": {"membershipTier": reward.get("value")}})
         elif reward.get("type") == "voucher":
@@ -290,7 +295,7 @@ async def evaluate_customer(customer_id: str) -> Dict[str, Any]:
         if completed and not (prog or {}).get("rewarded"):
             reward = ch.get("reward") or {}
             if reward.get("type") == "points":
-                await db.customers.update_one({"id": customer_id}, {"$inc": {"loyaltyPoints": int(reward.get("value") or 0)}})
+                await db.customers.update_one({"id": customer_id}, {"$inc": {"points": int(reward.get("value") or 0)}})
             elif reward.get("type") == "voucher":
                 v = {
                     "id": str(uuid.uuid4()), "customerId": customer_id,
@@ -318,7 +323,7 @@ async def get_customer_progress(customer_id: str) -> Dict[str, Any]:
 
     # Tier calculation
     tiers = await db.loyalty_tiers.find({}, {"_id": 0}).sort("minPoints", 1).to_list(20)
-    points = int(customer.get("loyaltyPoints") or 0)
+    points = int(customer.get("points") or 0)
     current_tier = tiers[0] if tiers else None
     next_tier = None
     for t in tiers:
@@ -581,16 +586,25 @@ async def complete_referral(ref_id: str, body: dict, user: dict = Depends(get_us
 
 @router.get("/leaderboard")
 async def leaderboard(metric: str = "points", limit: int = 20, _: dict = Depends(get_user)):
-    """Top customers by metric ∈ {points, visits, spend, referrals}."""
+    """Top customers by metric ∈ {points, visits, spend, referrals}.
+
+    field_map previously pointed at loyaltyPoints/totalVisits/totalSpend —
+    none of which exist on the Customer model (models/customer.py has
+    points/visits/totalSpent) — so `{field: {"$gt": 0}}` matched zero real
+    customers for 3 of the 4 metrics. The leaderboard has been effectively
+    empty since it was built. Response keys are kept as-is (the frontend
+    already reads totalVisits/totalSpend/loyaltyPoints) — only the Mongo
+    field names driving the query/sort/projection needed fixing.
+    """
     field_map = {
-        "points": "loyaltyPoints", "visits": "totalVisits",
-        "spend": "totalSpend", "referrals": "referrals",
+        "points": "points", "visits": "visits",
+        "spend": "totalSpent", "referrals": "referrals",
     }
-    field = field_map.get(metric, "loyaltyPoints")
+    field = field_map.get(metric, "points")
     rows = await db.customers.find(
         {field: {"$gt": 0}},
         {"_id": 0, "id": 1, "name": 1, "email": 1, "membershipTier": 1,
-          "loyaltyPoints": 1, "totalVisits": 1, "totalSpend": 1, "referrals": 1},
+          "points": 1, "visits": 1, "totalSpent": 1, "referrals": 1},
     ).sort(field, -1).limit(limit).to_list(limit)
     return {
         "metric": metric,
@@ -598,9 +612,9 @@ async def leaderboard(metric: str = "points", limit: int = 20, _: dict = Depends
             {"rank": i + 1, "customerId": r["id"], "name": r.get("name") or r.get("email"),
              "tier": r.get("membershipTier"),
              "value": r.get(field, 0),
-             "loyaltyPoints": r.get("loyaltyPoints", 0),
-             "totalVisits": r.get("totalVisits", 0),
-             "totalSpend": r.get("totalSpend", 0),
+             "loyaltyPoints": r.get("points", 0),
+             "totalVisits": r.get("visits", 0),
+             "totalSpend": r.get("totalSpent", 0),
              "referrals": r.get("referrals", 0)}
             for i, r in enumerate(rows)
         ],

@@ -14,6 +14,9 @@ from datetime import datetime, timezone, timedelta
 import uuid
 import os
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -367,8 +370,9 @@ async def resolve_fraud_flag(flag_id: str, data: dict, user: dict = Depends(requ
         from services.audit_service import log_event
         await log_event(entity_type="loyalty_fraud_flag", entity_id=flag_id, action=new_status,
                          memo=f"{flag['type']} flag resolved: {new_status}" + (f" — {action_taken}" if action_taken else ""))
-    except Exception:
-        pass
+    except Exception as e:
+        from utils.errors import log_and_continue
+        log_and_continue(logger, f"Fraud flag audit log write failed for {flag_id}", e)
     return {"ok": True, "status": new_status, "actionTaken": action_taken}
 
 
@@ -387,15 +391,23 @@ async def unlock_loyalty_account(customer_id: str, user: dict = Depends(require_
 # AUTONOMOUS AI AGENT (Ash) — observes, decides, acts
 # =============================================================================
 async def _segment_customers():
-    """Auto-segment customers: VIP / regular / at-risk / first-timer."""
+    """Auto-segment customers: VIP / regular / at-risk / first-timer.
+
+    Was reading totalVisits/totalSpend/lastVisit — none of which exist on
+    the Customer model (models/customer.py has visits/totalSpent/
+    lastVisitDate). Every customer silently read as 0/0/"" and fell
+    through to "first_timer" for anyone with visits<=1 (which is all of
+    them, since totalVisits was always 0) — this has been mis-segmenting
+    every customer since the field was added.
+    """
     customers = await db.customers.find({}, {"_id": 0}).to_list(5000)
     now = datetime.now(timezone.utc)
-    sixty_days_ago = (now - timedelta(days=60)).isoformat()
+    sixty_days_ago = (now - timedelta(days=60)).date().isoformat()
     segments = {"vip": [], "regular": [], "at_risk": [], "first_timer": []}
     for c in customers:
-        visits = int(c.get("totalVisits", 0) or 0)
-        spend = float(c.get("totalSpend", 0) or 0)
-        last_visit = c.get("lastVisit", "")
+        visits = int(c.get("visits", 0) or 0)
+        spend = float(c.get("totalSpent", 0) or 0)
+        last_visit = c.get("lastVisitDate", "")
         if spend > 500 and visits > 10:
             segments["vip"].append(c["id"])
         elif visits <= 1:

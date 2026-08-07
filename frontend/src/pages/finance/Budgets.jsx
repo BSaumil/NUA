@@ -114,6 +114,39 @@ const Budgets = () => {
         </div>
       )}
 
+      {report && report.rows.length > 0 && (
+        <Card><CardContent className="p-4">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Budget vs actual</p>
+          <div className="space-y-2.5">
+            {report.rows.map(row => {
+              const max = Math.max(row.budget, row.actual, 1);
+              return (
+                <div key={row.code} data-testid={`budget-chart-row-${row.code}`}>
+                  <div className="flex justify-between text-xs mb-0.5">
+                    <span className="font-mono text-slate-500 mr-1">{row.code}</span>
+                    <span className="text-slate-600">{row.name}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="flex-1 h-3 rounded-full bg-slate-100 overflow-hidden" title={`Budget: ${FMT(row.budget)}`}>
+                      <div className="h-full bg-slate-400 rounded-full" style={{ width: `${Math.min(100, (row.budget / max) * 100)}%` }} />
+                    </div>
+                    <div className={`flex-1 h-3 rounded-full bg-slate-100 overflow-hidden`} title={`Actual: ${FMT(row.actual)}`}>
+                      <div className={`h-full rounded-full ${row.actual > row.budget ? 'bg-rose-500' : 'bg-emerald-500'}`}
+                        style={{ width: `${Math.min(100, (row.actual / max) * 100)}%` }} />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex gap-4 mt-3 text-[11px] text-slate-500">
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block" /> Budget</span>
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" /> Actual (under)</span>
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block" /> Actual (over)</span>
+          </div>
+        </CardContent></Card>
+      )}
+
       {report && (
         <Card><CardContent className="p-0">
           <table className="w-full text-sm">
