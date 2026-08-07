@@ -362,11 +362,20 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
     from routes.inventory_accounting import deduct_recipe_stock
     from services import measured_inventory_service as _mi
     _actor = getattr(transaction, "cashier", None) or "pos"
+
+    # Base stock decrement is independent per item, so it's one bulk
+    # round trip instead of N sequential ones — recipe/measured-stock
+    # deduction and event emission below stay per-item since they carry
+    # real per-item side effects (container tracking, rules-engine emits)
+    # that don't reduce to a single batched write.
+    if transaction.items:
+        from pymongo import UpdateOne
+        await db.products.bulk_write([
+            UpdateOne({"id": item.productId}, {"$inc": {"stock": -item.quantity}})
+            for item in transaction.items
+        ])
+
     for item in transaction.items:
-        await db.products.update_one(
-            {"id": item.productId},
-            {"$inc": {"stock": -item.quantity}}
-        )
         try:
             await deduct_recipe_stock(item.productId, item.quantity)
         except Exception as e:
@@ -402,7 +411,16 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
                     "visits": 1,
                     "points": points_earned,
                 },
-                "$set": {"lastVisit": datetime.utcnow().isoformat()}
+                # Two fields for the same fact, kept in lockstep on purpose:
+                # lastVisit (bare ISO string) is what nua_intelligence.py,
+                # nua_tools.py and v25_suite.py already read; lastVisitDate is
+                # the Customer model's declared field (models/customer.py) and
+                # what loyalty_engine's segmentation and the marketing segment
+                # builder's "inactive for N days" rule read. Only writing one
+                # of the two silently starved the other's readers of any real
+                # data — every customer looked permanently brand-new to them.
+                "$set": {"lastVisit": datetime.utcnow().isoformat(),
+                         "lastVisitDate": datetime.utcnow().date().isoformat()}
             }
         )
         if points_earned > 0:
@@ -451,7 +469,8 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
             await db.customers.update_one(
                 {"id": part.customerId},
                 {"$inc": {"totalSpent": part.amount, "visits": 1, "points": part_points},
-                 "$set": {"lastVisit": datetime.utcnow().isoformat()}},
+                 "$set": {"lastVisit": datetime.utcnow().isoformat(),
+                          "lastVisitDate": datetime.utcnow().date().isoformat()}},
             )
             if part_points > 0:
                 try:
