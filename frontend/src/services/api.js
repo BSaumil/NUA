@@ -23,6 +23,7 @@ export const productsAPI = {
   update: (id, data) => api.put(`/products/${id}`, data),
   delete: (id) => api.delete(`/products/${id}`),
   adjustStock: (id, data) => api.post(`/products/${id}/adjust-stock`, data),
+  autoTranslate: (id) => api.post(`/products/${id}/auto-translate`),
 };
 
 // Promotions API
