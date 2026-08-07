@@ -3,10 +3,24 @@
 Server-authoritative. Frontend cannot bypass this — every API call (except a
 small allowlist) is checked against the tenant's license state.
 
+Commercial intent, by design: a suspended/past-due/abn_review tenant is
+blocked from taking new money (POS sales, tabs, kiosk orders, new gift
+cards — BLOCKED_WHEN_SUSPENDED_PREFIXES below) but can keep MANAGING their
+business — editing products, taking reservations, updating customers —
+so staff aren't locked out of basic operations while a billing issue gets
+sorted. Only "cancelled" locks the whole API down to a tiny allowlist.
+This is deliberate, not a gap: see BLOCKED_WHEN_SUSPENDED_PREFIXES's own
+comment for what's actually considered "a new sale."
+
 Routes are categorized:
 - ALWAYS_OPEN: auth, license itself, billing recovery, exports, owner login
 - RESTRICTED_IN_GRACE: settings edits, exports, new device activations
 - BLOCKED_WHEN_SUSPENDED: new transactions (POS sales)
+
+Everything else (products, customers, reservations, dashboard, analytics,
+etc.) is unrestricted in every state except "cancelled" — there's no
+separate read-only allowlist to maintain here, that's just what "not
+listed in one of the blocking sets above" already means.
 """
 from __future__ import annotations
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -24,12 +38,6 @@ ALWAYS_OPEN_PREFIXES = (
     "/api/webhook/",            # webhooks
     "/api/health",
     "/api/v25/warehouse/",      # data export — spec says always allow
-)
-# Read-only / informational — allowed in all states except cancelled
-READ_ONLY_PREFIXES = (
-    "/api/products", "/api/customers", "/api/reservations",
-    "/api/dock/", "/api/dashboard", "/api/v15/", "/api/analytics",
-    "/api/business-settings", "/api/v25/sites", "/api/v25/franchise/",
 )
 # Owner admin actions disabled in grace/past_due
 RESTRICTED_IN_GRACE_PREFIXES = (
