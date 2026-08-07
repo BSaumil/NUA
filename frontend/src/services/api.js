@@ -59,6 +59,12 @@ api.interceptors.response.use(
   }
 );
 
+// Auth — self-service password recovery (login/logout/2FA live in AuthContext)
+export const authAPI = {
+  forgotPassword: (email) => api.post('/auth/forgot-password', { email }),
+  resetPassword: (token, password) => api.post('/auth/reset-password', { token, password }),
+};
+
 // Products API
 export const productsAPI = {
   getAll: (params) => api.get('/products', { params }),

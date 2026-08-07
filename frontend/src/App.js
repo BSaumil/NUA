@@ -10,6 +10,7 @@ import BottomDock from './components/BottomDock';
 import BackButton from './components/BackButton';
 import LicensePage, { LicenseLockScreen, LicenseBanner } from './pages/LicensePage';
 import Login from './pages/Login';
+import ResetPassword from './pages/ResetPassword';
 import Today from './pages/Today';
 import CommandBar from './components/CommandBar';
 import Dashboard from './pages/Dashboard';
@@ -321,6 +322,7 @@ function App() {
                 <Route path="/order-online" element={<OrderOnline />} />
                 <Route path="/track" element={<TrackOrder />} />
                 <Route path="/track/:code" element={<TrackOrder />} />
+                <Route path="/reset-password" element={<ResetPassword />} />
                 {/* Staff routes — auth required */}
                 <Route path="/*" element={<ProtectedRoutes />} />
               </Routes>
