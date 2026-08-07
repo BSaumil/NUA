@@ -431,6 +431,7 @@ export const enterpriseAPI = {
   // Upsells
   // Reports
   getReportConfig: () => api.get('/reports/automated-config'),
+  saveReportConfig: (data) => api.post('/reports/automated-config', data),
   // Hardware
   getPrinters: () => api.get('/hardware/printers'),
   addPrinter: (data) => api.post('/hardware/printers', data),
