@@ -641,6 +641,24 @@ async def create_campaign(data: dict, user: dict = Depends(require_owner_or_mana
         if voucher_doc["manualCode"] not in campaign["body"]:
             campaign["body"] = (campaign["body"] or "") + redeem_blurb
 
+    # Recurring: a saved segment re-resolved fresh on every run (that's the
+    # entire point — "newly inactive" or "just crossed $X spend" changes
+    # week to week) instead of a one-off snapshot sent once and done.
+    # There's no background scheduler in this codebase — automations
+    # (agent_tick, automation triggers) are all "due work runs when
+    # something calls the tick endpoint," not self-scheduling, and this
+    # follows the same established pattern rather than introducing a new one.
+    recurring_req = data.get("recurring") or {}
+    if recurring_req.get("enabled"):
+        interval_days = max(1, int(recurring_req.get("intervalDays") or 7))
+        campaign["recurring"] = {"enabled": True, "intervalDays": interval_days}
+        campaign["status"] = "recurring"
+        campaign["nextRunAt"] = datetime.now(timezone.utc).isoformat()
+        campaign["lastRunAt"] = None
+        campaign["runCount"] = 0
+    else:
+        campaign["recurring"] = None
+
     # Count target recipients against the live customer collection.
     campaign["recipientCount"] = len(await _campaign_recipients(campaign))
     await db.campaigns.insert_one(dict(campaign))
@@ -652,15 +670,12 @@ async def get_campaigns(_: dict = Depends(require_owner_or_manager)):
     campaigns = await db.campaigns.find({}, {"_id": 0}).sort("createdAt", -1).to_list(100)
     return campaigns
 
-@router.post("/marketing/campaigns/{campaign_id}/send")
-async def send_campaign(campaign_id: str, _: dict = Depends(require_owner_or_manager)):
 
-    campaign = await db.campaigns.find_one({"id": campaign_id}, {"_id": 0})
-    if not campaign:
-        raise HTTPException(status_code=404, detail="Campaign not found")
-
+async def _send_campaign_emails(campaign: dict) -> dict:
+    """The actual send loop, shared by the one-off Send button and the
+    recurring run/run-due path — a recurring campaign never reaches
+    "sent" as a terminal status, it just runs again."""
     members = await _campaign_recipients(campaign)
-
     from utils.notifications import send_email
 
     # Log + best-effort send each recipient. A delivery failure on one
@@ -679,21 +694,76 @@ async def send_campaign(campaign_id: str, _: dict = Depends(require_owner_or_man
         if receipt.get("delivered"):
             delivered_count += 1
         await db.campaign_sends.insert_one({
-            "campaignId": campaign_id, "memberId": m["id"],
+            "campaignId": campaign["id"], "memberId": m["id"],
             "email": m.get("email"), "status": "sent" if receipt.get("delivered") else "queued",
             "deliveryReason": receipt.get("reason"),
             "sentAt": datetime.now(timezone.utc).isoformat(),
         })
+    return {"recipientCount": len(members), "deliveredCount": delivered_count}
 
+
+@router.post("/marketing/campaigns/{campaign_id}/send")
+async def send_campaign(campaign_id: str, _: dict = Depends(require_owner_or_manager)):
+    campaign = await db.campaigns.find_one({"id": campaign_id}, {"_id": 0})
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if campaign.get("status") == "recurring":
+        raise HTTPException(status_code=400, detail="Recurring campaigns run automatically — use run-now instead")
+
+    result = await _send_campaign_emails(campaign)
     await db.campaigns.update_one(
         {"id": campaign_id},
         {"$set": {"status": "sent", "sentAt": datetime.now(timezone.utc).isoformat(),
-                   "recipientCount": len(members), "deliveredCount": delivered_count}}
+                   "recipientCount": result["recipientCount"], "deliveredCount": result["deliveredCount"]}}
     )
-
-    return {"message": f"Campaign sent to {len(members)} members ({delivered_count} delivered via SendGrid, "
+    return {"message": f"Campaign sent to {result['recipientCount']} members ({result['deliveredCount']} delivered via SendGrid, "
                         f"rest queued — configure SENDGRID_API_KEY to send live)",
-            "recipientCount": len(members), "deliveredCount": delivered_count}
+            **result}
+
+
+async def _run_recurring_campaign(campaign: dict) -> dict:
+    result = await _send_campaign_emails(campaign)
+    interval_days = campaign.get("recurring", {}).get("intervalDays", 7)
+    now = datetime.now(timezone.utc)
+    await db.campaigns.update_one(
+        {"id": campaign["id"]},
+        {"$set": {"lastRunAt": now.isoformat(),
+                   "nextRunAt": (now + timedelta(days=interval_days)).isoformat(),
+                   "recipientCount": result["recipientCount"], "deliveredCount": result["deliveredCount"]},
+         "$inc": {"runCount": 1}}
+    )
+    return result
+
+
+@router.post("/marketing/campaigns/{campaign_id}/run-now")
+async def run_campaign_now(campaign_id: str, _: dict = Depends(require_owner_or_manager)):
+    """Manually fire one recurring campaign immediately, without waiting
+    for its schedule — same effect as run-due picking it up, just now."""
+    campaign = await db.campaigns.find_one({"id": campaign_id}, {"_id": 0})
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if campaign.get("status") != "recurring":
+        raise HTTPException(status_code=400, detail="Only recurring campaigns can be run this way")
+    result = await _run_recurring_campaign(campaign)
+    return {"message": f"Sent to {result['recipientCount']} members", **result}
+
+
+@router.post("/marketing/campaigns/run-due")
+async def run_due_campaigns(_: dict = Depends(require_owner_or_manager)):
+    """Process every recurring campaign whose nextRunAt has passed. No
+    background scheduler exists in this codebase (see agent_tick) — this
+    is meant to be called periodically the same way, or via the "Run due
+    campaigns" button in Email Marketing."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    due = await db.campaigns.find(
+        {"status": "recurring", "nextRunAt": {"$lte": now_iso}}, {"_id": 0}
+    ).to_list(200)
+    results = []
+    for campaign in due:
+        result = await _run_recurring_campaign(campaign)
+        results.append({"campaignId": campaign["id"], "name": campaign["name"], **result})
+    return {"ran": len(results), "campaigns": results}
+
 
 @router.delete("/marketing/campaigns/{campaign_id}")
 async def delete_campaign(campaign_id: str, _: dict = Depends(require_owner_or_manager)):
