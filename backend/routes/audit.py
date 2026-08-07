@@ -6,6 +6,7 @@ from typing import Optional
 from deps import get_user, require_owner_or_manager, require_owner
 from services import audit_service, entity_service
 from database import db
+from middleware.actor_context import tenant_scope_filter
 
 router = APIRouter(prefix="/audit")
 
@@ -84,7 +85,11 @@ async def gdpr_purge(entity_type: str, entity_id: str,
 async def summary(user: dict = Depends(get_user)):
     """Quick actor / action mix over the recent audit stream."""
     business_id = user.get("businessId") or "default"
-    match = {"$match": {"businessId": business_id}}
+    # tenant_scope_filter, not a plain equality match, so events written
+    # before tenant stamping still count instead of vanishing from a
+    # not-yet-backfilled business's summary.
+    scope = tenant_scope_filter(business_id)
+    match = {"$match": scope}
     pipeline_action = [match, {"$group": {"_id": "$action", "count": {"$sum": 1}}}, {"$sort": {"count": -1}}]
     pipeline_type = [match, {"$group": {"_id": "$entityType", "count": {"$sum": 1}}}, {"$sort": {"count": -1}}, {"$limit": 20}]
     pipeline_actor = [match, {"$group": {"_id": "$actor", "count": {"$sum": 1}}}, {"$sort": {"count": -1}}, {"$limit": 10}]
@@ -92,5 +97,5 @@ async def summary(user: dict = Depends(get_user)):
         "byAction": await db.audit_events.aggregate(pipeline_action).to_list(20),
         "byEntity": await db.audit_events.aggregate(pipeline_type).to_list(20),
         "byActor": await db.audit_events.aggregate(pipeline_actor).to_list(10),
-        "total": await db.audit_events.count_documents({"businessId": business_id}),
+        "total": await db.audit_events.count_documents(scope),
     }

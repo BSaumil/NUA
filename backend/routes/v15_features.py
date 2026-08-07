@@ -5,6 +5,7 @@ cohort retention, booking heatmap, 2FA, GDPR.
 from fastapi import APIRouter, HTTPException, Depends
 from deps import get_user, require_owner, require_owner_or_manager, require_permission
 from database import db
+from middleware.actor_context import tenant_scope_filter
 from datetime import datetime, timezone, timedelta
 import logging
 import uuid
@@ -238,8 +239,7 @@ async def open_cash_drawer(data: dict, user: dict = Depends(require_permission("
 @router.get("/pos/drawer-events")
 async def list_drawer_events(user: dict = Depends(require_owner_or_manager)):
     """Owner/manager oversight — every no-sale drawer open, who and why."""
-    business_id = user.get("businessId") or "default"
-    rows = await db.drawer_events.find({"businessId": business_id}, {"_id": 0}).sort("openedAt", -1).to_list(200)
+    rows = await db.drawer_events.find(tenant_scope_filter(user.get("businessId")), {"_id": 0}).sort("openedAt", -1).to_list(200)
     return rows
 
 

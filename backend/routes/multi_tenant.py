@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from deps import get_user, require_owner
 from database import db
+from middleware.actor_context import tenant_scope_filter
 from typing import Optional
 import re
 import uuid
@@ -132,11 +133,11 @@ async def get_business_summary(business_id: str, _: dict = Depends(require_owner
 
     # Scoped to this business_id specifically (not the caller's own token
     # businessId — an owner with multiple businesses needs to pull summaries
-    # for businesses other than the one they're currently acting as), with
-    # the same fail-open-to-untagged-legacy-data semantics as
-    # tenant_scope_filter so a not-yet-backfilled deployment still shows
-    # its (single, real) numbers instead of zero.
-    biz_or_untagged = {"$or": [{"businessId": business_id}, {"businessId": None}, {"businessId": {"$exists": False}}]}
+    # for businesses other than the one they're currently acting as).
+    # tenant_scope_filter still applies its fail-open-to-untagged-legacy-data
+    # semantics so a not-yet-backfilled deployment shows its real numbers
+    # instead of zero.
+    biz_or_untagged = tenant_scope_filter(business_id)
     txns = await db.transactions.find(biz_or_untagged, {"_id": 0}).to_list(10000)
     products = await db.products.find(biz_or_untagged, {"_id": 0}).to_list(1000)
     customers = await db.customers.find(biz_or_untagged, {"_id": 0}).to_list(10000)
