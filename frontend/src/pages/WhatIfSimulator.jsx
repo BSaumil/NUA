@@ -10,7 +10,6 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from '../components/ui/select';
 import { useTheme } from '../contexts/ThemeContext';
-import { simulatorAPI } from '../services/api';
 import api from '../services/api';
 import { toast } from 'sonner';
 
