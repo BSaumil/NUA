@@ -998,6 +998,8 @@ async def personalisation(customer_id: str, _: dict = Depends(get_user)):
 @router.post("/gift-cards/schedule")
 async def schedule_gift(body: dict, user: dict = Depends(get_user)):
     """Buy a gift card now, deliver later (e.g. valentine's day)."""
+    if user["role"] not in ("owner", "manager"):
+        raise HTTPException(403, "Owner/manager only")
     if not body.get("deliverAt"):
         raise HTTPException(400, "deliverAt required")
     v = await _issue_voucher({
@@ -1024,6 +1026,8 @@ async def schedule_gift(body: dict, user: dict = Depends(get_user)):
 
 @router.post("/gift-cards/{voucher_id}/reload")
 async def reload_gift(voucher_id: str, body: dict, user: dict = Depends(get_user)):
+    if user["role"] not in ("owner", "manager"):
+        raise HTTPException(403, "Owner/manager only")
     v = await db.vouchers.find_one({"id": voucher_id}, {"_id": 0})
     if not v or v.get("sourceType") != "gift_card":
         raise HTTPException(404, "Gift card not found")
