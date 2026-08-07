@@ -108,6 +108,7 @@ const NAV_STRUCTURE = [
     children: [
       { path: '/settings', label: 'Settings' },
       { path: '/integrations', label: 'Integrations' },
+      { path: '/eftpos-terminals', label: 'EFTPOS Terminals' },
       { path: '/approvals', label: 'Approvals' },
       { path: '/audit', label: 'Audit Log' },
       { path: '/ash-permissions', label: 'AI Permissions' },

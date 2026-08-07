@@ -220,6 +220,19 @@ async def get_liability_report(_: dict = Depends(require_owner_or_manager)):
     }
 
 
+@router.get("/loyalty/reports/locked-accounts")
+async def get_locked_accounts(_: dict = Depends(require_owner_or_manager)):
+    """Confirming a point-farming flag locks the account, but nothing ever
+    listed who's currently locked — the only way to find out was to already
+    know the customerId and check their profile. This is the other half of
+    that action: see who's locked, so the unlock endpoint has somewhere to
+    be driven from."""
+    customers = await db.customers.find(
+        {"loyaltyLocked": True}, {"_id": 0, "id": 1, "name": 1, "email": 1, "points": 1}
+    ).to_list(500)
+    return {"accounts": customers, "count": len(customers)}
+
+
 async def _compute_fraud_signals() -> list:
     """Two concrete, computable signals from data that already exists —
     not a general fraud model, just the two patterns explicitly called out

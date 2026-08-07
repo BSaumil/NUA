@@ -45,6 +45,14 @@ const Deposits = () => {
     } catch (e) { toast.error(e.response?.data?.detail || 'Failed'); }
   };
 
+  const refund = async (d) => {
+    if (!window.confirm(`Refund ${FMT(d.amount)} held for ${d.customerName || d.customerId}? This cannot be undone.`)) return;
+    try {
+      await financeAPI.refundDeposit(d.id);
+      toast.success('Deposit refunded'); load();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed'); }
+  };
+
   return (
     <div className="space-y-4" data-testid="deposits-page">
       <div className="flex justify-between items-center">
@@ -74,9 +82,12 @@ const Deposits = () => {
                 <td className="p-2 capitalize">{d.method}</td>
                 <td className="p-2 text-right font-medium">{FMT(d.amount)}</td>
                 <td className="p-2 text-center"><Badge variant={STATUS_BADGE[d.status] || 'outline'} className="capitalize">{d.status}</Badge></td>
-                <td className="p-2 pr-4 text-right">
+                <td className="p-2 pr-4 text-right space-x-2">
                   {d.status === 'held' && (
-                    <Button size="sm" onClick={() => setApplyFor(d)} data-testid={`deposit-apply-${d.id.slice(0, 6)}`}>Apply to Sale</Button>
+                    <>
+                      <Button size="sm" onClick={() => setApplyFor(d)} data-testid={`deposit-apply-${d.id.slice(0, 6)}`}>Apply to Sale</Button>
+                      <Button size="sm" variant="outline" onClick={() => refund(d)} data-testid={`deposit-refund-${d.id.slice(0, 6)}`}>Refund</Button>
+                    </>
                   )}
                 </td>
               </tr>

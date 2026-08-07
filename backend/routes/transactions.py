@@ -129,6 +129,21 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
     applied_discounts = [d.dict() for d in transaction.appliedDiscounts]
     for d in applied_discounts:
         d["amount"] = max(float(d.get("amount") or 0), 0)
+    # Voucher-linked discounts also get capped to what the voucher is
+    # actually worth — the client-supplied amount is a display hint only.
+    # Without this, any logged-in POS user could attach a real voucherId to
+    # an inflated amount and the bill would honour it at face value; the
+    # voucher only ever got checked for value once it was (separately)
+    # marked consumed after the sale had already been priced and saved.
+    for d in applied_discounts:
+        if not d.get("voucherId"):
+            continue
+        v = await db.vouchers.find_one({"id": d["voucherId"]}, {"_id": 0})
+        if not v or v.get("status") not in ("active", "partial"):
+            d["amount"] = 0.0
+        elif v.get("valueType") != "percentage":
+            cap = float(v.get("residualValue")) if v.get("partialRedeemable") else float(v.get("value", 0) or 0)
+            d["amount"] = min(d["amount"], max(cap, 0.0))
     voucher_discount = sum(d["amount"] for d in applied_discounts)
 
     # Loyalty config — used for both the redeem check below and the earn
@@ -297,7 +312,7 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
         from services.wallet_service import redeem_wallet_voucher
         for d in applied_discounts:
             if d.get("voucherId"):
-                await redeem_wallet_voucher(d["voucherId"], txn_dict["id"])
+                await redeem_wallet_voucher(d["voucherId"], txn_dict["id"], d["amount"])
     except Exception:
         pass
     # Audit trail — POS transactions are ledger-grade, always logged
@@ -352,11 +367,17 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
             {"id": item.productId},
             {"$inc": {"stock": -item.quantity}}
         )
-        try: await deduct_recipe_stock(item.productId, item.quantity)
-        except Exception: pass
+        try:
+            await deduct_recipe_stock(item.productId, item.quantity)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Recipe stock deduction failed for {item.productId}: {e}")
         # Measured-stock deduction — silent no-op for whole-unit products.
-        try: await _mi.deduct_on_sale(item.productId, item.quantity, _actor)
-        except Exception: pass
+        try:
+            await _mi.deduct_on_sale(item.productId, item.quantity, _actor)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Measured-stock deduction failed for {item.productId}: {e}")
         # Emit inventory events for rules engine
         try:
             p = await db.products.find_one({"id": item.productId}, {"_id": 0})

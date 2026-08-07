@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Mail, Send, Plus, Users, Trash2, Clock, CheckCircle, Edit2, Sparkles, Ticket, Wand2, LayoutTemplate
+  Mail, Send, Plus, Users, Trash2, Clock, CheckCircle, Edit2, Sparkles, Ticket, Wand2, LayoutTemplate, Filter, Save
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -21,6 +21,8 @@ const EMPTY_FORM = {
   voucherExpiresInDays: 30, voucherMinSpend: 0,
 };
 
+const EMPTY_SEGMENT_RULES = { minSpend: '', minVisits: '', inactiveForDays: '' };
+
 export default function EmailMarketing() {
   const { theme } = useTheme();
   const [campaigns, setCampaigns] = useState([]);
@@ -32,23 +34,38 @@ export default function EmailMarketing() {
   const [drafting, setDrafting] = useState(false);
   const [improving, setImproving] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [audienceMode, setAudienceMode] = useState('tier'); // 'tier' | 'segment'
+  const [segments, setSegments] = useState([]);
+  const [segmentId, setSegmentId] = useState('');
+  const [segmentRules, setSegmentRules] = useState(EMPTY_SEGMENT_RULES);
+  const [segmentPreview, setSegmentPreview] = useState(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [segmentName, setSegmentName] = useState('');
+  const [savingSegment, setSavingSegment] = useState(false);
 
   useEffect(() => { fetchData(); }, []);
 
   const fetchData = async () => {
     try {
-      const [camp, stats] = await Promise.all([
+      const [camp, stats, segs] = await Promise.all([
         advancedAPI.getCampaigns(),
         axios.get(`${API}/api/members/stats`, { headers: authHeader() }).catch(() => ({ data: null })),
+        advancedAPI.getSegments().catch(() => ({ data: [] })),
       ]);
       setCampaigns(camp.data);
       setMemberStats(stats.data);
+      setSegments(segs.data || []);
     } catch {}
   };
 
   const openCreate = async () => {
     setForm(EMPTY_FORM);
     setBrief('');
+    setAudienceMode('tier');
+    setSegmentId('');
+    setSegmentRules(EMPTY_SEGMENT_RULES);
+    setSegmentPreview(null);
+    setSegmentName('');
     setShowCreate(true);
     if (templates.length === 0) {
       try {
@@ -56,6 +73,42 @@ export default function EmailMarketing() {
         setTemplates(r.data || []);
       } catch {}
     }
+    if (segments.length === 0) {
+      try {
+        const r = await advancedAPI.getSegments();
+        setSegments(r.data || []);
+      } catch {}
+    }
+  };
+
+  const rulesPayload = () => {
+    const r = {};
+    if (segmentRules.minSpend !== '') r.minSpend = Number(segmentRules.minSpend);
+    if (segmentRules.minVisits !== '') r.minVisits = Number(segmentRules.minVisits);
+    if (segmentRules.inactiveForDays !== '') r.inactiveForDays = Number(segmentRules.inactiveForDays);
+    return r;
+  };
+
+  const previewCustomSegment = async () => {
+    setPreviewing(true);
+    try {
+      const r = await advancedAPI.previewSegment(rulesPayload());
+      setSegmentPreview(r.data);
+    } catch { toast.error('Could not preview segment'); }
+    finally { setPreviewing(false); }
+  };
+
+  const saveSegment = async () => {
+    if (!segmentName.trim()) return toast.error('Give the segment a name to save it');
+    setSavingSegment(true);
+    try {
+      const r = await advancedAPI.createSegment({ name: segmentName.trim(), rules: rulesPayload() });
+      toast.success('Segment saved');
+      setSegments(s => [r.data, ...s]);
+      setSegmentId(r.data.id);
+      setSegmentName('');
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to save segment'); }
+    finally { setSavingSegment(false); }
   };
 
   const applyTemplate = (t) => {
@@ -87,7 +140,10 @@ export default function EmailMarketing() {
     setCreating(true);
     try {
       await advancedAPI.createCampaign({
-        name: form.name, subject: form.subject, body: form.body, targetTier: form.targetTier,
+        name: form.name, subject: form.subject, body: form.body,
+        targetTier: audienceMode === 'tier' ? form.targetTier : '',
+        segmentId: audienceMode === 'segment' && segmentId ? segmentId : undefined,
+        segmentRules: audienceMode === 'segment' && !segmentId ? rulesPayload() : undefined,
         voucher: form.voucherEnabled ? {
           enabled: true, valueType: form.voucherValueType, value: Number(form.voucherValue) || 0,
           expiresInDays: Number(form.voucherExpiresInDays) || 30, minSpend: Number(form.voucherMinSpend) || 0,
@@ -167,6 +223,16 @@ export default function EmailMarketing() {
                       {c.status === 'sent' ? <><CheckCircle size={12} className="mr-0.5" /> Sent</> : <><Edit2 size={12} className="mr-0.5" /> Draft</>}
                     </Badge>
                     {c.targetTier && <Badge variant="outline">{c.targetTier} tier</Badge>}
+                    {c.segmentId && (
+                      <Badge variant="outline" className="text-violet-700 border-violet-300">
+                        <Filter size={10} className="mr-1" /> {segments.find(s => s.id === c.segmentId)?.name || 'Segment'}
+                      </Badge>
+                    )}
+                    {!c.segmentId && c.segmentRules && (
+                      <Badge variant="outline" className="text-violet-700 border-violet-300">
+                        <Filter size={10} className="mr-1" /> Custom segment
+                      </Badge>
+                    )}
                     {c.voucherCode && (
                       <Badge className="bg-amber-100 text-amber-700" data-testid={`campaign-voucher-${c.id}`}>
                         <Ticket size={12} className="mr-1" /> {c.voucherCode}
@@ -252,14 +318,74 @@ export default function EmailMarketing() {
               </Button>
             </div>
 
-            <select className="w-full p-2 border rounded-md text-sm" value={form.targetTier}
-              onChange={e => setForm({ ...form, targetTier: e.target.value })} data-testid="campaign-tier">
-              <option value="">All Members</option>
-              <option value="Bronze">Bronze Only</option>
-              <option value="Silver">Silver Only</option>
-              <option value="Gold">Gold Only</option>
-              <option value="Platinum">Platinum Only</option>
-            </select>
+            <div className="rounded-lg border p-3 space-y-2">
+              <p className="text-xs font-bold uppercase tracking-wider text-gray-500 flex items-center gap-1">
+                <Filter size={12} /> Audience
+              </p>
+              <div className="flex gap-1">
+                <Button type="button" size="sm" variant={audienceMode === 'tier' ? 'default' : 'outline'}
+                  onClick={() => setAudienceMode('tier')} data-testid="audience-mode-tier">Loyalty tier</Button>
+                <Button type="button" size="sm" variant={audienceMode === 'segment' ? 'default' : 'outline'}
+                  onClick={() => setAudienceMode('segment')} data-testid="audience-mode-segment">Custom segment</Button>
+              </div>
+
+              {audienceMode === 'tier' ? (
+                <select className="w-full p-2 border rounded-md text-sm" value={form.targetTier}
+                  onChange={e => setForm({ ...form, targetTier: e.target.value })} data-testid="campaign-tier">
+                  <option value="">All Customers</option>
+                  <option value="Bronze">Bronze Only</option>
+                  <option value="Silver">Silver Only</option>
+                  <option value="Gold">Gold Only</option>
+                  <option value="Platinum">Platinum Only</option>
+                </select>
+              ) : (
+                <div className="space-y-2">
+                  {segments.length > 0 && (
+                    <select className="w-full p-2 border rounded-md text-sm" value={segmentId}
+                      onChange={e => { setSegmentId(e.target.value); setSegmentPreview(null); }} data-testid="segment-select">
+                      <option value="">— Build a new segment below —</option>
+                      {segments.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  )}
+                  {!segmentId && (
+                    <>
+                      <div className="grid grid-cols-3 gap-2">
+                        <Input type="number" placeholder="Min spend ($)" value={segmentRules.minSpend}
+                          onChange={e => { setSegmentRules({ ...segmentRules, minSpend: e.target.value }); setSegmentPreview(null); }}
+                          data-testid="segment-min-spend" />
+                        <Input type="number" placeholder="Min visits" value={segmentRules.minVisits}
+                          onChange={e => { setSegmentRules({ ...segmentRules, minVisits: e.target.value }); setSegmentPreview(null); }}
+                          data-testid="segment-min-visits" />
+                        <Input type="number" placeholder="Inactive for (days)" value={segmentRules.inactiveForDays}
+                          onChange={e => { setSegmentRules({ ...segmentRules, inactiveForDays: e.target.value }); setSegmentPreview(null); }}
+                          data-testid="segment-inactive-days" />
+                      </div>
+                      <p className="text-[11px] text-gray-400">
+                        Total spend and visits are lifetime-to-date, not a time window. "Inactive for" catches customers
+                        who haven't visited in that many days (or never have).
+                      </p>
+                      <div className="flex gap-2 items-center flex-wrap">
+                        <Button type="button" size="sm" variant="outline" onClick={previewCustomSegment} disabled={previewing}
+                          data-testid="segment-preview-btn">
+                          {previewing ? 'Counting…' : 'Preview audience'}
+                        </Button>
+                        {segmentPreview && (
+                          <Badge variant="outline" data-testid="segment-preview-count">
+                            <Users size={10} className="mr-1" /> {segmentPreview.count} match
+                          </Badge>
+                        )}
+                        <Input placeholder="Save as… (optional)" value={segmentName}
+                          onChange={e => setSegmentName(e.target.value)} className="text-sm w-40" data-testid="segment-name" />
+                        <Button type="button" size="sm" variant="outline" onClick={saveSegment} disabled={savingSegment}
+                          data-testid="segment-save-btn">
+                          <Save size={12} className="mr-1" /> {savingSegment ? 'Saving…' : 'Save'}
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
 
             {/* Voucher code */}
             <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3 space-y-2">

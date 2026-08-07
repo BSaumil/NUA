@@ -59,6 +59,12 @@ api.interceptors.response.use(
   }
 );
 
+// Auth — self-service password recovery (login/logout/2FA live in AuthContext)
+export const authAPI = {
+  forgotPassword: (email) => api.post('/auth/forgot-password', { email }),
+  resetPassword: (token, password) => api.post('/auth/reset-password', { token, password }),
+};
+
 // Products API
 export const productsAPI = {
   getAll: (params) => api.get('/products', { params }),
@@ -68,6 +74,15 @@ export const productsAPI = {
   adjustStock: (id, data) => api.post(`/products/${id}/adjust-stock`, data),
   autoTranslate: (id) => api.post(`/products/${id}/auto-translate`),
   bulkAutoTranslate: (onlyMissing = true) => api.post('/products/bulk-auto-translate', null, { params: { only_missing: onlyMissing } }),
+};
+
+// EFTPOS terminals
+export const eftposAPI = {
+  listTerminals: () => api.get('/eftpos/terminals'),
+  createTerminal: (data) => api.post('/eftpos/terminals', data),
+  updateTerminal: (id, data) => api.put(`/eftpos/terminals/${id}`, data),
+  deleteTerminal: (id) => api.delete(`/eftpos/terminals/${id}`),
+  testTerminal: (id) => api.post(`/eftpos/terminals/${id}/test`),
 };
 
 // Promotions API
@@ -140,6 +155,7 @@ export const financeAPI = {
   listDeposits: (status) => api.get('/accounting/deposits', { params: status ? { status } : {} }),
   createDeposit: (data) => api.post('/accounting/deposits', data),
   applyDeposit: (id, data) => api.post(`/accounting/deposits/${id}/apply`, data),
+  refundDeposit: (id) => api.post(`/accounting/deposits/${id}/refund`),
   // Bank rec
   bankStatement: (code, params) => api.get(`/accounting/bank/statement/${code}`, { params }),
   importBank: (data) => api.post('/accounting/bank/import', data),
@@ -148,6 +164,8 @@ export const financeAPI = {
   // Budgets
   listBudgets: () => api.get('/accounting/budgets'),
   createBudget: (data) => api.post('/accounting/budgets', data),
+  updateBudget: (id, data) => api.put(`/accounting/budgets/${id}`, data),
+  deleteBudget: (id) => api.delete(`/accounting/budgets/${id}`),
   budgetVsActual: (params) => api.get('/accounting/reports/budget-vs-actual', { params }),
   // KPIs
   kpis: () => api.get('/accounting/kpis'),
@@ -422,6 +440,10 @@ export const advancedAPI = {
   getCampaignTemplates: () => api.get('/marketing/campaigns/templates'),
   draftCampaign: (data) => api.post('/marketing/campaigns/draft', data),
   improveCampaignCopy: (data) => api.post('/marketing/campaigns/improve', data),
+  previewSegment: (rules) => api.post('/marketing/segments/preview', { rules }),
+  getSegments: () => api.get('/marketing/segments'),
+  createSegment: (data) => api.post('/marketing/segments', data),
+  deleteSegment: (id) => api.delete(`/marketing/segments/${id}`),
 };
 
 // Staff Management — PIN, Timecards, Roster, Payrun

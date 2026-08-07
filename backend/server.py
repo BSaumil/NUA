@@ -210,14 +210,11 @@ PUBLIC_API_PREFIXES = (
 PUBLIC_API_PATHS = {
     "/api/", "/api/health", "/api/healthz",
     # Auth itself, plus the endpoints the login screen needs before there is a user.
-    # forgot-password/reset-password are NOT listed here on purpose: no such
-    # routes exist anywhere in this codebase (checked — no backend handler,
-    # no frontend "Forgot password?" flow), so those two entries never
-    # matched anything real. A staff member who forgets their password has
-    # no self-service recovery today; that's a real gap, just a bigger one
-    # than a stale allowlist entry can paper over.
     "/api/auth/login", "/api/auth/register", "/api/auth/logout", "/api/auth/refresh",
     "/api/auth/me",
+    # A locked-out staff member has no session by definition — both steps of
+    # self-service password recovery have to be reachable with no token.
+    "/api/auth/forgot-password", "/api/auth/reset-password",
     # The second half of login: password passed, code still owed. It carries
     # its own short-lived challenge token in the body instead of a session
     # token, which this middleware doesn't know how to read — the endpoint

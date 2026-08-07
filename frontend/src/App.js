@@ -10,6 +10,7 @@ import BottomDock from './components/BottomDock';
 import BackButton from './components/BackButton';
 import LicensePage, { LicenseLockScreen, LicenseBanner } from './pages/LicensePage';
 import Login from './pages/Login';
+import ResetPassword from './pages/ResetPassword';
 import Today from './pages/Today';
 import CommandBar from './components/CommandBar';
 import Dashboard from './pages/Dashboard';
@@ -44,6 +45,7 @@ import BookingPortal from './pages/BookingPortal';
 import TableOrder from './pages/TableOrder';
 import PaymentSuccess from './pages/PaymentSuccess';
 import Integrations from './pages/Integrations';
+import EFTPOSTerminals from './pages/EFTPOSTerminals';
 import StaffManagement from './pages/StaffManagement';
 import AIPantry from './pages/AIPantry';
 import MemberPortal from './pages/MemberPortal';
@@ -234,6 +236,7 @@ function ProtectedRoutes() {
         <Route path="/vouchers" element={<Vouchers />} />
         <Route path="/temperature" element={<Temperature />} />
         <Route path="/integrations" element={<Integrations />} />
+        <Route path="/eftpos-terminals" element={<EFTPOSTerminals />} />
         <Route path="/staff" element={<StaffManagement />} />
         <Route path="/staff-roster" element={<StaffRoster />} />
         <Route path="/leaderboard" element={<StaffLeaderboard />} />
@@ -321,6 +324,7 @@ function App() {
                 <Route path="/order-online" element={<OrderOnline />} />
                 <Route path="/track" element={<TrackOrder />} />
                 <Route path="/track/:code" element={<TrackOrder />} />
+                <Route path="/reset-password" element={<ResetPassword />} />
                 {/* Staff routes — auth required */}
                 <Route path="/*" element={<ProtectedRoutes />} />
               </Routes>

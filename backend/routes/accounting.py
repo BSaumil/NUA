@@ -37,6 +37,7 @@ AR (Invoices)
 Customer Deposits
   GET/POST   /accounting/deposits
   POST       /accounting/deposits/{id}/apply
+  POST       /accounting/deposits/{id}/refund
 
 Bank Reconciliation
   GET   /accounting/bank/statement/{account_code}
@@ -45,7 +46,8 @@ Bank Reconciliation
   POST  /accounting/bank/{line_id}/ignore
 
 Budgets
-  GET/POST /accounting/budgets
+  GET/POST      /accounting/budgets
+  PUT/DELETE    /accounting/budgets/{id}
 
 Dashboard / KPIs
   GET   /accounting/kpis
@@ -482,6 +484,24 @@ async def apply_deposit(did: str, body: dict, user: dict = Depends(require_owner
     return {"applied": True, "journalEntryId": je["id"] if je else None}
 
 
+@router.post("/deposits/{did}/refund")
+async def refund_deposit(did: str, user: dict = Depends(require_owner_or_manager)):
+    dep = await db.customer_deposits.find_one({"id": did}, {"_id": 0})
+    if not dep:
+        raise HTTPException(404, "Deposit not found")
+    if dep.get("status") != "held":
+        raise HTTPException(400, f"Deposit already {dep.get('status')}")
+    try:
+        je = await svc.auto_post_deposit_refunded(dep)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    await db.customer_deposits.update_one(
+        {"id": did}, {"$set": {"status": "refunded",
+                                "refundedJournalEntryId": je["id"] if je else None}}
+    )
+    return {"refunded": True, "journalEntryId": je["id"] if je else None}
+
+
 # ═════════════════════════════════════════════════════════════════════════
 # Bank reconciliation
 # ═════════════════════════════════════════════════════════════════════════
@@ -576,6 +596,24 @@ async def create_budget(body: dict, _: dict = Depends(require_owner_or_manager))
     b = Budget(**body).dict()
     await db.budgets.insert_one(dict(b))
     return b
+
+
+@router.put("/budgets/{bid}")
+async def update_budget(bid: str, body: dict, _: dict = Depends(require_owner_or_manager)):
+    existing = await db.budgets.find_one({"id": bid}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Budget not found")
+    updated = Budget(**{**existing, **body, "id": bid}).dict()
+    await db.budgets.replace_one({"id": bid}, updated)
+    return updated
+
+
+@router.delete("/budgets/{bid}")
+async def delete_budget(bid: str, _: dict = Depends(require_owner_or_manager)):
+    result = await db.budgets.delete_one({"id": bid})
+    if result.deleted_count == 0:
+        raise HTTPException(404, "Budget not found")
+    return {"deleted": True}
 
 
 # ═════════════════════════════════════════════════════════════════════════

@@ -234,3 +234,38 @@ def test_every_public_prefix_covers_at_least_one_real_route(app):
     for prefix in server.PUBLIC_API_PREFIXES:
         assert any(p.startswith(prefix) for p in real_paths), \
             f"{prefix!r} is in PUBLIC_API_PREFIXES but no registered route starts with it"
+
+
+def test_public_prefixes_dont_accidentally_cover_a_staff_only_neighbor(app):
+    """A prefix match is a startswith check, not an exact one — it's easy to
+    write one that's technically correct today but would silently widen to
+    cover a new staff-only route sharing the same stem tomorrow (e.g. a
+    prefix "/api/v25/kiosk/session/" is safe; the same prefix WITHOUT its
+    trailing slash would also match the staff-facing GET
+    /api/v25/kiosk/sessions). Concretely: no public prefix should ever
+    match a route that itself has no trailing-slash-delimited child segment
+    after the prefix — that shape (bare plural collection, no ID/action
+    after it) is the staff "list everything active" pattern, never
+    something a single unauthenticated guest should reach."""
+    import server
+    real_paths = {r.path for r in app.routes if hasattr(r, "path")}
+
+    for prefix in server.PUBLIC_API_PREFIXES:
+        assert prefix.endswith("/"), \
+            f"{prefix!r} has no trailing slash — it can match a sibling plural/collection route by accident"
+        for path in real_paths:
+            if path.startswith(prefix):
+                remainder = path[len(prefix):]
+                assert remainder, f"{prefix!r} matches its own bare stem {path!r}"
+
+
+# Regression pin for the exact near-miss this test class exists to catch:
+# a kiosk session prefix without the trailing slash would also match the
+# staff-only "list every active kiosk session" view.
+def test_kiosk_session_prefix_does_not_reach_the_staff_session_list(app):
+    import server
+    assert "/api/v25/kiosk/session/" in server.PUBLIC_API_PREFIXES
+    real_paths = {r.path for r in app.routes if hasattr(r, "path")}
+    assert "/api/v25/kiosk/sessions" in real_paths, "the staff session-list route moved or was renamed"
+    assert not "/api/v25/kiosk/sessions".startswith("/api/v25/kiosk/session/"), \
+        "the kiosk prefix would now also cover the staff-only session list"

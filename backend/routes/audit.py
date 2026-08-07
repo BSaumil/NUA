@@ -9,6 +9,31 @@ from database import db
 
 router = APIRouter(prefix="/audit")
 
+# entity_type (what audit events are tagged with, e.g. from stamped_update's
+# entity_type= kwarg) -> the actual Mongo collection name. Restoring a
+# version needs the real collection, and the two names diverge often enough
+# (singular vs. plural, "category" -> "categories") that guessing it
+# client-side would be a good way to silently restore into the wrong
+# collection. Callers that already know the right collection can still pass
+# ?collection= explicitly to override this.
+ENTITY_TYPE_TO_COLLECTION = {
+    "customer": "customers",
+    "product": "products",
+    "category": "categories",
+    "stock_unit": "stock_units",
+    "sell_variant": "sell_variants",
+    "wastage_event": "wastage_events",
+    "approval": "approvals",
+    "open_container": "open_containers",
+    "journal_entry": "journal_entries",
+    "ash_plan": "ash_plans",
+    "cash_drawer": "cash_drawers",
+    "kitchen_order": "kitchen_orders",
+    "stocktake_reconcile": "stocktake_reconciles",
+    "transaction": "transactions",
+    "loyalty_fraud_flag": "loyalty_fraud_flags",
+}
+
 
 @router.get("/events")
 async def list_events(
@@ -33,9 +58,12 @@ async def history(entity_type: str, entity_id: str, user: dict = Depends(get_use
 
 @router.post("/restore/{entity_type}/{entity_id}/{version}")
 async def restore(entity_type: str, entity_id: str, version: int,
-                  collection: str = Query(...),
+                  collection: Optional[str] = Query(None),
                   _: dict = Depends(require_owner_or_manager)):
-    r = await entity_service.restore_version(collection, entity_type, entity_id, version)
+    coll_name = collection or ENTITY_TYPE_TO_COLLECTION.get(entity_type)
+    if not coll_name:
+        raise HTTPException(400, f"Unknown entity_type '{entity_type}' — pass ?collection= explicitly")
+    r = await entity_service.restore_version(coll_name, entity_type, entity_id, version)
     if not r:
         raise HTTPException(404, "Version not found")
     return r
