@@ -15,16 +15,13 @@ lets "kg" invoice lines correctly add to "g" recipes.
 from fastapi import APIRouter, HTTPException, Depends
 from deps import get_user, require_owner, require_owner_or_manager
 from database import db
-from datetime import datetime, timezone, timedelta, date
+from datetime import datetime, timedelta, date
 from typing import Optional
-import uuid
 
 router = APIRouter()
 
 
-def _now(): return datetime.now(timezone.utc)
-def _iso(dt): return dt.isoformat() if isinstance(dt, datetime) else dt
-def _uid(prefix: str) -> str: return f"{prefix}-{uuid.uuid4().hex[:8].upper()}"
+from utils.ids import now_utc as _now, to_iso as _iso, gen_uid as _uid
 
 
 # Conversion factors → BASE unit per source unit.

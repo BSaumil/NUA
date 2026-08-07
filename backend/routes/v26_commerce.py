@@ -27,7 +27,7 @@ from fastapi import APIRouter, HTTPException, Request, Depends
 from deps import get_user, require_owner, require_owner_or_manager
 from middleware.actor_context import tenant_scope_filter
 from database import db
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from typing import Optional
 import uuid
 import os
@@ -40,9 +40,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v26")
 
 
-def _now(): return datetime.now(timezone.utc)
-def _iso(dt): return dt.isoformat()
-def _uid(prefix: str) -> str: return f"{prefix}-{uuid.uuid4().hex[:8].upper()}"
+from utils.ids import now_utc as _now, to_iso as _iso, gen_uid as _uid
 
 
 def _new_code(prefix: str = "NUA") -> dict:

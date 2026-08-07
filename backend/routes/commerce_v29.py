@@ -93,11 +93,7 @@ def _gen_code(prefix: str = "NUA") -> str:
     body = "".join(secrets.choice(alphabet) for _ in range(8))
     return f"{prefix}-{body[:4]}-{body[4:]}"
 
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
-
-def _iso(dt) -> str:
-    return dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
+from utils.ids import now_utc as _now, to_iso as _iso
 
 
 # ═════════════════════════════════════════════════════════════════════════
