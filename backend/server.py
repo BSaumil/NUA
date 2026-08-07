@@ -209,9 +209,15 @@ PUBLIC_API_PREFIXES = (
 
 PUBLIC_API_PATHS = {
     "/api/", "/api/health", "/api/healthz",
-    # Auth itself, plus the endpoints the login screen needs before there is a user
+    # Auth itself, plus the endpoints the login screen needs before there is a user.
+    # forgot-password/reset-password are NOT listed here on purpose: no such
+    # routes exist anywhere in this codebase (checked — no backend handler,
+    # no frontend "Forgot password?" flow), so those two entries never
+    # matched anything real. A staff member who forgets their password has
+    # no self-service recovery today; that's a real gap, just a bigger one
+    # than a stale allowlist entry can paper over.
     "/api/auth/login", "/api/auth/register", "/api/auth/logout", "/api/auth/refresh",
-    "/api/auth/me", "/api/auth/forgot-password", "/api/auth/reset-password",
+    "/api/auth/me",
     # The second half of login: password passed, code still owed. It carries
     # its own short-lived challenge token in the body instead of a session
     # token, which this middleware doesn't know how to read — the endpoint
@@ -231,8 +237,16 @@ PUBLIC_API_PATHS = {
     # Smart-substitution suggestions for an 86'd kiosk item — same unattended
     # guest surface as the rest of the kiosk endpoints above.
     "/api/v25/substitute",
-    # Payment provider callbacks — signed by the provider, not by a user
-    "/api/webhook/stripe", "/api/stripe/webhook",
+    # Payment provider callbacks — signed by the provider, not by a user.
+    # /api/webhook/stripe (POS/online-order Stripe checkout, integrations.py)
+    # and /api/license/stripe/webhook (billing/subscription events,
+    # licensing.py — that router is mounted with prefix "/license", so its
+    # webhook is NOT at the bare /api/stripe/webhook this list previously
+    # had; that entry matched nothing real — the actual path 401'd every
+    # delivery Stripe ever sent for a billing event before it could even
+    # reach signature verification, the same class of bug as the kiosk
+    # path above).
+    "/api/webhook/stripe", "/api/license/stripe/webhook",
 }
 
 

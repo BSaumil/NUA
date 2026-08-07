@@ -37,6 +37,9 @@ export default function Payroll() {
   const [committing, setCommitting] = useState(false);
   const [expandedRun, setExpandedRun] = useState(null);
   const [downloadingPayslip, setDownloadingPayslip] = useState(null); // `${runId}-${staffId}`
+  const [ytdFor, setYtdFor] = useState(null); // staffId currently showing YTD
+  const [ytdData, setYtdData] = useState({}); // staffId -> summary (cached across toggles)
+  const [ytdLoading, setYtdLoading] = useState(null); // staffId
 
   const runCalc = async () => {
     setBusy(true);
@@ -84,6 +87,18 @@ export default function Payroll() {
       URL.revokeObjectURL(url);
     } catch { toast.error('Payslip download failed'); }
     finally { setDownloadingPayslip(null); }
+  };
+
+  const toggleYtd = async (staffId) => {
+    if (ytdFor === staffId) { setYtdFor(null); return; }
+    setYtdFor(staffId);
+    if (ytdData[staffId]) return; // cached from an earlier toggle this session
+    setYtdLoading(staffId);
+    try {
+      const r = await finalizeAPI.payrollYtd(staffId);
+      setYtdData(prev => ({ ...prev, [staffId]: r.data }));
+    } catch { toast.error('Failed to load year-to-date figures'); setYtdFor(null); }
+    finally { setYtdLoading(null); }
   };
 
   const totalGross = useMemo(() => calc?.totals?.grossPay || 0, [calc]);
@@ -299,17 +314,38 @@ export default function Payroll() {
                               <div className="space-y-1" data-testid={`run-payslips-${r.id}`}>
                                 {(r.rows || []).map(row => {
                                   const key = `${r.id}-${row.staffId}`;
+                                  const ytd = ytdData[row.staffId];
                                   return (
-                                    <div key={row.staffId} className="flex items-center justify-between bg-white border rounded-lg px-3 py-1.5">
-                                      <span className="text-xs font-medium">{row.name}</span>
-                                      <span className="text-xs font-mono text-gray-500">${(row.netPay || 0).toFixed(2)} net</span>
-                                      <Button size="sm" variant="outline" className="h-7 text-xs"
-                                        disabled={downloadingPayslip === key}
-                                        onClick={() => downloadPayslip(r.id, row.staffId, row.name)}
-                                        data-testid={`download-payslip-${row.staffId}`}>
-                                        <Download size={12} className="mr-1" />
-                                        {downloadingPayslip === key ? 'Downloading…' : 'Payslip PDF'}
-                                      </Button>
+                                    <div key={row.staffId} className="bg-white border rounded-lg px-3 py-1.5">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-xs font-medium">{row.name}</span>
+                                        <span className="text-xs font-mono text-gray-500">${(row.netPay || 0).toFixed(2)} net</span>
+                                        <div className="flex gap-1.5">
+                                          <Button size="sm" variant="ghost" className="h-7 text-xs"
+                                            disabled={ytdLoading === row.staffId}
+                                            onClick={() => toggleYtd(row.staffId)}
+                                            data-testid={`toggle-ytd-${row.staffId}`}>
+                                            <TrendingUp size={12} className="mr-1" />
+                                            {ytdLoading === row.staffId ? 'Loading…' : (ytdFor === row.staffId ? 'Hide YTD' : 'YTD')}
+                                          </Button>
+                                          <Button size="sm" variant="outline" className="h-7 text-xs"
+                                            disabled={downloadingPayslip === key}
+                                            onClick={() => downloadPayslip(r.id, row.staffId, row.name)}
+                                            data-testid={`download-payslip-${row.staffId}`}>
+                                            <Download size={12} className="mr-1" />
+                                            {downloadingPayslip === key ? 'Downloading…' : 'Payslip PDF'}
+                                          </Button>
+                                        </div>
+                                      </div>
+                                      {ytdFor === row.staffId && ytd && (
+                                        <div className="mt-2 pt-2 border-t grid grid-cols-5 gap-2 text-center" data-testid={`ytd-${row.staffId}`}>
+                                          <div><p className="text-[10px] text-gray-400 uppercase">Since</p><p className="text-xs font-medium">{ytd.financialYearStart}</p></div>
+                                          <div><p className="text-[10px] text-gray-400 uppercase">Gross</p><p className="text-xs font-mono font-semibold">${ytd.grossPay.toFixed(2)}</p></div>
+                                          <div><p className="text-[10px] text-gray-400 uppercase">PAYG</p><p className="text-xs font-mono text-red-600">${ytd.payg.toFixed(2)}</p></div>
+                                          <div><p className="text-[10px] text-gray-400 uppercase">Super</p><p className="text-xs font-mono text-emerald-700">${ytd.super.toFixed(2)}</p></div>
+                                          <div><p className="text-[10px] text-gray-400 uppercase">Runs</p><p className="text-xs font-medium">{ytd.runCount}</p></div>
+                                        </div>
+                                      )}
                                     </div>
                                   );
                                 })}

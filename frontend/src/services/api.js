@@ -137,12 +137,18 @@ export const financeAPI = {
   createInvoice: (data) => api.post('/accounting/invoices', data),
   receiveInvoice: (id, data) => api.post(`/accounting/invoices/${id}/receive`, data),
   // Deposits
+  listDeposits: (status) => api.get('/accounting/deposits', { params: status ? { status } : {} }),
+  createDeposit: (data) => api.post('/accounting/deposits', data),
+  applyDeposit: (id, data) => api.post(`/accounting/deposits/${id}/apply`, data),
   // Bank rec
   bankStatement: (code, params) => api.get(`/accounting/bank/statement/${code}`, { params }),
   importBank: (data) => api.post('/accounting/bank/import', data),
   matchBank: (lineId, jid) => api.post(`/accounting/bank/${lineId}/match/${jid}`),
   ignoreBank: (lineId) => api.post(`/accounting/bank/${lineId}/ignore`),
   // Budgets
+  listBudgets: () => api.get('/accounting/budgets'),
+  createBudget: (data) => api.post('/accounting/budgets', data),
+  budgetVsActual: (params) => api.get('/accounting/reports/budget-vs-actual', { params }),
   // KPIs
   kpis: () => api.get('/accounting/kpis'),
 };

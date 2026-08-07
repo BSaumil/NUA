@@ -15,19 +15,15 @@ from conftest import OWNER, req
 
 # Reachable without logging in, on purpose. Anything not on this list that
 # answers an anonymous caller is a finding.
-INTENTIONALLY_PUBLIC = {
-    "/api/", "/api/health", "/api/healthz",
-    "/api/auth/login", "/api/auth/register", "/api/auth/logout",
-    "/api/auth/refresh", "/api/auth/me",
-    "/api/auth/forgot-password", "/api/auth/reset-password",
-    "/api/business/theme",
-    "/api/products", "/api/categories", "/api/modifiers",
-    "/api/online/categories", "/api/online/products", "/api/online/orders",
-    "/api/members/login", "/api/members/signup",
-    "/api/webhook/stripe", "/api/stripe/webhook",
-}
-PUBLIC_PREFIXES = ("/api/public/", "/api/table/", "/api/online/orders/track/",
-                   "/api/members/share-link/", "/api/stripe/checkout/status/")
+#
+# This used to be its own hand-maintained copy of server.py's allowlist,
+# which is exactly how the allowlist and reality drifted apart twice (kiosk
+# endpoints, then the licensing Stripe webhook, both under the wrong path)
+# without this test ever catching it — a second hardcoded list just agreed
+# with the first one being wrong. Importing the real thing means this sweep
+# and test_every_public_path_entry_matches_a_real_route below are checking
+# the actual production allowlist, not a snapshot of it.
+from server import PUBLIC_API_PATHS as INTENTIONALLY_PUBLIC, PUBLIC_API_PREFIXES as PUBLIC_PREFIXES
 
 MUST_BE_SHUT = [
     ("GET", "/api/customers"), ("GET", "/api/users"), ("GET", "/api/transactions"),
@@ -212,3 +208,29 @@ def test_staff_still_see_cost_and_stock(client, owner_headers):
     r = req(client, "GET", "/api/products", headers=owner_headers)
     assert r.status_code == 200
     assert any(p.get("cost") for p in r.json()), "no product carried a cost for a logged-in user"
+
+
+# ── The allowlist itself must point at routes that actually exist ──────────
+# Twice now (kiosk endpoints under the wrong path, the licensing Stripe
+# webhook under the wrong path) an entry in server.py's PUBLIC_API_PATHS /
+# PUBLIC_API_PREFIXES referenced a path that doesn't match anything actually
+# registered — because the real router carries a class-level prefix
+# (APIRouter(prefix="...")) the entry's author didn't account for. Each such
+# entry is two bugs at once: the intended-public route silently 401s for the
+# only caller it's meant to serve, and the stale path sits in the allowlist
+# looking like it's doing something. This walks every entry against the
+# actual FastAPI route table so a new one can't go unnoticed the same way.
+
+def test_every_public_path_entry_matches_a_real_route(app):
+    import server
+    real_paths = {r.path for r in app.routes if hasattr(r, "path")}
+    for path in server.PUBLIC_API_PATHS:
+        assert path in real_paths, f"{path!r} is in PUBLIC_API_PATHS but no route is registered at that exact path"
+
+
+def test_every_public_prefix_covers_at_least_one_real_route(app):
+    import server
+    real_paths = [r.path for r in app.routes if hasattr(r, "path")]
+    for prefix in server.PUBLIC_API_PREFIXES:
+        assert any(p.startswith(prefix) for p in real_paths), \
+            f"{prefix!r} is in PUBLIC_API_PREFIXES but no registered route starts with it"
