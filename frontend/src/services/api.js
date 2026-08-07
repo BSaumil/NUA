@@ -594,6 +594,7 @@ export const inventoryAPI = {
 
 // Online Ordering — public storefront + owner inbox + AI ETA
 export const onlineAPI = {
+  businessInfo: (business) => api.get('/online/business', { params: business ? { business } : {} }),
   publicCategories: (business) => api.get('/online/categories', { params: business ? { business } : {} }),
   publicProducts: (business) => api.get('/online/products', { params: business ? { business } : {} }),
   placeOrder: (data) => api.post('/online/orders', data),

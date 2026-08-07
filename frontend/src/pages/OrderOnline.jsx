@@ -43,12 +43,26 @@ export default function OrderOnline() {
   const [voucherApplied, setVoucherApplied] = useState(null); // { code, discount, label }
   const [voucherChecking, setVoucherChecking] = useState(false);
   const [voucherError, setVoucherError] = useState('');
+  // null = no ?business= param (normal, unscoped menu) or still checking;
+  // true/false once a param is present and its resolution is known. Without
+  // this, a stale or mistyped ?business= slug silently fell back to showing
+  // every business's menu combined instead of telling the guest their link
+  // is broken.
+  const [businessFound, setBusinessFound] = useState(null);
 
   useEffect(() => {
+    if (!businessParam) { setBusinessFound(null); return; }
+    onlineAPI.businessInfo(businessParam)
+      .then(r => setBusinessFound(!!r.data?.found))
+      .catch(() => setBusinessFound(null));
+  }, [businessParam]);
+
+  useEffect(() => {
+    if (businessParam && businessFound === false) return;
     Promise.all([onlineAPI.publicProducts(businessParam), onlineAPI.publicCategories(businessParam)])
       .then(([p, c]) => { setProducts(p.data || []); setCategories(c.data || []); })
       .catch(() => {});
-  }, [businessParam]);
+  }, [businessParam, businessFound]);
 
   // Filter categories by selected channel
   const cats = useMemo(() => categories.filter(c => true), [categories]);
@@ -137,6 +151,22 @@ export default function OrderOnline() {
       toast({ title: t('orderOnline.toastFailed'), description: e?.response?.data?.detail, variant: 'destructive' });
     } finally { setPlacing(false); }
   };
+
+  if (businessParam && businessFound === false) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6" data-testid="order-online-not-found">
+        <Card className="max-w-md w-full">
+          <CardContent className="p-8 text-center space-y-2">
+            <Store className="mx-auto text-gray-300" size={40} />
+            <h1 className="text-xl font-bold">Ordering link not found</h1>
+            <p className="text-sm text-gray-500">
+              This link doesn't match a business we know about. Double-check the link, or ask the venue for their current online-ordering link.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50" dir={dir} data-testid="order-online-page">
