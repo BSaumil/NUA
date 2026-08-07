@@ -76,6 +76,15 @@ export const productsAPI = {
   bulkAutoTranslate: (onlyMissing = true) => api.post('/products/bulk-auto-translate', null, { params: { only_missing: onlyMissing } }),
 };
 
+// EFTPOS terminals
+export const eftposAPI = {
+  listTerminals: () => api.get('/eftpos/terminals'),
+  createTerminal: (data) => api.post('/eftpos/terminals', data),
+  updateTerminal: (id, data) => api.put(`/eftpos/terminals/${id}`, data),
+  deleteTerminal: (id) => api.delete(`/eftpos/terminals/${id}`),
+  testTerminal: (id) => api.post(`/eftpos/terminals/${id}/test`),
+};
+
 // Promotions API
 export const promotionsAPI = {
   getAll: () => api.get('/promotions'),

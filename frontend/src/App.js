@@ -45,6 +45,7 @@ import BookingPortal from './pages/BookingPortal';
 import TableOrder from './pages/TableOrder';
 import PaymentSuccess from './pages/PaymentSuccess';
 import Integrations from './pages/Integrations';
+import EFTPOSTerminals from './pages/EFTPOSTerminals';
 import StaffManagement from './pages/StaffManagement';
 import AIPantry from './pages/AIPantry';
 import MemberPortal from './pages/MemberPortal';
@@ -235,6 +236,7 @@ function ProtectedRoutes() {
         <Route path="/vouchers" element={<Vouchers />} />
         <Route path="/temperature" element={<Temperature />} />
         <Route path="/integrations" element={<Integrations />} />
+        <Route path="/eftpos-terminals" element={<EFTPOSTerminals />} />
         <Route path="/staff" element={<StaffManagement />} />
         <Route path="/staff-roster" element={<StaffRoster />} />
         <Route path="/leaderboard" element={<StaffLeaderboard />} />
