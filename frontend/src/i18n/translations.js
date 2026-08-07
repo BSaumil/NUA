@@ -22,7 +22,14 @@ export const TRANSLATIONS = {
       pointsMissed: 'Sign up to earn {n} points — ask staff to add you!',
       splitPayment: 'Split Payment', paid: 'Paid', waiting: 'Waiting',
     },
-    kiosk: { title: 'Self-Service Kiosk', startOrder: 'Start Order', checkout: 'Checkout', orderSent: 'Order sent to kitchen' },
+    kiosk: {
+      title: 'Self-Service Kiosk', startOrder: 'Start Order', checkout: 'Checkout', orderSent: 'Order sent to kitchen',
+      unavailableTapForAlternatives: 'Unavailable — tap for alternatives',
+      notAvailable: '{name} isn\'t available right now',
+      loadingAlternatives: 'Finding alternatives…',
+      noAlternatives: 'No similar items available right now.',
+      substituteFailed: "Couldn't load alternatives",
+    },
     kitchen: { fire: 'Fire', hold: 'Hold', ready: 'Ready', serve: 'Serve', atPass: 'at pass', cooking: 'cooking', held: 'held', queued: 'queued', served: 'served', course: 'Course', station: 'Station', allStations: 'All stations', allergens: 'ALLERGENS' },
     tableOrder: {
       loadingMenu: 'Loading menu...', tableLabel: 'Table', ordersBtn: 'Orders', backToMenu: 'Back to Menu',

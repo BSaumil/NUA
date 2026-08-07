@@ -155,6 +155,33 @@ def test_storefront_order_and_tracking_work_for_a_guest(anon):
         assert req(anon, "GET", f"/api/online/orders/track/{code}").status_code == 200
 
 
+def test_kiosk_ordering_works_for_a_guest_end_to_end(anon):
+    """A self-service kiosk terminal has no staff login on it at all — this
+    whole flow previously 401'd on the very first call, because the
+    default-deny allowlist listed /api/kiosk/session (missing the /v25
+    prefix the real route actually lives under) instead of the real
+    /api/v25/kiosk/session path. Every kiosk endpoint was unreachable by an
+    actual guest kiosk client until that was fixed."""
+    products = req(anon, "GET", "/api/products")
+    assert products.status_code == 200 and products.json()
+    pid = products.json()[0]["id"]
+
+    start = req(anon, "POST", "/api/v25/kiosk/session", json={"guests": 2})
+    assert start.status_code == 200, start.text[:200]
+    sid = start.json()["id"]
+
+    added = req(anon, "POST", f"/api/v25/kiosk/session/{sid}/add",
+                json={"item": {"productId": pid, "name": "Thing", "price": 10.0, "quantity": 1}})
+    assert added.status_code == 200, added.text[:200]
+
+    checkout = req(anon, "POST", f"/api/v25/kiosk/session/{sid}/checkout")
+    assert checkout.status_code == 200, checkout.text[:200]
+
+    # The staff-facing "every active kiosk session" view stays behind auth —
+    # this is the one kiosk endpoint that must NOT be on the public list.
+    assert req(anon, "GET", "/api/v25/kiosk/sessions").status_code in (401, 403)
+
+
 def test_login_and_brand_theme_stay_reachable(anon):
     assert req(anon, "POST", "/api/auth/login", json=OWNER).status_code == 200
     assert req(anon, "GET", "/api/business/theme").status_code == 200

@@ -648,6 +648,7 @@ export const v25API = {
   kioskAdd: (sid, item) => api.post(`/v25/kiosk/session/${sid}/add`, { item }),
   kioskSetCourse: (sid, data) => api.post(`/v25/kiosk/session/${sid}/course`, data),
   kioskCheckout: (sid) => api.post(`/v25/kiosk/session/${sid}/checkout`),
+  substitute: (productId) => api.post('/v25/substitute', { productId }),
   cfdCurrent: () => api.get('/v25/cfd/current'),
   churnRisk: () => api.get('/v25/recovery/churn-risk'),
   winBack: (customerIds, voucherValue) => api.post('/v25/recovery/win-back', { customerIds, voucherValue }),

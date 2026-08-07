@@ -197,10 +197,14 @@ PUBLIC_API_PREFIXES = (
     "/api/stripe/checkout/status/",
     # Self-service kiosk: add-to-cart, course, checkout, upsell — no staff
     # login exists on a kiosk terminal. Deliberately "session/" (trailing
-    # slash) so this never matches GET /api/kiosk/sessions (plural, no
+    # slash) so this never matches GET /api/v25/kiosk/sessions (plural, no
     # trailing slash) — that one's the staff-facing "what's on every kiosk
-    # right now" view and stays behind auth.
-    "/api/kiosk/session/",
+    # right now" view and stays behind auth. Actually under /api/v25/kiosk/,
+    # not /api/kiosk/ — the v25_suite router is mounted with prefix "/v25";
+    # this list previously used the wrong path entirely (missing the /v25
+    # segment), meaning EVERY kiosk endpoint 401'd for the guest kiosk client
+    # they're meant to serve, on a terminal with no way to log in.
+    "/api/v25/kiosk/session/",
 )
 
 PUBLIC_API_PATHS = {
@@ -222,8 +226,11 @@ PUBLIC_API_PATHS = {
     # deliberately returns nothing beyond a discount amount + label.
     "/api/vouchers/public-check",
     # Self-service kiosk session creation — no sid exists yet, so this can't
-    # be covered by the "/api/kiosk/session/" prefix above.
-    "/api/kiosk/session",
+    # be covered by the "/api/v25/kiosk/session/" prefix above.
+    "/api/v25/kiosk/session",
+    # Smart-substitution suggestions for an 86'd kiosk item — same unattended
+    # guest surface as the rest of the kiosk endpoints above.
+    "/api/v25/substitute",
     # Payment provider callbacks — signed by the provider, not by a user
     "/api/webhook/stripe", "/api/stripe/webhook",
 }
