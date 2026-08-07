@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from deps import get_user, require_owner
 from database import db
 from typing import Optional
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -9,12 +10,28 @@ router = APIRouter(prefix="/business")
 
 # ============ MULTI-BUSINESS / MULTI-TENANT ============
 
+
+async def _unique_slug(name: str) -> str:
+    """URL-safe handle for the public online-ordering storefront
+    (/order-online?business=<slug>) — friendlier than the raw BIZ-xxxxxxxx id.
+    Not globally enforced at the DB level (no unique index; this is a
+    small, owner-driven collection), just checked-and-retried here so two
+    businesses named the same thing don't collide."""
+    base = re.sub(r"[^a-z0-9]+", "-", (name or "business").lower()).strip("-") or "business"
+    slug = base
+    n = 2
+    while await db.businesses.find_one({"slug": slug}, {"_id": 1}):
+        slug = f"{base}-{n}"
+        n += 1
+    return slug
+
 @router.post("/create")
 async def create_business(data: dict, user: dict = Depends(require_owner)):
     """Create a new business (Owner only)"""
 
     business = {
         "id": f"BIZ-{str(uuid.uuid4())[:8].upper()}",
+        "slug": await _unique_slug(data.get("name", "")),
         "name": data.get("name", ""),
         "type": data.get("type", "restaurant"),  # restaurant, cafe, bar, catering
         "abn": data.get("abn", ""),
@@ -136,6 +153,7 @@ async def seed_default_business():
     if not existing:
         await db.businesses.insert_one({
             "id": "default",
+            "slug": "default",
             "name": "NUA Restaurant",
             "type": "restaurant",
             "abn": "",
@@ -161,7 +179,8 @@ async def seed_default_business():
 # filtering: filtering today, before this runs, would make untagged data
 # disappear rather than isolate it.
 _BACKFILL_COLLECTIONS = ["customers", "vouchers", "wallet_ledger", "loyalty_ledger", "members",
-                          "transactions", "refunds", "products", "expenses", "suppliers", "promotions"]
+                          "transactions", "refunds", "products", "expenses", "suppliers", "promotions",
+                          "categories", "online_orders"]
 
 
 @router.post("/backfill-tenant")
@@ -175,4 +194,13 @@ async def backfill_tenant(user: dict = Depends(require_owner)):
     for name in _BACKFILL_COLLECTIONS:
         r = await db[name].update_many(query, {"$set": {"businessId": "default"}})
         results[name] = r.modified_count
+    # Businesses created before the online-storefront slug field existed
+    # never got one — without it, /order-online?business=<slug> has nothing
+    # to resolve for them. Assigned one per business (not update_many; each
+    # needs its own collision-checked slug).
+    slugged = 0
+    async for biz in db.businesses.find({"$or": [{"slug": {"$exists": False}}, {"slug": None}]}, {"_id": 0, "id": 1, "name": 1}):
+        await db.businesses.update_one({"id": biz["id"]}, {"$set": {"slug": await _unique_slug(biz.get("name", ""))}})
+        slugged += 1
+    results["businesses.slug"] = slugged
     return {"backfilled": results, "total": sum(results.values())}

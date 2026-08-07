@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ShoppingBag, MapPin, Store, Bike, Plus, Minus, Clock, ArrowRight, Trash2 } from 'lucide-react';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -16,6 +16,11 @@ function productName(p, lang) { return p?.translations?.[lang]?.name || p.name; 
 
 export default function OrderOnline() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // ?business=<slug-or-id> — a deployment with multiple businesses hands
+  // each one its own online-ordering link. Absent on a single-business
+  // deployment, where it's a no-op (backend treats it the same as unset).
+  const businessParam = searchParams.get('business') || undefined;
   const { toast } = useToast();
   const { lang, setLang, t, dir, languages } = useLanguage('nua_online_lang');
   const CHANNELS = [
@@ -40,10 +45,10 @@ export default function OrderOnline() {
   const [voucherError, setVoucherError] = useState('');
 
   useEffect(() => {
-    Promise.all([onlineAPI.publicProducts(), onlineAPI.publicCategories()])
+    Promise.all([onlineAPI.publicProducts(businessParam), onlineAPI.publicCategories(businessParam)])
       .then(([p, c]) => { setProducts(p.data || []); setCategories(c.data || []); })
       .catch(() => {});
-  }, []);
+  }, [businessParam]);
 
   // Filter categories by selected channel
   const cats = useMemo(() => categories.filter(c => true), [categories]);
@@ -117,6 +122,7 @@ export default function OrderOnline() {
         customerName: name, customerPhone: phone, customerEmail: email,
         address: channel === 'delivery' ? address : '', notes,
         voucherCode: voucherApplied?.code || undefined,
+        business: businessParam,
       });
       toast({ title: t('orderOnline.toastOrderPlaced'), description: t('orderOnline.toastTrackingCode', { code: r.data.id }) });
       // If Stripe is configured, send the guest to pay now instead of the

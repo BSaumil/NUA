@@ -21,6 +21,7 @@ import uuid
 
 from utils.notifications import notify_order
 from routes.commerce_v29 import _resolve_voucher, _validate_voucher_rules
+from middleware.actor_context import tenant_scope_filter, tenant_owns
 
 router = APIRouter()
 
@@ -154,11 +155,27 @@ def _notification(order: dict, message: str) -> dict:
 # =============================================================================
 # CATEGORY PREP TIMES (helper used by the storefront)
 # =============================================================================
+async def _resolve_business_id(business: Optional[str]) -> Optional[str]:
+    """?business=<slug-or-id> on the public storefront — lets a deployment
+    with multiple businesses give each one its own online-ordering link
+    (/order-online?business=my-cafe) instead of every business sharing one
+    undifferentiated menu. Returns None (unscoped — every product/category
+    visible, same as before this existed) when absent or unresolvable, so a
+    single-business deployment with no reason to ever pass this param is
+    completely unaffected."""
+    if not business:
+        return None
+    biz = await db.businesses.find_one({"$or": [{"id": business}, {"slug": business}]}, {"_id": 0, "id": 1})
+    return biz["id"] if biz else None
+
+
 @router.get("/online/categories")
-async def public_categories():
+async def public_categories(business: Optional[str] = None):
     """Public — only returns active categories that are enabled for online
     channels (pickup OR delivery)."""
-    cats = await db.categories.find({"active": True}, {"_id": 0}).to_list(200)
+    business_id = await _resolve_business_id(business)
+    query = {"active": True, **tenant_scope_filter(business_id)}
+    cats = await db.categories.find(query, {"_id": 0}).to_list(200)
     rows = []
     for c in cats:
         channels = c.get("channels") or ["dine-in", "pickup", "delivery"]
@@ -169,12 +186,17 @@ async def public_categories():
 
 
 @router.get("/online/products")
-async def public_products():
+async def public_products(business: Optional[str] = None):
     """Public storefront catalog: in-stock, not 86'd, with online-enabled category."""
-    cats = await public_categories()
+    business_id = await _resolve_business_id(business)
+    cats = await public_categories(business)
     allowed = {c["name"] for c in cats}
+    query = {
+        "category": {"$in": list(allowed)}, "stock": {"$gt": 0}, "eightySixed": {"$ne": True},
+        **tenant_scope_filter(business_id),
+    }
     products = await db.products.find(
-        {"category": {"$in": list(allowed)}, "stock": {"$gt": 0}, "eightySixed": {"$ne": True}},
+        query,
         # This is a storefront anyone on the internet can hit, so it hands back
         # the menu and nothing behind it — no unit cost, no on-hand count, no
         # SKU. Those are the same fields /products strips for guests.
@@ -232,8 +254,10 @@ async def place_order(data: dict):
     code = _uid("ORD")
     load = await _kitchen_load()
     eta = await _compute_eta(items, channel, load)
+    business_id = await _resolve_business_id(data.get("business"))
     order = {
         "id": code, "trackingCode": code,
+        "businessId": business_id,
         "channel": channel,
         "customer": customer,
         "items": items,
@@ -342,16 +366,17 @@ async def create_online_order_checkout(data: dict, http_request: Request):
 async def list_orders( status: Optional[str] = None, limit: int = 100, user: dict = Depends(get_user)):
     if user["role"] not in ("owner", "manager", "cashier", "kitchen"):
         raise HTTPException(status_code=403, detail="Staff only")
-    q = {}
+    q = tenant_scope_filter(user.get("businessId"))
     if status: q["status"] = status
     rows = await db.online_orders.find(q, {"_id": 0}).sort("createdAt", -1).to_list(limit)
     return rows
 
 
 @router.get("/online/orders/{order_id}")
-async def get_order(order_id: str, _: dict = Depends(get_user)):
+async def get_order(order_id: str, user: dict = Depends(get_user)):
     row = await db.online_orders.find_one({"id": order_id}, {"_id": 0})
-    if not row: raise HTTPException(status_code=404, detail="Order not found")
+    if not row or not tenant_owns(row.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Order not found")
     return row
 
 
