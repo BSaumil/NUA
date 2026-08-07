@@ -427,13 +427,16 @@ async def update_status(order_id: str, data: dict, user: dict = Depends(get_user
         # nothing to give back.
         await _adjust_stock_for_items(order.get("items") or [], sign=1)
         order["stockRestored"] = True
-    if new_status == "cancelled" and order.get("paymentStatus") == "paid":
+    if new_status == "cancelled" and order.get("paymentStatus") in ("paid", "refund_failed"):
         # This order was actually charged (Stripe checkout added last round)
         # — cancelling it without reversing the charge would just take the
         # guest's money for food they're never getting. Doesn't block the
         # cancellation on a failed refund call (network/Stripe-side issues
         # shouldn't trap staff into being unable to cancel an order) — it
-        # flags the order for manual follow-up instead.
+        # flags the order for manual follow-up instead. Re-cancelling an
+        # order already flagged refund_failed retries it — refund_stripe_
+        # payment() is itself safe to call again against an already-refunded
+        # charge, so this can't produce a double refund.
         payment = await db.payment_transactions.find_one(
             {"orderId": order_id, "kind": "online_order", "paymentStatus": "paid"}, {"_id": 0})
         if payment and payment.get("sessionId"):

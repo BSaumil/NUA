@@ -49,12 +49,25 @@ async def refund_stripe_payment(session_id: str) -> bool:
         payment_intent = session.get("payment_intent")
         if not payment_intent:
             return False
+        # Guards a double-refund attempt (e.g. staff double-clicking cancel
+        # before the first request's response comes back) at the source of
+        # truth — Stripe's own charge record — rather than trusting only our
+        # own payment_transactions doc, which could itself be out of sync.
+        intent = stripe.PaymentIntent.retrieve(payment_intent)
+        charges = (intent.get("charges") or {}).get("data") or []
+        if any(c.get("refunded") for c in charges):
+            return True  # already refunded — the desired end state already holds
         stripe.Refund.create(payment_intent=payment_intent)
         return True
 
     try:
         return await asyncio.to_thread(_do_refund)
     except Exception as e:
+        # Stripe itself rejects a second refund on an already-fully-refunded
+        # charge with an InvalidRequestError — that's not a failure, it's
+        # confirmation the money is already back with the guest.
+        if "already been refunded" in str(e).lower() or "has already been refunded" in str(e).lower():
+            return True
         logging.getLogger(__name__).error(f"Stripe refund failed for session {session_id}: {e}")
         return False
 
