@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { staffMgmtAPI, authAPI } from '../services/api';
@@ -23,6 +23,7 @@ export default function Login() {
   const [trustDevice, setTrustDevice] = useState(true);
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotSent, setForgotSent] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
 
   const handleEmailLogin = async (e) => {
     e.preventDefault();
@@ -74,8 +75,18 @@ export default function Login() {
     setLoading(false);
   };
 
-  const handleForgotSubmit = async (e) => {
-    e.preventDefault();
+  // The server allows 5 forgot-password requests per IP before a 15-minute
+  // lockout — this 60s client-side cooldown is just to stop an impatient
+  // double-click (or "it didn't arrive yet" retry-spam) from quietly
+  // burning through most of that allowance before the first email even
+  // has a chance to land.
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const t = setTimeout(() => setResendCooldown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendCooldown]);
+
+  const requestPasswordReset = async () => {
     setError(''); setLoading(true);
     try {
       // The backend deliberately answers identically whether or not the
@@ -83,10 +94,16 @@ export default function Login() {
       // that would let this screen leak that back to the caller.
       await authAPI.forgotPassword(forgotEmail);
       setForgotSent(true);
+      setResendCooldown(60);
     } catch (err) {
       setError(err.response?.data?.detail || 'Something went wrong — try again');
     }
     setLoading(false);
+  };
+
+  const handleForgotSubmit = async (e) => {
+    e.preventDefault();
+    await requestPasswordReset();
   };
 
   return (
@@ -164,9 +181,15 @@ export default function Login() {
                 </div>
               )}
               {forgotSent ? (
-                <div className="flex items-start gap-2 text-emerald-400 text-sm bg-emerald-950/40 p-3 rounded-lg mb-4" data-testid="forgot-sent">
-                  <CheckCircle2 size={16} className="mt-0.5 flex-shrink-0" />
-                  If that email has an account, a reset link is on its way. Check your inbox.
+                <div>
+                  <div className="flex items-start gap-2 text-emerald-400 text-sm bg-emerald-950/40 p-3 rounded-lg mb-3" data-testid="forgot-sent">
+                    <CheckCircle2 size={16} className="mt-0.5 flex-shrink-0" />
+                    If that email has an account, a reset link is on its way. Check your inbox.
+                  </div>
+                  <Button variant="outline" className="w-full h-10 text-sm border-gray-700 text-gray-300 hover:text-white"
+                    onClick={requestPasswordReset} disabled={loading || resendCooldown > 0} data-testid="forgot-resend">
+                    {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : loading ? 'Sending...' : "Didn't get it? Resend"}
+                  </Button>
                 </div>
               ) : (
                 <form onSubmit={handleForgotSubmit} className="space-y-4">
@@ -181,7 +204,7 @@ export default function Login() {
                   </Button>
                 </form>
               )}
-              <button onClick={() => { setMode('email'); setError(''); setForgotSent(false); setForgotEmail(''); }}
+              <button onClick={() => { setMode('email'); setError(''); setForgotSent(false); setForgotEmail(''); setResendCooldown(0); }}
                 className="mt-5 w-full text-sm text-gray-500 hover:text-gray-300"
                 data-testid="forgot-back">
                 Back to sign in
