@@ -7,7 +7,7 @@ import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../components/ui/select';
-import { CreditCard, PlusCircle, Pencil, Trash2, Wifi } from 'lucide-react';
+import { CreditCard, PlusCircle, Pencil, Trash2, Wifi, History } from 'lucide-react';
 
 const PROVIDERS = ['tyro', 'linkly', 'smartpay', 'windcave', 'westpac', 'anz', 'nab', 'cba', 'square'];
 const CONNECTION_TYPES = ['tcp', 'serial', 'cloud', 'usb'];
@@ -25,6 +25,10 @@ export default function EFTPOSTerminals() {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [testing, setTesting] = useState(null);
+  const [historyFor, setHistoryFor] = useState(null);
+  const [history, setHistory] = useState(null);
+  const [testHistory, setTestHistory] = useState(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   const load = useCallback(async () => {
     try { setTerminals((await eftposAPI.listTerminals()).data); }
@@ -59,6 +63,22 @@ export default function EFTPOSTerminals() {
     if (!window.confirm(`Remove terminal "${t.name}"? This cannot be undone.`)) return;
     try { await eftposAPI.deleteTerminal(t.id); toast.success('Terminal removed'); load(); }
     catch (e) { toast.error(e.response?.data?.detail || 'Failed to remove terminal'); }
+  };
+
+  const viewHistory = async (t) => {
+    setHistoryFor(t);
+    setHistory(null);
+    setTestHistory(null);
+    setLoadingHistory(true);
+    try {
+      const [txns, tests] = await Promise.all([
+        eftposAPI.listTransactions(t.id),
+        eftposAPI.testHistory(t.id),
+      ]);
+      setHistory(txns.data);
+      setTestHistory(tests.data);
+    } catch { toast.error('Could not load transaction history'); }
+    finally { setLoadingHistory(false); }
   };
 
   const testConnection = async (t) => {
@@ -106,6 +126,9 @@ export default function EFTPOSTerminals() {
                   <Button size="sm" variant="outline" disabled={testing === t.id} onClick={() => testConnection(t)}
                     data-testid={`terminal-test-${t.id.slice(0, 6)}`}>
                     <Wifi size={12} className="mr-1" /> {testing === t.id ? 'Testing...' : 'Test'}
+                  </Button>
+                  <Button size="icon" variant="ghost" onClick={() => viewHistory(t)} data-testid={`terminal-history-${t.id.slice(0, 6)}`} title="Recent transactions">
+                    <History size={14} />
                   </Button>
                   <Button size="icon" variant="ghost" onClick={() => openEdit(t)} data-testid={`terminal-edit-${t.id.slice(0, 6)}`}>
                     <Pencil size={14} />
@@ -171,6 +194,44 @@ export default function EFTPOSTerminals() {
               {editingId ? 'Save Changes' : 'Add Terminal'}
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!historyFor} onOpenChange={o => { if (!o) { setHistoryFor(null); setHistory(null); } }}>
+        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto" data-testid="terminal-history-dialog">
+          <DialogHeader><DialogTitle>{historyFor?.name} — recent transactions</DialogTitle></DialogHeader>
+          <div className="space-y-1">
+            {loadingHistory && <p className="text-sm text-slate-400 text-center py-6">Loading…</p>}
+            {history?.length === 0 && <p className="text-sm text-slate-400 text-center py-6">No transactions on this terminal yet.</p>}
+            {history?.map(tx => (
+              <div key={tx.id} className="flex justify-between items-center text-sm py-1.5 border-b last:border-0" data-testid={`terminal-history-row-${tx.id.slice(0, 6)}`}>
+                <div>
+                  <p className="font-medium capitalize">{tx.transactionType} {tx.cardType ? `· ${tx.cardType}` : ''} {tx.maskedPan ? `•••• ${tx.maskedPan}` : ''}</p>
+                  <p className="text-xs text-slate-500">{new Date(tx.timestamp).toLocaleString()}</p>
+                </div>
+                <div className="text-right">
+                  <p className="font-medium">${tx.amount.toFixed(2)}</p>
+                  <Badge variant={tx.approved ? 'default' : 'destructive'} className="text-[10px]">
+                    {tx.approved ? 'Approved' : 'Declined'}
+                  </Badge>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {testHistory?.length > 0 && (
+            <div className="pt-3 mt-3 border-t">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Connection test history</p>
+              <div className="space-y-1">
+                {testHistory.map(t => (
+                  <div key={t.id} className="flex justify-between items-center text-xs py-1" data-testid={`terminal-test-history-row-${t.id.slice(0, 6)}`}>
+                    <span className="text-slate-500">{new Date(t.testedAt).toLocaleString()}</span>
+                    <Badge variant={t.success ? 'default' : 'destructive'} className="text-[10px]">{t.message}</Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

@@ -10,6 +10,7 @@ from models.eftpos import EFTPOSConfig, EFTPOSConfigCreate, EFTPOSTransaction, E
 from models.staff import StaffShift
 from utils.mongo_safe import safe_find_list
 import logging
+import uuid
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -214,6 +215,17 @@ async def delete_eftpos_terminal(terminal_id: str, _: dict = Depends(require_own
         raise HTTPException(status_code=404, detail="Terminal not found")
     return {"message": "Terminal deleted successfully"}
 
+async def _log_eftpos_test(terminal_id: str, success: bool, message: str) -> None:
+    """A failed test just flipped `status` with no record of when or how
+    many times — Test Connection had no history, only a current snapshot.
+    """
+    await db.eftpos_test_log.insert_one({
+        "id": str(uuid.uuid4()), "terminalId": terminal_id,
+        "success": success, "message": message,
+        "testedAt": datetime.utcnow(),
+    })
+
+
 @router.post("/eftpos/terminals/{terminal_id}/test")
 async def test_eftpos_connection(terminal_id: str, _: dict = Depends(require_owner_or_manager)):
     terminal = await db.eftpos_terminals.find_one({"id": terminal_id})
@@ -226,12 +238,22 @@ async def test_eftpos_connection(terminal_id: str, _: dict = Depends(require_own
         if connected:
             await provider.disconnect()
             await db.eftpos_terminals.update_one({"id": terminal_id}, {"$set": {"status": "active", "lastPing": datetime.utcnow()}})
+            await _log_eftpos_test(terminal_id, True, "Connection successful")
             return {"success": True, "message": "Connection successful"}
         else:
             await db.eftpos_terminals.update_one({"id": terminal_id}, {"$set": {"status": "error"}})
+            await _log_eftpos_test(terminal_id, False, "Connection failed")
             return {"success": False, "message": "Connection failed"}
     except Exception as e:
+        await _log_eftpos_test(terminal_id, False, str(e)[:200])
         return {"success": False, "message": str(e)}
+
+
+@router.get("/eftpos/terminals/{terminal_id}/test-history")
+async def get_eftpos_test_history(terminal_id: str, limit: int = 50, _: dict = Depends(require_owner_or_manager)):
+    rows = await db.eftpos_test_log.find({"terminalId": terminal_id}, {"_id": 0}) \
+        .sort("testedAt", -1).limit(limit).to_list(limit)
+    return rows
 
 @router.post("/eftpos/transaction", response_model=EFTPOSTransaction)
 async def process_eftpos_transaction(request: EFTPOSTransactionRequest, _: dict = Depends(get_user)):

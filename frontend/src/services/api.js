@@ -83,6 +83,8 @@ export const eftposAPI = {
   updateTerminal: (id, data) => api.put(`/eftpos/terminals/${id}`, data),
   deleteTerminal: (id) => api.delete(`/eftpos/terminals/${id}`),
   testTerminal: (id) => api.post(`/eftpos/terminals/${id}/test`),
+  listTransactions: (terminalId) => api.get('/eftpos/transactions', { params: terminalId ? { terminal_id: terminalId } : {} }),
+  testHistory: (id) => api.get(`/eftpos/terminals/${id}/test-history`),
 };
 
 // Promotions API
