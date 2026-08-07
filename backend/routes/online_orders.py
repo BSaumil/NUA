@@ -403,6 +403,31 @@ async def update_status(order_id: str, data: dict, user: dict = Depends(get_user
         order["readyAt"] = _iso(_now())
     if new_status == "completed":
         order["completedAt"] = _iso(_now())
+    if new_status == "cancelled" and order.get("paymentStatus") == "paid":
+        # This order was actually charged (Stripe checkout added last round)
+        # — cancelling it without reversing the charge would just take the
+        # guest's money for food they're never getting. Doesn't block the
+        # cancellation on a failed refund call (network/Stripe-side issues
+        # shouldn't trap staff into being unable to cancel an order) — it
+        # flags the order for manual follow-up instead.
+        payment = await db.payment_transactions.find_one(
+            {"orderId": order_id, "kind": "online_order", "paymentStatus": "paid"}, {"_id": 0})
+        if payment and payment.get("sessionId"):
+            from routes.integrations import refund_stripe_payment
+            refunded = await refund_stripe_payment(payment["sessionId"])
+            if refunded:
+                order["paymentStatus"] = "refunded"
+                await db.payment_transactions.update_one(
+                    {"sessionId": payment["sessionId"]},
+                    {"$set": {"paymentStatus": "refunded", "status": "refunded", "updatedAt": _iso(_now())}},
+                )
+                _append_event(order, "payment:refunded", "Payment refunded in full.")
+            else:
+                order["paymentStatus"] = "refund_failed"
+                _append_event(order, "payment:refund_failed",
+                               "Automatic refund failed — needs manual refund via the Stripe dashboard.")
+                logging.getLogger(__name__).error(
+                    "online order %s: cancelled but Stripe refund failed — needs manual reconciliation", order_id)
     update_fields = {k: v for k, v in order.items() if k != "id"}
     await db.online_orders.update_one({"id": order_id}, {"$set": update_fields})
     return order

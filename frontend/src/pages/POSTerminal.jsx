@@ -997,12 +997,29 @@ const POSTerminal = () => {
   };
 
   // ---- Stripe Checkout ----
+  // Stripe redirects the whole browser away and back — nothing in this
+  // component's React state (cart, discounts, table…) survives that round
+  // trip. So the full sale payload (same shape POST /transactions takes)
+  // travels WITH the checkout session and gets rung up server-side once
+  // Stripe confirms payment, instead of relying on this tab still being
+  // open and in the right state when the guest returns.
   const handleStripeCheckout = async () => {
+    if (tableBlocked) {
+      toast({ title: 'Unknown table', description: tableCheck.message, variant: 'destructive' });
+      return;
+    }
     setLoading(true);
     try {
       const res = await stripeAPI.createCheckout({
         originUrl: window.location.origin,
         amount: totalNum,
+        sale: {
+          items: cart.map(item => toTxItem(item, true)),
+          paymentMethod: 'Stripe',
+          customerId: selectedCustomer?.id || null, location: currentLocation, cashier: currentUser.name,
+          orderType, tableNumber: orderType === 'dine-in' ? tableNumber : null,
+          ...buildDiscountPayload(),
+        },
       });
       if (res.data.url) window.location.href = res.data.url;
     } catch {

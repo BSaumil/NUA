@@ -195,6 +195,12 @@ PUBLIC_API_PREFIXES = (
     "/api/table/",               # QR table ordering: menu, place order, order status
     "/api/online/orders/track/", # order tracking by code, from the SMS link
     "/api/stripe/checkout/status/",
+    # Self-service kiosk: add-to-cart, course, checkout, upsell — no staff
+    # login exists on a kiosk terminal. Deliberately "session/" (trailing
+    # slash) so this never matches GET /api/kiosk/sessions (plural, no
+    # trailing slash) — that one's the staff-facing "what's on every kiosk
+    # right now" view and stays behind auth.
+    "/api/kiosk/session/",
 )
 
 PUBLIC_API_PATHS = {
@@ -215,6 +221,9 @@ PUBLIC_API_PATHS = {
     # Guest-facing voucher check (online ordering, table QR) — dry-run only,
     # deliberately returns nothing beyond a discount amount + label.
     "/api/vouchers/public-check",
+    # Self-service kiosk session creation — no sid exists yet, so this can't
+    # be covered by the "/api/kiosk/session/" prefix above.
+    "/api/kiosk/session",
     # Payment provider callbacks — signed by the provider, not by a user
     "/api/webhook/stripe", "/api/stripe/webhook",
 }

@@ -1,7 +1,9 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from typing import Optional
 from datetime import datetime
 from database import db
+from deps import get_user
+import logging
 import os
 import uuid
 
@@ -23,10 +25,93 @@ async def _mark_online_order_paid_if_applicable(session_id: str):
     )
 
 
+async def refund_stripe_payment(session_id: str) -> bool:
+    """Refund, in full, the Stripe payment behind a Checkout Session.
+
+    Uses the official `stripe` SDK directly (already a pinned dependency in
+    requirements.txt) rather than the emergentintegrations wrapper used
+    elsewhere in this file — that wrapper only exposes checkout-session
+    creation/status/webhook, no refund call. The SDK is synchronous, so the
+    actual network calls run in a thread so they don't block the event loop.
+    Returns False (never raises) on any failure — callers decide what a
+    failed refund means for the action that triggered it.
+    """
+    import stripe
+    import asyncio
+
+    api_key = os.environ.get("STRIPE_API_KEY")
+    if not api_key:
+        return False
+
+    def _do_refund():
+        stripe.api_key = api_key
+        session = stripe.checkout.Session.retrieve(session_id)
+        payment_intent = session.get("payment_intent")
+        if not payment_intent:
+            return False
+        stripe.Refund.create(payment_intent=payment_intent)
+        return True
+
+    try:
+        return await asyncio.to_thread(_do_refund)
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Stripe refund failed for session {session_id}: {e}")
+        return False
+
+
+async def _finalize_pos_sale_if_applicable(session_id: str):
+    """A payment_transactions doc tagged kind='pos_sale' carries the exact
+    cart/discount/loyalty payload the POS had built at the moment the
+    cashier sent the guest to Stripe — Stripe Checkout redirects the whole
+    browser away and back, so nothing survives in POSTerminal's React state
+    to finalize the sale once the guest returns. The Stripe redirect used to
+    be the entire flow: pay, then land back on a page that only confirmed
+    *money moved*, never actually rang anything up — no transaction, no
+    stock deduction, no receipt, no loyalty earn.
+
+    Runs the exact same POST /transactions code path a cash/card sale uses
+    (imported and called directly, not re-implemented), so this gets
+    everything that endpoint already does — server-side pricing, loyalty,
+    gift cards — for free. Claims the payment doc atomically first so the
+    status-poll and the webhook, which can both observe "paid" for the same
+    session, can't both create the sale.
+    """
+    claimed = await db.payment_transactions.find_one_and_update(
+        {"sessionId": session_id, "kind": "pos_sale", "transactionId": {"$exists": False}},
+        {"$set": {"transactionId": "pending"}},
+    )
+    if not claimed:
+        return
+    try:
+        from models.transaction import TransactionCreate
+        from routes.transactions import create_transaction
+        txn = await create_transaction(TransactionCreate(**claimed["salePayload"]), user=claimed["cashierUser"])
+        await db.payment_transactions.update_one(
+            {"sessionId": session_id}, {"$set": {"transactionId": txn.id}}
+        )
+    except Exception as e:
+        logging.getLogger(__name__).error(
+            f"Stripe payment {session_id} confirmed paid but sale creation failed — needs manual reconciliation: {e}"
+        )
+        # Un-claim so a retried poll/webhook can try again rather than
+        # permanently stranding a paid-for sale with no transaction.
+        await db.payment_transactions.update_one(
+            {"sessionId": session_id}, {"$unset": {"transactionId": ""}}
+        )
+
+
 # ============ STRIPE CHECKOUT API ============
 @router.post("/stripe/checkout")
-async def create_stripe_checkout(data: dict, http_request: Request):
-    """Create a Stripe checkout session for a POS transaction"""
+async def create_stripe_checkout(data: dict, http_request: Request, user: dict = Depends(get_user)):
+    """Create a Stripe checkout session for a POS transaction.
+
+    An optional "sale" object — the same shape POST /transactions takes
+    (items, paymentMethod, customerId, location, cashier, orderType,
+    tableNumber, discounts, points…) — gets stashed against this session so
+    the sale can actually be rung up once Stripe confirms payment. Without
+    it (or for any other caller of this generic endpoint) this behaves
+    exactly as before: a payment session with nothing else attached.
+    """
     from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
 
     api_key = os.environ.get("STRIPE_API_KEY")
@@ -36,6 +121,7 @@ async def create_stripe_checkout(data: dict, http_request: Request):
     origin_url = data.get("originUrl", str(http_request.base_url).rstrip("/"))
     order_id = data.get("orderId", f"ORD-{str(uuid.uuid4())[:8].upper()}")
     amount = data.get("amount", 0)
+    sale_payload = data.get("sale")
 
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Invalid amount")
@@ -69,6 +155,10 @@ async def create_stripe_checkout(data: dict, http_request: Request):
         "provider": "stripe",
         "createdAt": datetime.utcnow().isoformat(),
     }
+    if sale_payload:
+        payment_doc["kind"] = "pos_sale"
+        payment_doc["salePayload"] = sale_payload
+        payment_doc["cashierUser"] = user
     await db.payment_transactions.insert_one(payment_doc)
     payment_doc.pop("_id", None)
 
@@ -106,6 +196,7 @@ async def get_stripe_checkout_status(session_id: str, http_request: Request):
             )
             if status.payment_status == "paid":
                 await _mark_online_order_paid_if_applicable(session_id)
+                await _finalize_pos_sale_if_applicable(session_id)
 
     return {
         "status": status.status,
@@ -138,6 +229,7 @@ async def stripe_webhook(request: Request):
                 {"$set": {"status": "completed", "paymentStatus": "paid", "updatedAt": datetime.utcnow().isoformat()}}
             )
             await _mark_online_order_paid_if_applicable(event.session_id)
+            await _finalize_pos_sale_if_applicable(event.session_id)
         return {"received": True}
     except Exception as e:
         return {"received": True, "note": str(e)}

@@ -240,7 +240,9 @@ async def record_redemption(vid: str, data: dict, user: dict = Depends(get_user)
 # AUTO-APPLY PROMOTIONS (the bug fix)
 # ============================================================================
 def _promotion_active_now(promo: dict) -> bool:
-    """Honour startDate/endDate, activeDays, and start/endTime."""
+    """Honour startDate/endDate, activeDays, and start/endTime — including an
+    overnight window (e.g. 22:00-02:00) where startTime > endTime and the
+    window spans midnight, active both before and after the rollover."""
     if not promo.get("active"): return False
     now = _now()
     today = now.date().isoformat()
@@ -248,9 +250,19 @@ def _promotion_active_now(promo: dict) -> bool:
     if promo.get("endDate") and today > promo["endDate"]: return False
     days = promo.get("activeDays") or []
     if days and now.strftime("%A") not in days: return False
+    start, end = promo.get("startTime"), promo.get("endTime")
     hhmm = now.strftime("%H:%M")
-    if promo.get("startTime") and hhmm < promo["startTime"]: return False
-    if promo.get("endTime") and hhmm > promo["endTime"]: return False
+    if start and end:
+        if start <= end:
+            if hhmm < start or hhmm > end: return False
+        else:
+            # Overnight: active from start through midnight, then from
+            # midnight through end — i.e. everywhere EXCEPT the daytime gap
+            # between end and start.
+            if hhmm < start and hhmm > end: return False
+    else:
+        if start and hhmm < start: return False
+        if end and hhmm > end: return False
     return True
 
 
@@ -1005,7 +1017,14 @@ async def cfd_push(data: dict, user: dict = Depends(get_user)):
 
 def _promo_ends_in_minutes(promo: dict) -> Optional[int]:
     """Minutes until this promo's daily window closes, or None if it has no
-    endTime (an all-day / date-range-only promo has nothing to count down to)."""
+    endTime (an all-day / date-range-only promo has nothing to count down to)
+    or the window has genuinely finished for today.
+
+    For an overnight window (startTime > endTime, e.g. 22:00-02:00), naively
+    computing end_dt as *today's* date at endTime is wrong for the
+    before-midnight half of the window — at 23:30 that lands hours in the
+    past. Roll end_dt to tomorrow specifically when we're still in that
+    evening half (now is at/after startTime)."""
     if not promo.get("endTime"):
         return None
     try:
@@ -1014,8 +1033,12 @@ def _promo_ends_in_minutes(promo: dict) -> Optional[int]:
         return None
     now = _now()
     end_dt = now.replace(hour=end_h, minute=end_m, second=0, microsecond=0)
+    start = promo.get("startTime")
     if end_dt <= now:
-        return None
+        if start and start > promo["endTime"] and now.strftime("%H:%M") >= start:
+            end_dt += timedelta(days=1)
+        else:
+            return None
     return int((end_dt - now).total_seconds() // 60)
 
 
