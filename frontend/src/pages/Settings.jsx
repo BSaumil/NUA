@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Palette, MapPin, Users as UsersIcon, Building, GraduationCap, Plus, Edit, Trash2, Save, Receipt, Shield, ShieldCheck, Activity, DownloadCloud, Monitor, Zap, Printer, Globe, Clock, KeyRound, Target, Gift, Utensils, LayoutGrid, Percent } from 'lucide-react';
+import { Palette, MapPin, Users as UsersIcon, Building, GraduationCap, Plus, Edit, Trash2, Save, Receipt, Shield, ShieldCheck, Activity, DownloadCloud, Monitor, Zap, Printer, Globe, Clock, KeyRound, Target, Gift, Utensils, LayoutGrid, Percent, Mail } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -176,6 +176,7 @@ const Settings = () => {
     { id: 'backup', label: 'Backup', icon: DownloadCloud },
     { id: 'surcharge', label: 'Surcharges', icon: Zap },
     { id: 'gratuity', label: 'Auto-Gratuity', icon: Percent },
+    { id: 'reports', label: 'Automated Reports', icon: Mail },
     { id: 'hardware', label: 'Hardware', icon: Monitor },
     { id: 'training', label: 'Training', icon: GraduationCap },
     { id: 'locations', label: 'Locations', icon: MapPin },
@@ -299,6 +300,55 @@ const Settings = () => {
           <Button style={{ backgroundColor: theme.primary }} onClick={async () => {
             try { await enterpriseAPI.saveGratuitySettings(gratuitySettings); toast.success('Gratuity settings saved'); } catch { toast.error('Failed'); }
           }} data-testid="save-gratuity-btn"><Save size={16} className="mr-1" /> Save Gratuity Settings</Button>
+        </CardContent></Card>
+      )}
+
+      {/* Automated Reports — backend (GET/POST /reports/automated-config) has
+          existed for a while but this page only ever read the config into
+          state on load, with no form and no way to actually save a change. */}
+      {activeTab === 'reports' && user?.role === 'owner' && (
+        <Card><CardHeader><CardTitle>Automated Reports</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-gray-500">Email a sales report automatically on a schedule.</p>
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input type="checkbox" checked={reportConfig.enabled} onChange={e => setReportConfig({ ...reportConfig, enabled: e.target.checked })} data-testid="report-enabled" />
+            Enable Automated Reports
+          </label>
+          <div className="grid grid-cols-2 gap-4">
+            <div><label className="text-sm font-medium mb-1 block">Frequency</label>
+              <select className="w-full border rounded-md px-3 py-2 text-sm" value={reportConfig.frequency}
+                onChange={e => setReportConfig({ ...reportConfig, frequency: e.target.value })} data-testid="report-frequency">
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+            </div>
+            <div><label className="text-sm font-medium mb-1 block">Send Time</label>
+              <Input type="time" value={reportConfig.time} onChange={e => setReportConfig({ ...reportConfig, time: e.target.value })} data-testid="report-time" />
+            </div>
+          </div>
+          <div><label className="text-sm font-medium mb-1 block">Recipient Email</label>
+            <Input type="email" placeholder="owner@yourrestaurant.com" value={reportConfig.recipientEmail}
+              onChange={e => setReportConfig({ ...reportConfig, recipientEmail: e.target.value })} data-testid="report-recipient" />
+          </div>
+          <div><label className="text-sm font-medium mb-1 block">Report Types</label>
+            <div className="flex flex-wrap gap-1.5">
+              {['itemised', 'category', 'detailed'].map(t => (
+                <button key={t} type="button" onClick={() => {
+                  const types = reportConfig.reportTypes.includes(t)
+                    ? reportConfig.reportTypes.filter(x => x !== t) : [...reportConfig.reportTypes, t];
+                  setReportConfig({ ...reportConfig, reportTypes: types });
+                }} className={`px-2.5 py-1 text-xs rounded-full font-medium capitalize ${reportConfig.reportTypes.includes(t) ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}>{t}</button>
+              ))}
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input type="checkbox" checked={reportConfig.includeAIInsights} onChange={e => setReportConfig({ ...reportConfig, includeAIInsights: e.target.checked })} data-testid="report-ai-insights" />
+            Include NUA AI Insights
+          </label>
+          <Button style={{ backgroundColor: theme.primary }} onClick={async () => {
+            try { await enterpriseAPI.saveReportConfig(reportConfig); toast.success('Report settings saved'); } catch { toast.error('Failed to save report settings'); }
+          }} data-testid="save-report-config-btn"><Save size={16} className="mr-1" /> Save Report Settings</Button>
         </CardContent></Card>
       )}
 

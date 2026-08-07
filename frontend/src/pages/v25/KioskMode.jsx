@@ -24,7 +24,17 @@ export default function KioskMode() {
   // lands on. A takeaway kiosk never sees any of this — the venue's own
   // straight-fire rules already say a counter order goes out together.
   const [coursing, setCoursing] = useState(null);
-  useEffect(() => { fetch(`${process.env.REACT_APP_BACKEND_URL}/api/products`).then(r => r.json()).then(setProducts).catch(() => {}); }, []);
+  useEffect(() => {
+    // Unauthenticated (the kiosk calls this with no token, same as any
+    // guest-facing menu), so /api/products already strips cost/stock/sku
+    // for us — only the eightySixed flag survives to filter on here. The
+    // kiosk is unattended — unlike the POS (which greys the button out but
+    // still shows an 86'd item so a cashier can explain), a guest with no
+    // staff nearby should simply never see something they can't order.
+    fetch(`${process.env.REACT_APP_BACKEND_URL}/api/products`).then(r => r.json())
+      .then(list => setProducts((list || []).filter(p => !p.eightySixed)))
+      .catch(() => {});
+  }, []);
   useEffect(() => { coursingAPI.getConfig().then(r => setCoursing(r.data)).catch(() => setCoursing(null)); }, []);
 
   // Only dine-in kiosks course. `tableId` on the session is what makes it

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Building2, Plus, RefreshCw, DollarSign, Users, Package, Award, ShieldCheck, CreditCard, AlertTriangle, Link2, Pencil, Check, X } from 'lucide-react';
+import { Building2, Plus, RefreshCw, DollarSign, Users, Package, Award, ShieldCheck, CreditCard, AlertTriangle, Link2, Pencil, Check, X, Download } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -25,6 +25,8 @@ export default function MultiBusiness() {
   const [editingSlugFor, setEditingSlugFor] = useState(null); // businessId
   const [editingSlugValue, setEditingSlugValue] = useState('');
   const [savingSlug, setSavingSlug] = useState(false);
+  const [exportingId, setExportingId] = useState(null);
+  const [backfillResult, setBackfillResult] = useState(null); // { businesses.slug -> count } from the last run
 
   const load = () => {
     setLoading(true);
@@ -85,11 +87,33 @@ export default function MultiBusiness() {
     } finally { setSavingSlug(false); }
   };
 
+  const exportBusiness = async (b) => {
+    setExportingId(b.id);
+    try {
+      const r = await businessAPI.exportData(b.id);
+      const blob = new Blob([JSON.stringify(r.data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${b.slug || b.id}-export-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Export downloaded');
+    } catch {
+      toast.error('Export failed');
+    } finally { setExportingId(null); }
+  };
+
   const runBackfill = async () => {
     setBackfilling(true);
     try {
       const r = await businessAPI.backfillTenant();
       const total = r.data?.total ?? 0;
+      // The backend already returns a per-collection breakdown
+      // (r.data.backfilled) — surface it instead of just the sum, so an
+      // owner debugging a stale report (e.g. "why does this business still
+      // show 0 customers?") can see which collection actually moved
+      // without having to ask an engineer to check the database.
+      setBackfillResult(r.data?.backfilled || {});
       toast.success(total > 0 ? `Backfilled ${total} record(s) to the default business` : 'Nothing to backfill — all records already tagged');
     } catch {
       toast.error('Backfill failed');
@@ -125,8 +149,21 @@ export default function MultiBusiness() {
       </div>
 
       <Card className="bg-blue-50/50 border-blue-200">
-        <CardContent className="p-4 text-sm text-blue-900">
+        <CardContent className="p-4 text-sm text-blue-900 space-y-3">
           <p><strong>Backfill legacy data</strong> stamps <code>businessId</code> onto any customer, voucher, wallet, loyalty, transaction, or refund record created before multi-business support existed, so reports can start splitting them apart by business. It's safe to run more than once — it only ever fills in missing values, never overwrites a record that already has a businessId.</p>
+          {backfillResult && (
+            <div className="pt-2 border-t border-blue-200" data-testid="backfill-breakdown">
+              <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 mb-1.5">Last run — by collection</p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1 text-xs">
+                {Object.entries(backfillResult).map(([collection, count]) => (
+                  <div key={collection} className="flex justify-between gap-2">
+                    <span className="text-blue-800/80">{collection}</span>
+                    <span className={`font-mono font-semibold ${count > 0 ? 'text-blue-900' : 'text-blue-400'}`}>{count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -222,6 +259,11 @@ export default function MultiBusiness() {
                       )}
                     </div>
                   )}
+                  <button onClick={() => exportBusiness(b)} disabled={exportingId === b.id}
+                    className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 pt-2 border-t w-full"
+                    data-testid={`export-business-${b.id}`}>
+                    <Download size={12} /> {exportingId === b.id ? 'Exporting…' : 'Export all data (JSON)'}
+                  </button>
                 </CardContent>
               </Card>
             );

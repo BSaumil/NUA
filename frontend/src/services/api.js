@@ -24,6 +24,7 @@ export const productsAPI = {
   delete: (id) => api.delete(`/products/${id}`),
   adjustStock: (id, data) => api.post(`/products/${id}/adjust-stock`, data),
   autoTranslate: (id) => api.post(`/products/${id}/auto-translate`),
+  bulkAutoTranslate: (onlyMissing = true) => api.post('/products/bulk-auto-translate', null, { params: { only_missing: onlyMissing } }),
 };
 
 // Promotions API
@@ -430,6 +431,7 @@ export const enterpriseAPI = {
   // Upsells
   // Reports
   getReportConfig: () => api.get('/reports/automated-config'),
+  saveReportConfig: (data) => api.post('/reports/automated-config', data),
   // Hardware
   getPrinters: () => api.get('/hardware/printers'),
   addPrinter: (data) => api.post('/hardware/printers', data),
@@ -877,6 +879,7 @@ export const businessAPI = {
   list: () => api.get('/business/list'),
   update: (id, data) => api.put(`/business/${id}`, data),
   summary: (id) => api.get(`/business/${id}/summary`),
+  exportData: (id, collection) => api.get(`/business/${id}/export`, { params: collection ? { collection } : {} }),
   backfillTenant: () => api.post('/business/backfill-tenant'),
 };
 
