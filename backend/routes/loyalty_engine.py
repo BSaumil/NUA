@@ -368,7 +368,6 @@ async def _segment_customers():
     customers = await db.customers.find({}, {"_id": 0}).to_list(5000)
     now = datetime.now(timezone.utc)
     sixty_days_ago = (now - timedelta(days=60)).isoformat()
-    thirty_days_ago = (now - timedelta(days=30)).isoformat()
     segments = {"vip": [], "regular": [], "at_risk": [], "first_timer": []}
     for c in customers:
         visits = int(c.get("totalVisits", 0) or 0)
@@ -602,7 +601,7 @@ async def agent_tick(request: Request, user: dict = Depends(require_owner_or_man
     except Exception:
         pass
     # 5. Tonight-only blast suggestion if low booking count
-    today_iso = today.date().isoformat()
+    today_iso = datetime.now(timezone.utc).date().isoformat()
     bookings_today = await db.reservations.count_documents({"date": today_iso})
     if bookings_today < 5:
         decisions.append(await _record_decision("blast_suggested",
