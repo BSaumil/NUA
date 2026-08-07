@@ -963,4 +963,11 @@ export const businessAPI = {
   backfillTenant: () => api.post('/business/backfill-tenant'),
 };
 
+// What's New — release notes for owners/managers
+export const changelogAPI = {
+  list: (window) => api.get('/changelog', { params: window ? { window } : {} }),
+  upcoming: () => api.get('/changelog/upcoming'),
+  summary: () => api.get('/changelog/summary'),
+};
+
 export default api;

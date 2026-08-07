@@ -45,6 +45,7 @@ import BookingPortal from './pages/BookingPortal';
 import TableOrder from './pages/TableOrder';
 import PaymentSuccess from './pages/PaymentSuccess';
 import Integrations from './pages/Integrations';
+import WhatsNew from './pages/WhatsNew';
 import EFTPOSTerminals from './pages/EFTPOSTerminals';
 import StaffManagement from './pages/StaffManagement';
 import AIPantry from './pages/AIPantry';
@@ -302,6 +303,7 @@ function ProtectedRoutes() {
         <Route path="/marketing-emails" element={<MarketingEmails />} />
         <Route path="/online-orders" element={<OnlineOrders />} />
         <Route path="/license" element={<LicensePage />} />
+        <Route path="/whats-new" element={<WhatsNew />} />
       </Routes>
     </StaffLayout>
     </LicenseProvider>

@@ -106,6 +106,7 @@ const NAV_STRUCTURE = [
   {
     icon: Settings, label: 'Advanced', access: ['owner', 'manager'], advanced: true,
     children: [
+      { path: '/whats-new', label: "What's New" },
       { path: '/settings', label: 'Settings' },
       { path: '/integrations', label: 'Integrations' },
       { path: '/eftpos-terminals', label: 'EFTPOS Terminals' },

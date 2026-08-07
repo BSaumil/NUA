@@ -63,6 +63,7 @@ from routes.approvals import router as approvals_router
 from routes.nua import router as nua_router
 from routes.hq import router as hq_router
 from routes.ops import router as ops_router
+from routes.changelog import router as changelog_router
 from middleware.license_middleware import LicenseEnforcementMiddleware
 from middleware.actor_context import ActorContextMiddleware
 
@@ -125,6 +126,7 @@ api_router.include_router(nua_router)
 api_router.include_router(hq_router)
 api_router.include_router(multi_tenant_router)
 api_router.include_router(ops_router)
+api_router.include_router(changelog_router)
 
 @api_router.get("/")
 async def root():
@@ -403,6 +405,14 @@ async def startup():
             logger.info("Seeded %s demo customers", result.get("count"))
     except Exception as exc:
         logger.warning("Customer seed skipped: %s", exc)
+    # Seed the What's New feed (idempotent).
+    try:
+        from seeds.seed_changelog import seed_changelog
+        cl_result = await seed_changelog()
+        if cl_result.get("seeded"):
+            logger.info("Seeded %s changelog entries", cl_result.get("count"))
+    except Exception as exc:
+        logger.warning("Changelog seed skipped: %s", exc)
     logger.info("Admin seeded, default business created")
     # Preload persisted wallet credentials into process env
     try:
