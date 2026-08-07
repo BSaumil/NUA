@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Building2, Plus, RefreshCw, DollarSign, Users, Package, Award, ShieldCheck, CreditCard, AlertTriangle } from 'lucide-react';
+import { Building2, Plus, RefreshCw, DollarSign, Users, Package, Award, ShieldCheck, CreditCard, AlertTriangle, Link2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -50,6 +50,14 @@ export default function MultiBusiness() {
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Failed to create business');
     } finally { setSaving(false); }
+  };
+
+  const copyStorefrontLink = (b) => {
+    const url = `${window.location.origin}/order-online?business=${b.slug || b.id}`;
+    navigator.clipboard.writeText(url).then(
+      () => toast.success('Storefront link copied'),
+      () => toast.error('Could not copy — clipboard unavailable'),
+    );
   };
 
   const runBackfill = async () => {
@@ -125,6 +133,9 @@ export default function MultiBusiness() {
                     {b.phone && <span>{b.phone}</span>}
                     <span>{b.currency} · {b.taxRate}% tax</span>
                   </div>
+                  <button onClick={() => copyStorefrontLink(b)} className="flex items-center gap-1.5 text-xs text-indigo-600 hover:text-indigo-800" data-testid={`copy-storefront-link-${b.id}`}>
+                    <Link2 size={12} /> Copy online-ordering link ({b.slug || b.id})
+                  </button>
                   {s ? (
                     <div className="grid grid-cols-4 gap-2 pt-2 border-t text-center">
                       <div>

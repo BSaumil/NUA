@@ -710,13 +710,21 @@ async def profit_guardian(user: dict = Depends(get_user)):
         price = float(p.get("price", 0) or 0); cost = float(p.get("cost", 0) or 0)
         if price <= 0: continue
         margin = (price - cost) / price * 100
-        # Heuristic: previously sold N+, now selling much less, suggest price tune
         cu, pu = cur_units[pid], prev_units.get(pid, 0)
         if margin < 60 and cu >= 5:
             suggested = round(price * 1.05, 2)
+            reason = f"Margin {margin:.1f}% sold {cu} last week — bump 5% to lift gross"
+            # Heuristic: previously sold N+, now selling much less — surface
+            # the decline alongside the margin call, since a thin-margin item
+            # that's also losing volume is a worse price-bump candidate (it
+            # may need a menu/promo look instead) than one holding steady.
+            declining = pu >= 5 and cu < pu * 0.5
+            if declining:
+                reason += f" (down from {pu} the week before — losing volume, not just margin)"
             alerts.append({"productId": pid, "name": p["name"], "marginPct": round(margin, 1),
                            "price": price, "cost": cost, "suggestedPrice": suggested,
-                           "reason": f"Margin {margin:.1f}% sold {cu} last week — bump 5% to lift gross"})
+                           "unitsLastWeek": cu, "unitsPriorWeek": pu, "declining": declining,
+                           "reason": reason})
     alerts.sort(key=lambda x: x["marginPct"])
     return {"alerts": alerts[:30]}
 

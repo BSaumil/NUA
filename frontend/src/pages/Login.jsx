@@ -77,9 +77,10 @@ export default function Login() {
       <Card className="w-full max-w-sm border-gray-800 bg-gray-900/80 backdrop-blur">
         <CardContent className="p-8">
           {/* Login is a marketing-facing surface, so it gets the full
-              gradient lockup (BRAND-SPEC §3). */}
+              wordmark lockup (BRAND-SPEC §3) — on this dark background the
+              wordmark is orange (BRAND-SPEC §2), never a gradient. */}
           <div className="flex flex-col items-center mb-6">
-            <Logo variant="marketing" size={34} />
+            <Logo variant="marketing" background="dark" size={34} />
           </div>
 
           {/* Second factor — replaces the whole form rather than sitting

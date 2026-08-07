@@ -2,14 +2,15 @@ from fastapi import APIRouter, HTTPException, Depends
 from database import db
 from datetime import datetime, timezone
 import uuid
-from deps import require_owner, require_owner_or_manager, require_permission
+from deps import require_owner, require_owner_or_manager, require_permission, optional_user
+from middleware.actor_context import tenant_scope_filter
 
 router = APIRouter()
 
 # ============ CATEGORIES ============
 @router.get("/categories")
-async def get_categories():
-    cats = await db.categories.find({}, {"_id": 0}).to_list(200)
+async def get_categories(user=Depends(optional_user)):
+    cats = await db.categories.find(tenant_scope_filter(user.get("businessId") if user else None), {"_id": 0}).to_list(200)
     if not cats:
         defaults = [
             {"id": "cat-beverages", "name": "Beverages", "sortOrder": 0, "active": True, "icon": "Coffee", "color": "#8b5cf6"},
@@ -24,9 +25,10 @@ async def get_categories():
     return cats
 
 @router.post("/categories")
-async def create_category(data: dict, _: dict = Depends(require_owner_or_manager)):
+async def create_category(data: dict, user: dict = Depends(require_owner_or_manager)):
     cat = {
         "id": f"cat-{str(uuid.uuid4())[:8]}",
+        "businessId": user.get("businessId"),
         "name": data.get("name", ""), "sortOrder": data.get("sortOrder", 99),
         "active": data.get("active", True),
         "icon": data.get("icon", "Tag"),          # lucide-react icon name

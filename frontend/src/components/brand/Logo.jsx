@@ -2,29 +2,42 @@ import React from 'react';
 import Icon from './Icon';
 
 /**
- * NUA logo lockup.
+ * NUA logo lockup — see BRAND-SPEC.md §2 (wordmark colour rule) and §4.
  *
  * variant="product"   — app headers, nav bars, in-product chrome.
- *                       Plain Space Grotesk wordmark, no gradient, no flourish.
+ *                       Space Grotesk wordmark.
  * variant="marketing" — landing hero, login/signup, decks rendered in-app.
- *                       Gradient Bricolage Grotesque wordmark + flourish.
+ *                       Bold all-caps Bricolage Grotesque wordmark + flourish.
+ *
+ * background="dark" | "light" | "brand" — picks the wordmark colour. This is
+ * purely contrast-driven, NOT a status signal: dark → orange, light → wine,
+ * brand (sitting on an orange/purple/pink panel) → white knockout. Never a
+ * gradient, never purple or pink on the wordmark itself — those stay
+ * exclusively AI/insight colours in the icon and product UI.
  *
  * Never use the marketing variant in functional UI (buttons, nav, in-app
  * headers) — BRAND-SPEC §3.
  */
+const WORDMARK_COLOR = {
+  dark: 'var(--nua-orange, #f58c14)',
+  light: 'var(--nua-wine, #6b2737)',
+  brand: '#ffffff',
+};
+
 export default function Logo({
   variant = 'product',
+  background = 'dark',
   size = 28,
   className = '',
   showIcon = true,
   tagline,
 }) {
   const marketing = variant === 'marketing';
-  const gradientId = 'nua-wordmark-gradient';
+  const wordmarkColor = WORDMARK_COLOR[background] || WORDMARK_COLOR.dark;
 
   return (
     <span className={`inline-flex items-center gap-2.5 ${className}`} data-testid={`nua-logo-${variant}`}>
-      {showIcon && <Icon size={size} variant={marketing ? 'color' : 'color'} />}
+      {showIcon && <Icon size={size} variant="color" />}
       <span className="inline-flex flex-col leading-none">
         {marketing ? (
           <>
@@ -36,20 +49,13 @@ export default function Logo({
               aria-label="Nua"
               style={{ overflow: 'visible' }}
             >
-              <defs>
-                <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0.15">
-                  <stop offset="10%" stopColor="#f58c14" />
-                  <stop offset="55%" stopColor="#8b5cf6" />
-                  <stop offset="90%" stopColor="#ec4899" />
-                </linearGradient>
-              </defs>
               <text
                 x="0"
                 y="42"
                 fontFamily="var(--nua-font-wordmark, 'Bricolage Grotesque', sans-serif)"
                 fontWeight="700"
                 fontSize="48"
-                fill={`url(#${gradientId})`}
+                fill={wordmarkColor}
               >
                 NUA
               </text>
@@ -57,7 +63,7 @@ export default function Logo({
               <path
                 d="M2 50 C 28 44, 74 44, 112 48"
                 fill="none"
-                stroke="#f58c14"
+                stroke={wordmarkColor}
                 strokeWidth="2.5"
                 strokeLinecap="round"
                 opacity="0.9"
@@ -86,6 +92,7 @@ export default function Logo({
                 fontWeight: 700,
                 fontSize: size * 0.82,
                 letterSpacing: '0.02em',
+                color: wordmarkColor,
               }}
             >
               NUA
