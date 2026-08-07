@@ -29,6 +29,8 @@ SHIPPED = [
     # This week
     _entry("What's New page", "See exactly what's changed in NUA POS — this week, this month, or what's coming next — without digging through settings menus.",
            area="Platform", days_ago=0),
+    _entry("Route-based code splitting", "The app now loads only the page you're actually on instead of the whole app upfront — first load is roughly 70% smaller.",
+           area="Platform", category="improvement", days_ago=0),
     _entry("Recurring marketing campaigns", "Target a segment like \"hasn't visited in 30 days\" once and let it re-run on a schedule — the audience is re-checked fresh every time, so it always reaches whoever's newly inactive.",
            area="Marketing", days_ago=1),
     _entry("Marketing segment builder", "Build a real customer segment — spend threshold, visit count, inactivity window — with a live match count, instead of choosing only \"all customers\" or one loyalty tier.",
@@ -89,8 +91,6 @@ SHIPPED = [
 
 UPCOMING = [
     _entry("Duplicated helper cleanup", "Consolidating the remaining repeated date/ID helper code across route files to keep the codebase lean and consistent.",
-           area="Platform", category="improvement"),
-    _entry("Route-based code splitting", "Loading only the page you're actually on instead of the whole app upfront, for a noticeably faster first load.",
            area="Platform", category="improvement"),
     _entry("Loyalty tier auto-promotion audit", "Full visibility into why a customer was (or wasn't) automatically promoted to VIP.",
            area="Loyalty"),
