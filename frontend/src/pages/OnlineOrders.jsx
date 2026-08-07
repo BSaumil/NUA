@@ -128,6 +128,12 @@ export default function OnlineOrders() {
                       {o.paymentStatus === 'paid' && (
                         <Badge className="bg-emerald-100 text-emerald-700 border-0 text-[9px]" data-testid={`order-paid-badge-${o.id}`}>Paid</Badge>
                       )}
+                      {o.paymentStatus === 'refunded' && (
+                        <Badge variant="outline" className="text-gray-500 text-[9px]" data-testid={`order-refunded-badge-${o.id}`}>Refunded</Badge>
+                      )}
+                      {o.paymentStatus === 'refund_failed' && (
+                        <Badge className="bg-red-100 text-red-700 border-0 text-[9px]" data-testid={`order-refund-failed-badge-${o.id}`}>Refund failed</Badge>
+                      )}
                       {o.voucherDiscount > 0 && (
                         <Badge variant="outline" className="text-emerald-700 border-emerald-300 text-[9px]" data-testid={`order-voucher-badge-${o.id}`}>
                           Voucher −${o.voucherDiscount.toFixed(2)}
@@ -161,9 +167,16 @@ export default function OnlineOrders() {
                   <p className="text-xs text-gray-500 uppercase tracking-wider">{opened.channel} · {opened.status}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {opened.paymentStatus === 'paid' ? (
+                  {opened.paymentStatus === 'paid' && (
                     <Badge className="bg-emerald-100 text-emerald-700 border-0" data-testid="order-paid-badge">Paid online</Badge>
-                  ) : (
+                  )}
+                  {opened.paymentStatus === 'refunded' && (
+                    <Badge variant="outline" className="text-gray-500" data-testid="order-refunded-badge">Refunded</Badge>
+                  )}
+                  {opened.paymentStatus === 'refund_failed' && (
+                    <Badge className="bg-red-100 text-red-700 border-0" data-testid="order-refund-failed-badge">Refund failed — refund manually</Badge>
+                  )}
+                  {(!opened.paymentStatus || opened.paymentStatus === 'unpaid') && (
                     <Badge variant="outline" className="text-gray-500" data-testid="order-unpaid-badge">Unpaid</Badge>
                   )}
                   <Button variant="ghost" size="sm" onClick={() => setOpened(null)}><X size={16} /></Button>

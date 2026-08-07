@@ -25,6 +25,40 @@ async def _mark_online_order_paid_if_applicable(session_id: str):
     )
 
 
+async def refund_stripe_payment(session_id: str) -> bool:
+    """Refund, in full, the Stripe payment behind a Checkout Session.
+
+    Uses the official `stripe` SDK directly (already a pinned dependency in
+    requirements.txt) rather than the emergentintegrations wrapper used
+    elsewhere in this file — that wrapper only exposes checkout-session
+    creation/status/webhook, no refund call. The SDK is synchronous, so the
+    actual network calls run in a thread so they don't block the event loop.
+    Returns False (never raises) on any failure — callers decide what a
+    failed refund means for the action that triggered it.
+    """
+    import stripe
+    import asyncio
+
+    api_key = os.environ.get("STRIPE_API_KEY")
+    if not api_key:
+        return False
+
+    def _do_refund():
+        stripe.api_key = api_key
+        session = stripe.checkout.Session.retrieve(session_id)
+        payment_intent = session.get("payment_intent")
+        if not payment_intent:
+            return False
+        stripe.Refund.create(payment_intent=payment_intent)
+        return True
+
+    try:
+        return await asyncio.to_thread(_do_refund)
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Stripe refund failed for session {session_id}: {e}")
+        return False
+
+
 async def _finalize_pos_sale_if_applicable(session_id: str):
     """A payment_transactions doc tagged kind='pos_sale' carries the exact
     cart/discount/loyalty payload the POS had built at the moment the
