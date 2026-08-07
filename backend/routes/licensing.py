@@ -383,6 +383,18 @@ async def stripe_webhook(request: Request, stripe_signature: Optional[str] = Hea
     lic = await db.tenant_licenses.find_one({"stripeCustomerId": cust_id}, {"_id": 0})
     if not lic:
         return {"received": True, "ignored": "no license linked"}
+    # A Stripe customer can carry more than one Subscription object (a stray
+    # duplicate, a test subscription, a plan-change that left the old one
+    # lingering) — this license is tied to one specific stripeSubscriptionId
+    # at creation time, so an event for a *different* subscription under the
+    # same customer must not be allowed to flip this tenant's state. Only
+    # enforced when both sides actually have a subscription id to compare —
+    # invoice events on a not-yet-linked license, or a license created before
+    # this field existed, fall through to the old any-event-for-this-customer
+    # behavior rather than being silently ignored.
+    linked_sub_id = lic.get("stripeSubscriptionId")
+    if linked_sub_id and sub_id and sub_id != linked_sub_id:
+        return {"received": True, "ignored": "event for a different subscription on this customer"}
     tenant_id = lic["tenantId"]
 
     if et == "invoice.paid":
