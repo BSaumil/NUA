@@ -387,15 +387,23 @@ async def unlock_loyalty_account(customer_id: str, user: dict = Depends(require_
 # AUTONOMOUS AI AGENT (Ash) — observes, decides, acts
 # =============================================================================
 async def _segment_customers():
-    """Auto-segment customers: VIP / regular / at-risk / first-timer."""
+    """Auto-segment customers: VIP / regular / at-risk / first-timer.
+
+    Was reading totalVisits/totalSpend/lastVisit — none of which exist on
+    the Customer model (models/customer.py has visits/totalSpent/
+    lastVisitDate). Every customer silently read as 0/0/"" and fell
+    through to "first_timer" for anyone with visits<=1 (which is all of
+    them, since totalVisits was always 0) — this has been mis-segmenting
+    every customer since the field was added.
+    """
     customers = await db.customers.find({}, {"_id": 0}).to_list(5000)
     now = datetime.now(timezone.utc)
-    sixty_days_ago = (now - timedelta(days=60)).isoformat()
+    sixty_days_ago = (now - timedelta(days=60)).date().isoformat()
     segments = {"vip": [], "regular": [], "at_risk": [], "first_timer": []}
     for c in customers:
-        visits = int(c.get("totalVisits", 0) or 0)
-        spend = float(c.get("totalSpend", 0) or 0)
-        last_visit = c.get("lastVisit", "")
+        visits = int(c.get("visits", 0) or 0)
+        spend = float(c.get("totalSpent", 0) or 0)
+        last_visit = c.get("lastVisitDate", "")
         if spend > 500 and visits > 10:
             segments["vip"].append(c["id"])
         elif visits <= 1:
