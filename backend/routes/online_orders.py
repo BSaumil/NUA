@@ -169,6 +169,21 @@ async def _resolve_business_id(business: Optional[str]) -> Optional[str]:
     return biz["id"] if biz else None
 
 
+@router.get("/online/business")
+async def public_business_info(business: Optional[str] = None):
+    """Lets the storefront tell "no ?business= param, unscoped menu" (normal
+    on a single-business deployment) apart from "?business= was set but
+    didn't match anything" (a stale/mistyped link) — the products/categories
+    endpoints alone can't distinguish these since both resolve to the same
+    unscoped fallback. Only exposes what a guest already sees on the page."""
+    if not business:
+        return {"found": None}
+    biz = await db.businesses.find_one({"$or": [{"id": business}, {"slug": business}]}, {"_id": 0, "id": 1, "name": 1})
+    if not biz:
+        return {"found": False}
+    return {"found": True, "id": biz["id"], "name": biz.get("name", "")}
+
+
 @router.get("/online/categories")
 async def public_categories(business: Optional[str] = None):
     """Public — only returns active categories that are enabled for online

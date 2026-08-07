@@ -136,13 +136,28 @@ export default function Integrations() {
                       <p className="text-xs text-gray-500">{integration.category}</p>
                     </div>
                   </div>
-                  {connected ? (
-                    <Badge className="bg-emerald-100 text-emerald-700 border-emerald-300 text-[10px]">
-                      <Check size={10} className="mr-0.5" /> Connected
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-gray-400 text-[10px]">Inactive</Badge>
-                  )}
+                  <div className="flex flex-col items-end gap-1">
+                    {connected ? (
+                      <Badge className="bg-emerald-100 text-emerald-700 border-emerald-300 text-[10px]">
+                        <Check size={10} className="mr-0.5" /> Connected
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-gray-400 text-[10px]">Inactive</Badge>
+                    )}
+                    {/* Stripe secret keys are self-describing (sk_test_/sk_live_) — surface
+                        which one is live so nobody discovers a venue is still on test-mode
+                        payments (or accidentally live during a demo) by reading env vars. */}
+                    {integration.mode && (
+                      <Badge
+                        className={`text-[10px] ${integration.mode === 'live'
+                          ? 'bg-red-100 text-red-700 border-red-300'
+                          : 'bg-amber-100 text-amber-700 border-amber-300'}`}
+                        data-testid={`${integration.slug}-mode-badge`}
+                      >
+                        {integration.mode === 'live' ? 'Live mode' : 'Test mode'}
+                      </Badge>
+                    )}
+                  </div>
                 </div>
                 <p className="text-sm text-gray-500 mb-4 line-clamp-2">{integration.description}</p>
                 <div className="flex gap-2">

@@ -2,11 +2,21 @@ from fastapi import APIRouter, HTTPException, Request, Depends
 from datetime import datetime, timedelta
 from database import db
 from deps import get_user
+from typing import Optional
 import logging
 import os
 import uuid
 
 router = APIRouter()
+
+
+def _stripe_key_mode() -> Optional[str]:
+    """Stripe secret keys are self-describing: sk_test_/rk_test_ vs
+    sk_live_/rk_live_. None when Stripe isn't configured at all."""
+    key = os.environ.get("STRIPE_API_KEY", "")
+    if not key:
+        return None
+    return "live" if "_live_" in key else "test"
 
 
 async def _mark_online_order_paid_if_applicable(session_id: str):
@@ -280,7 +290,12 @@ async def get_integrations():
         # Middleware
         {"slug": "doshii", "name": "Doshii", "category": "Middleware", "description": "Connect 20+ hospitality apps via one integration. Powers Uber Eats, DoorDash, Deputy, and more.", "status": saved_map.get("doshii", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "Location Token", "website": "https://doshii.com"},
         # Payments
-        {"slug": "stripe", "name": "Stripe", "category": "Payments", "description": "Accept card payments with Stripe Checkout", "status": "connected" if os.environ.get("STRIPE_API_KEY") else "disconnected", "requiresKey": False, "preconfigured": True},
+        # Stripe secret keys are self-describing (sk_test_... vs sk_live_...)
+        # — surfacing which one is active matters because there was
+        # previously no way to tell from the UI whether a deployment was
+        # still taking play-money test charges or real guest card payments,
+        # short of reading the key value out of the environment directly.
+        {"slug": "stripe", "name": "Stripe", "category": "Payments", "description": "Accept card payments with Stripe Checkout", "status": "connected" if os.environ.get("STRIPE_API_KEY") else "disconnected", "requiresKey": False, "preconfigured": True, "mode": _stripe_key_mode()},
         {"slug": "square", "name": "Square", "category": "Payments", "description": "Process payments via Square terminals", "status": saved_map.get("square", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "Access Token", "website": "https://developer.squareup.com"},
         {"slug": "commbank", "name": "CommBank Smart", "category": "Payments", "description": "CommBank EFTPOS and pay-at-table via Doshii", "status": saved_map.get("commbank", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "Merchant ID", "website": "https://www.commbank.com.au/business/payments/hospitality.html"},
         # Accounting

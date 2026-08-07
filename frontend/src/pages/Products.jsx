@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Edit, Trash2, Tag, Package, ImageIcon } from 'lucide-react';
+import { Plus, Edit, Trash2, Tag, Package, ImageIcon, Sparkles } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Textarea } from '../components/ui/textarea';
@@ -51,6 +51,7 @@ const Products = () => {
   const [showTranslateDialog, setShowTranslateDialog] = useState(false);
   const [translatingProduct, setTranslatingProduct] = useState(null);
   const [translationForm, setTranslationForm] = useState({});
+  const [autoTranslating, setAutoTranslating] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [editingPromo, setEditingPromo] = useState(null);
   const [productForm, setProductForm] = useState(makeEmptyProduct);
@@ -169,6 +170,18 @@ const Products = () => {
       setShowTranslateDialog(false);
       fetchData();
     } catch (e) { toast.error(e.response?.data?.detail || 'Failed to save translations'); }
+  };
+  const autoTranslateProduct = async () => {
+    if (!translatingProduct) return;
+    setAutoTranslating(true);
+    try {
+      const res = await productsAPI.autoTranslate(translatingProduct.id);
+      // Merge into the form rather than replace, so any language a staff
+      // member already hand-edited in this session isn't clobbered.
+      setTranslationForm(prev => ({ ...prev, ...res.data.translations }));
+      toast.success('AI draft ready — review before saving');
+    } catch (e) { toast.error(e.response?.data?.detail || 'Auto-translate failed'); }
+    finally { setAutoTranslating(false); }
   };
 
   const toggleModifierForProduct = (mid) => {
@@ -781,6 +794,16 @@ const Products = () => {
           <p className="text-xs text-gray-500 -mt-2">
             Leave a language blank to show the English name/description on customer-facing menus.
           </p>
+          <Button
+            variant="outline"
+            className="w-full gap-2"
+            onClick={autoTranslateProduct}
+            disabled={autoTranslating}
+            data-testid="auto-translate-btn"
+          >
+            <Sparkles className="w-4 h-4" style={{ color: '#8b5cf6' }} />
+            {autoTranslating ? 'Drafting translations…' : 'Draft all languages with AI'}
+          </Button>
           <div className="space-y-4">
             {LANGUAGES.filter(l => l.code !== 'en').map(l => (
               <div key={l.code} className="border rounded-lg p-3 space-y-2">

@@ -1,6 +1,9 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
 from datetime import datetime, timezone
+import json
+import logging
+import os
 import uuid
 from database import db
 from deps import get_user, optional_user, require_owner_or_manager
@@ -9,6 +12,15 @@ from middleware.actor_context import tenant_scope_filter, tenant_owns
 from pydantic import BaseModel
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+# Must stay in sync with frontend/src/i18n/translations.js's LANGUAGES list
+# (minus 'en', which is the untranslated base). There's no shared source of
+# truth between the two stacks for this today.
+_TRANSLATABLE_LANGUAGES = {
+    "it": "Italian", "zh": "Chinese (Simplified)", "hi": "Hindi",
+    "es": "Spanish", "vi": "Vietnamese", "ar": "Arabic", "pt": "Portuguese",
+}
 
 # ============ PRODUCTS API ============
 # Deliberately reachable without logging in: the kiosk and the QR table-order
@@ -93,6 +105,77 @@ async def adjust_stock(product_id: str, data: dict, user: dict = Depends(get_use
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
     return {"message": "Stock adjusted", "newStock": new_stock}
+
+
+@router.post("/products/{product_id}/auto-translate")
+async def auto_translate_product(product_id: str, user: dict = Depends(require_owner_or_manager)):
+    """AI-draft translations for every supported language from this
+    product's name/description, for staff to review before saving.
+
+    Menu translations only ever showed up on the Customer Facing Display
+    (and kiosk/QR/online menus) when a staff member manually typed every
+    language for every product one at a time via the Translate dialog — a
+    real, tedious per-item task nobody does for a full menu, so in
+    practice almost every product just fell back to English regardless of
+    what language a guest picked. This doesn't remove that manual step
+    (staff still review and hit Save), it just means starting from an AI
+    draft instead of a blank form.
+    """
+    product = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not product or not tenant_owns(product.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="AI translation is not configured")
+
+    name = product.get("name", "")
+    description = product.get("description", "")
+    if not name:
+        raise HTTPException(status_code=400, detail="Product has no name to translate")
+
+    lang_list = ", ".join(f"{code} ({label})" for code, label in _TRANSLATABLE_LANGUAGES.items())
+    system = (
+        "You translate restaurant menu items. Given a dish name and optional "
+        "description, translate both into every requested language. Keep dish "
+        "names natural for a menu (don't over-literalize), and keep descriptions "
+        "concise. Respond with ONLY a JSON object, no prose, no markdown fences, "
+        'shaped exactly like: {"it": {"name": "...", "description": "..."}, "es": '
+        '{"name": "...", "description": "..."}, ...} — one key per language code, '
+        "using every language code requested. Omit \"description\" for a language "
+        "entry if the source description was empty."
+    )
+    user_text = f"Languages: {lang_list}\n\nDish name: {name}\nDescription: {description or '(none)'}"
+
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        chat = LlmChat(
+            api_key=api_key, session_id=f"translate-{product_id}-{uuid.uuid4().hex[:6]}",
+            system_message=system,
+        ).with_model("openai", "gpt-5.2")
+        resp = await chat.send_message(UserMessage(text=user_text))
+        text = (resp or "").strip().strip("`")
+        try:
+            drafted = json.loads(text)
+        except Exception:
+            import re
+            m = re.search(r"\{.*\}", text, re.DOTALL)
+            drafted = json.loads(m.group(0)) if m else {}
+    except Exception as e:
+        logger.warning(f"Auto-translate failed for product {product_id}: {e}")
+        raise HTTPException(status_code=502, detail="AI translation failed — try again")
+
+    # Only keep languages we actually asked for, and only well-formed entries —
+    # never let a malformed LLM response corrupt existing saved translations
+    # (the caller merges this into the form client-side, doesn't overwrite).
+    cleaned = {
+        code: {"name": v.get("name", "").strip(), "description": (v.get("description") or "").strip()}
+        for code, v in (drafted or {}).items()
+        if code in _TRANSLATABLE_LANGUAGES and isinstance(v, dict) and v.get("name", "").strip()
+    }
+    if not cleaned:
+        raise HTTPException(status_code=502, detail="AI returned no usable translations — try again")
+    return {"translations": cleaned}
 
 
 # ============ BULK PRODUCT EDIT ============

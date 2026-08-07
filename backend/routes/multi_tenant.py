@@ -11,27 +11,35 @@ router = APIRouter(prefix="/business")
 # ============ MULTI-BUSINESS / MULTI-TENANT ============
 
 
-async def _unique_slug(name: str) -> str:
+async def _unique_slug(name: str, exclude_id: Optional[str] = None) -> str:
     """URL-safe handle for the public online-ordering storefront
     (/order-online?business=<slug>) — friendlier than the raw BIZ-xxxxxxxx id.
     Not globally enforced at the DB level (no unique index; this is a
     small, owner-driven collection), just checked-and-retried here so two
-    businesses named the same thing don't collide."""
+    businesses named the same thing don't collide. `exclude_id` lets a
+    business keep its own slug when re-slugging on rename/edit instead of
+    always bumping onto "-2"."""
     base = re.sub(r"[^a-z0-9]+", "-", (name or "business").lower()).strip("-") or "business"
     slug = base
     n = 2
-    while await db.businesses.find_one({"slug": slug}, {"_id": 1}):
+    while True:
+        query = {"slug": slug}
+        if exclude_id:
+            query["id"] = {"$ne": exclude_id}
+        if not await db.businesses.find_one(query, {"_id": 1}):
+            return slug
         slug = f"{base}-{n}"
         n += 1
-    return slug
 
 @router.post("/create")
 async def create_business(data: dict, user: dict = Depends(require_owner)):
     """Create a new business (Owner only)"""
 
+    requested_slug_base = re.sub(r"[^a-z0-9]+", "-", (data.get("name", "") or "business").lower()).strip("-")
+    slug = await _unique_slug(data.get("name", ""))
     business = {
         "id": f"BIZ-{str(uuid.uuid4())[:8].upper()}",
-        "slug": await _unique_slug(data.get("name", "")),
+        "slug": slug,
         "name": data.get("name", ""),
         "type": data.get("type", "restaurant"),  # restaurant, cafe, bar, catering
         "abn": data.get("abn", ""),
@@ -53,6 +61,10 @@ async def create_business(data: dict, user: dict = Depends(require_owner)):
     }
     await db.businesses.insert_one(business)
     business.pop("_id", None)
+    # Tell the caller if the requested name collided with an existing
+    # business's slug and got silently suffixed, so the UI can surface it
+    # instead of leaving the owner to notice a "-2" in their storefront link.
+    business["slugAdjusted"] = bool(requested_slug_base) and slug != requested_slug_base
     return business
 
 @router.get("/list")
@@ -70,14 +82,23 @@ async def get_business(business_id: str, _: dict = Depends(get_user)):
 
 @router.put("/{business_id}")
 async def update_business(business_id: str, data: dict, _: dict = Depends(require_owner)):
-    allowed = {"name", "type", "abn", "address", "phone", "email", "timezone", "currency", "taxRate", "settings"}
+    allowed = {"name", "type", "abn", "address", "phone", "email", "timezone", "currency", "taxRate", "settings", "slug"}
     update_data = {k: v for k, v in data.items() if k in allowed}
+
+    slug_adjusted = False
+    if "slug" in update_data:
+        requested_base = re.sub(r"[^a-z0-9]+", "-", (update_data["slug"] or "").lower()).strip("-")
+        final_slug = await _unique_slug(update_data["slug"], exclude_id=business_id)
+        slug_adjusted = bool(requested_base) and final_slug != requested_base
+        update_data["slug"] = final_slug
+
     result = await db.businesses.find_one_and_update(
         {"id": business_id}, {"$set": update_data}, return_document=True
     )
     if not result:
         raise HTTPException(status_code=404, detail="Business not found")
     result.pop("_id", None)
+    result["slugAdjusted"] = slug_adjusted
     return result
 
 @router.get("/{business_id}/export")
@@ -119,14 +140,18 @@ async def get_business_summary(business_id: str, _: dict = Depends(require_owner
     txns = await db.transactions.find(biz_or_untagged, {"_id": 0}).to_list(10000)
     products = await db.products.find(biz_or_untagged, {"_id": 0}).to_list(1000)
     customers = await db.customers.find(biz_or_untagged, {"_id": 0}).to_list(10000)
+    # The member-portal router was removed rounds ago (nothing in this
+    # codebase writes db.members anymore) — this count is permanently
+    # frozen historical data from before that removal, not a live number.
+    # Left in rather than dropped so a deployment with old member rows
+    # doesn't lose that figure from its summary; new deployments will
+    # always show 0 here.
     members = await db.members.find(biz_or_untagged, {"_id": 0}).to_list(10000)
     staff = await db.auth_users.find({"businessId": business_id}, {"_id": 0, "password_hash": 0}).to_list(100)
-    # Online orders have no businessId field at all yet — there's no
-    # per-business storefront/slug for a guest to pick which business
-    # they're ordering from, so biz_or_untagged matches every online order
-    # on the deployment here, same as it would for any other untagged
-    # collection. On a real multi-business deployment these counts are
-    # deployment-wide until online ordering gets a businessId of its own.
+    # Online orders are tagged with businessId (added alongside the
+    # per-business storefront slug) — biz_or_untagged still applies the
+    # same fail-open-to-untagged-legacy-data rule as every other query on
+    # this page, so pre-slug orders keep counting rather than vanishing.
     online_orders = await db.online_orders.find(biz_or_untagged, {"_id": 0, "paymentStatus": 1}).to_list(10000)
     payment_counts = {"paid": 0, "refunded": 0, "refund_failed": 0}
     for o in online_orders:

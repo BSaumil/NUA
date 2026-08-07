@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Building2, Plus, RefreshCw, DollarSign, Users, Package, Award, ShieldCheck, CreditCard, AlertTriangle, Link2 } from 'lucide-react';
+import { Building2, Plus, RefreshCw, DollarSign, Users, Package, Award, ShieldCheck, CreditCard, AlertTriangle, Link2, Pencil, Check, X } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -22,6 +22,9 @@ export default function MultiBusiness() {
   const [saving, setSaving] = useState(false);
   const [summaries, setSummaries] = useState({}); // businessId -> summary
   const [backfilling, setBackfilling] = useState(false);
+  const [editingSlugFor, setEditingSlugFor] = useState(null); // businessId
+  const [editingSlugValue, setEditingSlugValue] = useState('');
+  const [savingSlug, setSavingSlug] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -42,8 +45,11 @@ export default function MultiBusiness() {
     if (!form.name.trim()) { toast.error('Business name required'); return; }
     setSaving(true);
     try {
-      await businessAPI.create(form);
+      const r = await businessAPI.create(form);
       toast.success(`${form.name} created`);
+      if (r.data?.slugAdjusted) {
+        toast.info(`Storefront link uses "${r.data.slug}" — another business already had that name`);
+      }
       setShowCreate(false);
       setForm(BLANK_FORM);
       load();
@@ -58,6 +64,25 @@ export default function MultiBusiness() {
       () => toast.success('Storefront link copied'),
       () => toast.error('Could not copy — clipboard unavailable'),
     );
+  };
+
+  const startEditSlug = (b) => { setEditingSlugFor(b.id); setEditingSlugValue(b.slug || ''); };
+  const cancelEditSlug = () => { setEditingSlugFor(null); setEditingSlugValue(''); };
+  const saveSlug = async (b) => {
+    if (!editingSlugValue.trim()) { toast.error('Slug cannot be empty'); return; }
+    setSavingSlug(true);
+    try {
+      const r = await businessAPI.update(b.id, { slug: editingSlugValue.trim() });
+      if (r.data?.slugAdjusted) {
+        toast.info(`That slug was taken — using "${r.data.slug}" instead`);
+      } else {
+        toast.success('Storefront link updated');
+      }
+      cancelEditSlug();
+      load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Failed to update slug');
+    } finally { setSavingSlug(false); }
   };
 
   const runBackfill = async () => {
@@ -133,9 +158,32 @@ export default function MultiBusiness() {
                     {b.phone && <span>{b.phone}</span>}
                     <span>{b.currency} · {b.taxRate}% tax</span>
                   </div>
-                  <button onClick={() => copyStorefrontLink(b)} className="flex items-center gap-1.5 text-xs text-indigo-600 hover:text-indigo-800" data-testid={`copy-storefront-link-${b.id}`}>
-                    <Link2 size={12} /> Copy online-ordering link ({b.slug || b.id})
-                  </button>
+                  {editingSlugFor === b.id ? (
+                    <div className="flex items-center gap-1.5" data-testid={`edit-slug-row-${b.id}`}>
+                      <Input
+                        value={editingSlugValue}
+                        onChange={e => setEditingSlugValue(e.target.value)}
+                        className="h-7 text-xs font-mono"
+                        placeholder="storefront-slug"
+                        data-testid={`edit-slug-input-${b.id}`}
+                      />
+                      <Button size="icon" variant="ghost" className="h-7 w-7" disabled={savingSlug} onClick={() => saveSlug(b)} data-testid={`save-slug-${b.id}`}>
+                        <Check size={14} />
+                      </Button>
+                      <Button size="icon" variant="ghost" className="h-7 w-7" disabled={savingSlug} onClick={cancelEditSlug}>
+                        <X size={14} />
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <button onClick={() => copyStorefrontLink(b)} className="flex items-center gap-1.5 text-xs text-indigo-600 hover:text-indigo-800" data-testid={`copy-storefront-link-${b.id}`}>
+                        <Link2 size={12} /> Copy online-ordering link ({b.slug || b.id})
+                      </button>
+                      <button onClick={() => startEditSlug(b)} className="text-gray-400 hover:text-gray-600" data-testid={`edit-slug-btn-${b.id}`}>
+                        <Pencil size={12} />
+                      </button>
+                    </div>
+                  )}
                   {s ? (
                     <div className="grid grid-cols-4 gap-2 pt-2 border-t text-center">
                       <div>
