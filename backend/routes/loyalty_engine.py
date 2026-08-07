@@ -69,6 +69,16 @@ async def update_loyalty_config(data: dict, _: dict = Depends(require_owner)):
 # =============================================================================
 # EARN POINTS (called after a successful transaction)
 # =============================================================================
+# Neither /loyalty/earn nor /loyalty/redeem below is currently called by
+# anything — routes/transactions.py earns/redeems points inline as part of
+# checkout (its own _redeem helper + earn calc, not this module) instead of
+# calling out to these. That inlining is what actually runs today; these
+# stay as the auth-protected place to wire any future NON-checkout
+# redemption flow (e.g. a customer scanning a QR code to redeem points
+# without a cashier present — see routes/loyalty.py's comment on why that
+# must go through an auth-protected handler, not a bare unauthenticated
+# one). Not dead code to delete on sight; genuinely unused today, kept on
+# purpose.
 @router.post("/loyalty/earn")
 async def earn_points(data: dict, _: dict = Depends(get_user)):
     customer_id = data.get("customerId")
