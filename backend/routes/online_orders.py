@@ -10,10 +10,10 @@ Endpoints:
 - GET    /api/online/kitchen/load            — current pending + preparing counts
 """
 from fastapi import APIRouter, HTTPException, Request, Depends
-from deps import get_user, require_owner, require_owner_or_manager
+from deps import get_user
 import logging
 from database import db
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Optional
 import os
 import json

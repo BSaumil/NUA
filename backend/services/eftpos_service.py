@@ -13,12 +13,10 @@ Supports multiple Australian EFTPOS providers:
 """
 
 import socket
-import serial
 import json
 import asyncio
 import uuid
-from typing import Optional, Dict, Any
-from datetime import datetime
+from typing import Dict, Any
 import logging
 
 logger = logging.getLogger(__name__)

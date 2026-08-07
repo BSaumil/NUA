@@ -7,7 +7,7 @@ from starlette.middleware.cors import CORSMiddleware
 import logging
 import os
 
-from database import db, client
+from database import client
 
 from routes.products import router as products_router
 from routes.transactions import router as transactions_router

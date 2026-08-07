@@ -5,8 +5,6 @@ import uuid
 from database import db
 from deps import get_user, optional_user, require_owner_or_manager
 from models.product import Product, ProductCreate, ProductUpdate
-from models.category import Category, CategoryCreate
-from models.modifier import Modifier, ModifierCreate
 from middleware.actor_context import tenant_scope_filter, tenant_owns
 from pydantic import BaseModel
 

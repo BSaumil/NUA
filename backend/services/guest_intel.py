@@ -9,7 +9,6 @@ normal case at the booking desk.
 """
 import re
 from collections import Counter
-from typing import Optional
 
 from database import db
 

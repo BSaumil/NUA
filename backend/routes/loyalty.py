@@ -1,9 +1,9 @@
 from fastapi import APIRouter, HTTPException, Depends
-from typing import List, Optional
+from typing import Optional
 from datetime import datetime
 from database import db
-from deps import get_user, require_owner, require_owner_or_manager
-from models.loyalty import LoyaltyReward, LoyaltyRedemption, Event, EventCreate
+from deps import require_owner, require_owner_or_manager
+from models.loyalty import Event, EventCreate
 import uuid
 
 router = APIRouter()

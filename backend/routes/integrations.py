@@ -1,5 +1,4 @@
 from fastapi import APIRouter, HTTPException, Request, Depends
-from typing import Optional
 from datetime import datetime, timedelta
 from database import db
 from deps import get_user

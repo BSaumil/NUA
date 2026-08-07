@@ -18,8 +18,6 @@ from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel
 from database import db
 from deps import require_owner_or_manager
-import os
-import json
 import uuid
 
 router = APIRouter()

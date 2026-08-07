@@ -3,7 +3,6 @@
 Script to build standalone backend executable using PyInstaller
 """
 
-import os
 import sys
 import subprocess
 import shutil

@@ -6,7 +6,7 @@ vouchers, and auto-issued occasion offers (birthday month, etc.).
 Occasion offers are issued lazily whenever a wallet is read (and in bulk
 by the loyalty agent tick), deduped per customer per occasion per year.
 """
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Optional
 import calendar
 import uuid

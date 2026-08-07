@@ -7,7 +7,7 @@ F: AI Phone Agent, auto-PO generation, live menu A/B testing, guest 'your usual'
 from fastapi import APIRouter, HTTPException, Request, Depends
 from deps import get_user, require_owner, require_owner_or_manager
 from database import db
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from collections import Counter, defaultdict
 import uuid
 import os
@@ -479,14 +479,11 @@ async def your_usual(customer_id: str, _: dict = Depends(get_user)):
     if not tx:
         return {"items": [], "reason": "no purchase history"}
     counter = Counter()
-    prices = {}
-    images = {}
     for t in tx:
         for it in t.get("items", []):
             pid = it.get("productId")
             if not pid: continue
             counter[pid] += int(it.get("quantity", 1))
-            prices[pid] = it.get("price")
     top_ids = [pid for pid, _ in counter.most_common(3)]
     products = []
     for pid in top_ids:

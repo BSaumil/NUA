@@ -27,7 +27,6 @@ stamped_insert / stamped_update — never a bare motor call.
 from __future__ import annotations
 from typing import Optional, Literal
 from pydantic import BaseModel
-from datetime import datetime
 from .base_entity import BaseEntity
 
 
