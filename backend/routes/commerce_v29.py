@@ -103,19 +103,14 @@ def _iso(dt) -> str:
 # ═════════════════════════════════════════════════════════════════════════
 # Universal Voucher Engine
 # ═════════════════════════════════════════════════════════════════════════
-async def _issue_voucher(payload: dict, user: Optional[dict] = None) -> dict:
-    """Internal helper used by /vouchers, /refunds, promotion auto-issue."""
+def _build_voucher_doc(payload: dict, user: Optional[dict], customer_data: dict) -> dict:
+    """Pure (no I/O) construction of one voucher document — split out of
+    _issue_voucher so bulk issuance can build N of these in memory and
+    insert them in a single round trip, instead of one insert_one (and one
+    redundant customer lookup) per voucher."""
     code = _gen_code(payload.get("codePrefix", "NUA"))
     vid = str(uuid.uuid4())
     qr_payload = _sign_payload({"vid": vid, "code": code, "issued": int(_now().timestamp())})
-
-    customer_data = {}
-    if payload.get("customerId"):
-        c = await db.customers.find_one({"id": payload["customerId"]}, {"_id": 0}) or {}
-        customer_data = {
-            "customerEmail": c.get("email"),
-            "customerName": c.get("name"),
-        }
 
     v = Voucher(
         id=vid, code=code, qrPayload=qr_payload,
@@ -139,7 +134,20 @@ async def _issue_voucher(payload: dict, user: Optional[dict] = None) -> dict:
         metadata=payload.get("metadata") or {},
         businessId=payload.get("businessId") or (user or {}).get("businessId") or get_actor_context().get("businessId"),
     )
-    doc = v.dict()
+    return v.dict()
+
+
+async def _lookup_customer_data(customer_id: Optional[str]) -> dict:
+    if not customer_id:
+        return {}
+    c = await db.customers.find_one({"id": customer_id}, {"_id": 0}) or {}
+    return {"customerEmail": c.get("email"), "customerName": c.get("name")}
+
+
+async def _issue_voucher(payload: dict, user: Optional[dict] = None) -> dict:
+    """Internal helper used by /vouchers, /refunds, promotion auto-issue."""
+    customer_data = await _lookup_customer_data(payload.get("customerId"))
+    doc = _build_voucher_doc(payload, user, customer_data)
     await db.vouchers.insert_one(dict(doc))
     doc.pop("_id", None)
     return doc
@@ -154,17 +162,23 @@ async def issue_voucher(body: VoucherCreate, user: dict = Depends(get_user)):
 
 @router.post("/vouchers/bulk")
 async def bulk_issue_voucher(body: dict, user: dict = Depends(get_user)):
-    """Issue N identical vouchers — for corporate hand-outs, staff perks, event give-aways."""
+    """Issue N identical vouchers — for corporate hand-outs, staff perks, event give-aways.
+
+    Builds all N documents in memory (one customer lookup total, not one
+    per voucher — the customerId, if any, is the same for the whole batch)
+    and inserts them in a single insert_many instead of N sequential
+    insert_one round trips."""
     if user["role"] not in ("owner", "manager"):
         raise HTTPException(403, "Owner/manager only")
     count = int(body.get("count", 1))
     if count < 1 or count > 5000:
         raise HTTPException(400, "count must be 1..5000")
     template = {k: v for k, v in body.items() if k != "count"}
-    codes = []
-    for _ in range(count):
-        v = await _issue_voucher(template, user)
-        codes.append({"id": v["id"], "code": v["code"], "qrPayload": v["qrPayload"]})
+    customer_data = await _lookup_customer_data(template.get("customerId"))
+    docs = [_build_voucher_doc(template, user, customer_data) for _ in range(count)]
+    if docs:
+        await db.vouchers.insert_many([dict(d) for d in docs])
+    codes = [{"id": d["id"], "code": d["code"], "qrPayload": d["qrPayload"]} for d in docs]
     return {"issued": count, "vouchers": codes}
 
 
