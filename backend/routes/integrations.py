@@ -190,12 +190,19 @@ async def create_stripe_checkout(data: dict, http_request: Request, user: dict =
 
 @router.get("/stripe/checkout/status/{session_id}")
 async def get_stripe_checkout_status(session_id: str, http_request: Request):
-    """Poll Stripe checkout session status"""
+    """Poll Stripe checkout session status.
+
+    Returns {"configured": False, ...} rather than a 500 when Stripe isn't
+    configured — matches create_online_order_checkout's style, and means a
+    caller polling with a stale/bookmarked session_id from before Stripe was
+    ever set up (or after a key gets removed) gets a normal response to
+    branch on instead of having to catch an exception.
+    """
     from emergentintegrations.payments.stripe.checkout import StripeCheckout
 
     api_key = os.environ.get("STRIPE_API_KEY")
     if not api_key:
-        raise HTTPException(status_code=500, detail="Stripe not configured")
+        return {"configured": False, "status": None, "paymentStatus": None, "amountTotal": None, "currency": None}
 
     host_url = str(http_request.base_url).rstrip("/")
     webhook_url = f"{host_url}/api/webhook/stripe"
@@ -223,6 +230,7 @@ async def get_stripe_checkout_status(session_id: str, http_request: Request):
                 await _finalize_pos_sale_if_applicable(session_id)
 
     return {
+        "configured": True,
         "status": status.status,
         "paymentStatus": status.payment_status,
         "amountTotal": status.amount_total,
