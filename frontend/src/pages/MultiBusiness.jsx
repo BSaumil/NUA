@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Building2, Plus, RefreshCw, DollarSign, Users, Package, Award, ShieldCheck, CreditCard, AlertTriangle, Link2, Pencil, Check, X } from 'lucide-react';
+import { Building2, Plus, RefreshCw, DollarSign, Users, Package, Award, ShieldCheck, CreditCard, AlertTriangle, Link2, Pencil, Check, X, Download } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -25,6 +25,7 @@ export default function MultiBusiness() {
   const [editingSlugFor, setEditingSlugFor] = useState(null); // businessId
   const [editingSlugValue, setEditingSlugValue] = useState('');
   const [savingSlug, setSavingSlug] = useState(false);
+  const [exportingId, setExportingId] = useState(null);
 
   const load = () => {
     setLoading(true);
@@ -83,6 +84,22 @@ export default function MultiBusiness() {
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Failed to update slug');
     } finally { setSavingSlug(false); }
+  };
+
+  const exportBusiness = async (b) => {
+    setExportingId(b.id);
+    try {
+      const r = await businessAPI.exportData(b.id);
+      const blob = new Blob([JSON.stringify(r.data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${b.slug || b.id}-export-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Export downloaded');
+    } catch {
+      toast.error('Export failed');
+    } finally { setExportingId(null); }
   };
 
   const runBackfill = async () => {
@@ -222,6 +239,11 @@ export default function MultiBusiness() {
                       )}
                     </div>
                   )}
+                  <button onClick={() => exportBusiness(b)} disabled={exportingId === b.id}
+                    className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 pt-2 border-t w-full"
+                    data-testid={`export-business-${b.id}`}>
+                    <Download size={12} /> {exportingId === b.id ? 'Exporting…' : 'Export all data (JSON)'}
+                  </button>
                 </CardContent>
               </Card>
             );

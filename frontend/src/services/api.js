@@ -879,6 +879,7 @@ export const businessAPI = {
   list: () => api.get('/business/list'),
   update: (id, data) => api.put(`/business/${id}`, data),
   summary: (id) => api.get(`/business/${id}/summary`),
+  exportData: (id, collection) => api.get(`/business/${id}/export`, { params: collection ? { collection } : {} }),
   backfillTenant: () => api.post('/business/backfill-tenant'),
 };
 
