@@ -122,6 +122,21 @@ async def _ai_eta_explanation(order: dict, eta: dict) -> str:
         return fallback
 
 
+async def _adjust_stock_for_items(items: list, sign: int):
+    """+1 to restock, -1 to deduct. Online orders never touched db.products
+    stock at all before this — an accepted online order didn't reduce
+    on-hand count the way a POS sale does, so this is what accepting one
+    now does (mirroring routes/transactions.py's create_transaction), and
+    cancelling a previously-accepted paid order reverses it — the same
+    deduct-on-sale/restore-on-refund pairing the POS already has."""
+    for item in items or []:
+        pid = item.get("productId") or item.get("id")
+        qty = int(item.get("quantity", 1))
+        if not pid or qty <= 0:
+            continue
+        await db.products.update_one({"id": pid}, {"$inc": {"stock": sign * qty}})
+
+
 def _append_event(order: dict, kind: str, message: str, actor: Optional[str] = None) -> dict:
     event = {"kind": kind, "message": message, "actor": actor, "at": _iso(_now())}
     order.setdefault("events", []).append(event)
@@ -392,6 +407,9 @@ async def update_status(order_id: str, data: dict, user: dict = Depends(get_user
         except Exception as e:
             logging.getLogger(__name__).warning(
                 "online order %s: kitchen ticket failed — %s", order_id, e)
+        if not order.get("stockDeducted"):
+            await _adjust_stock_for_items(order.get("items") or [], sign=-1)
+            order["stockDeducted"] = True
         # Recompute ETA with fresh kitchen-load snapshot
         load = await _kitchen_load()
         order["eta"] = await _compute_eta(order.get("items", []), ch, load)
@@ -403,6 +421,12 @@ async def update_status(order_id: str, data: dict, user: dict = Depends(get_user
         order["readyAt"] = _iso(_now())
     if new_status == "completed":
         order["completedAt"] = _iso(_now())
+    if new_status == "cancelled" and order.get("stockDeducted") and not order.get("stockRestored"):
+        # Only accepted orders ever deducted stock (above) — an order
+        # cancelled while still "pending" never touched inventory, so there's
+        # nothing to give back.
+        await _adjust_stock_for_items(order.get("items") or [], sign=1)
+        order["stockRestored"] = True
     if new_status == "cancelled" and order.get("paymentStatus") == "paid":
         # This order was actually charged (Stripe checkout added last round)
         # — cancelling it without reversing the charge would just take the
