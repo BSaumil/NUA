@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { useTheme } from '../contexts/ThemeContext';
 import { itemsSystemAPI } from '../services/api';
 import { toast } from 'sonner';
+import CompVoid from './CompVoid';
 
 const TYPES = [
   { value: 'percentage', label: '% Off', icon: Percent },
@@ -22,17 +23,13 @@ export default function Discounts() {
   const { theme } = useTheme();
   const [tab, setTab] = useState('discounts');
   const [discounts, setDiscounts] = useState([]);
-  const [compVoids, setCompVoids] = useState([]);
   const [showDialog, setShowDialog] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: '', type: 'percentage', value: '', active: true, startDate: '', endDate: '' });
-  const [showCompDialog, setShowCompDialog] = useState(false);
-  const [compForm, setCompForm] = useState({ type: 'comp', reason: '', amount: '', printVoid: false });
 
   useEffect(() => { fetchData(); }, []);
   const fetchData = async () => {
     try { const r = await itemsSystemAPI.getDiscounts(); setDiscounts(r.data); } catch {}
-    try { const r = await itemsSystemAPI.getCompVoids(); setCompVoids(r.data); } catch {}
   };
 
   const openAdd = () => { setEditing(null); setForm({ name: '', type: 'percentage', value: '', active: true, startDate: '', endDate: '' }); setShowDialog(true); };
@@ -48,19 +45,11 @@ export default function Discounts() {
     } catch { toast.error('Failed'); }
   };
 
-  const handleComp = async () => {
-    if (!compForm.reason) { toast.error('Reason required'); return; }
-    try { await itemsSystemAPI.createCompVoid({ ...compForm, amount: parseFloat(compForm.amount) || 0 }); toast.success(`${compForm.type === 'comp' ? 'Comp' : 'Void'} recorded`); setShowCompDialog(false); fetchData(); } catch { toast.error('Failed'); }
-  };
-
   return (
     <div className="space-y-6" data-testid="discounts-page">
       <div className="flex items-center justify-between">
         <div><h1 className="text-2xl font-bold" style={{ color: theme.text }}>Discounts, Offers & Comp/Void</h1><p className="text-sm text-gray-500">Manage discounts, BOGO offers, complementary items and voids</p></div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setShowCompDialog(true)} data-testid="add-comp-btn">Comp / Void</Button>
-          <Button style={{ backgroundColor: theme.primary }} onClick={openAdd} data-testid="add-discount-btn"><Plus size={16} className="mr-1" /> New Discount</Button>
-        </div>
+        <Button style={{ backgroundColor: theme.primary }} onClick={openAdd} data-testid="add-discount-btn"><Plus size={16} className="mr-1" /> New Discount</Button>
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
@@ -88,12 +77,7 @@ export default function Discounts() {
         </TabsContent>
 
         <TabsContent value="comp" className="mt-4">
-          <Card><CardContent className="p-0"><div className="overflow-x-auto"><table className="w-full text-sm" data-testid="comp-table">
-            <thead className="bg-gray-50"><tr><th className="text-left p-3">Type</th><th className="text-left p-3">Reason</th><th className="text-right p-3">Amount</th><th className="text-left p-3">Print</th><th className="text-left p-3">Date</th></tr></thead>
-            <tbody>{compVoids.map(cv => (
-              <tr key={cv.id} className="border-t"><td className="p-3"><Badge className={cv.type === 'comp' ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}>{cv.type}</Badge></td><td className="p-3">{cv.reason}</td><td className="p-3 text-right font-mono">${cv.amount.toFixed(2)}</td><td className="p-3">{cv.printVoid ? 'Yes' : 'No'}</td><td className="p-3 text-xs text-gray-500">{new Date(cv.processedAt).toLocaleString()}</td></tr>
-            ))}</tbody>
-          </table></div></CardContent></Card>
+          <CompVoid embedded />
         </TabsContent>
       </Tabs>
 
@@ -115,22 +99,6 @@ export default function Discounts() {
             </div>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} /> Active</label>
             <Button className="w-full" style={{ backgroundColor: theme.primary }} onClick={handleSave} data-testid="save-disc-btn">{editing ? 'Update' : 'Create'}</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Comp/Void Dialog */}
-      <Dialog open={showCompDialog} onOpenChange={setShowCompDialog}>
-        <DialogContent className="max-w-sm" data-testid="comp-void-dialog">
-          <DialogHeader><DialogTitle>Comp / Void</DialogTitle></DialogHeader>
-          <div className="space-y-3 py-2">
-            <select className="w-full p-2 border rounded-md text-sm" value={compForm.type} onChange={e => setCompForm({ ...compForm, type: e.target.value })} data-testid="cv-type">
-              <option value="comp">Complementary</option><option value="void">Void</option>
-            </select>
-            <Input placeholder="Reason" value={compForm.reason} onChange={e => setCompForm({ ...compForm, reason: e.target.value })} data-testid="cv-reason" />
-            <Input type="number" step="0.01" placeholder="Amount ($)" value={compForm.amount} onChange={e => setCompForm({ ...compForm, amount: e.target.value })} data-testid="cv-amount" />
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={compForm.printVoid} onChange={e => setCompForm({ ...compForm, printVoid: e.target.checked })} data-testid="cv-print" /> Print void ticket</label>
-            <Button className="w-full" style={{ backgroundColor: theme.primary }} onClick={handleComp} data-testid="save-cv-btn">Record {compForm.type === 'comp' ? 'Comp' : 'Void'}</Button>
           </div>
         </DialogContent>
       </Dialog>

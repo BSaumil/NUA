@@ -9,7 +9,12 @@ import { useTheme } from '../contexts/ThemeContext';
 import { itemsSystemAPI } from '../services/api';
 import { toast } from 'sonner';
 
-export default function CompVoid() {
+// Used both as its own route (/comp-void — full page header) and embedded
+// as the "Comp / Void History" tab inside Discounts.jsx, which used to
+// reimplement a second, smaller copy of this same table (no search, no
+// filter, no stats) plus its own record dialog. One implementation now;
+// `embedded` just drops the page header, since the host page supplies one.
+export default function CompVoid({ embedded = false }) {
   const { theme } = useTheme();
   const [records, setRecords] = useState([]);
   const [showDialog, setShowDialog] = useState(false);
@@ -42,9 +47,11 @@ export default function CompVoid() {
   const totalVoid = records.filter(r => r.type === 'void').reduce((s, r) => s + (r.amount || 0), 0);
 
   return (
-    <div className="space-y-6" data-testid="comp-void-page">
+    <div className={embedded ? "space-y-4" : "space-y-6"} data-testid="comp-void-page">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-2xl font-bold" style={{ color: theme.text }}>Comp / Void</h1><p className="text-sm text-gray-500">Track complimentary items and voided transactions with reasons</p></div>
+        {embedded
+          ? <div />
+          : <div><h1 className="text-2xl font-bold" style={{ color: theme.text }}>Comp / Void</h1><p className="text-sm text-gray-500">Track complimentary items and voided transactions with reasons</p></div>}
         <Button style={{ backgroundColor: theme.primary }} onClick={() => setShowDialog(true)} data-testid="add-cv-btn"><Plus size={16} className="mr-1" /> Record Comp / Void</Button>
       </div>
 
