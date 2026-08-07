@@ -24,6 +24,7 @@ export const productsAPI = {
   delete: (id) => api.delete(`/products/${id}`),
   adjustStock: (id, data) => api.post(`/products/${id}/adjust-stock`, data),
   autoTranslate: (id) => api.post(`/products/${id}/auto-translate`),
+  bulkAutoTranslate: (onlyMissing = true) => api.post('/products/bulk-auto-translate', null, { params: { only_missing: onlyMissing } }),
 };
 
 // Promotions API

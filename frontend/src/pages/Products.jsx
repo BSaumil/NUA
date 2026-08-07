@@ -52,6 +52,7 @@ const Products = () => {
   const [translatingProduct, setTranslatingProduct] = useState(null);
   const [translationForm, setTranslationForm] = useState({});
   const [autoTranslating, setAutoTranslating] = useState(false);
+  const [bulkTranslating, setBulkTranslating] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [editingPromo, setEditingPromo] = useState(null);
   const [productForm, setProductForm] = useState(makeEmptyProduct);
@@ -182,6 +183,23 @@ const Products = () => {
       toast.success('AI draft ready — review before saving');
     } catch (e) { toast.error(e.response?.data?.detail || 'Auto-translate failed'); }
     finally { setAutoTranslating(false); }
+  };
+  const bulkAutoTranslateMenu = async () => {
+    setBulkTranslating(true);
+    try {
+      const res = await productsAPI.bulkAutoTranslate(true);
+      const { translated, failed, skipped, total } = res.data;
+      if (total === 0) {
+        toast.info('Every product already has translations — nothing to do');
+      } else {
+        toast.success(
+          `Translated ${translated} of ${total} product${total === 1 ? '' : 's'}`
+          + (failed || skipped ? ` (${failed + skipped} skipped)` : '')
+        );
+      }
+      fetchData();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Bulk translate failed'); }
+    finally { setBulkTranslating(false); }
   };
 
   const toggleModifierForProduct = (mid) => {
@@ -507,6 +525,10 @@ const Products = () => {
         </div>
         {view === 'products' ? (
           <div className="flex gap-2">
+            <Button variant="outline" className="gap-2" onClick={bulkAutoTranslateMenu} disabled={bulkTranslating} data-testid="bulk-translate-btn">
+              <Sparkles className="w-4 h-4" style={{ color: '#8b5cf6' }} />
+              {bulkTranslating ? 'Translating menu…' : 'Translate menu with AI'}
+            </Button>
             <Button variant="outline" onClick={() => document.getElementById('csv-import-input')?.click()} data-testid="csv-import-btn">
               CSV Import
             </Button>
