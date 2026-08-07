@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import './App.css';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
@@ -9,113 +9,141 @@ import { Toaster } from './components/ui/sonner';
 import BottomDock from './components/BottomDock';
 import BackButton from './components/BackButton';
 import LicensePage, { LicenseLockScreen, LicenseBanner } from './pages/LicensePage';
-import Login from './pages/Login';
-import ResetPassword from './pages/ResetPassword';
-import Today from './pages/Today';
+const Login = lazy(() => import('./pages/Login'));
+const ResetPassword = lazy(() => import('./pages/ResetPassword'));
+const Today = lazy(() => import('./pages/Today'));
 import CommandBar from './components/CommandBar';
-import Dashboard from './pages/Dashboard';
-import POSTerminal from './pages/POSTerminal';
-import StaffApp from './pages/StaffApp';
-import OwnerDashboardApp from './pages/OwnerDashboardApp';
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const POSTerminal = lazy(() => import('./pages/POSTerminal'));
+const StaffApp = lazy(() => import('./pages/StaffApp'));
+const OwnerDashboardApp = lazy(() => import('./pages/OwnerDashboardApp'));
 import { getAppShell } from './lib/appShell';
-import Products from './pages/Products';
-import Customers from './pages/Customers';
-import Inventory from './pages/Inventory';
-import InventoryAccounting from './pages/InventoryAccounting';
-import BookingsInbox from './pages/BookingsInbox';
-import ChannelMenus from './pages/ChannelMenus';
-import SocialMedia from './pages/SocialMedia';
-import Accounting from './pages/Accounting';
-import BASGST from './pages/BASGST';
-import Settings from './pages/Settings';
-import Reservations from './pages/Reservations';
-import FloorPlan from './pages/FloorPlan';
-import WaitlistPage from './pages/Waitlist';
-import Kitchen from './pages/Kitchen';
-import CoursingAnalytics from './pages/CoursingAnalytics';
-import PreShift from './pages/PreShift';
-import CommandCenter from './pages/CommandCenter';
-import MenuEngineering from './pages/MenuEngineering';
-import AutomationEngine from './pages/AutomationEngine';
-import AutomationTriggers from './pages/AutomationTriggers';
-import LoyaltyEvents from './pages/LoyaltyEvents';
-import Forecasting from './pages/Forecasting';
-import WhatIfSimulator from './pages/WhatIfSimulator';
-import BookingPortal from './pages/BookingPortal';
-import TableOrder from './pages/TableOrder';
-import PaymentSuccess from './pages/PaymentSuccess';
-import Integrations from './pages/Integrations';
-import EFTPOSTerminals from './pages/EFTPOSTerminals';
-import StaffManagement from './pages/StaffManagement';
-import AIPantry from './pages/AIPantry';
-import MemberPortal from './pages/MemberPortal';
-import StaffRoster from './pages/StaffRoster';
-import StaffLeaderboard from './pages/StaffLeaderboard';
-import QuarterlyReview from './pages/QuarterlyReview';
-import TableLayout from './pages/TableLayout';
-import BookingSettings from './pages/BookingSettings';
-import BookingExperience from './pages/BookingExperience';
-import BookingAnalytics from './pages/BookingAnalytics';
-import Clubmember from './pages/Clubmember';
-import EmailMarketing from './pages/EmailMarketing';
-import Marketing from './pages/Marketing';
-import Super from './pages/Super';
-import Payroll from './pages/Payroll';
-import Vouchers from './pages/Vouchers';
-import FinanceLedger from './pages/FinanceLedger';
-import AshDashboard from './pages/AshDashboard';
-import AshCommandCenter from './pages/AshCommandCenter';
-import AshPlans from './pages/AshPlans';
-import AshPermissions from './pages/AshPermissions';
-import AshMemory from './pages/AshMemory';
-import LoyaltyProgress from './pages/LoyaltyProgress';
-import MeasuredStock from './pages/MeasuredStock';
-import Approvals from './pages/Approvals';
-import AuditLogUniversal from './pages/AuditLogUniversal';
-import HQDashboard from './pages/HQDashboard';
-import MultiBusiness from './pages/MultiBusiness';
+const Products = lazy(() => import('./pages/Products'));
+const Customers = lazy(() => import('./pages/Customers'));
+const Inventory = lazy(() => import('./pages/Inventory'));
+const InventoryAccounting = lazy(() => import('./pages/InventoryAccounting'));
+const BookingsInbox = lazy(() => import('./pages/BookingsInbox'));
+const ChannelMenus = lazy(() => import('./pages/ChannelMenus'));
+const SocialMedia = lazy(() => import('./pages/SocialMedia'));
+const Accounting = lazy(() => import('./pages/Accounting'));
+const BASGST = lazy(() => import('./pages/BASGST'));
+const Settings = lazy(() => import('./pages/Settings'));
+const Reservations = lazy(() => import('./pages/Reservations'));
+const FloorPlan = lazy(() => import('./pages/FloorPlan'));
+const WaitlistPage = lazy(() => import('./pages/Waitlist'));
+const Kitchen = lazy(() => import('./pages/Kitchen'));
+const CoursingAnalytics = lazy(() => import('./pages/CoursingAnalytics'));
+const PreShift = lazy(() => import('./pages/PreShift'));
+const CommandCenter = lazy(() => import('./pages/CommandCenter'));
+const MenuEngineering = lazy(() => import('./pages/MenuEngineering'));
+const AutomationEngine = lazy(() => import('./pages/AutomationEngine'));
+const AutomationTriggers = lazy(() => import('./pages/AutomationTriggers'));
+const LoyaltyEvents = lazy(() => import('./pages/LoyaltyEvents'));
+const Forecasting = lazy(() => import('./pages/Forecasting'));
+const WhatIfSimulator = lazy(() => import('./pages/WhatIfSimulator'));
+const BookingPortal = lazy(() => import('./pages/BookingPortal'));
+const TableOrder = lazy(() => import('./pages/TableOrder'));
+const PaymentSuccess = lazy(() => import('./pages/PaymentSuccess'));
+const Integrations = lazy(() => import('./pages/Integrations'));
+const WhatsNew = lazy(() => import('./pages/WhatsNew'));
+const EFTPOSTerminals = lazy(() => import('./pages/EFTPOSTerminals'));
+const StaffManagement = lazy(() => import('./pages/StaffManagement'));
+const AIPantry = lazy(() => import('./pages/AIPantry'));
+const MemberPortal = lazy(() => import('./pages/MemberPortal'));
+const StaffRoster = lazy(() => import('./pages/StaffRoster'));
+const StaffLeaderboard = lazy(() => import('./pages/StaffLeaderboard'));
+const QuarterlyReview = lazy(() => import('./pages/QuarterlyReview'));
+const TableLayout = lazy(() => import('./pages/TableLayout'));
+const BookingSettings = lazy(() => import('./pages/BookingSettings'));
+const BookingExperience = lazy(() => import('./pages/BookingExperience'));
+const BookingAnalytics = lazy(() => import('./pages/BookingAnalytics'));
+const Clubmember = lazy(() => import('./pages/Clubmember'));
+const EmailMarketing = lazy(() => import('./pages/EmailMarketing'));
+const Marketing = lazy(() => import('./pages/Marketing'));
+const Super = lazy(() => import('./pages/Super'));
+const Payroll = lazy(() => import('./pages/Payroll'));
+const Vouchers = lazy(() => import('./pages/Vouchers'));
+const FinanceLedger = lazy(() => import('./pages/FinanceLedger'));
+const AshDashboard = lazy(() => import('./pages/AshDashboard'));
+const AshCommandCenter = lazy(() => import('./pages/AshCommandCenter'));
+const AshPlans = lazy(() => import('./pages/AshPlans'));
+const AshPermissions = lazy(() => import('./pages/AshPermissions'));
+const AshMemory = lazy(() => import('./pages/AshMemory'));
+const LoyaltyProgress = lazy(() => import('./pages/LoyaltyProgress'));
+const MeasuredStock = lazy(() => import('./pages/MeasuredStock'));
+const Approvals = lazy(() => import('./pages/Approvals'));
+const AuditLogUniversal = lazy(() => import('./pages/AuditLogUniversal'));
+const HQDashboard = lazy(() => import('./pages/HQDashboard'));
+const MultiBusiness = lazy(() => import('./pages/MultiBusiness'));
 import AshChat from './components/AshChat';
 import NotificationBell from './components/NotificationBell';
-import Temperature from './pages/Temperature';
-import EndOfDay from './pages/EndOfDay';
-import TipManagement from './pages/TipManagement';
-import Categories from './pages/Categories';
-import Modifiers from './pages/Modifiers';
-import Discounts from './pages/Discounts';
-import CompVoid from './pages/CompVoid';
-import PaymentLinks from './pages/PaymentLinks';
-import AuditLog from './pages/AuditLog';
-import InventoryAnomalies from './pages/InventoryAnomalies';
-import BookingHeatmap from './pages/BookingHeatmap';
-import CohortRetention from './pages/CohortRetention';
-import ShiftSwaps from './pages/ShiftSwaps';
-import SecurityCompliance from './pages/SecurityCompliance';
-import LoyaltyConfig from './pages/LoyaltyConfig';
-import AgentDashboard from './pages/AgentDashboard';
-import AgentAutonomy from './pages/AgentAutonomy';
-import PhoneAgent from './pages/PhoneAgent';
-import PurchaseOrders from './pages/PurchaseOrders';
-import MenuABTesting from './pages/MenuABTesting';
-import AICostCoach from './pages/AICostCoach';
-import LaborForecast from './pages/LaborForecast';
-import SurgePricing from './pages/SurgePricing';
-import VoiceRecipe from './pages/VoiceRecipe';
-import KitchenLoad from './pages/KitchenLoad';
-import PriceTune from './pages/PriceTune';
-import EnterpriseCommandCenter from './pages/EnterpriseCommandCenter';
-import NuaPro from './pages/NuaPro';
-import ProfitGuardian from './pages/ProfitGuardian';
-import DigitalTwin from './pages/DigitalTwin';
-import {
-  ShiftManager, AutoMarketing, Exceptions, HardwareHealth, Disputes,
-  SupplierMarketplace, GiftCards, PredictiveOrders, WasteTracking, Concierge,
-  Reputation, Franchise, FraudDetection, MarginGuardrails, StationReadiness,
-  KioskMode, CFD, ChurnRisk, RecipeCosting, DynamicPricing, Subscriptions
-} from './pages/V25Pages';
-import { EventsManager, StaffAvailability, MarketingEmails } from './pages/V26Pages';
-import OnlineOrders from './pages/OnlineOrders';
-import OrderOnline from './pages/OrderOnline';
-import TrackOrder from './pages/TrackOrder';
+const Temperature = lazy(() => import('./pages/Temperature'));
+const EndOfDay = lazy(() => import('./pages/EndOfDay'));
+const TipManagement = lazy(() => import('./pages/TipManagement'));
+const Categories = lazy(() => import('./pages/Categories'));
+const Modifiers = lazy(() => import('./pages/Modifiers'));
+const Discounts = lazy(() => import('./pages/Discounts'));
+const CompVoid = lazy(() => import('./pages/CompVoid'));
+const PaymentLinks = lazy(() => import('./pages/PaymentLinks'));
+const AuditLog = lazy(() => import('./pages/AuditLog'));
+const InventoryAnomalies = lazy(() => import('./pages/InventoryAnomalies'));
+const BookingHeatmap = lazy(() => import('./pages/BookingHeatmap'));
+const CohortRetention = lazy(() => import('./pages/CohortRetention'));
+const ShiftSwaps = lazy(() => import('./pages/ShiftSwaps'));
+const SecurityCompliance = lazy(() => import('./pages/SecurityCompliance'));
+const LoyaltyConfig = lazy(() => import('./pages/LoyaltyConfig'));
+const AgentDashboard = lazy(() => import('./pages/AgentDashboard'));
+const AgentAutonomy = lazy(() => import('./pages/AgentAutonomy'));
+const PhoneAgent = lazy(() => import('./pages/PhoneAgent'));
+const PurchaseOrders = lazy(() => import('./pages/PurchaseOrders'));
+const MenuABTesting = lazy(() => import('./pages/MenuABTesting'));
+const AICostCoach = lazy(() => import('./pages/AICostCoach'));
+const LaborForecast = lazy(() => import('./pages/LaborForecast'));
+const SurgePricing = lazy(() => import('./pages/SurgePricing'));
+const VoiceRecipe = lazy(() => import('./pages/VoiceRecipe'));
+const KitchenLoad = lazy(() => import('./pages/KitchenLoad'));
+const PriceTune = lazy(() => import('./pages/PriceTune'));
+const EnterpriseCommandCenter = lazy(() => import('./pages/EnterpriseCommandCenter'));
+const NuaPro = lazy(() => import('./pages/NuaPro'));
+const ProfitGuardian = lazy(() => import('./pages/ProfitGuardian'));
+const DigitalTwin = lazy(() => import('./pages/DigitalTwin'));
+// V25Pages/V26Pages are batch named-export files (20 + 3 components) — lazy()
+// needs a default export, so each one wraps the shared module import and
+// picks its own named export off it. All still resolve from one chunk (the
+// whole file loads together the first time any of these routes is hit)
+// since React.lazy can't split named exports out of a single module on its
+// own — but that's still 23 components deferred out of the eager bundle
+// instead of importing all of them upfront.
+const lazyNamed = (loader, name) => lazy(() => loader().then(m => ({ default: m[name] })));
+const v25 = () => import('./pages/V25Pages');
+const v26 = () => import('./pages/V26Pages');
+const ShiftManager = lazyNamed(v25, 'ShiftManager');
+const AutoMarketing = lazyNamed(v25, 'AutoMarketing');
+const Exceptions = lazyNamed(v25, 'Exceptions');
+const HardwareHealth = lazyNamed(v25, 'HardwareHealth');
+const Disputes = lazyNamed(v25, 'Disputes');
+const SupplierMarketplace = lazyNamed(v25, 'SupplierMarketplace');
+const GiftCards = lazyNamed(v25, 'GiftCards');
+const PredictiveOrders = lazyNamed(v25, 'PredictiveOrders');
+const WasteTracking = lazyNamed(v25, 'WasteTracking');
+const Concierge = lazyNamed(v25, 'Concierge');
+const Reputation = lazyNamed(v25, 'Reputation');
+const Franchise = lazyNamed(v25, 'Franchise');
+const FraudDetection = lazyNamed(v25, 'FraudDetection');
+const MarginGuardrails = lazyNamed(v25, 'MarginGuardrails');
+const StationReadiness = lazyNamed(v25, 'StationReadiness');
+const KioskMode = lazyNamed(v25, 'KioskMode');
+const CFD = lazyNamed(v25, 'CFD');
+const ChurnRisk = lazyNamed(v25, 'ChurnRisk');
+const RecipeCosting = lazyNamed(v25, 'RecipeCosting');
+const DynamicPricing = lazyNamed(v25, 'DynamicPricing');
+const Subscriptions = lazyNamed(v25, 'Subscriptions');
+const EventsManager = lazyNamed(v26, 'EventsManager');
+const StaffAvailability = lazyNamed(v26, 'StaffAvailability');
+const MarketingEmails = lazyNamed(v26, 'MarketingEmails');
+const OnlineOrders = lazy(() => import('./pages/OnlineOrders'));
+const OrderOnline = lazy(() => import('./pages/OrderOnline'));
+const TrackOrder = lazy(() => import('./pages/TrackOrder'));
 import { useTheme } from './contexts/ThemeContext';
 
 function StaffLayout({ children }) {
@@ -302,6 +330,7 @@ function ProtectedRoutes() {
         <Route path="/marketing-emails" element={<MarketingEmails />} />
         <Route path="/online-orders" element={<OnlineOrders />} />
         <Route path="/license" element={<LicensePage />} />
+        <Route path="/whats-new" element={<WhatsNew />} />
       </Routes>
     </StaffLayout>
     </LicenseProvider>
@@ -315,19 +344,28 @@ function App() {
         <AuthProvider>
           <div className="App">
             <BrowserRouter>
-              <Routes>
-                {/* Public routes — no sidebar, no auth */}
-                <Route path="/booking" element={<BookingPortal />} />
-                <Route path="/table/:tableId" element={<TableOrder />} />
-                <Route path="/join" element={<MemberPortal />} />
-                <Route path="/payment-success" element={<PaymentSuccess />} />
-                <Route path="/order-online" element={<OrderOnline />} />
-                <Route path="/track" element={<TrackOrder />} />
-                <Route path="/track/:code" element={<TrackOrder />} />
-                <Route path="/reset-password" element={<ResetPassword />} />
-                {/* Staff routes — auth required */}
-                <Route path="/*" element={<ProtectedRoutes />} />
-              </Routes>
+              {/* Page components are lazy-loaded (see the const X = lazy(...)
+                  imports above) — one Suspense boundary here covers every
+                  nested <Routes> too (ProtectedRoutes', the staff-shell one),
+                  since a boundary catches any descendant's suspend regardless
+                  of nesting depth. Previously all ~120 page components were
+                  imported eagerly at module load, in one bundle, before the
+                  user had picked a single route. */}
+              <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="animate-pulse text-gray-500 text-lg">Loading...</div></div>}>
+                <Routes>
+                  {/* Public routes — no sidebar, no auth */}
+                  <Route path="/booking" element={<BookingPortal />} />
+                  <Route path="/table/:tableId" element={<TableOrder />} />
+                  <Route path="/join" element={<MemberPortal />} />
+                  <Route path="/payment-success" element={<PaymentSuccess />} />
+                  <Route path="/order-online" element={<OrderOnline />} />
+                  <Route path="/track" element={<TrackOrder />} />
+                  <Route path="/track/:code" element={<TrackOrder />} />
+                  <Route path="/reset-password" element={<ResetPassword />} />
+                  {/* Staff routes — auth required */}
+                  <Route path="/*" element={<ProtectedRoutes />} />
+                </Routes>
+              </Suspense>
               <Toaster />
             </BrowserRouter>
           </div>
