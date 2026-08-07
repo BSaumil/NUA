@@ -1031,6 +1031,13 @@ async def schedule_gift(body: dict, user: dict = Depends(get_user)):
             "delivered": False,
         },
     }, user)
+    # Gift cards mint real spendable value with no purchase transaction
+    # backing them (unlike a POS sale) — that made them invisible to the
+    # universal audit log entirely; owner/manager gating alone doesn't
+    # answer "who minted how much, and when."
+    from services.audit_service import log_event
+    await log_event(entity_type="gift_card", entity_id=v["id"], action="created",
+                     after=v, memo=f"Gift card scheduled: ${v['value']:.2f} by {user.get('email')}")
     return v
 
 
@@ -1052,4 +1059,8 @@ async def reload_gift(voucher_id: str, body: dict, user: dict = Depends(get_user
         "faceValue": round(v.get("faceValue", 0) + amt, 2),
         "status": "partial" if new_residual > 0 else v.get("status"),
     }})
+    from services.audit_service import log_event
+    await log_event(entity_type="gift_card", entity_id=voucher_id, action="updated",
+                     before=v, after={**v, "value": new_value, "residualValue": new_residual},
+                     memo=f"Gift card reloaded: +${amt:.2f} by {user.get('email')} (new balance ${new_residual:.2f})")
     return {"ok": True, "newBalance": new_residual}
