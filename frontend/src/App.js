@@ -265,7 +265,6 @@ function ProtectedRoutes() {
         {/* v25 Enterprise Suite */}
         <Route path="/enterprise" element={<EnterpriseCommandCenter />} />
         <Route path="/ash-pro" element={<NuaPro />} />
-        <Route path="/nua-pro" element={<NuaPro />} />
         <Route path="/profit-guardian" element={<ProfitGuardian />} />
         <Route path="/digital-twin" element={<DigitalTwin />} />
         <Route path="/shift-manager" element={<ShiftManager />} />

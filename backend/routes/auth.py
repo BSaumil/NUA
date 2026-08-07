@@ -338,7 +338,15 @@ async def refresh_token(request: Request, response: Response):
             raise HTTPException(status_code=401, detail="User not found")
         access = create_access_token(user["id"], user["email"], user["role"], user.get("businessId"))
         response.set_cookie("access_token", access, httponly=True, secure=_cookie_secure(), samesite="lax", max_age=28800, path="/")
-        return {"message": "Token refreshed"}
+        # The frontend authenticates every API call with a Bearer header read
+        # from localStorage, not the httpOnly cookie above — this endpoint
+        # used to only ever set the cookie, which nothing actually reads for
+        # API calls, making it silently useless for the auth flow the app
+        # really uses. Returning the new token lets a caller update
+        # localStorage and keep working past the 8-hour access-token expiry
+        # instead of every long-running session (an unattended kiosk, an
+        # overnight shift) hitting 401s with no recovery but a full re-login.
+        return {"message": "Token refreshed", "token": access}
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 

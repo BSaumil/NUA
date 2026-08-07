@@ -16,6 +16,49 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Silent refresh on a 401: the access token lasts 8 hours, and until now
+// there was nothing between "still valid" and "force a full re-login" — any
+// session left open past that window (an unattended kiosk, an overnight
+// shift) just started throwing 401s on every call with no recovery. POST
+// /auth/refresh reads the httpOnly refresh_token cookie set at login (valid
+// 7 days) and returns a fresh access token; on success this updates
+// localStorage and retries the original request exactly once. Concurrent
+// 401s (several polling components failing around the same moment) share
+// one in-flight refresh instead of each firing their own.
+let refreshPromise = null;
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const original = error.config;
+    const isAuthEndpoint = original?.url?.includes('/auth/refresh') || original?.url?.includes('/auth/login');
+    if (error.response?.status === 401 && original && !original._retriedAfterRefresh && !isAuthEndpoint) {
+      original._retriedAfterRefresh = true;
+      try {
+        if (!refreshPromise) {
+          refreshPromise = axios
+            .post(`${API_BASE_URL}/auth/refresh`, {}, { withCredentials: true })
+            .finally(() => { refreshPromise = null; });
+        }
+        const r = await refreshPromise;
+        const newToken = r.data?.token;
+        if (newToken) {
+          localStorage.setItem('nua_token', newToken);
+          original.headers.Authorization = `Bearer ${newToken}`;
+          return api(original);
+        }
+      } catch {
+        // Refresh token is itself missing/expired — the session is genuinely
+        // over, not just the access token. Fall through to the rejection
+        // below; AuthContext's next checkAuth (or a protected-route guard)
+        // is what actually navigates to /login, this just stops pretending
+        // localStorage still holds something usable.
+        localStorage.removeItem('nua_token');
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 // Products API
 export const productsAPI = {
   getAll: (params) => api.get('/products', { params }),
