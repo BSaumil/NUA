@@ -89,7 +89,7 @@ async def delete_product(product_id: str, user: dict = Depends(require_owner_or_
     return {"message": "Product soft-deleted", "id": product_id}
 
 @router.post("/products/{product_id}/adjust-stock")
-async def adjust_stock(product_id: str, data: dict, user: dict = Depends(get_user)):
+async def adjust_stock(product_id: str, data: dict, user: dict = Depends(require_owner_or_manager)):
     adjustment = data.get("adjustment", 0)
     reason = data.get("reason", "Manual adjustment")
     product = await db.products.find_one({"id": product_id})
