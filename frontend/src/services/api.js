@@ -440,6 +440,10 @@ export const advancedAPI = {
   getCampaignTemplates: () => api.get('/marketing/campaigns/templates'),
   draftCampaign: (data) => api.post('/marketing/campaigns/draft', data),
   improveCampaignCopy: (data) => api.post('/marketing/campaigns/improve', data),
+  previewSegment: (rules) => api.post('/marketing/segments/preview', { rules }),
+  getSegments: () => api.get('/marketing/segments'),
+  createSegment: (data) => api.post('/marketing/segments', data),
+  deleteSegment: (id) => api.delete(`/marketing/segments/${id}`),
 };
 
 // Staff Management — PIN, Timecards, Roster, Payrun

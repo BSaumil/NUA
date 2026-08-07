@@ -442,6 +442,96 @@ def _split_first_name(full_name: str) -> str:
     return (full_name or "").strip().split(" ")[0] or "there"
 
 
+# ============ AUDIENCE SEGMENTS ============
+# Campaign targeting used to mean "all customers" or "one loyalty tier" —
+# nothing in between. Rules are intentionally flat (AND'd together) rather
+# than a general expression engine: the fields are exactly the ones the
+# Customer record already carries (no time-windowed spend/visit aggregation
+# over raw transactions, which would need new infrastructure this doesn't
+# have yet).
+def _build_segment_query(rules: dict) -> dict:
+    q: dict = {}
+    if rules.get("tier"):
+        q["membershipTier"] = rules["tier"]
+    if rules.get("minSpend") not in (None, "", 0):
+        q["totalSpent"] = {"$gte": float(rules["minSpend"])}
+    if rules.get("minVisits") not in (None, "", 0):
+        q["visits"] = {"$gte": int(rules["minVisits"])}
+    if rules.get("inactiveForDays") not in (None, ""):
+        # "Hasn't visited in N days" — win-back targeting. Customers with no
+        # lastVisitDate at all (never actually visited) count as inactive.
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=int(rules["inactiveForDays"]))).date().isoformat()
+        q["$or"] = [{"lastVisitDate": {"$lt": cutoff}}, {"lastVisitDate": None}, {"lastVisitDate": {"$exists": False}}]
+    return q
+
+
+async def _resolve_segment_customers(rules: dict, *, limit: int = 10000) -> list:
+    query = _build_segment_query(rules)
+    return await db.customers.find(query, {"_id": 0, "password_hash": 0}).to_list(limit)
+
+
+@router.post("/marketing/segments/preview")
+async def preview_segment(data: dict, _: dict = Depends(require_owner_or_manager)):
+    rules = data.get("rules") or {}
+    customers = await _resolve_segment_customers(rules)
+    sample = [{"id": c["id"], "name": c.get("name"), "email": c.get("email"),
+               "totalSpent": c.get("totalSpent", 0), "visits": c.get("visits", 0),
+               "membershipTier": c.get("membershipTier")} for c in customers[:20]]
+    return {"count": len(customers), "sample": sample}
+
+
+@router.get("/marketing/segments")
+async def list_segments(_: dict = Depends(require_owner_or_manager)):
+    return await db.customer_segments.find({}, {"_id": 0}).sort("createdAt", -1).to_list(200)
+
+
+@router.post("/marketing/segments")
+async def create_segment(data: dict, user: dict = Depends(require_owner_or_manager)):
+    name = (data.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Segment name is required")
+    rules = data.get("rules") or {}
+    segment = {
+        "id": f"SEG-{str(uuid.uuid4())[:8].upper()}",
+        "name": name, "rules": rules,
+        "createdBy": user["id"], "createdAt": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.customer_segments.insert_one(dict(segment))
+    segment.pop("_id", None)
+    return segment
+
+
+@router.delete("/marketing/segments/{segment_id}")
+async def delete_segment(segment_id: str, _: dict = Depends(require_owner_or_manager)):
+    result = await db.customer_segments.delete_one({"id": segment_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Segment not found")
+    return {"deleted": True}
+
+
+async def _campaign_recipients(campaign: dict) -> list:
+    """Resolve a campaign's actual recipient list against the LIVE customer
+    collection. Older campaigns only ever set targetTier; segmentId (or an
+    inline rules dict) is additive, not a replacement — either narrows who
+    a campaign reaches, never both at once.
+
+    This used to query db.members, a collection nothing has written to
+    since the member-portal router was removed several rounds ago — on any
+    deployment created after that removal, every campaign silently had 0
+    real recipients. db.customers is the actual, live guest record.
+    """
+    if campaign.get("segmentId"):
+        segment = await db.customer_segments.find_one({"id": campaign["segmentId"]}, {"_id": 0})
+        rules = (segment or {}).get("rules") or {}
+    elif campaign.get("segmentRules"):
+        rules = campaign["segmentRules"]
+    else:
+        rules = {}
+    if campaign.get("targetTier"):
+        rules = {**rules, "tier": campaign["targetTier"]}
+    return await _resolve_segment_customers(rules)
+
+
 @router.post("/marketing/campaigns")
 async def create_campaign(data: dict, user: dict = Depends(require_owner_or_manager)):
 
@@ -450,7 +540,9 @@ async def create_campaign(data: dict, user: dict = Depends(require_owner_or_mana
         "name": data.get("name", ""),
         "subject": data.get("subject", ""),
         "body": data.get("body", ""),
-        "targetTier": data.get("targetTier"),  # None = all members
+        "targetTier": data.get("targetTier"),  # None = all customers
+        "segmentId": data.get("segmentId"),  # optional saved segment, narrows targetTier further
+        "segmentRules": data.get("segmentRules"),  # or inline rules, for a one-off segment never saved
         "status": "draft",
         "createdBy": user["id"],
         "createdAt": datetime.now(timezone.utc).isoformat(),
@@ -499,9 +591,8 @@ async def create_campaign(data: dict, user: dict = Depends(require_owner_or_mana
         if voucher_doc["manualCode"] not in campaign["body"]:
             campaign["body"] = (campaign["body"] or "") + redeem_blurb
 
-    # Count target recipients
-    query = {} if not campaign["targetTier"] else {"tier": campaign["targetTier"]}
-    campaign["recipientCount"] = await db.members.count_documents(query)
+    # Count target recipients against the live customer collection.
+    campaign["recipientCount"] = len(await _campaign_recipients(campaign))
     await db.campaigns.insert_one(dict(campaign))
     campaign.pop("_id", None)
     return campaign
@@ -518,8 +609,7 @@ async def send_campaign(campaign_id: str, _: dict = Depends(require_owner_or_man
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
-    query = {} if not campaign.get("targetTier") else {"tier": campaign["targetTier"]}
-    members = await db.members.find(query, {"_id": 0, "password_hash": 0}).to_list(10000)
+    members = await _campaign_recipients(campaign)
 
     from utils.notifications import send_email
 
