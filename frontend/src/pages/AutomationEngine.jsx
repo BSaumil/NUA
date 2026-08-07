@@ -98,7 +98,7 @@ export default function AutomationEngine() {
           </div>
           <div>
             <h1 className="text-2xl font-bold" style={{ color: theme.text }}>Automation Engine</h1>
-            <p className="text-sm text-gray-500">AI-driven rules & alerts | Your restaurant on autopilot</p>
+            <p className="text-sm text-gray-500">Live threshold alerts, plus a reference checklist of rules to action manually</p>
           </div>
         </div>
         <Button onClick={() => setDialogOpen(true)} style={{ background: theme.primary }} data-testid="create-rule-btn">
@@ -145,7 +145,9 @@ export default function AutomationEngine() {
         </Card>
       )}
 
-      {/* Automation Rules */}
+      {/* Automation Rules — these are saved as a reference checklist only;
+          see the note below for why (nothing here auto-fires). Live Alerts
+          above IS real — recomputed from current data on every load. */}
       <Card className="border-0 shadow-sm">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm flex items-center gap-2">
@@ -153,11 +155,20 @@ export default function AutomationEngine() {
           </CardTitle>
         </CardHeader>
         <CardContent>
+          <div className="flex items-start gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4" data-testid="rules-not-live-notice">
+            <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+            <p>
+              Rules saved here are a reference checklist, not live automation — nothing
+              executes automatically when a condition is met. For rules that actually
+              fire on real events (sales, refunds, bookings, inventory), use{' '}
+              <a href="/automation-triggers" className="underline font-medium">Automation Brain</a> instead.
+            </p>
+          </div>
           {rules.length === 0 ? (
             <div className="text-center py-12 text-gray-400">
               <Zap size={40} className="mx-auto mb-3 opacity-30" />
-              <p className="font-medium">No automation rules yet</p>
-              <p className="text-xs mt-1">Create rules to automate your restaurant operations</p>
+              <p className="font-medium">No rules saved yet</p>
+              <p className="text-xs mt-1">Save a reference checklist of conditions worth watching for</p>
             </div>
           ) : (
             <div className="space-y-3">

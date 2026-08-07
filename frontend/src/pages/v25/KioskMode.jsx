@@ -24,15 +24,18 @@ export default function KioskMode() {
   // lands on. A takeaway kiosk never sees any of this — the venue's own
   // straight-fire rules already say a counter order goes out together.
   const [coursing, setCoursing] = useState(null);
+  // productId -> { loading, original, substitutes } while a guest is looking
+  // at alternatives for an 86'd item they tapped.
+  const [substituteFor, setSubstituteFor] = useState(null);
   useEffect(() => {
     // Unauthenticated (the kiosk calls this with no token, same as any
     // guest-facing menu), so /api/products already strips cost/stock/sku
-    // for us — only the eightySixed flag survives to filter on here. The
-    // kiosk is unattended — unlike the POS (which greys the button out but
-    // still shows an 86'd item so a cashier can explain), a guest with no
-    // staff nearby should simply never see something they can't order.
+    // for us. 86'd items stay in the list (unlike an earlier version of
+    // this fix, which hid them outright) so a guest who taps one gets an
+    // AI-suggested alternative instead of the item just not existing —
+    // still can't add it to the cart directly, same protection as before.
     fetch(`${process.env.REACT_APP_BACKEND_URL}/api/products`).then(r => r.json())
-      .then(list => setProducts((list || []).filter(p => !p.eightySixed)))
+      .then(list => setProducts(list || []))
       .catch(() => {});
   }, []);
   useEffect(() => { coursingAPI.getConfig().then(r => setCoursing(r.data)).catch(() => setCoursing(null)); }, []);
@@ -45,6 +48,7 @@ export default function KioskMode() {
   const start = async () => { const r = await v25API.kioskStart({ guests: 2 }); setSession(r.data); setCart([]); };
 
   const add = (p) => {
+    if (p.eightySixed) { showSubstitutes(p); return; }
     const line = {
       ...p,
       lineId: `${p.id}-${Date.now()}`,
@@ -56,6 +60,22 @@ export default function KioskMode() {
       price: p.price, quantity: 1, lineId: line.lineId,
       ...(line.course ? { course: line.course } : {}),
     });
+  };
+
+  const showSubstitutes = async (p) => {
+    setSubstituteFor({ loading: true, original: p, substitutes: [] });
+    try {
+      const r = await v25API.substitute(p.id);
+      setSubstituteFor({ loading: false, original: r.data.original, substitutes: r.data.substitutes || [] });
+    } catch {
+      setSubstituteFor(null);
+      toast({ title: t('kiosk.substituteFailed') || "Couldn't load alternatives", variant: 'destructive' });
+    }
+  };
+
+  const addSubstitute = (p) => {
+    setSubstituteFor(null);
+    add(p);
   };
 
   // Moving a dish to another course has to reach the session, not just the
@@ -105,10 +125,55 @@ export default function KioskMode() {
       {session && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {products.slice(0, 12).map(p => (
-            <button key={p.id} onClick={() => add(p)} className="border rounded-xl p-4 hover:shadow-md hover:-translate-y-0.5 transition-all text-left" data-testid={`kiosk-prod-${p.id}`}>
-              <p className="font-bold">{productName(p, lang)}</p><p className="text-lg" style={{ color: theme.primary }}>${p.price}</p>
+            <button key={p.id} onClick={() => add(p)}
+              className={`border rounded-xl p-4 transition-all text-left relative ${
+                p.eightySixed ? 'opacity-60' : 'hover:shadow-md hover:-translate-y-0.5'
+              }`}
+              data-testid={`kiosk-prod-${p.id}`}>
+              <p className="font-bold">{productName(p, lang)}</p>
+              {p.eightySixed ? (
+                <p className="text-xs font-medium text-amber-600 mt-1">{t('kiosk.unavailableTapForAlternatives') || 'Unavailable — tap for alternatives'}</p>
+              ) : (
+                <p className="text-lg" style={{ color: theme.primary }}>${p.price}</p>
+              )}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Substitute suggestions for an 86'd item the guest tapped */}
+      {substituteFor && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setSubstituteFor(null)}>
+          <Card className="max-w-md w-full" onClick={e => e.stopPropagation()} data-testid="kiosk-substitutes">
+            <CardContent className="p-5 space-y-3">
+              <p className="font-bold">
+                {t('kiosk.notAvailable', { name: productName(substituteFor.original, lang) })
+                  || `${productName(substituteFor.original, lang)} isn't available right now`}
+              </p>
+              {substituteFor.loading ? (
+                <p className="text-sm text-gray-400">{t('kiosk.loadingAlternatives') || 'Finding alternatives…'}</p>
+              ) : substituteFor.substitutes.length === 0 ? (
+                <p className="text-sm text-gray-400">{t('kiosk.noAlternatives') || 'No similar items available right now.'}</p>
+              ) : (
+                <div className="space-y-2">
+                  {substituteFor.substitutes.map(s => (
+                    <button key={s.id} onClick={() => addSubstitute(s)}
+                      className="w-full flex items-center justify-between border rounded-lg p-3 hover:shadow-sm text-left"
+                      data-testid={`kiosk-substitute-${s.id}`}>
+                      <span>
+                        <span className="font-semibold block">{productName(s, lang)}</span>
+                        <span className="text-xs text-gray-500">{s.substitutionReason}</span>
+                      </span>
+                      <span className="font-bold" style={{ color: theme.primary }}>${s.price}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <Button variant="outline" className="w-full" onClick={() => setSubstituteFor(null)}>
+                {t('common.cancel') || 'Cancel'}
+              </Button>
+            </CardContent>
+          </Card>
         </div>
       )}
     </div>

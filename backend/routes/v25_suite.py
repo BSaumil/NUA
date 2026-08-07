@@ -42,6 +42,7 @@ TIER 1-5 EXTRAS
 from fastapi import APIRouter, HTTPException, Request, Depends
 from deps import get_user, require_owner, require_owner_or_manager
 from database import db
+from routes.products import GUEST_HIDDEN_PRODUCT_FIELDS
 from datetime import datetime, timezone, timedelta
 from collections import Counter, defaultdict
 import uuid
@@ -469,9 +470,18 @@ async def cfd_current():
 # v27 SHOULD-HAVE — Smart Substitution / 86 fallback
 # ============================================================================
 @router.post("/substitute")
-async def substitute(data: dict, _: dict = Depends(get_user)):
+async def substitute(data: dict):
     """Given an 86'd product, suggest the best substitute with a human-readable
-    reason per pick. Ranked by (1) modifier overlap, (2) price proximity, (3) stock."""
+    reason per pick. Ranked by (1) modifier overlap, (2) price proximity, (3) stock.
+
+    Public/no-auth — same as the kiosk's other endpoints (kiosk_start,
+    kiosk_add, kiosk_upsell above), because the kiosk itself is unattended
+    and never carries a staff credential. This never had a frontend caller
+    at all before (kiosk or otherwise), which is why it still required
+    Depends(get_user): nothing had ever tried to call it as a guest and hit
+    the 401. Trade fields (cost/stock/sku) are stripped from every returned
+    product the same way the public storefront strips them — a guest-facing
+    caller must never see what a dish costs the business."""
     pid = data.get("productId")
     if not pid: raise HTTPException(status_code=400, detail="productId required")
     target = await db.products.find_one({"id": pid}, {"_id": 0})
@@ -498,6 +508,10 @@ async def substitute(data: dict, _: dict = Depends(get_user)):
         else:
             reason = f"${diff:.2f} upgrade · plenty in stock"
         top.append({**p, "substitutionReason": reason})
+    for f in GUEST_HIDDEN_PRODUCT_FIELDS:
+        target.pop(f, None)
+        for p in top:
+            p.pop(f, None)
     return {"original": target, "substitutes": top}
 
 

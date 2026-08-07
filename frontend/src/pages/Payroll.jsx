@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { useTheme } from '../contexts/ThemeContext';
 import { finalizeAPI } from '../services/api';
 import { toast } from 'sonner';
-import { DollarSign, Users, FileText, Calculator, Send, Download, Shield, Calendar, TrendingUp, AlertTriangle } from 'lucide-react';
+import { DollarSign, Users, FileText, Calculator, Send, Download, Shield, Calendar, TrendingUp, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
 
 const monday = () => {
   const d = new Date();
@@ -35,6 +35,8 @@ export default function Payroll() {
   const [register, setRegister] = useState({ runs: [], totals: {} });
   const [compliance, setCompliance] = useState(null);
   const [committing, setCommitting] = useState(false);
+  const [expandedRun, setExpandedRun] = useState(null);
+  const [downloadingPayslip, setDownloadingPayslip] = useState(null); // `${runId}-${staffId}`
 
   const runCalc = async () => {
     setBusy(true);
@@ -70,6 +72,19 @@ export default function Payroll() {
     } catch { /* silent */ }
   };
   useEffect(() => { loadRegister(); loadCompliance(); }, []);
+
+  const downloadPayslip = async (runId, staffId, staffName) => {
+    const key = `${runId}-${staffId}`;
+    setDownloadingPayslip(key);
+    try {
+      const r = await finalizeAPI.payslipPdf(runId, staffId);
+      const url = window.URL.createObjectURL(new Blob([r.data], { type: 'application/pdf' }));
+      const a = document.createElement('a');
+      a.href = url; a.download = `payslip-${staffName || staffId}-${runId}.pdf`; a.click();
+      URL.revokeObjectURL(url);
+    } catch { toast.error('Payslip download failed'); }
+    finally { setDownloadingPayslip(null); }
+  };
 
   const totalGross = useMemo(() => calc?.totals?.grossPay || 0, [calc]);
   const totalTax = useMemo(() => calc?.totals?.payg || 0, [calc]);
@@ -249,6 +264,7 @@ export default function Payroll() {
                 <table className="w-full text-sm">
                   <thead className="text-xs uppercase tracking-widest text-gray-500 bg-gray-50">
                     <tr>
+                      <th className="p-2 w-6"></th>
                       <th className="p-2 text-left">Run ID</th>
                       <th className="p-2 text-left">Period</th>
                       <th className="p-2 text-left">Pay date</th>
@@ -260,18 +276,54 @@ export default function Payroll() {
                   </thead>
                   <tbody>
                     {(register.runs || []).map(r => (
-                      <tr key={r.id} className="border-t" data-testid={`register-row-${r.id}`}>
-                        <td className="p-2 font-mono text-xs">{r.id}</td>
-                        <td className="p-2 text-xs">{r.periodStart} → {r.periodEnd}</td>
-                        <td className="p-2 text-xs">{r.payDate}</td>
-                        <td className="p-2 text-right font-mono">${(r.totals?.grossPay || 0).toFixed(2)}</td>
-                        <td className="p-2 text-right font-mono text-red-600">${(r.totals?.payg || 0).toFixed(2)}</td>
-                        <td className="p-2 text-right font-mono text-emerald-700">${(r.totals?.super || 0).toFixed(2)}</td>
-                        <td className="p-2 text-right font-mono font-bold">${(r.totals?.netPay || 0).toFixed(2)}</td>
-                      </tr>
+                      <React.Fragment key={r.id}>
+                        <tr className="border-t cursor-pointer hover:bg-gray-50" data-testid={`register-row-${r.id}`}
+                          onClick={() => setExpandedRun(expandedRun === r.id ? null : r.id)}>
+                          <td className="p-2 text-gray-400">
+                            {expandedRun === r.id ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                          </td>
+                          <td className="p-2 font-mono text-xs">{r.id}</td>
+                          <td className="p-2 text-xs">{r.periodStart} → {r.periodEnd}</td>
+                          <td className="p-2 text-xs">{r.payDate}</td>
+                          <td className="p-2 text-right font-mono">${(r.totals?.grossPay || 0).toFixed(2)}</td>
+                          <td className="p-2 text-right font-mono text-red-600">${(r.totals?.payg || 0).toFixed(2)}</td>
+                          <td className="p-2 text-right font-mono text-emerald-700">${(r.totals?.super || 0).toFixed(2)}</td>
+                          <td className="p-2 text-right font-mono font-bold">${(r.totals?.netPay || 0).toFixed(2)}</td>
+                        </tr>
+                        {expandedRun === r.id && (
+                          <tr className="border-t bg-gray-50/50">
+                            <td colSpan={8} className="p-3">
+                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                                Payslips — {(r.rows || []).length} employee{(r.rows || []).length === 1 ? '' : 's'}
+                              </p>
+                              <div className="space-y-1" data-testid={`run-payslips-${r.id}`}>
+                                {(r.rows || []).map(row => {
+                                  const key = `${r.id}-${row.staffId}`;
+                                  return (
+                                    <div key={row.staffId} className="flex items-center justify-between bg-white border rounded-lg px-3 py-1.5">
+                                      <span className="text-xs font-medium">{row.name}</span>
+                                      <span className="text-xs font-mono text-gray-500">${(row.netPay || 0).toFixed(2)} net</span>
+                                      <Button size="sm" variant="outline" className="h-7 text-xs"
+                                        disabled={downloadingPayslip === key}
+                                        onClick={() => downloadPayslip(r.id, row.staffId, row.name)}
+                                        data-testid={`download-payslip-${row.staffId}`}>
+                                        <Download size={12} className="mr-1" />
+                                        {downloadingPayslip === key ? 'Downloading…' : 'Payslip PDF'}
+                                      </Button>
+                                    </div>
+                                  );
+                                })}
+                                {(r.rows || []).length === 0 && (
+                                  <p className="text-xs text-gray-400">No per-employee rows recorded for this run.</p>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     ))}
                     {(register.runs || []).length === 0 && (
-                      <tr><td colSpan={7} className="p-6 text-center text-sm text-gray-400">No committed runs yet.</td></tr>
+                      <tr><td colSpan={8} className="p-6 text-center text-sm text-gray-400">No committed runs yet.</td></tr>
                     )}
                   </tbody>
                 </table>
