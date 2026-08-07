@@ -108,6 +108,26 @@ def test_settlement_totals_only_the_approved_purchases(client, owner_headers):
     assert r.json()["success"] is True
 
 
+def test_a_declined_purchase_is_recorded_as_declined_in_history(client, owner_headers):
+    """The immediate response for a decline (tested above) coming back
+    approved=False doesn't guarantee the persisted log entry agrees — a bug
+    in what gets written to db.eftpos_transactions wouldn't show up in that
+    test at all. Settlement excluding declines (tested below) is an
+    aggregate check that could pass even if an individual record's
+    'approved' field were wrong. This checks the actual stored record."""
+    tid = _make_terminal(client, owner_headers, terminalId="SIM-DECLINE-HISTORY")
+    req(client, "POST", "/api/eftpos/transaction", headers=owner_headers, json={
+        "terminalId": tid, "transactionType": "purchase", "amount": 1.00,
+        "reference": "REF-DECLINE-HISTORY", "posTransactionId": "TXN-decline-hist"})
+    r = req(client, "GET", "/api/eftpos/transactions", headers=owner_headers,
+            params={"terminal_id": tid})
+    assert r.status_code == 200
+    records = [t for t in r.json() if t["reference"] == "REF-DECLINE-HISTORY"]
+    assert len(records) == 1
+    assert records[0]["approved"] is False
+    assert records[0]["responseCode"] == "51"
+
+
 def test_a_purchase_is_recorded_in_transaction_history(client, owner_headers):
     tid = _make_terminal(client, owner_headers, terminalId="SIM-HISTORY")
     req(client, "POST", "/api/eftpos/transaction", headers=owner_headers, json={
