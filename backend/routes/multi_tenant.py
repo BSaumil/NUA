@@ -140,14 +140,18 @@ async def get_business_summary(business_id: str, _: dict = Depends(require_owner
     txns = await db.transactions.find(biz_or_untagged, {"_id": 0}).to_list(10000)
     products = await db.products.find(biz_or_untagged, {"_id": 0}).to_list(1000)
     customers = await db.customers.find(biz_or_untagged, {"_id": 0}).to_list(10000)
+    # The member-portal router was removed rounds ago (nothing in this
+    # codebase writes db.members anymore) — this count is permanently
+    # frozen historical data from before that removal, not a live number.
+    # Left in rather than dropped so a deployment with old member rows
+    # doesn't lose that figure from its summary; new deployments will
+    # always show 0 here.
     members = await db.members.find(biz_or_untagged, {"_id": 0}).to_list(10000)
     staff = await db.auth_users.find({"businessId": business_id}, {"_id": 0, "password_hash": 0}).to_list(100)
-    # Online orders have no businessId field at all yet — there's no
-    # per-business storefront/slug for a guest to pick which business
-    # they're ordering from, so biz_or_untagged matches every online order
-    # on the deployment here, same as it would for any other untagged
-    # collection. On a real multi-business deployment these counts are
-    # deployment-wide until online ordering gets a businessId of its own.
+    # Online orders are tagged with businessId (added alongside the
+    # per-business storefront slug) — biz_or_untagged still applies the
+    # same fail-open-to-untagged-legacy-data rule as every other query on
+    # this page, so pre-slug orders keep counting rather than vanishing.
     online_orders = await db.online_orders.find(biz_or_untagged, {"_id": 0, "paymentStatus": 1}).to_list(10000)
     payment_counts = {"paid": 0, "refunded": 0, "refund_failed": 0}
     for o in online_orders:
