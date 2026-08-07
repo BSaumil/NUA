@@ -42,9 +42,9 @@ Gift Card 2.0 (extends existing gift-card sale)
   POST   /gift-cards/{id}/reload     — top up an existing card
 """
 from __future__ import annotations
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from datetime import datetime, timezone, timedelta, date
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 from database import db
 from deps import get_user

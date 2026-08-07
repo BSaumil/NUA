@@ -58,6 +58,7 @@ export default function TrackOrder() {
       attempts++;
       try {
         const r = await stripeAPI.checkStatus(sessionId);
+        if (r.data?.configured === false) { setPaymentPolling(false); return; }
         if (r.data?.paymentStatus === 'paid') {
           await fetchData(data.id);
           setPaymentPolling(false);

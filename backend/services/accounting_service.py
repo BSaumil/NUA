@@ -13,7 +13,7 @@ Guarantees
 """
 from __future__ import annotations
 from typing import List, Dict, Any, Optional
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone
 from database import db
 from models.accounting import JournalEntry, JournalLine
 import uuid

@@ -1,5 +1,4 @@
 from fastapi import APIRouter, HTTPException
-from typing import Optional
 from datetime import datetime
 from database import db
 import uuid

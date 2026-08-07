@@ -10,15 +10,13 @@ Australian Payroll — enhanced compliance routes.
   • GET  /payroll/roster-compliance   — flag award/NES violations across shifts
 """
 from fastapi import APIRouter, HTTPException, Depends, Response
-from typing import Optional, List
 from datetime import date, datetime, timezone, timedelta
 from pydantic import BaseModel
 from database import db
 from deps import get_user
 from utils.au_payroll import (
-    payg_for_period, super_guarantee, sg_rate_for, super_due_date_for_quarter,
+    sg_rate_for, super_due_date_for_quarter,
     assemble_payslip_row, build_stp2_pay_event, roster_compliance_issues,
-    DEFAULT_PENALTY_MATRIX, ANNUAL_LEAVE_HOURS_PER_ORDINARY_HOUR,
     effective_hourly_rate,
 )
 import uuid

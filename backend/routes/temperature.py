@@ -20,9 +20,9 @@ Reports: weekly, monthly, yearly, plus a custom (start, end) window for
 audits and food-safety inspectors.
 """
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
-from typing import List, Optional
+from typing import Optional
 from datetime import datetime, timedelta, timezone, date
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from database import db
 from deps import get_user
 import uuid

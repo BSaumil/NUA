@@ -2,7 +2,7 @@
 Nano Banana image gen, anomaly detection, auto-rostering, audit log, variants, CSV import,
 cohort retention, booking heatmap, 2FA, GDPR.
 """
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Depends
 from deps import get_user, require_owner, require_owner_or_manager, require_permission
 from database import db
 from datetime import datetime, timezone, timedelta
@@ -11,7 +11,6 @@ import uuid
 import os
 import base64
 import json
-import secrets
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

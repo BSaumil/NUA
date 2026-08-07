@@ -7,7 +7,6 @@ from database import db
 import bcrypt
 import jwt
 import os
-import secrets
 
 router = APIRouter(prefix="/auth")
 

@@ -44,7 +44,6 @@ from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone, timedelta
 from collections import Counter, defaultdict
-from typing import Optional
 import uuid
 import os
 import json

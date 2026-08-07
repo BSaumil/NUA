@@ -7,9 +7,7 @@ from models.location import Location, LocationCreate
 from models.user import User, UserCreate
 from models.table import Table, TableCreate
 from models.eftpos import EFTPOSConfig, EFTPOSConfigCreate, EFTPOSTransaction, EFTPOSTransactionRequest
-from models.integration import Integration, IntegrationCreate, IntegrationUpdate, SyncRequest
-from models.employee import EmployeeSchedule, EmployeeScheduleCreate, TimeOffRequest, AgeVerification
-from models.staff import StaffCommission, StaffShift
+from models.staff import StaffShift
 from utils.mongo_safe import safe_find_list
 import logging
 

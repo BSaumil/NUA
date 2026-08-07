@@ -10,7 +10,7 @@ F7  Dynamic Surge Pricing                    GET  /api/ai/surge-recommendations
 F8  Voice-to-Recipe                          POST /api/ai/voice-recipe
 F9  Kitchen-Load Balancing                   GET  /api/ai/kitchen-load
 """
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Depends
 from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone, timedelta

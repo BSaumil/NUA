@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Depends
 from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone, timedelta
@@ -159,8 +159,6 @@ async def toggle_training_mode(data: dict, _: dict = Depends(require_owner_or_ma
 @router.get("/reports/end-of-day")
 async def get_end_of_day_report( period: str = "today", start_date: str = None, end_date: str = None, _: dict = Depends(require_owner_or_manager)):
 
-    # Build date filter
-    query = {}
     now = datetime.now(timezone.utc)
     if period == "today":
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)

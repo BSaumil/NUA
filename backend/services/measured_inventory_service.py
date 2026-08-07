@@ -18,7 +18,7 @@ Every write goes through `stamped_update` / `stamped_insert` so version
 counters, audit events, and actor/device/ip stamping are automatic.
 """
 from __future__ import annotations
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 from datetime import datetime, timezone
 from database import db
 from services.entity_service import stamped_insert, stamped_update

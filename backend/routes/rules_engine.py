@@ -3,7 +3,7 @@ NUA Cross-Module Rules Engine — REST endpoints.
 """
 from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any
 from datetime import datetime, timezone
 from database import db
 from deps import get_user, require_owner_or_manager

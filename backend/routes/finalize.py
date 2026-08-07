@@ -15,7 +15,7 @@ we don't scatter tiny router files everywhere. Groups covered:
 
 All endpoints are additive — they layer on top of existing modules.
 """
-from fastapi import APIRouter, HTTPException, Depends, Response, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, Response
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta, date
 from pydantic import BaseModel

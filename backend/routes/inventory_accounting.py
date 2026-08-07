@@ -12,7 +12,7 @@ Unit conversion is canonical: every ingredient declares its `baseUnit` (g, mL,
 ea); all stock movements convert to that base before recording. This is what
 lets "kg" invoice lines correctly add to "g" recipes.
 """
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Depends
 from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone, timedelta, date

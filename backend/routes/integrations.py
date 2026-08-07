@@ -1,6 +1,5 @@
 from fastapi import APIRouter, HTTPException, Request, Depends
-from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from database import db
 from deps import get_user
 import logging
@@ -49,12 +48,25 @@ async def refund_stripe_payment(session_id: str) -> bool:
         payment_intent = session.get("payment_intent")
         if not payment_intent:
             return False
+        # Guards a double-refund attempt (e.g. staff double-clicking cancel
+        # before the first request's response comes back) at the source of
+        # truth — Stripe's own charge record — rather than trusting only our
+        # own payment_transactions doc, which could itself be out of sync.
+        intent = stripe.PaymentIntent.retrieve(payment_intent)
+        charges = (intent.get("charges") or {}).get("data") or []
+        if any(c.get("refunded") for c in charges):
+            return True  # already refunded — the desired end state already holds
         stripe.Refund.create(payment_intent=payment_intent)
         return True
 
     try:
         return await asyncio.to_thread(_do_refund)
     except Exception as e:
+        # Stripe itself rejects a second refund on an already-fully-refunded
+        # charge with an InvalidRequestError — that's not a failure, it's
+        # confirmation the money is already back with the guest.
+        if "already been refunded" in str(e).lower() or "has already been refunded" in str(e).lower():
+            return True
         logging.getLogger(__name__).error(f"Stripe refund failed for session {session_id}: {e}")
         return False
 
@@ -75,10 +87,21 @@ async def _finalize_pos_sale_if_applicable(session_id: str):
     gift cards — for free. Claims the payment doc atomically first so the
     status-poll and the webhook, which can both observe "paid" for the same
     session, can't both create the sale.
+
+    The claim carries a timestamp and is reclaimable after 2 minutes — if
+    the process crashes between claiming and finishing (not an exception,
+    an actual process death), the except-block's un-claim never runs, and
+    without a staleness window that would strand the sale at "pending"
+    forever with no automatic retry. Stripe retries its webhook for days on
+    failure, so a stale claim gets picked up by the next delivery attempt.
     """
+    stale_cutoff = (datetime.utcnow() - timedelta(minutes=2)).isoformat()
     claimed = await db.payment_transactions.find_one_and_update(
-        {"sessionId": session_id, "kind": "pos_sale", "transactionId": {"$exists": False}},
-        {"$set": {"transactionId": "pending"}},
+        {"sessionId": session_id, "kind": "pos_sale", "$or": [
+            {"transactionId": {"$exists": False}},
+            {"transactionId": "pending", "transactionClaimedAt": {"$lt": stale_cutoff}},
+        ]},
+        {"$set": {"transactionId": "pending", "transactionClaimedAt": datetime.utcnow().isoformat()}},
     )
     if not claimed:
         return
@@ -93,10 +116,10 @@ async def _finalize_pos_sale_if_applicable(session_id: str):
         logging.getLogger(__name__).error(
             f"Stripe payment {session_id} confirmed paid but sale creation failed — needs manual reconciliation: {e}"
         )
-        # Un-claim so a retried poll/webhook can try again rather than
-        # permanently stranding a paid-for sale with no transaction.
+        # Un-claim so a retried poll/webhook can try again immediately
+        # rather than waiting out the staleness window above.
         await db.payment_transactions.update_one(
-            {"sessionId": session_id}, {"$unset": {"transactionId": ""}}
+            {"sessionId": session_id}, {"$unset": {"transactionId": "", "transactionClaimedAt": ""}}
         )
 
 
@@ -166,12 +189,19 @@ async def create_stripe_checkout(data: dict, http_request: Request, user: dict =
 
 @router.get("/stripe/checkout/status/{session_id}")
 async def get_stripe_checkout_status(session_id: str, http_request: Request):
-    """Poll Stripe checkout session status"""
+    """Poll Stripe checkout session status.
+
+    Returns {"configured": False, ...} rather than a 500 when Stripe isn't
+    configured — matches create_online_order_checkout's style, and means a
+    caller polling with a stale/bookmarked session_id from before Stripe was
+    ever set up (or after a key gets removed) gets a normal response to
+    branch on instead of having to catch an exception.
+    """
     from emergentintegrations.payments.stripe.checkout import StripeCheckout
 
     api_key = os.environ.get("STRIPE_API_KEY")
     if not api_key:
-        raise HTTPException(status_code=500, detail="Stripe not configured")
+        return {"configured": False, "status": None, "paymentStatus": None, "amountTotal": None, "currency": None}
 
     host_url = str(http_request.base_url).rstrip("/")
     webhook_url = f"{host_url}/api/webhook/stripe"
@@ -199,6 +229,7 @@ async def get_stripe_checkout_status(session_id: str, http_request: Request):
                 await _finalize_pos_sale_if_applicable(session_id)
 
     return {
+        "configured": True,
         "status": status.status,
         "paymentStatus": status.payment_status,
         "amountTotal": status.amount_total,

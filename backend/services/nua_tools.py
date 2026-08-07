@@ -23,7 +23,7 @@ Owner-configurable in `db.ash_tool_config` — falls back to defaultPermission.
 from __future__ import annotations
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 from datetime import datetime, timezone
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from database import db
 from services import audit_service, approval_service
 import uuid

@@ -9,7 +9,6 @@ from models.supplier import Supplier, SupplierCreate, PurchaseOrder, PurchaseOrd
 from middleware.actor_context import tenant_scope_filter
 import uuid
 import random
-import math
 
 router = APIRouter()
 
@@ -561,7 +560,6 @@ async def what_if_simulation(changes: List[dict]):
 # ============ DEMAND FORECASTING API ============
 @router.get("/analytics/demand-forecast")
 async def get_demand_forecast():
-    all_txns = await db.transactions.find({}, {"_id": 0}).to_list(10000)
     reservations = await db.reservations.find({}, {"_id": 0}).to_list(1000)
     today = datetime.utcnow()
     forecast = []

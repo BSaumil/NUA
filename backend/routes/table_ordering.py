@@ -1,8 +1,6 @@
-from fastapi import APIRouter, HTTPException, Request
-from typing import Optional
+from fastapi import APIRouter, HTTPException
 from datetime import datetime
 from database import db
-from models.kitchen_order import KitchenOrder
 import logging
 import uuid
 

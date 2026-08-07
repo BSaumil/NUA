@@ -52,13 +52,13 @@ Dashboard / KPIs
 """
 from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Depends, Query
-from typing import Optional, List, Dict, Any
-from datetime import datetime, timezone, date, timedelta
+from typing import Optional, Dict, Any
+from datetime import datetime, timezone, timedelta
 from database import db
 from deps import get_user, require_owner_or_manager
 from models.accounting import (
-    Account, JournalEntry, JournalLine, Bill, Invoice, CustomerDeposit,
-    Budget, BudgetLine, BankStatementLine,
+    Account, JournalEntry, Bill, Invoice, CustomerDeposit,
+    Budget, BankStatementLine,
 )
 from utils.mongo_safe import safe_parse_list
 from services import accounting_service as svc
