@@ -53,6 +53,16 @@ const Deposits = () => {
     } catch (e) { toast.error(e.response?.data?.detail || 'Failed'); }
   };
 
+  // Held deposits are a real liability — the business owes that $ back
+  // (as a refund or a credit toward the eventual sale) the moment it's
+  // taken, same accounting posture as gratuity being tracked separately
+  // from revenue. Computed client-side from the already-loaded list
+  // rather than a new endpoint, since the page already has everything.
+  const heldTotal = deposits.filter(d => d.status === 'held').reduce((s, d) => s + d.amount, 0);
+  const appliedTotal = deposits.filter(d => d.status === 'applied').reduce((s, d) => s + d.amount, 0);
+  const refundedTotal = deposits.filter(d => d.status === 'refunded').reduce((s, d) => s + d.amount, 0);
+  const heldCount = deposits.filter(d => d.status === 'held').length;
+
   return (
     <div className="space-y-4" data-testid="deposits-page">
       <div className="flex justify-between items-center">
@@ -62,6 +72,24 @@ const Deposits = () => {
         </div>
         <Button size="sm" onClick={() => setShow(true)} data-testid="deposit-new-btn"><PlusCircle size={14} className="mr-1" /> Record Deposit</Button>
       </div>
+
+      {deposits.length > 0 && (
+        <div className="grid grid-cols-3 gap-3">
+          <Card><CardContent className="p-3 text-center">
+            <p className="text-lg font-bold" data-testid="deposits-held-total">{FMT(heldTotal)}</p>
+            <p className="text-[11px] text-slate-500 uppercase tracking-wide">Currently held ({heldCount})</p>
+          </CardContent></Card>
+          <Card><CardContent className="p-3 text-center">
+            <p className="text-lg font-bold text-emerald-600">{FMT(appliedTotal)}</p>
+            <p className="text-[11px] text-slate-500 uppercase tracking-wide">Applied to sales</p>
+          </CardContent></Card>
+          <Card><CardContent className="p-3 text-center">
+            <p className="text-lg font-bold text-slate-500">{FMT(refundedTotal)}</p>
+            <p className="text-[11px] text-slate-500 uppercase tracking-wide">Refunded</p>
+          </CardContent></Card>
+        </div>
+      )}
+
       <Card><CardContent className="p-0">
         <table className="w-full text-sm">
           <thead className="bg-slate-50"><tr>
