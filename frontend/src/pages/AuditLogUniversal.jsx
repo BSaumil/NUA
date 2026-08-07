@@ -5,7 +5,7 @@ import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../components/ui/select';
 import { Button } from '../components/ui/button';
-import { History, Search, User, Shield, Clock } from 'lucide-react';
+import { History, Search, User, Shield, Clock, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -20,6 +20,7 @@ export default function AuditLog() {
   const [action, setAction] = useState('');
   const [actor, setActor] = useState('');
   const [expanded, setExpanded] = useState(null);
+  const [restoring, setRestoring] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -36,6 +37,19 @@ export default function AuditLog() {
     } catch { toast.error('Failed to load audit log'); }
   }, [entityType, action, actor]);
   useEffect(() => { load(); }, [load]);
+
+  const restoreTo = async (e) => {
+    const version = e.before?.version;
+    if (!version) return;
+    if (!window.confirm(`Restore ${e.entityType} ${(e.entityId || '').slice(0, 8)} to its state before this change (version ${version})?`)) return;
+    setRestoring(e.id);
+    try {
+      await axios.post(`${API}/audit/restore/${e.entityType}/${e.entityId}/${version}`, {}, { headers: H() });
+      toast.success('Restored');
+      load();
+    } catch (err) { toast.error(err.response?.data?.detail || 'Restore failed'); }
+    finally { setRestoring(null); }
+  };
 
   return (
     <div className="space-y-6" data-testid="audit-log-page">
@@ -127,6 +141,13 @@ export default function AuditLog() {
                           <pre className="bg-white border rounded p-2 overflow-auto max-h-64">{JSON.stringify(e.after, null, 2)}</pre>
                         </div>
                       </div>
+                      {e.before?.version && (
+                        <Button size="sm" variant="outline" className="mt-3 text-xs" disabled={restoring === e.id}
+                          onClick={() => restoreTo(e)} data-testid={`restore-${e.id}`}>
+                          <RotateCcw size={12} className="mr-1" />
+                          {restoring === e.id ? 'Restoring...' : `Restore to before this change (v${e.before.version})`}
+                        </Button>
+                      )}
                     </td>
                   </tr>
                 )}
