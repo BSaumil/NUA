@@ -223,10 +223,11 @@ export default function BottomDock() {
       >
         <div className="max-w-screen-2xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-1 text-sm">
-            {/* In-product chrome — product variant only, never the gradient
-                marketing lockup (BRAND-SPEC §3). */}
-            <span className="px-2" style={{ color: theme.primary }}>
-              <Logo variant="product" size={22} />
+            {/* In-product chrome — product variant only, never the marketing
+                lockup (BRAND-SPEC §3). Wordmark colour follows the dock's own
+                background, not the theme accent (BRAND-SPEC §2). */}
+            <span className="px-2">
+              <Logo variant="product" background={darkMode ? 'dark' : 'light'} size={22} />
             </span>
             <span className={`text-[10px] mr-2 hidden sm:inline ${darkMode ? 'text-zinc-500' : 'text-gray-400'}`}>{user.name} · {role}</span>
           </div>
