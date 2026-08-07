@@ -134,12 +134,6 @@ export const locationsAPI = {
   delete: (id) => api.delete(`/locations/${id}`),
 };
 
-// Users API
-export const usersAPI = {
-  getAll: () => api.get('/users'),
-  create: (data) => api.post('/users', data),
-};
-
 // Categories API
 export const categoriesAPI = {
   getAll: () => api.get('/categories'),
@@ -197,11 +191,6 @@ export const reservationsAIAPI = {
 export const modifiersAPI = {
   getAll: () => api.get('/modifiers'),
   create: (data) => api.post('/modifiers', data),
-};
-
-// Offline Sync API
-export const offlineAPI = {
-  sync: (data) => api.post('/offline/sync', data),
 };
 
 // Reservations API
@@ -350,12 +339,6 @@ export const automationAPI = {
   getAlerts: () => api.get('/automation/alerts'),
 };
 
-// Predictive Customer Matching
-export const predictiveAPI = {
-  predictCustomer: (items) => api.post('/orders/predict-customer', items),
-  linkCustomer: (txnId, customerId, points) => api.post('/orders/link-customer', null, { params: { transaction_id: txnId, customer_id: customerId, points_earned: points } }),
-};
-
 // What-If Simulator
 export const simulatorAPI = {
   simulate: (changes) => api.post('/analytics/what-if', changes),
@@ -376,11 +359,6 @@ export const forecastAPI = {
   getTableTurns: () => api.get('/analytics/table-turns'),
   getSmartRoster: () => api.get('/staff/smart-roster'),
   getSuggestions: () => api.get('/analytics/forecast-suggestions'),
-};
-
-// QR Menu
-export const qrMenuAPI = {
-  getData: () => api.get('/menu/qr-data'),
 };
 
 // Public Booking Portal
