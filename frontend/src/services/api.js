@@ -290,6 +290,8 @@ export const coursingAPI = {
   streamUrl: (tableNumber) =>
     `${API_BASE_URL}/coursing/stream?tableNumber=${encodeURIComponent(tableNumber || '')}`
     + `&token=${encodeURIComponent(localStorage.getItem('nua_token') || '')}`,
+  endOfService: () => api.get('/coursing/end-of-service'),
+  closeService: (reason) => api.post('/coursing/end-of-service/close', { reason }),
 };
 
 // Two-factor sign-in

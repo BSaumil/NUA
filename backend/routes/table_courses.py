@@ -18,6 +18,9 @@ from pydantic import BaseModel
 from database import db
 from deps import get_user
 import uuid
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -202,6 +205,28 @@ async def send_nudge(body: SendNudgeIn, user: dict = Depends(get_user)):
     }
     await db.dock_notifications.insert_one(notif)
     notif.pop("_id", None)
+
+    # dock_notifications had no reader anywhere in the UI — a sent nudge was
+    # persisted but never actually seen by the server it was meant for. Also
+    # fan it out through the universal notification bell (already wired into
+    # every staff screen), resolving serverId to their email when possible
+    # and broadcasting to front-of-house otherwise.
+    try:
+        from services import notification_service
+        target_email = None
+        if server_id:
+            staffer = await db.auth_users.find_one({"id": server_id}, {"_id": 0, "email": 1})
+            target_email = (staffer or {}).get("email")
+        await notification_service.send(
+            kind="kitchen", title=f"Table {body.tableId} needs you", body=body.message,
+            email=target_email, role=None if target_email else "cashier",
+            severity="high" if notif["priority"] == "urgent" else "info",
+            link="/floor-plan",
+        )
+    except Exception as e:
+        from utils.errors import log_and_continue
+        log_and_continue(logger, f"Table nudge bell notification failed for table {body.tableId}", e)
+
     return notif
 
 
