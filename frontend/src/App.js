@@ -86,7 +86,6 @@ const Modifiers = lazy(() => import('./pages/Modifiers'));
 const Discounts = lazy(() => import('./pages/Discounts'));
 const CompVoid = lazy(() => import('./pages/CompVoid'));
 const PaymentLinks = lazy(() => import('./pages/PaymentLinks'));
-const AuditLog = lazy(() => import('./pages/AuditLog'));
 const InventoryAnomalies = lazy(() => import('./pages/InventoryAnomalies'));
 const BookingHeatmap = lazy(() => import('./pages/BookingHeatmap'));
 const CohortRetention = lazy(() => import('./pages/CohortRetention'));
@@ -279,7 +278,6 @@ function ProtectedRoutes() {
         <Route path="/settings" element={<Settings />} />
         <Route path="/print-routing" element={<Navigate to="/settings?tab=print-routing" replace />} />
         <Route path="/security" element={<SecurityCompliance />} />
-        <Route path="/audit-log" element={<AuditLog />} />
         <Route path="/anomalies" element={<InventoryAnomalies />} />
         <Route path="/booking-heatmap" element={<BookingHeatmap />} />
         <Route path="/cohort-retention" element={<CohortRetention />} />

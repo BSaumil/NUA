@@ -2,8 +2,11 @@ from fastapi import APIRouter, HTTPException, Depends
 from database import db
 from datetime import datetime, timezone
 import uuid
+import logging
 from deps import require_owner, require_owner_or_manager, require_permission, optional_user
 from middleware.actor_context import tenant_scope_filter
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -462,6 +465,22 @@ async def create_comp_void(data: dict, user: dict = Depends(require_permission("
     }
     await db.comp_voids.insert_one(record)
     record.pop("_id", None)
+
+    # Comp/void records lived only in their own narrow list (the old
+    # standalone Audit Log page, since retired in favor of the universal
+    # one) — nothing wrote them into the real audit trail, so restoring a
+    # transaction's history never showed the comp/void issued against it.
+    try:
+        from services.audit_service import log_event
+        await log_event(
+            entity_type="comp_void", entity_id=record["id"], action="created",
+            after=record, severity="notice",
+            memo=f"{record['type'].upper()} — {record['reason'] or 'no reason given'} (${record['amount']})",
+        )
+    except Exception as e:
+        from utils.errors import log_and_continue
+        log_and_continue(logger, f"Comp/void audit log write failed for {record['id']}", e)
+
     return record
 
 @router.get("/comp-void")

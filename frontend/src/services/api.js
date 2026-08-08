@@ -822,8 +822,6 @@ export const v15API = {
   // Heatmap & cohort
   getBookingHeatmap: () => api.get('/analytics/booking-heatmap'),
   getCohortRetention: () => api.get('/analytics/cohort-retention'),
-  // Audit
-  getAuditLogs: (limit = 200) => api.get('/audit/logs', { params: { limit } }),
   // 2FA
   setup2FA: () => api.post('/auth/2fa/setup'),
   verify2FA: (code) => api.post('/auth/2fa/verify', { code }),

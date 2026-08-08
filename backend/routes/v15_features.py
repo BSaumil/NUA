@@ -733,25 +733,6 @@ async def cohort_retention(_: dict = Depends(require_owner_or_manager)):
 # =============================================================================
 # AUDIT LOG
 # =============================================================================
-@router.get("/audit/logs")
-async def get_audit_logs( limit: int = 200, user: dict = Depends(require_owner_or_manager)):
-    # Aggregate from multiple sources: comp_voids, refunds, login attempts
-    logs = []
-    cv = await db.comp_voids.find({}, {"_id": 0}).sort("processedAt", -1).to_list(100)
-    for c in cv:
-        logs.append({"id": c["id"], "type": c.get("type", "comp").upper(), "user": c.get("processedBy", "?"),
-                     "details": f"${c.get('amount',0):.2f} - {c.get('reason', '')}",
-                     "timestamp": c.get("processedAt")})
-    refunds = await db.refunds.find({}, {"_id": 0}).sort("createdAt", -1).to_list(100)
-    for r in refunds:
-        logs.append({"id": r.get("id", str(uuid.uuid4())[:8]), "type": "REFUND", "user": r.get("processedBy", "?"),
-                     "details": f"${r.get('amount',0):.2f} - {r.get('reason', '')}",
-                     "timestamp": r.get("createdAt")})
-    # Sort by timestamp desc
-    logs.sort(key=lambda x: x.get("timestamp") or "", reverse=True)
-    return logs[:limit]
-
-
 # =============================================================================
 # 2FA (TOTP)
 #
