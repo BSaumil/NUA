@@ -970,6 +970,17 @@ export const businessAPI = {
   backfillTenant: () => api.post('/business/backfill-tenant'),
 };
 
+// Customer Identity — the free base layer + per-add-on entitlements
+// (bookings-guests, loyalty, punch-card, marketing). Every checkout and
+// booking already writes into this layer; this is its admin surface.
+export const identityAPI = {
+  getEntitlements: () => api.get('/identity/entitlements'),
+  setEntitlements: (data) => api.put('/identity/entitlements', data),
+  search: (search) => api.get('/identity/customers', { params: search ? { search } : {} }),
+  getCustomer: (id) => api.get(`/identity/customers/${id}`),
+  migrateLegacyCrm: () => api.post('/identity/migrate-legacy-crm'),
+};
+
 // What's New — release notes for owners/managers
 export const changelogAPI = {
   list: (window) => api.get('/changelog', { params: window ? { window } : {} }),

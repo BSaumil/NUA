@@ -12,7 +12,7 @@ import {
   CalendarCheck, LayoutGrid, SlidersHorizontal, Boxes, Layers, Puzzle,
   Percent, XCircle, Grid3x3, Scale, Sparkles, Ticket, Megaphone, Receipt,
   FileBadge, Wallet, PiggyBank, Target, BookMarked, AlertTriangle, Cpu,
-  CreditCard, KeyRound, Building2, Rocket
+  CreditCard, KeyRound, Building2, Rocket, Fingerprint
 } from 'lucide-react';
 
 // Progressive disclosure: the everyday screens live in a handful of merged
@@ -133,6 +133,7 @@ const NAV_STRUCTURE = [
       { path: '/approvals', label: 'Approvals', icon: ShieldCheck },
       { path: '/audit', label: 'Audit Log', icon: FileText },
       { path: '/ash-permissions', label: 'AI Permissions', icon: KeyRound },
+      { path: '/identity-settings', label: 'Identity & Add-Ons', icon: Fingerprint },
       { path: '/license', label: 'License', icon: FileBadge },
     ],
   },
