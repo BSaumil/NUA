@@ -75,6 +75,7 @@ const Approvals = lazy(() => import('./pages/Approvals'));
 const AuditLogUniversal = lazy(() => import('./pages/AuditLogUniversal'));
 const HQDashboard = lazy(() => import('./pages/HQDashboard'));
 const MultiBusiness = lazy(() => import('./pages/MultiBusiness'));
+const IdentitySettings = lazy(() => import('./pages/IdentitySettings'));
 import AshChat from './components/AshChat';
 import NotificationBell from './components/NotificationBell';
 const Temperature = lazy(() => import('./pages/Temperature'));
@@ -85,7 +86,6 @@ const Modifiers = lazy(() => import('./pages/Modifiers'));
 const Discounts = lazy(() => import('./pages/Discounts'));
 const CompVoid = lazy(() => import('./pages/CompVoid'));
 const PaymentLinks = lazy(() => import('./pages/PaymentLinks'));
-const AuditLog = lazy(() => import('./pages/AuditLog'));
 const InventoryAnomalies = lazy(() => import('./pages/InventoryAnomalies'));
 const BookingHeatmap = lazy(() => import('./pages/BookingHeatmap'));
 const CohortRetention = lazy(() => import('./pages/CohortRetention'));
@@ -259,6 +259,7 @@ function ProtectedRoutes() {
         <Route path="/audit" element={<AuditLogUniversal />} />
         <Route path="/hq" element={<HQDashboard />} />
         <Route path="/multi-business" element={<MultiBusiness />} />
+        <Route path="/identity-settings" element={<IdentitySettings />} />
         <Route path="/bas-gst" element={<BASGST />} />
         <Route path="/super" element={<Super />} />
         <Route path="/payroll" element={<Payroll />} />
@@ -277,7 +278,6 @@ function ProtectedRoutes() {
         <Route path="/settings" element={<Settings />} />
         <Route path="/print-routing" element={<Navigate to="/settings?tab=print-routing" replace />} />
         <Route path="/security" element={<SecurityCompliance />} />
-        <Route path="/audit-log" element={<AuditLog />} />
         <Route path="/anomalies" element={<InventoryAnomalies />} />
         <Route path="/booking-heatmap" element={<BookingHeatmap />} />
         <Route path="/cohort-retention" element={<CohortRetention />} />

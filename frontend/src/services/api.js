@@ -822,8 +822,6 @@ export const v15API = {
   // Heatmap & cohort
   getBookingHeatmap: () => api.get('/analytics/booking-heatmap'),
   getCohortRetention: () => api.get('/analytics/cohort-retention'),
-  // Audit
-  getAuditLogs: (limit = 200) => api.get('/audit/logs', { params: { limit } }),
   // 2FA
   setup2FA: () => api.post('/auth/2fa/setup'),
   verify2FA: (code) => api.post('/auth/2fa/verify', { code }),
@@ -968,6 +966,17 @@ export const businessAPI = {
   summary: (id) => api.get(`/business/${id}/summary`),
   exportData: (id, collection) => api.get(`/business/${id}/export`, { params: collection ? { collection } : {} }),
   backfillTenant: () => api.post('/business/backfill-tenant'),
+};
+
+// Customer Identity — the free base layer + per-add-on entitlements
+// (bookings-guests, loyalty, punch-card, marketing). Every checkout and
+// booking already writes into this layer; this is its admin surface.
+export const identityAPI = {
+  getEntitlements: () => api.get('/identity/entitlements'),
+  setEntitlements: (data) => api.put('/identity/entitlements', data),
+  search: (search) => api.get('/identity/customers', { params: search ? { search } : {} }),
+  getCustomer: (id) => api.get(`/identity/customers/${id}`),
+  migrateLegacyCrm: () => api.post('/identity/migrate-legacy-crm'),
 };
 
 // What's New — release notes for owners/managers

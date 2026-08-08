@@ -776,11 +776,23 @@ async def promo_analytics(days: int = 30, _: dict = Depends(get_user)):
     expired = sum(1 for v in vs if v.get("status") == "expired")
     revoked = sum(1 for v in vs if v.get("status") == "revoked")
 
-    revenue_generated = 0.0
-    for v in vs:
-        for r in v.get("redemptions", []):
-            tx = await db.transactions.find_one({"id": r.get("transactionId")}, {"_id": 0, "total": 1}) if r.get("transactionId") else None
-            revenue_generated += (tx or {}).get("total", 0)
+    # One batched $in lookup for every redemption's transaction instead of
+    # one find_one() per redemption — with thousands of vouchers each
+    # carrying multiple redemptions, this page used to issue thousands of
+    # individual queries on a single load.
+    txn_ids = list({
+        r["transactionId"] for v in vs for r in v.get("redemptions", []) if r.get("transactionId")
+    })
+    totals_by_txn = {}
+    if txn_ids:
+        rows = await db.transactions.find(
+            {"id": {"$in": txn_ids}}, {"_id": 0, "id": 1, "total": 1}
+        ).to_list(len(txn_ids))
+        totals_by_txn = {row["id"]: row.get("total", 0) for row in rows}
+    revenue_generated = sum(
+        totals_by_txn.get(r.get("transactionId"), 0)
+        for v in vs for r in v.get("redemptions", [])
+    )
 
     # By source type
     by_source: Dict[str, dict] = {}
@@ -816,23 +828,6 @@ _MILESTONES = [
     {"key": "big_spender_2k", "label": "$2,000 lifetime", "type": "spend", "threshold": 2000, "reward": {"type": "voucher", "amount": 100.0}},
 ]
 
-_TIER_THRESHOLDS = [
-    ("Bronze", 0),
-    ("Silver", 500),
-    ("Gold", 1500),
-    ("Platinum", 5000),
-    ("VIP", 10000),
-]
-
-
-def _tier_for_spend(total: float) -> str:
-    tier = "Bronze"
-    for name, threshold in _TIER_THRESHOLDS:
-        if total >= threshold:
-            tier = name
-    return tier
-
-
 @router.get("/loyalty/status/{customer_id}")
 async def loyalty_status(customer_id: str, _: dict = Depends(get_user)):
     c = await db.customers.find_one({"id": customer_id}, {"_id": 0})
@@ -841,13 +836,29 @@ async def loyalty_status(customer_id: str, _: dict = Depends(get_user)):
     txns = await db.transactions.find({"customerId": customer_id, "status": {"$in": ["completed", "paid", "closed"]}}, {"_id": 0}).to_list(5000)
     total_visits = len(txns)
     total_spend = sum(t.get("total", 0) for t in txns)
-    tier = _tier_for_spend(total_spend)
-    # Next tier
-    next_tier = None; next_threshold = None
-    for name, threshold in _TIER_THRESHOLDS:
-        if total_spend < threshold:
-            next_tier, next_threshold = name, threshold
-            break
+
+    # Tier comes from the same points-based db.loyalty_tiers ladder every
+    # other tier calculation in the app uses (loyalty_v2's progress view,
+    # checkout's own discount lookup, the leaderboard) — this endpoint used
+    # to run its own hardcoded, spend-based Bronze/Silver/Gold/Platinum/VIP
+    # thresholds instead, so the same customer could show as one tier on
+    # the wallet panel and a different tier everywhere else in the app.
+    points = int(c.get("points") or 0)
+    tiers = await db.loyalty_tiers.find({}, {"_id": 0}).sort("minPoints", 1).to_list(20)
+    current_tier_doc = tiers[0] if tiers else None
+    next_tier_doc = None
+    for t in tiers:
+        if points >= t["minPoints"]:
+            current_tier_doc = t
+        elif not next_tier_doc:
+            next_tier_doc = t
+    tier = current_tier_doc["name"] if current_tier_doc else "Bronze"
+    next_tier = next_tier_doc["name"] if next_tier_doc else None
+    next_threshold = next_tier_doc["minPoints"] if next_tier_doc else None
+    tier_progress_pct = 100.0
+    if current_tier_doc and next_tier_doc:
+        span = max(1, next_tier_doc["minPoints"] - current_tier_doc["minPoints"])
+        tier_progress_pct = round(max(0, min(100, (points - current_tier_doc["minPoints"]) / span * 100)), 1)
     # Streak — count consecutive weeks with at least one visit
     weeks_visited = set()
     for t in txns:
@@ -892,7 +903,8 @@ async def loyalty_status(customer_id: str, _: dict = Depends(get_user)):
         "tier": tier,
         "nextTier": next_tier,
         "nextTierAt": next_threshold,
-        "tierProgressPct": round((total_spend / next_threshold) * 100, 1) if next_threshold else 100.0,
+        "tierProgressPct": tier_progress_pct,
+        "points": points,
         "totalVisits": total_visits,
         "totalSpend": round(total_spend, 2),
         "streakWeeks": streak,
