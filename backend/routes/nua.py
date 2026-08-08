@@ -57,18 +57,6 @@ async def run(include_summary: bool = False, _: dict = Depends(require_owner_or_
     return await nua_intelligence.run_all_insights(include_summary=include_summary)
 
 
-@router.post("/summary/weekly")
-async def weekly_summary(_: dict = Depends(require_owner_or_manager)):
-    doc = await nua_intelligence.generate_weekly_summary()
-    if doc:
-        await db.ash_insights.update_one(
-            {"category": doc["category"], "key": doc["key"]},
-            {"$set": doc, "$setOnInsert": {"firstSeenAt": doc["createdAt"]}},
-            upsert=True,
-        )
-    return doc
-
-
 @router.post("/insights/{iid}/dismiss")
 async def dismiss_insight(iid: str, _: dict = Depends(require_owner_or_manager)):
     from datetime import datetime, timezone

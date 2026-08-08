@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 from database import db
-from middleware.actor_context import get_actor_context
+from middleware.actor_context import get_actor_context, tenant_scope_filter
 import uuid
 import logging
 
@@ -60,8 +60,10 @@ async def list_events(
     actor: Optional[str] = None,
     limit: int = 200,
 ) -> List[Dict[str, Any]]:
-    q: Dict[str, Any] = {}
-    if business_id: q["businessId"] = business_id
+    # tenant_scope_filter (not a plain equality match) so audit events
+    # written before tenant stamping still show up on the Audit Log page
+    # instead of silently vanishing for a not-yet-backfilled business.
+    q: Dict[str, Any] = dict(tenant_scope_filter(business_id))
     if entity_type: q["entityType"] = entity_type
     if entity_id: q["entityId"] = entity_id
     if action: q["action"] = action

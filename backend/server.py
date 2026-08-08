@@ -230,6 +230,10 @@ PUBLIC_API_PATHS = {
     # Guest-facing voucher check (online ordering, table QR) — dry-run only,
     # deliberately returns nothing beyond a discount amount + label.
     "/api/vouchers/public-check",
+    # Guest-facing loyalty portal — a customer checking their own points/tier
+    # by phone, no staff login involved. Returns first name only, never the
+    # full customer record.
+    "/api/loyalty/v2/guest-lookup",
     # Self-service kiosk session creation — no sid exists yet, so this can't
     # be covered by the "/api/v25/kiosk/session/" prefix above.
     "/api/v25/kiosk/session",
@@ -300,6 +304,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     """
     PATH_OVERRIDES = {
         "/api/vouchers/public-check": (10, 60),  # 10 req/min per IP
+        # Same rationale as vouchers/public-check — an unauthenticated
+        # caller with no identity beyond "some IP" shouldn't get the
+        # generous default room to enumerate phone numbers.
+        "/api/loyalty/v2/guest-lookup": (10, 60),  # 10 req/min per IP
     }
 
     def __init__(self, app):

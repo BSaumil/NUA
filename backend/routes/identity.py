@@ -91,10 +91,18 @@ async def segment_preview(definition: dict, _: dict = Depends(get_user)):
         if await addon_enabled("loyalty.enabled"):
             order = ["Bronze", "Silver", "Gold", "Platinum"]
             floor = order.index(min_tier) if min_tier in order else 0
+            # One batched $in lookup instead of one find_one() per customer —
+            # this ran a query per row on every segment preview keystroke.
+            cust_ids = [c["id"] for c in customers]
+            tier_by_customer = {}
+            if cust_ids:
+                accts = await db.loyalty_accounts.find(
+                    {"customer_id": {"$in": cust_ids}}, {"_id": 0, "customer_id": 1, "tier": 1}
+                ).to_list(len(cust_ids))
+                tier_by_customer = {a["customer_id"]: a.get("tier", "Bronze") for a in accts}
             keep = []
             for c in customers:
-                acct = await db.loyalty_accounts.find_one({"customer_id": c["id"]}, {"_id": 0})
-                tier = (acct or {}).get("tier", "Bronze")
+                tier = tier_by_customer.get(c["id"], "Bronze")
                 if order.index(tier) >= floor if tier in order else False:
                     keep.append(c)
             customers = keep
@@ -104,12 +112,14 @@ async def segment_preview(definition: dict, _: dict = Depends(get_user)):
     tag = definition.get("guest_tag")
     if tag:
         if await addon_enabled("bookings_guests.enabled"):
-            keep = []
-            for c in customers:
-                prof = await db.guest_profiles.find_one({"customer_id": c["id"]}, {"_id": 0})
-                if prof and tag in (prof.get("tags") or []):
-                    keep.append(c)
-            customers = keep
+            cust_ids = [c["id"] for c in customers]
+            tags_by_customer = {}
+            if cust_ids:
+                profs = await db.guest_profiles.find(
+                    {"customer_id": {"$in": cust_ids}}, {"_id": 0, "customer_id": 1, "tags": 1}
+                ).to_list(len(cust_ids))
+                tags_by_customer = {p["customer_id"]: (p.get("tags") or []) for p in profs}
+            customers = [c for c in customers if tag in tags_by_customer.get(c["id"], [])]
         else:
             degraded.append("guest_tag ignored — bookings-guests add-on not enabled")
 

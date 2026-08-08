@@ -144,6 +144,7 @@ const MarketingEmails = lazyNamed(v26, 'MarketingEmails');
 const OnlineOrders = lazy(() => import('./pages/OnlineOrders'));
 const OrderOnline = lazy(() => import('./pages/OrderOnline'));
 const TrackOrder = lazy(() => import('./pages/TrackOrder'));
+const LoyaltyGuestPortal = lazy(() => import('./pages/LoyaltyGuestPortal'));
 import { useTheme } from './contexts/ThemeContext';
 
 function StaffLayout({ children }) {
@@ -361,6 +362,7 @@ function App() {
                   <Route path="/order-online" element={<OrderOnline />} />
                   <Route path="/track" element={<TrackOrder />} />
                   <Route path="/track/:code" element={<TrackOrder />} />
+                  <Route path="/rewards" element={<LoyaltyGuestPortal />} />
                   <Route path="/reset-password" element={<ResetPassword />} />
                   {/* Staff routes — auth required */}
                   <Route path="/*" element={<ProtectedRoutes />} />

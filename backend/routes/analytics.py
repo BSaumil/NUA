@@ -334,10 +334,18 @@ async def export_report_csv(report_type: str, start_date: str, end_date: str, _:
 async def get_pre_shift_data(_: dict = Depends(get_user)):
     today = datetime.utcnow().strftime('%Y-%m-%d')
     reservations = await db.reservations.find({"date": today}, {"_id": 0}).sort("time", 1).to_list(100)
+    # One batched $in lookup instead of one find_one() per reservation, per
+    # loop — the VIP pass and the dietary-alerts pass below both used to
+    # re-fetch the same customer doc a second time.
+    cust_ids = list({r["customerId"] for r in reservations if r.get("customerId")})
+    customers_by_id = {}
+    if cust_ids:
+        rows = await db.customers.find({"id": {"$in": cust_ids}}, {"_id": 0}).to_list(len(cust_ids))
+        customers_by_id = {c["id"]: c for c in rows}
     vip_guests = []
     for r in reservations:
         if r.get("customerId"):
-            cust = await db.customers.find_one({"id": r["customerId"]}, {"_id": 0})
+            cust = customers_by_id.get(r["customerId"])
             if cust and cust.get("isVip"):
                 vip_guests.append({**r, "customerProfile": cust})
         elif "VIP" in (r.get("tags") or []):
@@ -346,7 +354,7 @@ async def get_pre_shift_data(_: dict = Depends(get_user)):
     for r in reservations:
         alerts = []
         if r.get("customerId"):
-            cust = await db.customers.find_one({"id": r["customerId"]}, {"_id": 0})
+            cust = customers_by_id.get(r["customerId"])
             if cust:
                 if cust.get("dietaryRestrictions"):
                     alerts.extend(cust["dietaryRestrictions"])

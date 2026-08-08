@@ -138,11 +138,19 @@ async def cleanup_legacy_categories(_: dict = Depends(require_owner)):
     Cakes & Slices/Pasta). Safe — products are unaffected."""
     canonical = {c["name"] for c in SEED_CATEGORIES}
     all_cats = await db.categories.find({}, {"_id": 0}).to_list(200)
+    candidates = [cat for cat in all_cats if cat["name"] not in canonical]
+    # One aggregation for all candidate categories' product counts, instead
+    # of one count_documents() per category.
+    counts_by_category = {}
+    if candidates:
+        agg = await db.products.aggregate([
+            {"$match": {"category": {"$in": [c["name"] for c in candidates]}}},
+            {"$group": {"_id": "$category", "count": {"$sum": 1}}},
+        ]).to_list(len(candidates))
+        counts_by_category = {row["_id"]: row["count"] for row in agg}
     removed, kept = [], []
-    for cat in all_cats:
-        if cat["name"] in canonical:
-            continue
-        product_count = await db.products.count_documents({"category": cat["name"]})
+    for cat in candidates:
+        product_count = counts_by_category.get(cat["name"], 0)
         if product_count == 0:
             await db.categories.delete_one({"id": cat["id"]})
             removed.append(cat["name"])

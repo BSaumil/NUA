@@ -40,7 +40,7 @@ export const TRANSLATIONS = {
       menuLoadFailed: 'Failed to load menu', orderPlaced: 'Order placed!', orderFailed: 'Failed to place order',
     },
     orderOnline: {
-      brandTitle: 'NUA · Order Online', subtitle: 'Fresh food, real-time ETA', trackOrder: 'Track an order',
+      brandTitle: 'NUA · Order Online', subtitle: 'Fresh food, real-time ETA', trackOrder: 'Track an order', myRewards: 'My Rewards',
       channelPickup: 'Pickup', channelPickupHint: 'Skip the queue', channelDelivery: 'Delivery', channelDeliveryHint: 'To your door',
       channelDineIn: 'Dine-in', channelDineInHint: 'Order ahead', allCategory: 'All', yourCart: 'Your Cart', prepTime: 'prep',
       emptyCartPrompt: 'Add items to start your order', namePlaceholder: 'Your name *', phonePlaceholder: 'Phone',
@@ -80,7 +80,7 @@ export const TRANSLATIONS = {
       menuLoadFailed: 'Impossibile caricare il menu', orderPlaced: 'Ordine inviato!', orderFailed: "Impossibile inviare l'ordine",
     },
     orderOnline: {
-      brandTitle: 'NUA · Ordina Online', subtitle: "Cibo fresco, tempi d'attesa in tempo reale", trackOrder: 'Traccia un ordine',
+      brandTitle: 'NUA · Ordina Online', subtitle: "Cibo fresco, tempi d'attesa in tempo reale", trackOrder: 'Traccia un ordine', myRewards: 'I miei premi',
       channelPickup: 'Ritiro', channelPickupHint: 'Salta la fila', channelDelivery: 'Consegna', channelDeliveryHint: 'A casa tua',
       channelDineIn: 'Al Tavolo', channelDineInHint: 'Ordina in anticipo', allCategory: 'Tutti', yourCart: 'Il Tuo Carrello', prepTime: 'preparazione',
       emptyCartPrompt: 'Aggiungi articoli per iniziare il tuo ordine', namePlaceholder: 'Il tuo nome *', phonePlaceholder: 'Telefono',
@@ -117,7 +117,7 @@ export const TRANSLATIONS = {
       menuLoadFailed: '菜单加载失败', orderPlaced: '下单成功！', orderFailed: '下单失败',
     },
     orderOnline: {
-      brandTitle: 'NUA · 在线点餐', subtitle: '新鲜美食，实时预计时间', trackOrder: '查询订单',
+      brandTitle: 'NUA · 在线点餐', subtitle: '新鲜美食，实时预计时间', trackOrder: '查询订单', myRewards: '我的积分',
       channelPickup: '自取', channelPickupHint: '免排队', channelDelivery: '外送', channelDeliveryHint: '送到家门口',
       channelDineIn: '堂食', channelDineInHint: '提前点餐', allCategory: '全部', yourCart: '您的购物车', prepTime: '制作时间',
       emptyCartPrompt: '添加菜品以开始下单', namePlaceholder: '您的姓名 *', phonePlaceholder: '电话',
@@ -154,7 +154,7 @@ export const TRANSLATIONS = {
       menuLoadFailed: 'मेनू लोड नहीं हो सका', orderPlaced: 'ऑर्डर हो गया!', orderFailed: 'ऑर्डर देने में विफल',
     },
     orderOnline: {
-      brandTitle: 'NUA · ऑनलाइन ऑर्डर करें', subtitle: 'ताज़ा खाना, रीयल-टाइम समय अनुमान', trackOrder: 'ऑर्डर ट्रैक करें',
+      brandTitle: 'NUA · ऑनलाइन ऑर्डर करें', subtitle: 'ताज़ा खाना, रीयल-टाइम समय अनुमान', trackOrder: 'ऑर्डर ट्रैक करें', myRewards: 'मेरे रिवॉर्ड्स',
       channelPickup: 'पिकअप', channelPickupHint: 'लाइन छोड़ें', channelDelivery: 'डिलीवरी', channelDeliveryHint: 'आपके दरवाज़े तक',
       channelDineIn: 'डाइन-इन', channelDineInHint: 'पहले से ऑर्डर करें', allCategory: 'सभी', yourCart: 'आपकी कार्ट', prepTime: 'तैयारी',
       emptyCartPrompt: 'ऑर्डर शुरू करने के लिए आइटम जोड़ें', namePlaceholder: 'आपका नाम *', phonePlaceholder: 'फ़ोन',
@@ -191,7 +191,7 @@ export const TRANSLATIONS = {
       menuLoadFailed: 'Error al cargar el menú', orderPlaced: '¡Pedido realizado!', orderFailed: 'No se pudo realizar el pedido',
     },
     orderOnline: {
-      brandTitle: 'NUA · Pedir en Línea', subtitle: 'Comida fresca, tiempo de espera en tiempo real', trackOrder: 'Rastrear un pedido',
+      brandTitle: 'NUA · Pedir en Línea', subtitle: 'Comida fresca, tiempo de espera en tiempo real', trackOrder: 'Rastrear un pedido', myRewards: 'Mis recompensas',
       channelPickup: 'Recoger', channelPickupHint: 'Sin hacer fila', channelDelivery: 'Entrega', channelDeliveryHint: 'Hasta tu puerta',
       channelDineIn: 'Comer Aquí', channelDineInHint: 'Pide con anticipación', allCategory: 'Todos', yourCart: 'Tu Carrito', prepTime: 'preparación',
       emptyCartPrompt: 'Agrega artículos para empezar tu pedido', namePlaceholder: 'Tu nombre *', phonePlaceholder: 'Teléfono',
@@ -228,7 +228,7 @@ export const TRANSLATIONS = {
       menuLoadFailed: 'Không thể tải thực đơn', orderPlaced: 'Đặt hàng thành công!', orderFailed: 'Đặt hàng không thành công',
     },
     orderOnline: {
-      brandTitle: 'NUA · Đặt Hàng Trực Tuyến', subtitle: 'Đồ ăn tươi ngon, thời gian ước tính theo thời gian thực', trackOrder: 'Theo dõi đơn hàng',
+      brandTitle: 'NUA · Đặt Hàng Trực Tuyến', subtitle: 'Đồ ăn tươi ngon, thời gian ước tính theo thời gian thực', trackOrder: 'Theo dõi đơn hàng', myRewards: 'Ưu đãi của tôi',
       channelPickup: 'Tự đến lấy', channelPickupHint: 'Không cần xếp hàng', channelDelivery: 'Giao hàng', channelDeliveryHint: 'Đến tận cửa nhà bạn',
       channelDineIn: 'Dùng tại chỗ', channelDineInHint: 'Đặt trước', allCategory: 'Tất cả', yourCart: 'Giỏ Hàng Của Bạn', prepTime: 'chuẩn bị',
       emptyCartPrompt: 'Thêm món để bắt đầu đặt hàng', namePlaceholder: 'Tên của bạn *', phonePlaceholder: 'Số điện thoại',
@@ -265,7 +265,7 @@ export const TRANSLATIONS = {
       menuLoadFailed: 'فشل تحميل القائمة', orderPlaced: 'تم إرسال الطلب!', orderFailed: 'فشل إرسال الطلب',
     },
     orderOnline: {
-      brandTitle: 'NUA · اطلب أونلاين', subtitle: 'طعام طازج، وقت انتظار فوري', trackOrder: 'تتبع الطلب',
+      brandTitle: 'NUA · اطلب أونلاين', subtitle: 'طعام طازج، وقت انتظار فوري', trackOrder: 'تتبع الطلب', myRewards: 'مكافآتي',
       channelPickup: 'استلام', channelPickupHint: 'تخطَّ الطابور', channelDelivery: 'توصيل', channelDeliveryHint: 'حتى باب منزلك',
       channelDineIn: 'تناول في المطعم', channelDineInHint: 'اطلب مسبقًا', allCategory: 'الكل', yourCart: 'سلتك', prepTime: 'التحضير',
       emptyCartPrompt: 'أضف عناصر لبدء طلبك', namePlaceholder: 'اسمك *', phonePlaceholder: 'رقم الهاتف',
@@ -302,7 +302,7 @@ export const TRANSLATIONS = {
       menuLoadFailed: 'Falha ao carregar o cardápio', orderPlaced: 'Pedido enviado!', orderFailed: 'Falha ao enviar o pedido',
     },
     orderOnline: {
-      brandTitle: 'NUA · Peça Online', subtitle: 'Comida fresca, tempo estimado em tempo real', trackOrder: 'Rastrear um pedido',
+      brandTitle: 'NUA · Peça Online', subtitle: 'Comida fresca, tempo estimado em tempo real', trackOrder: 'Rastrear um pedido', myRewards: 'Minhas recompensas',
       channelPickup: 'Retirada', channelPickupHint: 'Sem filas', channelDelivery: 'Entrega', channelDeliveryHint: 'Até a sua porta',
       channelDineIn: 'Comer no Local', channelDineInHint: 'Peça com antecedência', allCategory: 'Todos', yourCart: 'Seu Carrinho', prepTime: 'preparo',
       emptyCartPrompt: 'Adicione itens para começar seu pedido', namePlaceholder: 'Seu nome *', phonePlaceholder: 'Telefone',

@@ -470,6 +470,45 @@ async def get_progress(customer_id: str, _: dict = Depends(get_user)):
     return await get_customer_progress(customer_id)
 
 
+@router.post("/guest-lookup")
+async def guest_lookup(body: Dict[str, Any]):
+    """Unauthenticated counterpart to /progress/{customer_id} — lets a
+    customer check their own points, tier and badges from their phone
+    without asking staff to look it up on a register. No login exists for
+    a guest, so phone number is the identifier (the same one checkout
+    already keys loyalty accounts on).
+
+    Deliberately minimal, same posture as /vouchers/public-check: an
+    unauthenticated caller gets first name only, never the full customer
+    record (email, address, full name, id). A phone that matches nothing
+    gets the same generic response as a genuine miss, so this can't be
+    used to enumerate which numbers are registered customers.
+    """
+    phone = (body or {}).get("phone", "")
+    phone = "".join(ch for ch in str(phone) if ch.isdigit() or ch == "+").strip()
+    if not phone:
+        raise HTTPException(400, "phone is required")
+
+    customer = await db.customers.find_one({"phone": phone}, {"_id": 0, "id": 1, "name": 1})
+    if not customer:
+        return {"found": False}
+
+    progress = await get_customer_progress(customer["id"])
+    if progress.get("error"):
+        return {"found": False}
+
+    first_name = (customer.get("name") or "").strip().split(" ")[0] or "there"
+    return {
+        "found": True,
+        "firstName": first_name,
+        "points": progress["points"],
+        "tier": progress["tier"],
+        "tierProgress": progress["tierProgress"],
+        "badges": [b for b in progress["badges"] if b["earned"]],
+        "milestones": progress["milestones"],
+    }
+
+
 @router.post("/evaluate/{customer_id}")
 async def evaluate(customer_id: str, _: dict = Depends(get_user)):
     return await evaluate_customer(customer_id)

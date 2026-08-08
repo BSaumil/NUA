@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
-import { Timer, Flame, BellRing, AlertTriangle } from 'lucide-react';
+import { Button } from '../components/ui/button';
+import { Timer, Flame, BellRing, AlertTriangle, DoorClosed, Loader2 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { coursingAPI } from '../services/api';
+import { toast } from 'sonner';
 
 const WINDOWS = [
   { days: 1, label: 'Today' },
@@ -29,6 +31,73 @@ function passTone(mins) {
   if (mins >= 5) return 'text-red-600';
   if (mins >= 2) return 'text-amber-600';
   return 'text-emerald-600';
+}
+
+/**
+ * What's still open right now, before the overnight sweep silently cancels
+ * it with no report. Lets a manager close the night deliberately — on the
+ * record, with tables released — instead of tomorrow's staff finding a
+ * floor plan full of last night's tables.
+ */
+function EndOfServicePanel() {
+  const { theme } = useTheme();
+  const [eos, setEos] = useState(null);
+  const [closing, setClosing] = useState(false);
+
+  const load = () => {
+    coursingAPI.endOfService().then(r => setEos(r.data)).catch(() => {});
+  };
+  useEffect(() => { load(); }, []);
+
+  const handleClose = async () => {
+    if (!window.confirm(`Close out ${eos.openCount} open ticket${eos.openCount === 1 ? '' : 's'} and release their tables?`)) return;
+    setClosing(true);
+    try {
+      const r = await coursingAPI.closeService('closed at end of service');
+      toast.success(`Closed ${r.data.closed.length} ticket${r.data.closed.length === 1 ? '' : 's'}, released ${r.data.tablesFreed.length} table${r.data.tablesFreed.length === 1 ? '' : 's'}`);
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Could not close out service');
+    } finally {
+      setClosing(false);
+    }
+  };
+
+  if (!eos || eos.openCount === 0) return null;
+
+  return (
+    <Card className="border-amber-200" data-testid="end-of-service-panel">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm flex items-center justify-between">
+          <span className="flex items-center gap-1.5"><DoorClosed size={14} className="text-amber-600" /> End of service — {eos.openCount} still open</span>
+          <Button size="sm" variant="outline" onClick={handleClose} disabled={closing} data-testid="close-service-btn">
+            {closing ? <Loader2 size={13} className="mr-1 animate-spin" /> : null} Close out
+          </Button>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-xs text-gray-500 mb-2">
+          Cancelled at close instead of silently swept overnight — the reason and tables released are kept on the record.
+        </p>
+        <div className="space-y-1">
+          {eos.openTickets.slice(0, 8).map(t => (
+            <div key={t.orderId} className="flex items-center gap-2 text-xs p-1.5 rounded border" data-testid={`eos-ticket-${t.orderId}`}>
+              <span className="font-mono text-[10px] text-gray-500 w-24 truncate">{t.orderId}</span>
+              <span className="text-gray-600">{t.tableNumber ? `Table ${t.tableNumber}` : t.orderType}</span>
+              <Badge variant="outline" className="text-[10px]">{t.status}</Badge>
+              <span className="ml-auto font-bold tabular-nums text-amber-600">{t.ageMinutes != null ? `${Math.round(t.ageMinutes)}m` : '—'}</span>
+            </div>
+          ))}
+          {eos.openCount > 8 && <p className="text-[11px] text-gray-400">+{eos.openCount - 8} more</p>}
+        </div>
+        {eos.tablesOccupiedWithNoTicket.length > 0 && (
+          <p className="text-[11px] text-amber-700 mt-2">
+            Tables occupied with no open ticket: {eos.tablesOccupiedWithNoTicket.join(', ')}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 function Stat({ icon: Icon, label, value, hint, tone }) {
@@ -82,6 +151,8 @@ export default function CoursingAnalytics() {
           ))}
         </div>
       </div>
+
+      <EndOfServicePanel />
 
       {loading && <div className="text-center py-12 text-gray-400 animate-pulse">Loading…</div>}
       {error && <div className="text-center py-12 text-red-600 text-sm" data-testid="analytics-error">{error}</div>}

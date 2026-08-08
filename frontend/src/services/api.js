@@ -290,6 +290,8 @@ export const coursingAPI = {
   streamUrl: (tableNumber) =>
     `${API_BASE_URL}/coursing/stream?tableNumber=${encodeURIComponent(tableNumber || '')}`
     + `&token=${encodeURIComponent(localStorage.getItem('nua_token') || '')}`,
+  endOfService: () => api.get('/coursing/end-of-service'),
+  closeService: (reason) => api.post('/coursing/end-of-service/close', { reason }),
 };
 
 // Two-factor sign-in
@@ -559,6 +561,11 @@ export const loyaltyAPI = {
   createReward: (data) => api.post('/loyalty/rewards', data),
   updateReward: (id, data) => api.put(`/loyalty/rewards/${id}`, data),
   deleteReward: (id) => api.delete(`/loyalty/rewards/${id}`),
+};
+
+// Guest-facing loyalty portal — unauthenticated, phone-only lookup
+export const loyaltyGuestAPI = {
+  lookup: (phone) => api.post('/loyalty/v2/guest-lookup', { phone }),
 };
 
 // Items System — Categories, Modifiers, Discounts, Comp/Void, Payment Links
