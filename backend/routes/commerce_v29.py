@@ -776,11 +776,23 @@ async def promo_analytics(days: int = 30, _: dict = Depends(get_user)):
     expired = sum(1 for v in vs if v.get("status") == "expired")
     revoked = sum(1 for v in vs if v.get("status") == "revoked")
 
-    revenue_generated = 0.0
-    for v in vs:
-        for r in v.get("redemptions", []):
-            tx = await db.transactions.find_one({"id": r.get("transactionId")}, {"_id": 0, "total": 1}) if r.get("transactionId") else None
-            revenue_generated += (tx or {}).get("total", 0)
+    # One batched $in lookup for every redemption's transaction instead of
+    # one find_one() per redemption — with thousands of vouchers each
+    # carrying multiple redemptions, this page used to issue thousands of
+    # individual queries on a single load.
+    txn_ids = list({
+        r["transactionId"] for v in vs for r in v.get("redemptions", []) if r.get("transactionId")
+    })
+    totals_by_txn = {}
+    if txn_ids:
+        rows = await db.transactions.find(
+            {"id": {"$in": txn_ids}}, {"_id": 0, "id": 1, "total": 1}
+        ).to_list(len(txn_ids))
+        totals_by_txn = {row["id"]: row.get("total", 0) for row in rows}
+    revenue_generated = sum(
+        totals_by_txn.get(r.get("transactionId"), 0)
+        for v in vs for r in v.get("redemptions", [])
+    )
 
     # By source type
     by_source: Dict[str, dict] = {}
