@@ -563,6 +563,11 @@ export const loyaltyAPI = {
   deleteReward: (id) => api.delete(`/loyalty/rewards/${id}`),
 };
 
+// Guest-facing loyalty portal — unauthenticated, phone-only lookup
+export const loyaltyGuestAPI = {
+  lookup: (phone) => api.post('/loyalty/v2/guest-lookup', { phone }),
+};
+
 // Items System — Categories, Modifiers, Discounts, Comp/Void, Payment Links
 export const itemsSystemAPI = {
   getCategories: () => api.get('/categories'),

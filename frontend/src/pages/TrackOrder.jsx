@@ -86,7 +86,10 @@ export default function TrackOrder() {
       <div className="max-w-2xl mx-auto p-4 sm:p-6 space-y-5">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold">Track your order</h1>
-          <Button variant="ghost" size="sm" onClick={() => navigate('/order-online')}>← Back to menu</Button>
+          <div className="flex gap-2">
+            <Button variant="ghost" size="sm" onClick={() => navigate('/rewards')}>My Rewards</Button>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/order-online')}>← Back to menu</Button>
+          </div>
         </div>
 
         {!codeFromUrl && (

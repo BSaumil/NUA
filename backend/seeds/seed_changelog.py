@@ -27,6 +27,10 @@ def _entry(title, description, *, category="feature", area, audience="owner", da
 
 SHIPPED = [
     # This week
+    _entry("Guest-facing loyalty portal", "Customers can now check their own points balance, tier and badges at /rewards, by phone number — no need to ask staff.",
+           area="Loyalty", audience="guest", days_ago=0),
+    _entry("Sidebar regrouped for clarity", "Split the old 10-item \"Advanced\" catch-all into Configuration, Governance and Organization, and gave every nav item its own icon.",
+           area="Platform", category="improvement", days_ago=0),
     _entry("What's New page", "See exactly what's changed in NUA POS — this week, this month, or what's coming next — without digging through settings menus.",
            area="Platform", days_ago=0),
     _entry("Route-based code splitting", "The app now loads only the page you're actually on instead of the whole app upfront — first load is roughly 70% smaller.",
@@ -100,8 +104,6 @@ UPCOMING = [
            area="Payments"),
     _entry("Inventory reorder automation", "Auto-generate purchase orders when stock crosses a supplier's reorder threshold.",
            area="Inventory"),
-    _entry("Guest-facing loyalty portal", "Let customers check their points balance and tier progress without asking staff.",
-           area="Loyalty", audience="guest"),
     _entry("Multi-business consolidated reporting", "Roll up sales, labor, and inventory across every location an owner runs, in one report.",
            area="Multi-location"),
 ]

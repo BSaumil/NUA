@@ -178,6 +178,7 @@ export default function OrderOnline() {
           </div>
           <div className="flex items-center gap-3">
             <LanguageSelector lang={lang} setLang={setLang} languages={languages} variant="light" label={t('common.language')} />
+            <Button variant="ghost" onClick={() => navigate('/rewards')} className="text-sm">{t('orderOnline.myRewards')}</Button>
             <Button variant="ghost" onClick={() => navigate('/track')} className="text-sm">{t('orderOnline.trackOrder')}</Button>
           </div>
         </header>
