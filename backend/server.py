@@ -40,6 +40,7 @@ from routes.items_system import router as items_system_router
 from routes.v15_features import router as v15_router
 from routes.loyalty_engine import router as loyalty_engine_router
 from routes.loyalty_v2 import router as loyalty_v2_router
+from routes.guest_session import router as guest_session_router
 from routes.measured_inventory import router as measured_inventory_router
 from routes.notifications import router as notifications_router
 from routes.phase_ef import router as phase_ef_router
@@ -83,6 +84,7 @@ api_router.include_router(analytics_router)
 api_router.include_router(settings_router)
 api_router.include_router(loyalty_router)
 api_router.include_router(loyalty_v2_router)
+api_router.include_router(guest_session_router)
 api_router.include_router(measured_inventory_router)
 api_router.include_router(notifications_router)
 api_router.include_router(public_router)
@@ -234,6 +236,13 @@ PUBLIC_API_PATHS = {
     # full customer record.
     "/api/loyalty/v2/guest-lookup",
     "/api/loyalty/v2/guest-lookup/request-code",
+    # Passwordless guest identity (services/guest_session.py) — same
+    # unauthenticated-by-design posture as the loyalty guest lookup above,
+    # generalized for booking/waitlist/ordering instead of loyalty-only.
+    # The token itself, not this middleware, is what verifies the caller.
+    "/api/guest/session/request-code",
+    "/api/guest/session/verify",
+    "/api/guest/session/me",
     # Self-service kiosk session creation — no sid exists yet, so this can't
     # be covered by the "/api/v25/kiosk/session/" prefix above.
     "/api/v25/kiosk/session",
@@ -315,6 +324,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # as much that a single IP can't be used to spam a phone number or
         # run up a Twilio bill.
         "/api/loyalty/v2/guest-lookup/request-code": (10, 60),  # 10 req/min per IP
+        # Same posture, generalized guest identity (services/guest_session.py)
+        # rather than loyalty-specific — still unauthenticated-by-design and
+        # still sends a real SMS per request-code call.
+        "/api/guest/session/request-code": (10, 60),  # 10 req/min per IP
+        "/api/guest/session/verify": (10, 60),  # 10 req/min per IP
         # Generous relative to the endpoints above — a genuine error storm
         # (a bad deploy looping on render) can legitimately fire many reports
         # per second from one browser, and losing those is exactly the

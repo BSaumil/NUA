@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   CalendarDays, Clock, Users, MapPin, ChevronRight, Check,
-  Phone, Mail, User, UtensilsCrossed, Music, Ticket, Star, ClipboardList
+  Phone, Mail, User, UtensilsCrossed, Music, Ticket, Star, ClipboardList, ShieldCheck, X
 } from 'lucide-react';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -12,6 +12,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from '../components/ui/select';
 import { publicAPI } from '../services/api';
+import { useGuestSession } from '../hooks/useGuestSession';
 import { toast } from 'sonner';
 
 const STEPS = ['select', 'details', 'confirmed'];
@@ -31,6 +32,51 @@ export default function BookingPortal() {
   });
   const [waitlistForm, setWaitlistForm] = useState({ guestName: '', guestPhone: '', partySize: 2, preferences: '' });
   const [confirmData, setConfirmData] = useState(null);
+
+  const guest = useGuestSession();
+  const [verifyPhone, setVerifyPhone] = useState('');
+  const [verifyCode, setVerifyCode] = useState('');
+  const [verifyStep, setVerifyStep] = useState('phone'); // phone, code
+  const [verifyBusy, setVerifyBusy] = useState(false);
+
+  // Prefill whichever form is in view once a returning guest verifies —
+  // only fills blanks, never clobbers something already typed this visit.
+  useEffect(() => {
+    if (!guest.profile) return;
+    setForm(f => ({
+      ...f,
+      guestName: f.guestName || guest.profile.name || '',
+      guestPhone: f.guestPhone || guest.profile.phone || '',
+      guestEmail: f.guestEmail || guest.profile.email || '',
+    }));
+    setWaitlistForm(f => ({
+      ...f,
+      guestName: f.guestName || guest.profile.name || '',
+      guestPhone: f.guestPhone || guest.profile.phone || '',
+    }));
+  }, [guest.profile]);
+
+  const sendVerifyCode = async () => {
+    if (!verifyPhone.trim()) return toast.error('Enter your phone number');
+    setVerifyBusy(true);
+    try {
+      await guest.requestCode(verifyPhone.trim());
+      setVerifyStep('code');
+      toast.success('Code sent — check your phone');
+    } catch { toast.error('Failed to send code'); }
+    finally { setVerifyBusy(false); }
+  };
+
+  const confirmVerifyCode = async () => {
+    if (verifyCode.length !== 6) return;
+    setVerifyBusy(true);
+    try {
+      await guest.verify(verifyPhone.trim(), verifyCode);
+      toast.success('Verified — your details will prefill from here on');
+      setVerifyStep('phone'); setVerifyPhone(''); setVerifyCode('');
+    } catch (e) { toast.error(e?.response?.data?.detail || 'That code didn’t match'); }
+    finally { setVerifyBusy(false); }
+  };
 
   useEffect(() => {
     publicAPI.getMenu().then(r => setMenu(r.data.categories || [])).catch(() => {});
@@ -73,6 +119,50 @@ export default function BookingPortal() {
       <div className="max-w-4xl mx-auto pt-10 pb-6 px-4">
         <div className="text-center">
           <h1 className="text-4xl font-bold text-white tracking-tight">NUA</h1>
+        </div>
+
+        {/* Passwordless guest verification — one phone check that prefills
+            every form on this page (and, via the same shared token, online
+            ordering) instead of re-typing name/phone/email each time. */}
+        <div className="max-w-md mx-auto mt-5">
+          {guest.profile ? (
+            <div className="flex items-center justify-between gap-2 bg-white/10 border border-white/20 rounded-full px-4 py-2 text-sm text-white"
+              data-testid="guest-session-verified-banner">
+              <span className="flex items-center gap-2 truncate">
+                <ShieldCheck size={14} className="text-emerald-400 flex-shrink-0" />
+                {guest.profile.known ? `Welcome back, ${guest.profile.name}!` : `Verified as ${guest.profile.phone}`}
+              </span>
+              <button onClick={guest.clearSession} className="text-gray-400 hover:text-white flex-shrink-0" data-testid="guest-session-clear-btn">
+                <X size={14} />
+              </button>
+            </div>
+          ) : !guest.loading && (
+            <div className="bg-white/10 border border-white/20 rounded-2xl p-3" data-testid="guest-session-verify-banner">
+              {verifyStep === 'phone' ? (
+                <div className="flex gap-2">
+                  <Input placeholder="Verify your phone to skip re-typing your details"
+                    value={verifyPhone} onChange={e => setVerifyPhone(e.target.value)}
+                    className="bg-white/90 text-sm" data-testid="guest-session-phone-input" />
+                  <Button size="sm" onClick={sendVerifyCode} disabled={verifyBusy} data-testid="guest-session-send-code-btn">
+                    Verify
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <Input placeholder="6-digit code" value={verifyCode} maxLength={6}
+                    onChange={e => setVerifyCode(e.target.value.replace(/\D/g, ''))}
+                    className="bg-white/90 text-sm" data-testid="guest-session-code-input" />
+                  <Button size="sm" onClick={confirmVerifyCode} disabled={verifyBusy || verifyCode.length !== 6}
+                    data-testid="guest-session-confirm-code-btn">
+                    Confirm
+                  </Button>
+                  <Button size="sm" variant="ghost" className="text-gray-300" onClick={() => setVerifyStep('phone')}>
+                    Back
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Tab Navigation */}

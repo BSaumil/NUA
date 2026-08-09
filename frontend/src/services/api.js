@@ -972,6 +972,15 @@ export const identityAPI = {
   migrateLegacyCrm: () => api.post('/identity/migrate-legacy-crm'),
 };
 
+// Passwordless guest identity — one verified phone session any guest-facing
+// surface (booking, waitlist, online ordering) can use to prefill forms
+// instead of asking a returning guest to re-type their details every time.
+export const guestSessionAPI = {
+  requestCode: (phone) => api.post('/guest/session/request-code', { phone }),
+  verify: (phone, code) => api.post('/guest/session/verify', { phone, code }),
+  me: (token) => api.get('/guest/session/me', { headers: { Authorization: `Bearer ${token}` } }),
+};
+
 // What's New — release notes for owners/managers
 export const changelogAPI = {
   list: (window) => api.get('/changelog', { params: window ? { window } : {} }),
