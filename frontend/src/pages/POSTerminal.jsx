@@ -1754,6 +1754,21 @@ const POSTerminal = () => {
           </div>
         ) : (
         <>
+        {/* Scrollable body — everything that can stack up (customer card,
+            "Your Usual", cart items, AI upsell strip, totals, discount
+            picker, and the payment method/cash sub-views) used to sit in
+            plain flex flow with only the cart-items list itself scrollable.
+            On a short viewport, a selected customer + "Your Usual" +
+            AI-suggested upsells could push the cart items to zero height
+            and shove the Send to Table / Proceed to Payment buttons clean
+            off the bottom of the panel with no way to scroll to them —
+            they weren't just hidden, they were unreachable. Wrapping the
+            whole body in one scrollable region and pinning the action
+            buttons below it (outside this div, so they're a fixed flex
+            sibling) fixes both: everything above is always reachable by
+            scrolling, and the buttons are always visible without needing
+            to. */}
+        <div className="flex-1 overflow-y-auto min-h-0 -mr-1 pr-1">
         {/* Customer Selection */}
         <Card className="mb-4"><CardContent className="p-4">
           <div className="flex items-center gap-2 mb-2">
@@ -1891,7 +1906,7 @@ const POSTerminal = () => {
         {coursingOn && kitchenOrder && (
           <ReadyBanner courses={ready} onServe={serveCourseFromCart} busy={coursingBusy} />
         )}
-        <div className="flex-1 overflow-y-auto mb-4">
+        <div className="mb-4">
           {cart.length === 0 ? (
             <div className="text-center py-12 text-gray-400">
               <ShoppingCart size={48} className="mx-auto mb-3 opacity-50" /><p>Cart is empty</p><p className="text-sm">Tap a product to add</p>
@@ -2148,6 +2163,10 @@ const POSTerminal = () => {
             )}
           </CardContent></Card>
         )}
+        </div>
+        {/* End of scrollable body — the actions below are a fixed flex
+            sibling, not part of the scroll region, so they stay visible
+            without needing to scroll to them. */}
 
         {/* Send-to-Table + Payment buttons */}
         {!showPayment && cart.length > 0 && (
