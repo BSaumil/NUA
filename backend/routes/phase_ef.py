@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request, Depends
 from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone
+from typing import Optional
 from collections import Counter, defaultdict
 import uuid
 import os
@@ -389,12 +390,63 @@ async def generate_po(user: dict = Depends(require_owner_or_manager)):
     return {"created": len(pos_list), "purchaseOrders": pos_list}
 
 
+async def _resolve_supplier_email(po: dict) -> Optional[dict]:
+    """POs land in this collection with two different shapes depending on
+    which path created them — analytics.py's strict-model POST stamps a
+    real supplierId, phase_ef's own auto-generate only ever had a raw
+    supplier NAME string. Try the id first, fall back to a name match, so
+    "send" works for a PO regardless of which flow created it."""
+    supplier_id = po.get("supplierId")
+    if supplier_id:
+        supplier = await db.suppliers.find_one({"id": supplier_id}, {"_id": 0})
+        if supplier:
+            return supplier
+    supplier_name = po.get("supplier") or po.get("supplierName")
+    if supplier_name:
+        return await db.suppliers.find_one({"name": supplier_name}, {"_id": 0})
+    return None
+
+
+def _po_email_body(po: dict) -> str:
+    lines = [f"Purchase order {po.get('id')}", ""]
+    for item in po.get("items", []):
+        qty = item.get("orderQty") or item.get("quantity") or 0
+        name = item.get("productName") or item.get("name") or "Item"
+        lines.append(f"  {qty} x {name}")
+    if po.get("notes"):
+        lines.append("")
+        lines.append(f"Notes: {po['notes']}")
+    return "\n".join(lines)
+
+
 @router.post("/purchase-orders/{po_id}/{action}")
 async def update_po(po_id: str, action: str, _: dict = Depends(require_owner_or_manager)):
     if action not in ("approve", "send", "receive", "cancel"):
         raise HTTPException(status_code=400, detail="Invalid action")
     status_map = {"approve": "approved", "send": "sent", "receive": "received", "cancel": "cancelled"}
     update = {"status": status_map[action], f"{action}dAt": datetime.now(timezone.utc).isoformat()}
+
+    email_result = None
+    if action == "send":
+        # "send" used to just flip a status flag — nothing was ever actually
+        # communicated to the supplier, so a PO marked "sent" was a false
+        # signal a human still had to remember to call or email it in
+        # themselves. This is the actual last mile: attempt a real email,
+        # and record the real outcome (delivered / not_configured / no
+        # supplier on file) instead of a status flip that implies more than
+        # what happened.
+        existing = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+        if not existing:
+            raise HTTPException(status_code=404, detail="PO not found")
+        supplier = await _resolve_supplier_email(existing)
+        if supplier and supplier.get("email"):
+            from utils.notifications import send_email
+            email_result = await send_email(
+                supplier["email"], f"Purchase order {po_id}", _po_email_body(existing))
+        else:
+            email_result = {"channel": "email", "delivered": False, "reason": "no_supplier_email_on_file"}
+        update["emailResult"] = email_result
+
     po = await db.purchase_orders.find_one_and_update({"id": po_id}, {"$set": update}, return_document=True)
     if not po:
         raise HTTPException(status_code=404, detail="PO not found")
