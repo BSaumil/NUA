@@ -112,7 +112,7 @@ async def export_business_data(business_id: str, collection: Optional[str] = Non
 
     collections_to_export = ["products", "transactions", "customers", "reservations",
                               "kitchen_orders", "expenses", "suppliers", "feedback",
-                              "members", "vouchers", "automation_rules"]
+                              "members", "vouchers"]
 
     if collection and collection in collections_to_export:
         collections_to_export = [collection]

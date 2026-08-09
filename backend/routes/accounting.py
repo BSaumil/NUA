@@ -64,6 +64,7 @@ from models.accounting import (
 )
 from utils.mongo_safe import safe_parse_list
 from services import accounting_service as svc
+from middleware.actor_context import tenant_scope_filter
 import uuid
 import logging
 
@@ -133,7 +134,7 @@ async def list_journals(
     source_type: Optional[str] = None,
     account_code: Optional[str] = None,
     limit: int = 200,
-    _: dict = Depends(get_user),
+    user: dict = Depends(get_user),
 ):
     q: Dict[str, Any] = {}
     if from_date or to_date:
@@ -146,6 +147,9 @@ async def list_journals(
         q["sourceType"] = source_type
     if account_code:
         q["lines.accountCode"] = account_code
+    # journal_entries had no tenant filter at all — any authenticated user
+    # could list every business's ledger entries, not just their own.
+    q.update(tenant_scope_filter(user.get("businessId")))
     rows = await db.journal_entries.find(q, {"_id": 0}).sort("date", -1).limit(limit).to_list(limit)
     return safe_parse_list(rows, JournalEntry, where="journal_entries")
 
@@ -291,10 +295,12 @@ async def report_budget_vs_actual(
 # AP — Bills
 # ═════════════════════════════════════════════════════════════════════════
 @router.get("/bills")
-async def list_bills(status: Optional[str] = None, supplier_id: Optional[str] = None, _: dict = Depends(get_user)):
+async def list_bills(status: Optional[str] = None, supplier_id: Optional[str] = None, user: dict = Depends(get_user)):
     q: Dict[str, Any] = {}
     if status: q["status"] = status
     if supplier_id: q["supplierId"] = supplier_id
+    # Accounts-payable bills, same missing-filter gap as journal_entries above.
+    q.update(tenant_scope_filter(user.get("businessId")))
     rows = await db.bills.find(q, {"_id": 0}).sort("dueDate", 1).to_list(500)
     return safe_parse_list(rows, Bill, where="bills")
 

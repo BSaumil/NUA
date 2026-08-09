@@ -117,10 +117,16 @@ export default function StaffRoster() {
       setRoster(ros.data);
       setStaff(st.data.filter(s => s.role !== 'owner'));
     } catch (e) { toast.error(e.response?.data?.detail || 'Failed to load roster data — check your connection and reload'); }
+    const [payRes, timeOffRes] = await Promise.allSettled([
+      isOwner ? staffMgmtAPI.getPayrunHistory() : Promise.resolve(null),
+      staffMgmtAPI.listTimeOff(),
+    ]);
     if (isOwner) {
-      try { const h = await staffMgmtAPI.getPayrunHistory(); setPayHistory(h.data); } catch { toast.error('Failed to load payrun history'); }
+      if (payRes.status === 'fulfilled') setPayHistory(payRes.value.data);
+      else toast.error('Failed to load payrun history');
     }
-    try { const t = await staffMgmtAPI.listTimeOff(); setTimeOff(t.data); } catch { toast.error('Failed to load time-off requests'); }
+    if (timeOffRes.status === 'fulfilled') setTimeOff(timeOffRes.value.data);
+    else toast.error('Failed to load time-off requests');
   };
 
   const fetchReports = async () => {

@@ -11,7 +11,7 @@ import {
   ChevronDown, ChevronRight, Timer,
   CalendarCheck, LayoutGrid, SlidersHorizontal, Boxes, Layers, Puzzle,
   Percent, XCircle, Grid3x3, Scale, Sparkles, Ticket, Megaphone, Receipt,
-  FileBadge, Wallet, PiggyBank, Target, BookMarked, AlertTriangle, Cpu,
+  FileBadge, Wallet, PiggyBank, Target, BookMarked, Cpu,
   CreditCard, KeyRound, Building2, Rocket, Fingerprint
 } from 'lucide-react';
 
@@ -112,14 +112,14 @@ const NAV_STRUCTURE = [
     icon: Brain, label: 'NUA AI', access: ['owner', 'manager'],
     children: [
       // "Intelligence" renamed to match what the page itself calls itself
-      // (the Autonomous Operating Layer) — and "Automation Engine" (threshold
-      // alerts) renamed to "Alert Rules" so it stops reading as a duplicate
-      // of "Automation Brain" (the actual rule-firing engine).
+      // (the Autonomous Operating Layer). The old "Automation Engine" entry
+      // (threshold alerts, rebranded "Alert Rules") is gone entirely now —
+      // its rules were write-only, never read by anything that could fire
+      // them. "Automation Brain" is the one real, event-driven rules engine.
       { path: '/ash', label: 'Autonomy', icon: Sparkles },
       { path: '/ash-hq', label: 'Agent Command Center', icon: Zap },
       { path: '/ash-plans', label: 'Planner', icon: Target },
       { path: '/ash-memory', label: 'Memory', icon: BookMarked },
-      { path: '/automation', label: 'Alert Rules', icon: AlertTriangle },
       { path: '/automation-triggers', label: 'Automation Brain', icon: Cpu },
     ],
   },

@@ -368,15 +368,6 @@ export const analyticsAPI = {
   saveTodayTargets: (data) => api.post('/analytics/today-targets', data),
 };
 
-// Automation API
-export const automationAPI = {
-  getRules: () => api.get('/automation/rules'),
-  createRule: (data) => api.post('/automation/rules', data),
-  deleteRule: (id) => api.delete(`/automation/rules/${id}`),
-  toggleRule: (id) => api.post(`/automation/rules/${id}/toggle`),
-  getAlerts: () => api.get('/automation/alerts'),
-};
-
 // Events & Experiences
 export const eventsAPI = {
   getAll: (params) => api.get('/events', { params }),
@@ -773,11 +764,6 @@ export const v26API = {
   stopGiftCard: (code, reason) => api.post(`/v26/gift-cards/${code}/stop`, { reason }),
   reactivateGiftCard: (code) => api.post(`/v26/gift-cards/${code}/reactivate`),
   resendGiftCard: (code, email) => api.post(`/v26/gift-cards/${code}/resend`, email ? { email } : {}),
-  // Marketing emails
-  generateMarketingEmail: (data) => api.post('/v26/marketing/email/generate', data),
-  listMarketingEmails: () => api.get('/v26/marketing/emails'),
-  updateMarketingEmail: (id, data) => api.patch(`/v26/marketing/emails/${id}`, data),
-  deleteMarketingEmail: (id) => api.delete(`/v26/marketing/emails/${id}`),
   // Events
   listEvents: (upcomingOnly = false) => api.get('/v26/events', { params: { upcomingOnly } }),
   createEvent: (data) => api.post('/v26/events', data),

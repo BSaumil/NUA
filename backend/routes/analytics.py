@@ -7,31 +7,11 @@ from models.bas_report import BASReport, BASReportCreate
 from models.expense import Expense, ExpenseCreate
 from models.supplier import Supplier, SupplierCreate, PurchaseOrder, PurchaseOrderCreate
 from middleware.actor_context import tenant_scope_filter
+from utils.dates import date_range_filter as _date_match
 import uuid
 import random
 
 router = APIRouter()
-
-
-def _date_match(field: str, start_date: Optional[str], end_date: Optional[str]) -> dict:
-    """A $match stage for an optional date range, or {} for all-time.
-
-    Kept optional and defaulting to all-time rather than forcing a window:
-    these are lifetime P&L figures a venue expects to see by default, and
-    changing that default silently would change what the report means. What
-    this actually fixes is that the sum is now computed by the database
-    instead of by shipping every row to Python and adding it up there — a
-    P&L that summed the first 10,000 transactions and silently ignored the
-    rest was the real bug once a venue had traded past that many.
-    """
-    if not start_date and not end_date:
-        return {}
-    rng = {}
-    if start_date:
-        rng["$gte"] = datetime.fromisoformat(start_date)
-    if end_date:
-        rng["$lte"] = datetime.fromisoformat(end_date)
-    return {field: rng}
 
 
 async def _sum_transactions(match: dict) -> dict:

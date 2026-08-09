@@ -114,7 +114,7 @@ const ALL_FEATURES = [
     { path: '/integrations', label: 'Integrations', icon: Plug, access: ['owner'] },
   ]},
   { group: 'System', items: [
-    { path: '/automation', label: 'Automation', icon: Zap, access: ['owner', 'manager'] },
+    { path: '/automation-triggers', label: 'Automation', icon: Zap, access: ['owner', 'manager'] },
     { path: '/settings', label: 'Settings', icon: Settings, access: ['owner', 'manager'] },
   ]},
   { group: 'Enterprise (v25)', items: [
@@ -148,7 +148,7 @@ const ALL_FEATURES = [
     { path: '/events', label: 'Events & Experiences', icon: Trophy, access: ['owner', 'manager'] },
     { path: '/staff-availability', label: 'Staff Availability', icon: Users, access: ['owner', 'manager'] },
     { path: '/gift-cards', label: 'Sell Gift Card', icon: Tag, access: ['owner', 'manager', 'cashier'] },
-    { path: '/marketing-emails', label: 'AI Marketing Emails', icon: Sparkles, access: ['owner', 'manager'] },
+    { path: '/marketing?tab=email', label: 'AI Marketing Emails', icon: Sparkles, access: ['owner', 'manager'] },
     { path: '/online-orders', label: 'Online Orders', icon: ShoppingBag, access: ['owner', 'manager', 'cashier', 'kitchen'] },
     { path: '/inventory-accounting', label: 'Inventory & BAS', icon: Receipt, access: ['owner', 'manager'] },
   ]},
