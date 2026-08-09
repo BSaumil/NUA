@@ -76,10 +76,14 @@ const NAV_STRUCTURE = [
   {
     icon: Users2, label: 'Team', access: ['owner', 'manager', 'cashier', 'kitchen'],
     children: [
-      { path: '/staff', label: 'Staff', icon: Users2 },
+      // GET /staff and GET|POST /tips* are owner/manager-only server-side —
+      // a cashier or kitchen role reaching either of these used to get a
+      // silently-failed toast and a blank page, since the group itself
+      // (and therefore every child in it, pre-fix) was visible to them.
+      { path: '/staff', label: 'Staff', icon: Users2, access: ['owner', 'manager'] },
       { path: '/staff-roster', label: 'Roster & Payrun', icon: Clock },
       { path: '/leaderboard', label: 'Leaderboard', icon: Trophy },
-      { path: '/tip-management', label: 'Tip Management', icon: DollarSign },
+      { path: '/tip-management', label: 'Tip Management', icon: DollarSign, access: ['owner', 'manager'] },
     ],
   },
   {
@@ -203,9 +207,16 @@ const Sidebar = () => {
           if (item.children) {
             const isOpen = openGroups[item.label] || isGroupActive(item.children);
             const Icon = item.icon;
+            // Most groups are uniform — every child open to whoever can see
+            // the group. A few (Team: Staff/Tip Management vs Roster/
+            // Leaderboard) mix screens with genuinely different backend
+            // access requirements under one group; `access` on a child
+            // narrows the group's default for that child only, e.g. so
+            // Tip Management doesn't show for a cashier the backend was
+            // always going to 403.
             const filteredChildren = hasCustomPerms && role !== 'owner'
               ? item.children.filter(c => customPerms.includes(c.path.replace('/', '')))
-              : item.children;
+              : item.children.filter(c => role === 'owner' || !c.access || c.access.includes(role));
             if (filteredChildren.length === 0) return null;
             return (
               <div key={item.label} className={item.advanced ? 'pt-2 mt-2 border-t border-gray-100' : ''}>

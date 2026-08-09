@@ -87,7 +87,7 @@ export default function GuestWalletDialog({ open, onOpenChange, customer }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md" data-testid="guest-wallet-dialog">
+      <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto" data-testid="guest-wallet-dialog">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Wallet size={18} /> Digital Wallet

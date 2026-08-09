@@ -49,6 +49,8 @@ export default function OrderOnline() {
   // every business's menu combined instead of telling the guest their link
   // is broken.
   const [businessFound, setBusinessFound] = useState(null);
+  const [menuLoading, setMenuLoading] = useState(true);
+  const [menuError, setMenuError] = useState(false);
 
   useEffect(() => {
     if (!businessParam) { setBusinessFound(null); return; }
@@ -57,12 +59,22 @@ export default function OrderOnline() {
       .catch(() => setBusinessFound(null));
   }, [businessParam]);
 
-  useEffect(() => {
-    if (businessParam && businessFound === false) return;
+  const loadMenu = React.useCallback(() => {
+    setMenuLoading(true);
+    setMenuError(false);
     Promise.all([onlineAPI.publicProducts(businessParam), onlineAPI.publicCategories(businessParam)])
       .then(([p, c]) => { setProducts(p.data || []); setCategories(c.data || []); })
-      .catch(() => {});
-  }, [businessParam, businessFound]);
+      // A guest hitting a slow/broken backend used to just see an empty
+      // product grid with zero explanation — no loading state, no error,
+      // no way to tell "nothing on the menu" from "couldn't load the menu."
+      .catch(() => setMenuError(true))
+      .finally(() => setMenuLoading(false));
+  }, [businessParam]);
+
+  useEffect(() => {
+    if (businessParam && businessFound === false) return;
+    loadMenu();
+  }, [businessParam, businessFound, loadMenu]);
 
   // Filter categories by selected channel
   const cats = useMemo(() => categories.filter(c => true), [categories]);
@@ -219,8 +231,20 @@ export default function OrderOnline() {
                 </button>
               ))}
             </div>
+            {menuError && (
+              <div className="text-center py-10 border border-dashed rounded-lg" data-testid="online-menu-error">
+                <p className="text-sm text-gray-500 mb-2">Couldn't load the menu — please check your connection.</p>
+                <Button size="sm" variant="outline" onClick={loadMenu} data-testid="online-menu-retry">Try again</Button>
+              </div>
+            )}
+            {menuLoading && !menuError && (
+              <div className="text-center py-10 text-sm text-gray-400" data-testid="online-menu-loading">Loading menu…</div>
+            )}
+            {!menuLoading && !menuError && filteredProducts.length === 0 && (
+              <div className="text-center py-10 text-sm text-gray-400" data-testid="online-menu-empty">Nothing available in this category right now.</div>
+            )}
             <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(170px,1fr))]">
-              {filteredProducts.map(p => (
+              {!menuLoading && !menuError && filteredProducts.map(p => (
                 <Card key={p.id} className="overflow-hidden cursor-pointer hover:shadow-md transition" onClick={() => addItem(p)} data-testid={`online-product-${p.id}`}>
                   <img src={p.image || 'https://placehold.co/300x180/e5e7eb/9ca3af?text=NUA'} alt={productName(p, lang)} className="w-full h-28 object-cover" />
                   <CardContent className="p-2.5">

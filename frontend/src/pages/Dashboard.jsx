@@ -161,7 +161,7 @@ const Dashboard = () => {
 
       {/* Transaction Detail Dialog */}
       <Dialog open={showDetail} onOpenChange={setShowDetail}>
-        <DialogContent className="max-w-lg" data-testid="txn-detail-dialog">
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto" data-testid="txn-detail-dialog">
           <DialogHeader><DialogTitle>Transaction Details</DialogTitle></DialogHeader>
           {selectedTxn && (
             <div className="space-y-4 py-2">

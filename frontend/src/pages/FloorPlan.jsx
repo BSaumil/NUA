@@ -87,7 +87,7 @@ export default function FloorPlan() {
         setSections(first.sections || []);
         setPlanName(first.name);
       }
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); toast.error('Could not load the floor plan'); }
   }, [activePlanId]);
 
   useEffect(() => { fetchPlans(); }, [fetchPlans]);

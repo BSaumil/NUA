@@ -2207,8 +2207,17 @@ const POSTerminal = () => {
           </p>
         )}
 
+        {/* Payment Methods Panel + Cash Payment Panel — same fixed-height
+            cart panel as the body above, but these two were never given
+            their own scroll region either. On a short/embedded viewport
+            (e.g. a kiosk tablet with an on-screen keyboard eating vertical
+            space) Split Payment / Cancel / Complete Sale could get pushed
+            out of the panel with nothing able to scroll to them — this is
+            the literal payment step, hit on every sale. */}
+        {showPayment && (
+        <div className="flex-1 overflow-y-auto min-h-0 -mr-1 pr-1">
         {/* Payment Methods Panel */}
-        {showPayment && paymentView === 'methods' && (
+        {paymentView === 'methods' && (
           <div className="space-y-2" data-testid="payment-methods-panel">
             <div className="grid grid-cols-2 gap-2">
               <Button className="h-14 flex-col gap-1" variant="outline" onClick={() => handleCheckout('Card')} data-testid="pay-card">
@@ -2245,7 +2254,7 @@ const POSTerminal = () => {
         )}
 
         {/* Cash Payment Panel */}
-        {showPayment && paymentView === 'cash' && (
+        {paymentView === 'cash' && (
           <div className="space-y-3" data-testid="cash-payment-panel">
             {!showCashChange ? (
               <>
@@ -2289,6 +2298,8 @@ const POSTerminal = () => {
               </div>
             )}
           </div>
+        )}
+        </div>
         )}
         </>
         )}
