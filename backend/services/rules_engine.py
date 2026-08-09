@@ -68,6 +68,8 @@ EVENT_CATALOG = {
     # Finance
     "finance.ap_due_soon":      {"module": "finance",   "label": "AP bill due soon",            "fields": ["billId", "amount", "supplierName"]},
     "finance.cash_low":         {"module": "finance",   "label": "Cash balance low",            "fields": ["accountCode", "balance"]},
+    # Ops / observability
+    "ops.error_spike":          {"module": "ops",       "label": "Error rate spike",            "fields": ["source", "count", "threshold", "windowMinutes"]},
 }
 
 
