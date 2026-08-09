@@ -390,6 +390,8 @@ export const publicAPI = {
   book: (data) => api.post('/public/book', data),
   joinWaitlist: (data) => api.post('/public/join-waitlist', data),
   getEvents: () => api.get('/public/events'),
+  trackWaitlist: (code) => api.get(`/waitlist/track/${code}`),
+  trackWaitlistStreamUrl: (code) => `${API_BASE_URL}/waitlist/track/stream/${encodeURIComponent(code)}`,
 };
 
 // QR Payment
