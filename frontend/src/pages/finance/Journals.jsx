@@ -106,7 +106,7 @@ const Journals = () => {
       </CardContent></Card>
 
       <Dialog open={showNew} onOpenChange={setShowNew}>
-        <DialogContent className="max-w-3xl" data-testid="journal-new-dialog">
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto" data-testid="journal-new-dialog">
           <DialogHeader><DialogTitle>New Journal Entry</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
