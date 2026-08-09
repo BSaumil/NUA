@@ -9,6 +9,7 @@ from models.table import Table, TableCreate
 from models.eftpos import EFTPOSConfig, EFTPOSConfigCreate, EFTPOSTransaction, EFTPOSTransactionRequest
 from models.staff import StaffShift
 from utils.mongo_safe import safe_find_list
+from middleware.actor_context import tenant_scope_filter
 import logging
 import uuid
 
@@ -291,12 +292,15 @@ async def process_eftpos_transaction(request: EFTPOSTransactionRequest, _: dict 
 @router.get("/eftpos/transactions", response_model=List[EFTPOSTransaction])
 async def get_eftpos_transactions(start_date: Optional[str] = None, end_date: Optional[str] = None,
                                   terminal_id: Optional[str] = None,
-                                  _: dict = Depends(require_owner_or_manager)):
+                                  user: dict = Depends(require_owner_or_manager)):
     query = {}
     if terminal_id:
         query["terminalId"] = terminal_id
     if start_date and end_date:
         query["timestamp"] = {"$gte": datetime.fromisoformat(start_date), "$lte": datetime.fromisoformat(end_date)}
+    # EFTPOS terminal transactions had no tenant filter — comparable financial
+    # data to transactions.py, which already scopes correctly.
+    query.update(tenant_scope_filter(user.get("businessId")))
     transactions = await db.eftpos_transactions.find(query).sort("timestamp", -1).to_list(1000)
     return [EFTPOSTransaction(**t) for t in transactions]
 

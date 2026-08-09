@@ -7,6 +7,7 @@ from services import floor_tables
 from models.reservation import Reservation, ReservationCreate, ReservationUpdate
 from models.floor_plan import FloorPlan, FloorPlanCreate, FloorPlanUpdate
 from models.waitlist import WaitlistEntry, WaitlistEntryCreate, WaitlistEntryUpdate
+from middleware.actor_context import tenant_scope_filter
 
 router = APIRouter()
 
@@ -43,7 +44,8 @@ async def guest_intel(customer_id: str):
 
 # ============ RESERVATIONS API ============
 @router.get("/reservations", response_model=List[Reservation])
-async def get_reservations(date: Optional[str] = None, status: Optional[str] = None, section: Optional[str] = None):
+async def get_reservations(date: Optional[str] = None, status: Optional[str] = None, section: Optional[str] = None,
+                           user: dict = Depends(get_user)):
     query = {}
     if date:
         query["date"] = date
@@ -51,6 +53,9 @@ async def get_reservations(date: Optional[str] = None, status: Optional[str] = N
         query["status"] = status
     if section:
         query["section"] = section
+    # Guest name/phone/party-size reservation data had no tenant filter —
+    # comparable to v15_features.py's drawer events, which already scopes.
+    query.update(tenant_scope_filter(user.get("businessId")))
     reservations = await db.reservations.find(query, {"_id": 0}).sort("time", 1).to_list(1000)
     return [Reservation(**r) for r in reservations]
 
