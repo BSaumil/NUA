@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   CalendarDays, Clock, Users, MapPin, ChevronRight, Check,
   Phone, Mail, User, UtensilsCrossed, Music, Ticket, Star, ClipboardList
@@ -17,6 +18,7 @@ const STEPS = ['select', 'details', 'confirmed'];
 const EVENT_ICONS = { dining: UtensilsCrossed, wine_pairing: Star, cooking_class: UtensilsCrossed, live_music: Music, private: Ticket };
 
 export default function BookingPortal() {
+  const navigate = useNavigate();
   const [tab, setTab] = useState('reserve'); // reserve, waitlist, events, menu
   const [step, setStep] = useState('select');
   const [menu, setMenu] = useState([]);
@@ -256,9 +258,18 @@ export default function BookingPortal() {
                   <p>Estimated wait: ~{confirmData.estimatedWait} minutes</p>
                 </div>
               )}
-              <Button className="mt-6 bg-gray-900 hover:bg-gray-800 text-white" onClick={reset} data-testid="portal-new-booking-btn">
-                Make Another Booking
-              </Button>
+              <div className="flex flex-col sm:flex-row gap-2 justify-center mt-6">
+                {tab === 'waitlist' && confirmData.id && (
+                  <Button className="bg-purple-600 hover:bg-purple-700 text-white"
+                    onClick={() => navigate(`/waitlist-track/${confirmData.id}`)}
+                    data-testid="portal-track-waitlist-btn">
+                    Track my position live
+                  </Button>
+                )}
+                <Button className="bg-gray-900 hover:bg-gray-800 text-white" onClick={reset} data-testid="portal-new-booking-btn">
+                  Make Another Booking
+                </Button>
+              </div>
             </CardContent>
           </Card>
         )}

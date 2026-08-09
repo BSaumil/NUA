@@ -142,6 +142,7 @@ const StaffAvailability = lazyNamed(v26, 'StaffAvailability');
 const OnlineOrders = lazy(() => import('./pages/OnlineOrders'));
 const OrderOnline = lazy(() => import('./pages/OrderOnline'));
 const TrackOrder = lazy(() => import('./pages/TrackOrder'));
+const TrackWaitlist = lazy(() => import('./pages/TrackWaitlist'));
 const LoyaltyGuestPortal = lazy(() => import('./pages/LoyaltyGuestPortal'));
 import { useTheme } from './contexts/ThemeContext';
 
@@ -360,6 +361,8 @@ function App() {
                   <Route path="/order-online" element={<OrderOnline />} />
                   <Route path="/track" element={<TrackOrder />} />
                   <Route path="/track/:code" element={<TrackOrder />} />
+                  <Route path="/waitlist-track" element={<TrackWaitlist />} />
+                  <Route path="/waitlist-track/:code" element={<TrackWaitlist />} />
                   <Route path="/rewards" element={<LoyaltyGuestPortal />} />
                   <Route path="/reset-password" element={<ResetPassword />} />
                   {/* Staff routes — auth required */}

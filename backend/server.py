@@ -194,6 +194,7 @@ PUBLIC_API_PREFIXES = (
     "/api/public/",              # booking portal: menu, slots, book, waitlist, events
     "/api/table/",               # QR table ordering: menu, place order, order status
     "/api/online/orders/track/", # order tracking by code, from the SMS link
+    "/api/waitlist/track/",      # waitlist position tracking by code, same access model
     "/api/stripe/checkout/status/",
     # Self-service kiosk: add-to-cart, course, checkout, upsell — no staff
     # login exists on a kiosk terminal. Deliberately "session/" (trailing

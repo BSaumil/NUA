@@ -71,7 +71,10 @@ async def public_join_waitlist(data: dict):
         position=next_pos,
     )
     await db.waitlist.insert_one(entry.dict())
-    return {"position": next_pos, "estimatedWait": next_pos * random.randint(8, 15)}
+    # id is the guest's tracking code for GET /waitlist/track/{id} — without
+    # it there was no way to hand the guest anything to check their status
+    # with later, only the one-time position/estimate from this response.
+    return {"id": entry.id, "position": next_pos, "estimatedWait": next_pos * random.randint(8, 15)}
 
 @router.get("/public/events")
 async def get_public_events():
