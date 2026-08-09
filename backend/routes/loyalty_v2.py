@@ -476,6 +476,22 @@ async def get_progress(customer_id: str, _: dict = Depends(get_user)):
     return await get_customer_progress(customer_id)
 
 
+@router.get("/passport/{customer_id}")
+async def get_passport(customer_id: str, _: dict = Depends(get_user)):
+    """Staff-facing: does this customer have loyalty accounts at sibling
+    locations (same owner), and what does their combined picture look
+    like? Anchors the group lookup on this customer's own record rather
+    than the caller's business context, so it works the same whichever
+    location's staff happen to be looking."""
+    from services import loyalty_group
+    customer = await db.customers.find_one({"id": customer_id}, {"_id": 0, "phone": 1, "businessId": 1})
+    if not customer:
+        raise HTTPException(404, "Customer not found")
+    if not customer.get("phone"):
+        return {"found": False}
+    return await loyalty_group.passport_view(customer["phone"], customer.get("businessId"))
+
+
 GUEST_OTP_TTL_SECONDS = 300      # code is texted, so 5 minutes is generous but not loose
 GUEST_OTP_MAX_ATTEMPTS = 5
 
@@ -564,13 +580,19 @@ async def guest_lookup(body: Dict[str, Any]):
     # Single use — burn it the moment it's spent, win or lose.
     await db.loyalty_guest_otp.delete_one({"phone": phone})
 
-    customer = await db.customers.find_one({"phone": phone}, {"_id": 0, "id": 1, "name": 1})
+    customer = await db.customers.find_one({"phone": phone}, {"_id": 0, "id": 1, "name": 1, "businessId": 1})
     if not customer:
         return {"found": False}
 
     progress = await get_customer_progress(customer["id"])
     if progress.get("error"):
         return {"found": False}
+
+    # If this phone also has an account at a sibling location (same owner,
+    # different venue), surface the combined picture instead of leaving the
+    # guest to think the one record found here is their whole relationship.
+    from services import loyalty_group
+    passport = await loyalty_group.passport_view(phone, customer.get("businessId"))
 
     first_name = (customer.get("name") or "").strip().split(" ")[0] or "there"
     return {
@@ -580,6 +602,7 @@ async def guest_lookup(body: Dict[str, Any]):
         "tier": progress["tier"],
         "tierProgress": progress["tierProgress"],
         "badges": [b for b in progress["badges"] if b["earned"]],
+        "passport": passport if passport.get("isMultiLocation") else None,
         "milestones": progress["milestones"],
     }
 

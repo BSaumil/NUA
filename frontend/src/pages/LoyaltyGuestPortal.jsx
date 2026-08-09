@@ -7,7 +7,7 @@ import { Badge } from '../components/ui/badge';
 import { loyaltyGuestAPI } from '../services/api';
 import {
   Sparkles, Coffee, Heart, Trophy, DollarSign, Crown, Sunrise, Wine, Users, Gift,
-  Lock, CheckCircle2, Target, Loader2, Phone,
+  Lock, CheckCircle2, Target, Loader2, Phone, MapPin,
 } from 'lucide-react';
 
 const ICONS = {
@@ -165,6 +165,30 @@ export default function LoyaltyGuestPortal() {
                 )}
               </CardContent>
             </Card>
+
+            {data.passport && (
+              <Card className="border-indigo-200 bg-indigo-50/60" data-testid="guest-passport-card">
+                <CardContent className="p-5 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <MapPin size={16} className="text-indigo-600" />
+                    <p className="font-semibold text-sm text-indigo-800">You're a member at {data.passport.locations.length} locations</p>
+                  </div>
+                  <p className="text-xs text-indigo-700/80">
+                    Combined across every venue: <span className="font-bold">{data.passport.groupPoints} points</span>,{' '}
+                    <span className="font-bold">{data.passport.groupTier || 'Bronze'}</span> tier.
+                  </p>
+                  <div className="space-y-1.5">
+                    {data.passport.locations.map(l => (
+                      <div key={l.customerId} className="flex items-center justify-between bg-white rounded-lg border border-indigo-100 px-3 py-2 text-sm"
+                        data-testid={`guest-passport-location-${l.businessId}`}>
+                        <span className="font-medium truncate">{l.businessName}</span>
+                        <span className="text-slate-500 text-xs flex-shrink-0">{l.points} pts · {l.tier || 'Bronze'}</span>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {data.badges.length > 0 && (
               <Card><CardContent className="p-5">
