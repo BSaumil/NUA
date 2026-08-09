@@ -160,6 +160,26 @@ async def run_predictive_scan(_: dict = Depends(require_owner_or_manager)):
     return await predictive_signals.scan_and_emit_predicted_stockouts()
 
 
+@router.get("/ops/error-status")
+async def ops_error_status(_: dict = Depends(get_user)):
+    """Preview-only — current error counts in the rolling window without
+    touching db.rule_events, so checking this never affects the hourly
+    scheduler's own dedupe window for the real scan."""
+    from services import ops_signals
+    server = await ops_signals.check_server_errors()
+    client = await ops_signals.check_client_errors()
+    return {"server": server, "client": client}
+
+
+@router.post("/ops/scan")
+async def run_ops_scan(_: dict = Depends(require_owner_or_manager)):
+    """Manually trigger the same observability scan the hourly scheduler
+    runs — emits ops.error_spike for whichever source just crossed its
+    threshold and isn't already inside its dedupe window."""
+    from services import ops_signals
+    return await ops_signals.scan_and_emit()
+
+
 @router.post("/simulate")
 async def simulate(body: dict, _: dict = Depends(get_user)):
     """Dry-run a rule against a sample payload without executing actions."""

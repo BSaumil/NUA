@@ -98,6 +98,13 @@ async def _loop() -> None:
         except Exception as e:
             logger.warning(f"[ash] predictive scan error: {e}")
         try:
+            from services import ops_signals
+            ops = await ops_signals.scan_and_emit()
+            if ops["server"]["emitted"] or ops["client"]["emitted"]:
+                logger.info(f"[ash] ops scan: server_emitted={ops['server']['emitted']} client_emitted={ops['client']['emitted']}")
+        except Exception as e:
+            logger.warning(f"[ash] ops scan error: {e}")
+        try:
             await asyncio.sleep(interval)
         except asyncio.CancelledError:
             logger.info("[ash] scheduler cancelled — exiting cleanly")

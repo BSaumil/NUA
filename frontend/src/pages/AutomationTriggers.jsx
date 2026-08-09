@@ -9,7 +9,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { toast } from 'sonner';
-import { Zap, Plus, Trash2, Sparkles, Play, Pause, Brain, History, GitBranch, ChevronRight, Cpu, Activity, ArrowRight, TrendingDown, RefreshCw } from 'lucide-react';
+import { Zap, Plus, Trash2, Sparkles, Play, Pause, Brain, History, GitBranch, ChevronRight, Cpu, Activity, ArrowRight, TrendingDown, RefreshCw, AlertTriangle, ShieldCheck } from 'lucide-react';
 import axios from 'axios';
 
 /* Tiny API wrapper — kept local to avoid polluting services/api.js */
@@ -29,6 +29,8 @@ const rulesAPI = {
   executions: (params) => axios.get(`${API}/rules/history/executions`, { headers: headers(), params }),
   predictiveStockouts: () => axios.get(`${API}/rules/predictive/stockouts`, { headers: headers() }),
   predictiveScan: () => axios.post(`${API}/rules/predictive/scan`, {}, { headers: headers() }),
+  opsErrorStatus: () => axios.get(`${API}/rules/ops/error-status`, { headers: headers() }),
+  opsScan: () => axios.post(`${API}/rules/ops/scan`, {}, { headers: headers() }),
 };
 
 const emptyRule = {
@@ -61,6 +63,9 @@ export default function AutomationTriggers() {
   const [predictions, setPredictions] = useState([]);
   const [predictiveLoading, setPredictiveLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [opsStatus, setOpsStatus] = useState(null);
+  const [opsLoading, setOpsLoading] = useState(false);
+  const [opsScanning, setOpsScanning] = useState(false);
 
   const loadAll = useCallback(async () => {
     try {
@@ -94,6 +99,27 @@ export default function AutomationTriggers() {
       loadPredictions();
     } catch { toast.error('Scan failed'); }
     finally { setScanning(false); }
+  };
+
+  const loadOpsStatus = useCallback(async () => {
+    setOpsLoading(true);
+    try { setOpsStatus((await rulesAPI.opsErrorStatus()).data); }
+    catch { toast.error('Could not load error status'); }
+    finally { setOpsLoading(false); }
+  }, []);
+  useEffect(() => { if (tab === 'ops') loadOpsStatus(); }, [tab, loadOpsStatus]);
+
+  const runOpsScan = async () => {
+    setOpsScanning(true);
+    try {
+      const { data } = await rulesAPI.opsScan();
+      const emittedCount = (data.server.emitted ? 1 : 0) + (data.client.emitted ? 1 : 0);
+      toast.success(emittedCount > 0
+        ? `Emitted ${emittedCount} error-spike event${emittedCount === 1 ? '' : 's'}`
+        : 'No new spikes to emit — either everything is quiet, or it’s inside its 2h dedupe window');
+      loadOpsStatus();
+    } catch { toast.error('Scan failed'); }
+    finally { setOpsScanning(false); }
   };
 
   const openNew = () => { setForm(emptyRule); setEditId(null); setDialogOpen(true); };
@@ -214,6 +240,7 @@ export default function AutomationTriggers() {
           <TabsTrigger value="history" data-testid="tab-history"><History size={14} className="mr-1" /> History</TabsTrigger>
           <TabsTrigger value="catalog" data-testid="tab-catalog"><Cpu size={14} className="mr-1" /> Events &amp; Actions</TabsTrigger>
           <TabsTrigger value="predictive" data-testid="tab-predictive"><TrendingDown size={14} className="mr-1" /> Predictive</TabsTrigger>
+          <TabsTrigger value="ops" data-testid="tab-ops"><AlertTriangle size={14} className="mr-1" /> Ops Health</TabsTrigger>
         </TabsList>
 
         <TabsContent value="rules">
@@ -420,6 +447,62 @@ export default function AutomationTriggers() {
                     </div>
                   ))}
                 </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="ops">
+          <Card>
+            <CardContent className="p-4 space-y-4">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <h3 className="font-semibold flex items-center gap-2"><AlertTriangle size={16} className="text-rose-600" /> Error rate monitoring</h3>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Server and browser errors are always captured (Audit → Error Log), but nothing acted on them
+                    until now — this checks the last 30 minutes hourly and emits{' '}
+                    <span className="font-mono text-[11px]">ops.error_spike</span> when either crosses its threshold,
+                    so a subscribed rule can notify or page instead of waiting for a complaint.
+                  </p>
+                </div>
+                <div className="flex gap-2 flex-shrink-0">
+                  <Button size="sm" variant="outline" onClick={loadOpsStatus} disabled={opsLoading} data-testid="ops-refresh-btn">
+                    <RefreshCw size={12} className={`mr-1 ${opsLoading ? 'animate-spin' : ''}`} /> Refresh
+                  </Button>
+                  <Button size="sm" onClick={runOpsScan} disabled={opsScanning} data-testid="ops-scan-btn">
+                    {opsScanning ? 'Scanning…' : 'Scan now'}
+                  </Button>
+                </div>
+              </div>
+
+              {opsStatus && (
+                <div className="grid md:grid-cols-2 gap-3">
+                  {[{ key: 'server', label: 'Server errors' }, { key: 'client', label: 'Browser errors' }].map(({ key, label }) => {
+                    const s = opsStatus[key];
+                    return (
+                      <div key={key}
+                        className={`rounded-lg border px-4 py-3 ${s.triggered ? 'bg-rose-50 border-rose-200' : 'bg-emerald-50 border-emerald-200'}`}
+                        data-testid={`ops-status-${key}`}>
+                        <div className="flex items-center gap-2">
+                          {s.triggered ? <AlertTriangle size={14} className="text-rose-600" /> : <ShieldCheck size={14} className="text-emerald-600" />}
+                          <p className="text-sm font-medium">{label}</p>
+                        </div>
+                        <p className="text-xs text-slate-600 mt-1">
+                          {s.count} in the last {s.windowMinutes} min (threshold {s.threshold})
+                        </p>
+                        {s.triggered && s.topPath && (
+                          <p className="text-[11px] text-rose-700 mt-1 font-mono truncate">Most affected: {s.topPath}</p>
+                        )}
+                        {s.triggered && s.sampleMessage && (
+                          <p className="text-[11px] text-rose-700 mt-1 truncate">{s.sampleMessage}</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {!opsStatus && (
+                <p className="text-center text-slate-400 py-8 text-sm">{opsLoading ? 'Loading…' : 'No data yet.'}</p>
               )}
             </CardContent>
           </Card>
