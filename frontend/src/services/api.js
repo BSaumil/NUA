@@ -310,6 +310,8 @@ export const twoFactorAPI = {
 export const opsAPI = {
   health: () => api.get('/health'),
   recentErrors: (limit = 50) => api.get('/ops/errors', { params: { limit } }),
+  recentClientErrors: (limit = 50) => api.get('/ops/client-errors', { params: { limit } }),
+  reportClientError: (payload) => api.post('/ops/client-errors', payload),
 };
 
 // Backup / restore
@@ -565,7 +567,8 @@ export const loyaltyAPI = {
 
 // Guest-facing loyalty portal — unauthenticated, phone-only lookup
 export const loyaltyGuestAPI = {
-  lookup: (phone) => api.post('/loyalty/v2/guest-lookup', { phone }),
+  requestCode: (phone) => api.post('/loyalty/v2/guest-lookup/request-code', { phone }),
+  lookup: (phone, code) => api.post('/loyalty/v2/guest-lookup', { phone, code }),
 };
 
 // Items System — Categories, Modifiers, Discounts, Comp/Void, Payment Links
@@ -625,6 +628,8 @@ export const onlineAPI = {
   updateStatus: (id, data) => api.patch(`/online/orders/${id}/status`, data),
   recomputeEta: (id) => api.post(`/online/orders/${id}/eta`),
   track: (code) => api.get(`/online/orders/track/${code}`),
+  // SSE endpoint — consumed via EventSource, not axios.
+  trackStreamUrl: (code) => `${API_BASE_URL}/online/orders/track/stream/${encodeURIComponent(code)}`,
   kitchenLoad: () => api.get('/online/kitchen/load'),
   checkVoucher: (code, cart) => api.post('/vouchers/public-check', { code, cart }),
   checkout: (orderId, originUrl) => api.post('/online/orders/checkout', { orderId, originUrl }),

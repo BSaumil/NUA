@@ -362,6 +362,11 @@ async def update_floor_plan(plan_id: str, update: FloorPlanUpdate):
     if not result:
         raise HTTPException(status_code=404, detail="Floor plan not found")
     result.pop("_id", None)
+    try:
+        from services import realtime
+        await realtime.broadcast({"type": "floor_plan.updated", "planId": plan_id})
+    except Exception:
+        pass
     return FloorPlan(**result)
 
 @router.delete("/floor-plans/{plan_id}")
@@ -384,6 +389,11 @@ async def update_table_status(table_id: str, status: str, plan_id: Optional[str]
             await db.floor_plans.update_one(
                 {"id": plan_id}, {"$set": {"tables": tables, "updatedAt": datetime.utcnow().isoformat()}}
             )
+    try:
+        from services import realtime
+        await realtime.broadcast({"type": "floor_plan.updated", "planId": plan_id, "tableId": table_id, "status": status})
+    except Exception:
+        pass
     return {"message": f"Table {table_id} status updated to {status}"}
 
 # ── Typed-table validation (POS dine-in) ──────────────────────────────────
@@ -434,6 +444,11 @@ async def occupy_table_by_number(number: str, order_id: Optional[str] = None,
                             detail=f"Table '{number}' is not on the floor plan")
     table, plan_id = hit
     await floor_tables.set_table_status(table["id"], plan_id, "occupied", order_id)
+    try:
+        from services import realtime
+        await realtime.broadcast({"type": "floor_plan.updated", "planId": plan_id, "tableId": table["id"], "status": "occupied"})
+    except Exception:
+        pass
     return {"ok": True, "tableId": table["id"], "planId": plan_id,
             "number": table.get("number"), "status": "occupied"}
 
@@ -446,6 +461,11 @@ async def free_table_by_number(number: str, _: dict = Depends(get_user)):
                             detail=f"Table '{number}' is not on the floor plan")
     table, plan_id = hit
     await floor_tables.set_table_status(table["id"], plan_id, "available")
+    try:
+        from services import realtime
+        await realtime.broadcast({"type": "floor_plan.updated", "planId": plan_id, "tableId": table["id"], "status": "available"})
+    except Exception:
+        pass
     return {"ok": True, "tableId": table["id"], "planId": plan_id,
             "number": table.get("number"), "status": "available"}
 
