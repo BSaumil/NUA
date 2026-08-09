@@ -45,6 +45,7 @@ EVENT_CATALOG = {
     "inventory.low_stock":      {"module": "inventory", "label": "Product below threshold",     "fields": ["productId", "productName", "stock", "threshold"]},
     "inventory.stockout":       {"module": "inventory", "label": "Product hit zero",            "fields": ["productId", "productName"]},
     "inventory.received":       {"module": "inventory", "label": "Stock received",              "fields": ["productId", "quantity", "supplierId"]},
+    "inventory.predicted_stockout": {"module": "inventory", "label": "Predicted to run out soon", "fields": ["productId", "productName", "currentStock", "avgDailyUsage", "daysRemaining"]},
     # CRM
     "customer.created":         {"module": "crm",       "label": "Customer created",            "fields": ["id", "name", "email"]},
     "customer.spend_milestone": {"module": "crm",       "label": "Customer spend milestone",    "fields": ["customerId", "totalSpent", "milestone"]},

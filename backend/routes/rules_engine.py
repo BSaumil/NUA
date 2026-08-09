@@ -140,6 +140,26 @@ async def emit(body: dict, _: dict = Depends(get_user)):
     return await re_svc.emit_event(event_type, body.get("payload") or {}, body.get("entityId"))
 
 
+@router.get("/predictive/stockouts")
+async def predictive_stockouts(lookback_days: int = 7, horizon_days: float = 2.0, _: dict = Depends(get_user)):
+    """Preview-only — projects days-remaining from recent sales velocity
+    without touching db.rule_events, so checking this never affects the
+    hourly scheduler's own dedupe window for the real scan."""
+    from services import predictive_signals
+    predictions = await predictive_signals.compute_predicted_stockouts(
+        lookback_days=lookback_days, horizon_days=horizon_days)
+    return {"predictions": predictions}
+
+
+@router.post("/predictive/scan")
+async def run_predictive_scan(_: dict = Depends(require_owner_or_manager)):
+    """Manually trigger the same predictive scan the hourly scheduler runs
+    — emits inventory.predicted_stockout for anything newly at risk, same
+    dedupe window as the automatic pass."""
+    from services import predictive_signals
+    return await predictive_signals.scan_and_emit_predicted_stockouts()
+
+
 @router.post("/simulate")
 async def simulate(body: dict, _: dict = Depends(get_user)):
     """Dry-run a rule against a sample payload without executing actions."""
