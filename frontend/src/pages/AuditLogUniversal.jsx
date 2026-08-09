@@ -5,8 +5,9 @@ import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../components/ui/select';
 import { Button } from '../components/ui/button';
-import { History, Search, User, Shield, Clock, RotateCcw } from 'lucide-react';
+import { History, Search, User, Shield, Clock, RotateCcw, Download, FileCheck } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAuth } from '../contexts/AuthContext';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nua_token')}` });
@@ -41,6 +42,8 @@ function formatDiffValue(v) {
 }
 
 export default function AuditLog() {
+  const { user } = useAuth();
+  const isOwner = user?.role === 'owner';
   const [events, setEvents] = useState([]);
   const [summary, setSummary] = useState(null);
   const [entityType, setEntityType] = useState('');
@@ -49,6 +52,9 @@ export default function AuditLog() {
   const [expanded, setExpanded] = useState(null);
   const [restoring, setRestoring] = useState(null);
   const [showRaw, setShowRaw] = useState(false);
+  const [complianceStart, setComplianceStart] = useState('');
+  const [complianceEnd, setComplianceEnd] = useState('');
+  const [complianceExporting, setComplianceExporting] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -79,12 +85,60 @@ export default function AuditLog() {
     finally { setRestoring(null); }
   };
 
+  const downloadComplianceExport = async () => {
+    setComplianceExporting(true);
+    try {
+      const params = {};
+      if (complianceStart) params.start = complianceStart;
+      if (complianceEnd) params.end = complianceEnd;
+      const r = await axios.get(`${API}/audit/compliance-export.csv`, { headers: H(), params, responseType: 'blob' });
+      const url = URL.createObjectURL(r.data);
+      const a = document.createElement('a');
+      const label = `${complianceStart || 'all-time'}_to_${complianceEnd || 'now'}`;
+      a.href = url; a.download = `compliance-${label}.csv`; a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Compliance export downloaded');
+    } catch (err) { toast.error(err.response?.data?.detail || 'Export failed'); }
+    finally { setComplianceExporting(false); }
+  };
+
   return (
     <div className="space-y-6" data-testid="audit-log-page">
       <div>
         <h1 className="text-3xl font-bold flex items-center gap-2"><History className="text-slate-600" /> Universal Audit Log</h1>
         <p className="text-sm text-slate-500 mt-1">Every mutation, everywhere. Filter and drill into the full before/after diff.</p>
       </div>
+
+      {isOwner && (
+        <Card className="border-indigo-200 bg-indigo-50/60" data-testid="compliance-export-card">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <FileCheck size={16} className="text-indigo-600" />
+              <p className="font-semibold text-sm text-indigo-800">Compliance export</p>
+            </div>
+            <p className="text-xs text-indigo-700/80">
+              Every approval, rule firing, and Ash trust change in one chronological CSV — evidence of exactly
+              what an autonomous action did, who requested it, and who (or what) decided it.
+            </p>
+            <div className="flex flex-wrap items-end gap-2">
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-indigo-600 block mb-1">From</label>
+                <Input type="date" value={complianceStart} onChange={e => setComplianceStart(e.target.value)}
+                  className="w-40" data-testid="compliance-start-date" />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-indigo-600 block mb-1">To</label>
+                <Input type="date" value={complianceEnd} onChange={e => setComplianceEnd(e.target.value)}
+                  className="w-40" data-testid="compliance-end-date" />
+              </div>
+              <Button size="sm" onClick={downloadComplianceExport} disabled={complianceExporting}
+                data-testid="compliance-export-btn">
+                <Download size={12} className="mr-1" /> {complianceExporting ? 'Exporting…' : 'Download CSV'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {summary && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

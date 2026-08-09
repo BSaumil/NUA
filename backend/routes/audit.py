@@ -2,11 +2,14 @@
 Universal audit / history / restore endpoints.
 """
 from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi.responses import Response
 from typing import Optional
 from deps import get_user, require_owner_or_manager, require_owner
 from services import audit_service, entity_service
 from database import db
 from middleware.actor_context import tenant_scope_filter
+import csv
+import io
 
 router = APIRouter(prefix="/audit")
 
@@ -99,3 +102,37 @@ async def summary(user: dict = Depends(get_user)):
         "byActor": await db.audit_events.aggregate(pipeline_actor).to_list(10),
         "total": await db.audit_events.count_documents(scope),
     }
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Compliance export — the approval queue, rule firings, and trust ladder
+# already record every autonomous decision individually; this assembles
+# them into one chronological, exportable trail for a date range instead
+# of an operator having to piece it together from three different screens.
+# ═════════════════════════════════════════════════════════════════════════
+@router.get("/compliance-report")
+async def compliance_report(start: Optional[str] = None, end: Optional[str] = None,
+                            user: dict = Depends(require_owner)):
+    from services import compliance_export
+    return await compliance_export.build_report(
+        business_id=user.get("businessId"), start_date=start, end_date=end)
+
+
+@router.get("/compliance-export.csv")
+async def compliance_export_csv(start: Optional[str] = None, end: Optional[str] = None,
+                                user: dict = Depends(require_owner)):
+    from services import compliance_export
+    report = await compliance_export.build_report(
+        business_id=user.get("businessId"), start_date=start, end_date=end)
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["At", "Kind", "Source", "Summary", "Actor", "Decided By", "Status", "Reference"])
+    for row in report["timeline"]:
+        writer.writerow([row["at"], row["kind"], row["source"], row["summary"],
+                         row.get("actor"), row.get("decidedBy"), row["status"], row.get("reference")])
+
+    range_label = f"{start or 'all-time'}_to_{end or 'now'}".replace(" ", "_")
+    range_label = range_label.encode("ascii", "ignore").decode("ascii") or "export"
+    return Response(content=buf.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename=compliance-{range_label}.csv"})
