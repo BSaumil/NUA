@@ -111,7 +111,14 @@ export default function Kitchen() {
         () => kitchenAPI.getOrders(params).then(r => r.data));
       setOrders(tickets);
       setOfflineTickets(offline ? { cachedAt } : null);
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      // Network failures are already handled above (falls back to the
+      // cached ticket list with an offline banner) — this only fires for a
+      // genuine server error, which used to just log, leaving the board
+      // looking stale with zero indication anything was actually wrong.
+      console.error(e);
+      toast.error('Could not refresh the kitchen board — showing the last loaded tickets');
+    }
   }, [filter]);
 
   const fetchConfig = useCallback(async () => {

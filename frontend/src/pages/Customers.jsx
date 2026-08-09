@@ -57,7 +57,7 @@ const Customers = () => {
     try {
       const res = await customersAPI.getAll();
       setCustomers(res.data);
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); toast.error('Could not load customers'); }
   }, []);
 
   useEffect(() => { fetchCustomers(); }, [fetchCustomers]);
