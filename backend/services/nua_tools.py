@@ -143,8 +143,17 @@ async def _tx_create_purchase_order(a):
 
 
 async def _tx_add_customer_note(a):
+    """customers.notes is a plain free-text string everywhere else in this
+    codebase (seed data, the CRM UI, guest_intel.py), not an array — append
+    to it rather than $push, which fails outright against a string field."""
     cid = a["customerId"]; note = a["note"]
-    await db.customers.update_one({"id": cid}, {"$push": {"notes": {"text": note, "by": "ash-agent", "at": _now()}}})
+    customer = await db.customers.find_one({"id": cid}, {"_id": 0, "notes": 1})
+    if not customer:
+        return {"error": "customer not found"}
+    existing = (customer.get("notes") or "").strip()
+    entry = f"[{_now()[:10]} · ash-agent] {note}"
+    updated = f"{existing}\n{entry}" if existing else entry
+    await db.customers.update_one({"id": cid}, {"$set": {"notes": updated}})
     return {"customerId": cid, "added": True}
 
 

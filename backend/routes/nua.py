@@ -526,6 +526,52 @@ async def promote_tool(tool_name: str, user: dict = Depends(require_owner)):
         raise HTTPException(400, str(e))
 
 
+@router.get("/tools/auto-executions")
+async def auto_executions(limit: int = 50, _: dict = Depends(get_user)):
+    """Shadow-audit review feed: recent auto-tier tool calls, newest first,
+    so an owner can spot-check what NUA ran unsupervised."""
+    return await nua_trust.list_recent_executions(limit=min(max(limit, 1), 200))
+
+
+@router.post("/tools/executions/{audit_id}/flag")
+async def flag_execution(audit_id: str, body: dict, user: dict = Depends(require_owner)):
+    """Owner-only: flag one auto-executed action as wrong. Instantly demotes
+    the tool back to approval-gated (see nua_trust.demote) and, if the tool
+    exposes a rollback and the caller asked for one, attempts to undo it."""
+    reason = (body or {}).get("reason")
+    row = await db.audit_events.find_one({"id": audit_id}, {"_id": 0})
+    if not row:
+        raise HTTPException(404, "Execution not found")
+    tool_name = row.get("entityId")
+    tool = nua_tools.TOOLS.get(tool_name)
+    if not tool:
+        raise HTTPException(400, "Not a recognized NUA tool execution")
+
+    await db.audit_events.update_one(
+        {"id": audit_id},
+        {"$set": {"flagged": True, "flaggedBy": user.get("email"),
+                  "flaggedAt": datetime.now(timezone.utc).isoformat(), "flagReason": reason}},
+    )
+    result = await nua_trust.demote(
+        tool_name, actor=user.get("email") or "owner",
+        reason=reason or "Flagged as wrong from the auto-execution review feed",
+    )
+
+    undo = None
+    if body.get("undo"):
+        outcome = (row.get("after") or {}).get("outcome")
+        if tool.rollback and outcome and not (isinstance(outcome, dict) and outcome.get("error")):
+            try:
+                await tool.rollback(outcome)
+                undo = {"undone": True}
+            except Exception as e:
+                undo = {"undone": False, "error": str(e)}
+        else:
+            undo = {"undone": False, "error": "No rollback available for this action"}
+
+    return {**result, "auditId": audit_id, "undo": undo}
+
+
 @router.get("/health-score")
 async def get_health_score(_: dict = Depends(get_user)):
     return await health_score.compute_health()
