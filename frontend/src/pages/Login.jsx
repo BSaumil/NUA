@@ -8,6 +8,21 @@ import { Card, CardContent } from '../components/ui/card';
 import { Lock, Mail, AlertCircle, Hash, ShieldCheck, CheckCircle2 } from 'lucide-react';
 import Logo from '../components/brand/Logo';
 
+// Every catch block on this page did `err.response?.data?.detail || '<wrong
+// password>'-style message`. That fallback fires for ANY failure with no
+// response object — a CORS rejection, a dropped connection, a cold backend
+// instance still waking up, a request that timed out — not just a real
+// 401/403 from the server. A transient network hiccup on the login POST was
+// showing up as "Invalid credentials," which reads as "your password is
+// wrong" when the true story is "we couldn't reach the server that time."
+// Retrying the exact same correct password after the hiccup passed is
+// exactly the "doesn't work at first, works on retry" pattern that produces
+// — this tells the two apart instead of collapsing them into one message.
+function loginErrorMessage(err, fallback) {
+  if (err.response) return err.response.data?.detail || fallback;
+  return "Couldn't reach the server — check your connection and try again.";
+}
+
 export default function Login() {
   const { login, completeTwoFactor } = useAuth();
   const navigate = useNavigate();
@@ -36,7 +51,7 @@ export default function Login() {
         navigate('/', { replace: true }); // role-based landing (Today / POS / Kitchen)
       }
     } catch (err) {
-      setError(err.response?.data?.detail || 'Invalid credentials');
+      setError(loginErrorMessage(err, 'Invalid credentials'));
     }
     setLoading(false);
   };
@@ -56,7 +71,7 @@ export default function Login() {
       }
       navigate('/', { replace: true });
     } catch (err) {
-      setError(err.response?.data?.detail || 'Incorrect code');
+      setError(loginErrorMessage(err, 'Incorrect code'));
       setCode('');
     }
     setLoading(false);
@@ -70,7 +85,7 @@ export default function Login() {
       localStorage.setItem('nua_token', res.data.token);
       window.location.assign('/'); // role-based landing (Today / POS / Kitchen)
     } catch (err) {
-      setError(err.response?.data?.detail || 'Invalid PIN');
+      setError(loginErrorMessage(err, 'Invalid PIN'));
     }
     setLoading(false);
   };
@@ -96,7 +111,7 @@ export default function Login() {
       setForgotSent(true);
       setResendCooldown(60);
     } catch (err) {
-      setError(err.response?.data?.detail || 'Something went wrong — try again');
+      setError(loginErrorMessage(err, 'Something went wrong — try again'));
     }
     setLoading(false);
   };

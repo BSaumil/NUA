@@ -29,6 +29,21 @@ def _today_str() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
+async def _broadcast_kitchen_update(order: dict, event: str) -> None:
+    """Best-effort push to any connected Kitchen/FloorPlan screen so a board
+    refresh feels instant instead of waiting for the next poll. Mirrors the
+    sale.completed pattern in transactions.py — never lets a broadcast
+    failure affect the actual ticket mutation."""
+    try:
+        from services import realtime
+        await realtime.broadcast({
+            "type": "kitchen_order.updated", "event": event, "orderId": order.get("id"),
+            "status": order.get("status"), "tableNumber": order.get("tableNumber"),
+        })
+    except Exception:
+        pass
+
+
 async def _clear_overnight_tickets() -> int:
     """A ticket left in new/preparing/ready from a previous day (chef forgot
     to mark it served, or it was superseded by close of service) shouldn't
@@ -202,7 +217,9 @@ async def create_kitchen_order(order: KitchenOrderCreate, request: Request, user
 
     order_obj = KitchenOrder(**order_dict)
     await db.kitchen_orders.insert_one(order_obj.dict())
-    return order_obj.dict()
+    result = order_obj.dict()
+    await _broadcast_kitchen_update(result, "created")
+    return result
 
 
 @router.post("/kitchen/orders/{order_id}/start")
@@ -214,6 +231,7 @@ async def start_kitchen_order(order_id: str, _: dict = Depends(get_user)):
     if not result:
         raise HTTPException(status_code=404, detail="Order not found")
     result.pop("_id", None)
+    await _broadcast_kitchen_update(result, "started")
     return result
 
 
@@ -226,6 +244,7 @@ async def mark_order_ready(order_id: str, user: dict = Depends(get_user)):
     if not result:
         raise HTTPException(status_code=404, detail="Order not found")
     result.pop("_id", None)
+    await _broadcast_kitchen_update(result, "ready")
     try:
         from services import notification_service as ns
         server_email = result.get("serverId") or result.get("createdByEmail")
@@ -255,6 +274,7 @@ async def mark_order_served(order_id: str, _: dict = Depends(get_user)):
     if not result:
         raise HTTPException(status_code=404, detail="Order not found")
     result.pop("_id", None)
+    await _broadcast_kitchen_update(result, "served")
     return result
 
 
@@ -267,6 +287,7 @@ async def cancel_kitchen_order(order_id: str, _: dict = Depends(get_user)):
     if not result:
         raise HTTPException(status_code=404, detail="Order not found")
     result.pop("_id", None)
+    await _broadcast_kitchen_update(result, "cancelled")
     return result
 
 

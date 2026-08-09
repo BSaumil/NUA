@@ -7,10 +7,13 @@ Endpoints:
 - PATCH  /api/online/orders/{id}/status      — owner moves to next stage (auth)
 - POST   /api/online/orders/{id}/eta         — AI-recomputed ETA (auth)
 - GET    /api/online/orders/track/{code}     — public order tracking
+- GET    /api/online/orders/track/stream/{code} — public order tracking, SSE
 - GET    /api/online/kitchen/load            — current pending + preparing counts
 """
 from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi.responses import StreamingResponse
 from deps import get_user
+import asyncio
 import logging
 from database import db
 from datetime import datetime
@@ -24,6 +27,13 @@ from routes.commerce_v29 import _resolve_voucher, _validate_voucher_rules
 from middleware.actor_context import tenant_scope_filter, tenant_owns
 
 router = APIRouter()
+
+# Same env-tunable pattern as coursing.py's SSE stream — short poll interval,
+# bounded connection lifetime so a guest who wanders off without closing the
+# tab doesn't leak a connection + Mongo poll loop forever (EventSource
+# reconnects on its own once the bound is hit).
+TRACK_SSE_INTERVAL_SECONDS = float(os.environ.get('TRACK_SSE_INTERVAL', '4'))
+TRACK_SSE_MAX_SECONDS = float(os.environ.get('TRACK_SSE_MAX_SECONDS', '600'))
 
 
 from utils.ids import now_utc as _now, to_iso as _iso, gen_uid as _uid
@@ -519,11 +529,10 @@ async def kitchen_load_endpoint(_: dict = Depends(get_user)):
 # =============================================================================
 # PUBLIC TRACKING (no auth — by order code)
 # =============================================================================
-@router.get("/online/orders/track/{code}")
-async def track_order(code: str):
-    order = await db.online_orders.find_one({"id": code.upper()}, {"_id": 0})
-    if not order: raise HTTPException(status_code=404, detail="Order not found")
-    # Strip internal fields the customer doesn't need.
+def _public_order_view(order: dict) -> dict:
+    """Strip internal fields the customer doesn't need — shared by the
+    polled REST endpoint and the SSE stream below so they can never drift
+    into showing different shapes for the same order."""
     customer = order.get("customer") or {}
     return {
         "id": order["id"], "status": order["status"], "channel": order.get("channel"),
@@ -538,3 +547,50 @@ async def track_order(code: str):
         "readyAt": order.get("readyAt"),
         "completedAt": order.get("completedAt"),
     }
+
+@router.get("/online/orders/track/{code}")
+async def track_order(code: str):
+    order = await db.online_orders.find_one({"id": code.upper()}, {"_id": 0})
+    if not order: raise HTTPException(status_code=404, detail="Order not found")
+    return _public_order_view(order)
+
+@router.get("/online/orders/track/stream/{code}")
+async def track_order_stream(code: str, request: Request):
+    """Server-sent events for one guest's own order — replaces every
+    guest currently watching their order polling every ~12s with one
+    long-lived connection each. Public, same access model as the REST
+    endpoint above: the tracking code (emailed/texted to the guest, and
+    already right there in the /track/{code} URL) is the only credential,
+    same as it already was for the polled version — this just pushes
+    instead of making the guest's browser ask again and again.
+    """
+    async def events():
+        last = None
+        started = asyncio.get_event_loop().time()
+        while True:
+            if asyncio.get_event_loop().time() - started > TRACK_SSE_MAX_SECONDS:
+                return
+            if await request.is_disconnected():
+                return
+            try:
+                order = await db.online_orders.find_one({"id": code.upper()}, {"_id": 0})
+                if not order:
+                    yield "event: not_found\ndata: {}\n\n"
+                    return
+                payload = json.dumps(_public_order_view(order), default=str)
+                if payload != last:
+                    last = payload
+                    yield f"event: order\ndata: {payload}\n\n"
+                else:
+                    yield ": keepalive\n\n"
+            except Exception as e:
+                logging.getLogger(__name__).warning("order tracking stream error for %s: %s", code, e)
+                yield ": error\n\n"
+            await asyncio.sleep(TRACK_SSE_INTERVAL_SECONDS)
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        # nginx buffers SSE by default, which would defeat the whole point.
+        "X-Accel-Buffering": "no",
+    })

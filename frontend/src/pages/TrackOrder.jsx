@@ -45,6 +45,22 @@ export default function TrackOrder() {
     return () => clearInterval(t);
   }, [data, fetchData]);
 
+  // Push updates over SSE so a guest watching this page sees "Preparing"
+  // flip to "Ready" the moment staff act, not up to 12s later. The poll
+  // above stays running regardless — if the stream can't connect (proxy
+  // strips SSE, browser quirk) the guest still gets updates, just slower.
+  useEffect(() => {
+    if (!data?.id || ['completed', 'cancelled'].includes(data.status)) return;
+    if (typeof EventSource === 'undefined') return;
+    const source = new EventSource(onlineAPI.trackStreamUrl(data.id));
+    source.addEventListener('order', (ev) => {
+      try { setData(JSON.parse(ev.data)); } catch { /* ignore malformed payload */ }
+    });
+    source.addEventListener('not_found', () => source.close());
+    source.onerror = () => { /* EventSource retries on its own; poll above covers the gap */ };
+    return () => source.close();
+  }, [data?.id, data?.status]);
+
   // Coming back from Stripe checkout — poll until the webhook/status-check
   // has flipped paymentStatus, then refresh the order so the "paid" banner
   // reflects reality instead of trusting the redirect alone.

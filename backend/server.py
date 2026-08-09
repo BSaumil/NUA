@@ -234,6 +234,7 @@ PUBLIC_API_PATHS = {
     # by phone, no staff login involved. Returns first name only, never the
     # full customer record.
     "/api/loyalty/v2/guest-lookup",
+    "/api/loyalty/v2/guest-lookup/request-code",
     # Self-service kiosk session creation — no sid exists yet, so this can't
     # be covered by the "/api/v25/kiosk/session/" prefix above.
     "/api/v25/kiosk/session",
@@ -250,6 +251,9 @@ PUBLIC_API_PATHS = {
     # reach signature verification, the same class of bug as the kiosk
     # path above).
     "/api/webhook/stripe", "/api/license/stripe/webhook",
+    # A browser reporting its own crash — has to work from the login screen
+    # and the guest ordering pages, neither of which carries a token.
+    "/api/ops/client-errors",
 }
 
 
@@ -308,6 +312,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # caller with no identity beyond "some IP" shouldn't get the
         # generous default room to enumerate phone numbers.
         "/api/loyalty/v2/guest-lookup": (10, 60),  # 10 req/min per IP
+        # Same tier — this one sends a real SMS per call, so it matters just
+        # as much that a single IP can't be used to spam a phone number or
+        # run up a Twilio bill.
+        "/api/loyalty/v2/guest-lookup/request-code": (10, 60),  # 10 req/min per IP
+        # Generous relative to the endpoints above — a genuine error storm
+        # (a bad deploy looping on render) can legitimately fire many reports
+        # per second from one browser, and losing those is exactly the
+        # moment this feature exists to cover. Still bounded so one runaway
+        # tab can't grow client_error_log unbounded.
+        "/api/ops/client-errors": (30, 60),  # 30 req/min per IP
     }
 
     def __init__(self, app):

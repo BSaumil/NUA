@@ -18,6 +18,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useLanguage } from '../i18n/useLanguage';
 import { LanguageSelector } from '../i18n/LanguageSelector';
 import { kitchenAPI, productsAPI } from '../services/api';
+import useLiveFeed from '../hooks/useLiveFeed';
 import { loadOpenTicketsResilient } from '../lib/offlineQueue';
 import { toast } from 'sonner';
 
@@ -140,6 +141,11 @@ export default function Kitchen() {
     const interval = setInterval(() => { fetchOrders(); fetchAvgOrderTime(); }, 10000);
     return () => clearInterval(interval);
   }, [fetchOrders, fetchAvgOrderTime]);
+  // Nice-to-have instant refresh on top of the 10s poll above — never a
+  // dependency, degrades to plain polling if the socket can't connect.
+  useLiveFeed(useCallback((event) => {
+    if (event.type === 'kitchen_order.updated') fetchOrders();
+  }, [fetchOrders]));
 
   const fetchProducts = async () => {
     try { const res = await productsAPI.getAll(); setProducts(res.data); }

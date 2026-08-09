@@ -20,6 +20,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { floorPlansAPI, tableCoursesAPI, v15API } from '../services/api';
 import { toast } from 'sonner';
 import { TableInfoDrawer } from '../components/floor/TableInfoDrawer';
+import useLiveFeed from '../hooks/useLiveFeed';
 
 const TABLE_STATUS_COLORS = {
   available: { fill: '#10B981', stroke: '#059669', label: 'Available' },
@@ -91,6 +92,12 @@ export default function FloorPlan() {
   }, [activePlanId]);
 
   useEffect(() => { fetchPlans(); }, [fetchPlans]);
+  // Any staff device that moves/seats/clears a table pushes here — this
+  // page has no baseline poll interval, so without this the floor plan only
+  // ever updates on this device's own actions.
+  useLiveFeed(useCallback((event) => {
+    if (event.type === 'floor_plan.updated') fetchPlans();
+  }, [fetchPlans]));
 
   const switchPlan = (planId) => {
     const plan = plans.find(p => p.id === planId);

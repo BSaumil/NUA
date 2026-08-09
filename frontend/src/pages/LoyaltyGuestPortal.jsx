@@ -23,33 +23,52 @@ const TIER_COLOR = {
 /**
  * Guest-facing loyalty portal — no login exists for a customer, so this
  * looks them up by the phone number checkout already keys their loyalty
- * account on. Unauthenticated by design (mirrors /vouchers/public-check):
- * the backend returns first name only, never the full customer record,
- * and a rate limit keeps it from being usable to enumerate phone numbers.
+ * account on. A texted one-time code gates the actual lookup: knowing (or
+ * guessing) someone's number is no longer enough to see their points and
+ * badges, the code has to land on that phone. Unauthenticated by design
+ * (mirrors /vouchers/public-check): the backend returns first name only,
+ * never the full customer record.
  */
 export default function LoyaltyGuestPortal() {
   const navigate = useNavigate();
   const [phone, setPhone] = useState('');
+  const [code, setCode] = useState('');
+  const [codeSent, setCodeSent] = useState(false);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
 
-  const lookup = async () => {
+  const requestCode = async () => {
     if (!phone.trim()) return;
-    setLoading(true); setErr(''); setData(null);
+    setLoading(true); setErr('');
     try {
-      const r = await loyaltyGuestAPI.lookup(phone.trim());
-      if (!r.data.found) {
-        setErr("We couldn't find a rewards account for that number.");
-      } else {
-        setData(r.data);
-      }
+      await loyaltyGuestAPI.requestCode(phone.trim());
+      setCodeSent(true);
     } catch {
       setErr('Something went wrong — please try again.');
     } finally {
       setLoading(false);
     }
   };
+
+  const lookup = async () => {
+    if (!code.trim()) return;
+    setLoading(true); setErr(''); setData(null);
+    try {
+      const r = await loyaltyGuestAPI.lookup(phone.trim(), code.trim());
+      if (!r.data.found) {
+        setErr("We couldn't find a rewards account for that number.");
+      } else {
+        setData(r.data);
+      }
+    } catch (e) {
+      setErr(e?.response?.data?.detail || 'That code didn\'t work — please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startOver = () => { setData(null); setPhone(''); setCode(''); setCodeSent(false); };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100" data-testid="loyalty-guest-portal">
@@ -59,23 +78,45 @@ export default function LoyaltyGuestPortal() {
           <Button variant="ghost" size="sm" onClick={() => navigate('/order-online')}>← Back to menu</Button>
         </div>
 
-        {!data && (
+        {!data && !codeSent && (
           <Card>
             <CardContent className="p-5 space-y-3">
-              <p className="text-sm text-slate-500">Enter the phone number you use at checkout to see your points, tier and badges.</p>
+              <p className="text-sm text-slate-500">Enter the phone number you use at checkout — we'll text you a code to confirm it's you.</p>
               <div className="flex gap-2">
                 <div className="relative flex-1">
                   <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <Input className="pl-8" placeholder="0400 000 000" value={phone}
                     onChange={e => setPhone(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && lookup()}
+                    onKeyDown={e => e.key === 'Enter' && requestCode()}
                     data-testid="guest-phone-input" />
                 </div>
-                <Button onClick={lookup} disabled={loading || !phone.trim()} data-testid="guest-lookup-btn">
+                <Button onClick={requestCode} disabled={loading || !phone.trim()} data-testid="guest-request-code-btn">
+                  {loading ? <Loader2 size={14} className="animate-spin" /> : 'Send code'}
+                </Button>
+              </div>
+              {err && <p className="text-sm text-red-600" data-testid="guest-lookup-error">{err}</p>}
+            </CardContent>
+          </Card>
+        )}
+
+        {!data && codeSent && (
+          <Card>
+            <CardContent className="p-5 space-y-3">
+              <p className="text-sm text-slate-500">Enter the 6-digit code we texted to {phone}.</p>
+              <div className="flex gap-2">
+                <Input className="tracking-widest" placeholder="000000" maxLength={6} value={code}
+                  onChange={e => setCode(e.target.value.replace(/\D/g, ''))}
+                  onKeyDown={e => e.key === 'Enter' && lookup()}
+                  data-testid="guest-code-input" />
+                <Button onClick={lookup} disabled={loading || code.length !== 6} data-testid="guest-lookup-btn">
                   {loading ? <Loader2 size={14} className="animate-spin" /> : 'Check'}
                 </Button>
               </div>
               {err && <p className="text-sm text-red-600" data-testid="guest-lookup-error">{err}</p>}
+              <div className="flex justify-between text-xs">
+                <button className="text-slate-400 hover:text-slate-600" onClick={startOver}>← Wrong number?</button>
+                <button className="text-slate-400 hover:text-slate-600" onClick={requestCode} disabled={loading}>Resend code</button>
+              </div>
             </CardContent>
           </Card>
         )}
@@ -86,7 +127,7 @@ export default function LoyaltyGuestPortal() {
               <CardContent className="p-5 space-y-3" data-testid="guest-progress-card">
                 <div className="flex items-center justify-between">
                   <p className="text-xl font-bold">Hi {data.firstName}!</p>
-                  <Button variant="outline" size="sm" onClick={() => { setData(null); setPhone(''); }} data-testid="guest-lookup-again-btn">
+                  <Button variant="outline" size="sm" onClick={startOver} data-testid="guest-lookup-again-btn">
                     Not you?
                   </Button>
                 </div>
