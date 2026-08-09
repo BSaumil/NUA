@@ -36,6 +36,7 @@ log = logging.getLogger(__name__)
 KIOSK_SESSION_DAYS = 1
 NOTIFICATION_DAYS = 90
 LOGIN_LOCKOUT_DAYS = 1
+GUEST_OTP_DAYS = 1
 
 
 def kiosk_session_expiry() -> datetime:
@@ -53,6 +54,7 @@ async def ensure_indexes() -> None:
         # login_attempts already carries a real datetime in locked_until —
         # no new field needed, the existing one is TTL-able as-is.
         await db.login_attempts.create_index("locked_until", expireAfterSeconds=0)
+        await db.loyalty_guest_otp.create_index("expiresAt", expireAfterSeconds=0)
     except Exception as e:
         log.info("retention indexes not created: %s", e)
 
@@ -64,6 +66,8 @@ POLICY = [
      "reason": "in-app notifications — useful for a season, not a compliance record"},
     {"collection": "login_attempts", "field": "locked_until", "days": LOGIN_LOCKOUT_DAYS,
      "reason": "failed-login lockout counters — meaningless once the lockout has passed"},
+    {"collection": "loyalty_guest_otp", "field": "expiresAt", "days": GUEST_OTP_DAYS,
+     "reason": "guest phone-verification codes — dead weight within minutes of issue"},
 ]
 
 

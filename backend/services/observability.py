@@ -90,10 +90,41 @@ async def record_error(request_id: str, request, exc: Exception) -> None:
         log.exception("failed to record error %s (secondary failure, not the original)", request_id)
 
 
+CLIENT_ERROR_RETENTION_DAYS = 30
+
+
+async def record_client_error(payload: dict, actor: Optional[dict]) -> None:
+    """A JS error that happened in someone's browser — a render crash, a
+    rejected promise nobody caught — used to just vanish the moment that tab
+    closed. The owner had no way to know the POS had been throwing a white
+    screen for a shift unless a staff member happened to mention it.
+
+    Deliberately loose validation and small bounds: this is a diagnostic
+    signal from an untrusted browser, not a typed API contract, so it takes
+    whatever shape the reporter sends and trims it down rather than
+    rejecting anything that doesn't match exactly.
+    """
+    try:
+        now = datetime.now(timezone.utc)
+        await db.client_error_log.insert_one({
+            "message": str(payload.get("message") or "")[:500],
+            "stack": str(payload.get("stack") or "")[:4000],
+            "url": str(payload.get("url") or "")[:500],
+            "userAgent": str(payload.get("userAgent") or "")[:300],
+            "actor": actor,
+            "at": now,
+            "expiresAt": now + timedelta(days=CLIENT_ERROR_RETENTION_DAYS),
+        })
+    except Exception:
+        log.exception("failed to record client error (non-fatal)")
+
+
 async def ensure_indexes() -> None:
     try:
         await db.error_log.create_index("expiresAt", expireAfterSeconds=0)
         await db.error_log.create_index("at")
+        await db.client_error_log.create_index("expiresAt", expireAfterSeconds=0)
+        await db.client_error_log.create_index("at")
     except Exception as e:
         log.info("observability indexes not created: %s", e)
 
