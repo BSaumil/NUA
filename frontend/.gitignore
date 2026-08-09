@@ -25,3 +25,6 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# ad-hoc local verification logs (e2e_run*.log etc.) — not part of the suite
+e2e_run*.log
