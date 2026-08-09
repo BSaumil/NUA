@@ -29,8 +29,12 @@ export default function AgentDashboard() {
   const [loading, setLoading] = useState(false);
 
   const refresh = async () => {
-    try { const r = await agentAPI.getDecisions(); setDecisions(r.data || []); } catch {}
-    try { const r = await agentAPI.getSegments(); setSegments(r.data?.segments || {}); } catch {}
+    const [decisionsRes, segmentsRes] = await Promise.allSettled([
+      agentAPI.getDecisions(),
+      agentAPI.getSegments(),
+    ]);
+    if (decisionsRes.status === 'fulfilled') setDecisions(decisionsRes.value.data || []);
+    if (segmentsRes.status === 'fulfilled') setSegments(segmentsRes.value.data?.segments || {});
   };
   useEffect(() => { refresh(); }, []);
 

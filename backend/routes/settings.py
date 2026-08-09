@@ -10,6 +10,7 @@ from models.eftpos import EFTPOSConfig, EFTPOSConfigCreate, EFTPOSTransaction, E
 from models.staff import StaffShift
 from utils.mongo_safe import safe_find_list
 from middleware.actor_context import tenant_scope_filter
+from utils.dates import date_range_filter
 import logging
 import uuid
 
@@ -297,7 +298,7 @@ async def get_eftpos_transactions(start_date: Optional[str] = None, end_date: Op
     if terminal_id:
         query["terminalId"] = terminal_id
     if start_date and end_date:
-        query["timestamp"] = {"$gte": datetime.fromisoformat(start_date), "$lte": datetime.fromisoformat(end_date)}
+        query.update(date_range_filter("timestamp", start_date, end_date))
     # EFTPOS terminal transactions had no tenant filter — comparable financial
     # data to transactions.py, which already scopes correctly.
     query.update(tenant_scope_filter(user.get("businessId")))

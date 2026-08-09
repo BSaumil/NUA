@@ -8,6 +8,7 @@ from models.transaction import Transaction, TransactionCreate
 from models.refund import Refund, RefundCreate
 from middleware.actor_context import tenant_scope_filter, tenant_owns
 from utils.errors import log_and_continue
+from utils.dates import date_range_filter
 import logging
 import uuid
 
@@ -77,10 +78,7 @@ async def get_transactions(
     if location:
         query["location"] = location
     if start_date and end_date:
-        query["timestamp"] = {
-            "$gte": datetime.fromisoformat(start_date),
-            "$lte": datetime.fromisoformat(end_date)
-        }
+        query.update(date_range_filter("timestamp", start_date, end_date))
     transactions = await db.transactions.find(query, {"_id": 0}).sort("timestamp", -1).to_list(1000)
     from utils.mongo_safe import safe_parse_list
     return safe_parse_list(transactions, Transaction, where="transactions")
