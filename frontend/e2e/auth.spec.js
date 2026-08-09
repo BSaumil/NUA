@@ -2,6 +2,11 @@
 const { test, expect } = require('@playwright/test');
 const { loginAsOwner } = require('./helpers');
 
+// loginAsOwner retries up to 3x against the webServer's own cold-start
+// window (see helpers.js) — give the test enough total runway to actually
+// use those retries instead of hitting the suite's 30s default first.
+test.setTimeout(90_000);
+
 test('owner can log in and land on an authenticated screen', async ({ page }) => {
   await loginAsOwner(page);
 

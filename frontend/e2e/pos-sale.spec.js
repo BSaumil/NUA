@@ -6,7 +6,7 @@ const { loginAsOwner } = require('./helpers');
 // wallet data all load on mount) and this is its first-ever navigation in a
 // fresh browser context, so its chunk hasn't been fetched yet either — give
 // this one noticeably more runway than the suite default.
-test.setTimeout(60_000);
+test.setTimeout(120_000);
 
 test('ring up a card sale end to end', async ({ page }) => {
   await loginAsOwner(page);
