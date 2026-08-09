@@ -8,11 +8,14 @@ import { Card, CardContent } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
+import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import { advancedAPI, gamificationAPI } from '../services/api';
 
 export default function TipManagement() {
   const { theme } = useTheme();
+  const { user } = useAuth();
+  const isOwner = user?.role === 'owner';
   const [tips, setTips] = useState([]);
   const [summary, setSummary] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
@@ -65,10 +68,15 @@ export default function TipManagement() {
           <p className="text-gray-500 mt-1">Track, pool, and distribute tips across staff</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={handleDistribute} disabled={distributing || !summary?.pooledAmount}
-            data-testid="distribute-tips-btn">
-            <ArrowRightLeft size={16} className="mr-1" /> Distribute Pool
-          </Button>
+          {/* POST /tips/smart-distribute is owner-only server-side — showing
+              this to a manager just earned them a generic "Failed to
+              distribute" toast with no explanation. */}
+          {isOwner && (
+            <Button variant="outline" onClick={handleDistribute} disabled={distributing || !summary?.pooledAmount}
+              data-testid="distribute-tips-btn">
+              <ArrowRightLeft size={16} className="mr-1" /> Distribute Pool
+            </Button>
+          )}
           <Button onClick={() => setShowAdd(true)} style={{ backgroundColor: theme.primary }}
             data-testid="add-tip-btn">
             <Plus size={16} className="mr-1" /> Record Tip

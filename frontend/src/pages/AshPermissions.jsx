@@ -6,6 +6,7 @@ import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../components/ui/select';
 import { toast } from 'sonner';
+import { useAuth } from '../contexts/AuthContext';
 import { ShieldCheck, RefreshCw, Search, Lock, Zap, Eye, Sparkles, TrendingUp } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -28,6 +29,8 @@ const PERMISSION_TONE = {
 };
 
 export default function AshPermissions() {
+  const { user } = useAuth();
+  const isOwner = user?.role === 'owner';
   const [tools, setTools] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState('');
@@ -151,11 +154,19 @@ export default function AshPermissions() {
                 <div className="flex gap-2 flex-shrink-0">
                   <Button size="sm" variant="ghost" onClick={() => setDismissed(d => new Set(d).add(s.toolName))}
                     data-testid={`dismiss-suggestion-${s.toolName}`}>Not yet</Button>
-                  <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                    disabled={promoting.has(s.toolName)} onClick={() => promoteTool(s.toolName)}
-                    data-testid={`promote-${s.toolName}`}>
-                    <TrendingUp size={14} className="mr-1" /> {promoting.has(s.toolName) ? 'Promoting…' : 'Promote to Auto'}
-                  </Button>
+                  {/* POST /nua/tools/{tool}/promote is intentionally gated
+                      tighter than the rest of this page (owner-only) — a
+                      manager could see the suggestion but got a confusing
+                      403 on click. */}
+                  {isOwner ? (
+                    <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                      disabled={promoting.has(s.toolName)} onClick={() => promoteTool(s.toolName)}
+                      data-testid={`promote-${s.toolName}`}>
+                      <TrendingUp size={14} className="mr-1" /> {promoting.has(s.toolName) ? 'Promoting…' : 'Promote to Auto'}
+                    </Button>
+                  ) : (
+                    <span className="text-[11px] text-slate-400 italic">Owner only</span>
+                  )}
                 </div>
               </div>
             ))}
