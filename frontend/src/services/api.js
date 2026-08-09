@@ -368,15 +368,6 @@ export const analyticsAPI = {
   saveTodayTargets: (data) => api.post('/analytics/today-targets', data),
 };
 
-// Automation API
-export const automationAPI = {
-  getRules: () => api.get('/automation/rules'),
-  createRule: (data) => api.post('/automation/rules', data),
-  deleteRule: (id) => api.delete(`/automation/rules/${id}`),
-  toggleRule: (id) => api.post(`/automation/rules/${id}/toggle`),
-  getAlerts: () => api.get('/automation/alerts'),
-};
-
 // Events & Experiences
 export const eventsAPI = {
   getAll: (params) => api.get('/events', { params }),

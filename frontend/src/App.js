@@ -36,7 +36,6 @@ const CoursingAnalytics = lazy(() => import('./pages/CoursingAnalytics'));
 const PreShift = lazy(() => import('./pages/PreShift'));
 const CommandCenter = lazy(() => import('./pages/CommandCenter'));
 const MenuEngineering = lazy(() => import('./pages/MenuEngineering'));
-const AutomationEngine = lazy(() => import('./pages/AutomationEngine'));
 const AutomationTriggers = lazy(() => import('./pages/AutomationTriggers'));
 const LoyaltyEvents = lazy(() => import('./pages/LoyaltyEvents'));
 const Forecasting = lazy(() => import('./pages/Forecasting'));
@@ -243,7 +242,7 @@ function ProtectedRoutes() {
         <Route path="/inventory" element={<Inventory />} />
         <Route path="/inventory-accounting" element={<InventoryAccounting />} />
         <Route path="/forecasting" element={<Forecasting />} />
-        <Route path="/automation" element={<AutomationEngine />} />
+        <Route path="/automation" element={<Navigate to="/automation-triggers" replace />} />
         <Route path="/automation-triggers" element={<AutomationTriggers />} />
         <Route path="/accounting" element={<Accounting />} />
         <Route path="/finance" element={<FinanceLedger />} />

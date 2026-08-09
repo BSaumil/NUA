@@ -114,7 +114,7 @@ const ALL_FEATURES = [
     { path: '/integrations', label: 'Integrations', icon: Plug, access: ['owner'] },
   ]},
   { group: 'System', items: [
-    { path: '/automation', label: 'Automation', icon: Zap, access: ['owner', 'manager'] },
+    { path: '/automation-triggers', label: 'Automation', icon: Zap, access: ['owner', 'manager'] },
     { path: '/settings', label: 'Settings', icon: Settings, access: ['owner', 'manager'] },
   ]},
   { group: 'Enterprise (v25)', items: [
