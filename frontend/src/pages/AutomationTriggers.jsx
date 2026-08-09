@@ -9,7 +9,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { toast } from 'sonner';
-import { Zap, Plus, Trash2, Sparkles, Play, Pause, Brain, History, GitBranch, ChevronRight, Cpu, Activity, ArrowRight } from 'lucide-react';
+import { Zap, Plus, Trash2, Sparkles, Play, Pause, Brain, History, GitBranch, ChevronRight, Cpu, Activity, ArrowRight, TrendingDown, RefreshCw } from 'lucide-react';
 import axios from 'axios';
 
 /* Tiny API wrapper — kept local to avoid polluting services/api.js */
@@ -27,6 +27,8 @@ const rulesAPI = {
   simulate: (b) => axios.post(`${API}/rules/simulate`, b, { headers: headers() }),
   emit: (b) => axios.post(`${API}/rules/emit`, b, { headers: headers() }),
   executions: (params) => axios.get(`${API}/rules/history/executions`, { headers: headers(), params }),
+  predictiveStockouts: () => axios.get(`${API}/rules/predictive/stockouts`, { headers: headers() }),
+  predictiveScan: () => axios.post(`${API}/rules/predictive/scan`, {}, { headers: headers() }),
 };
 
 const emptyRule = {
@@ -56,6 +58,9 @@ export default function AutomationTriggers() {
   const [simDialog, setSimDialog] = useState(null); // rule being simulated
   const [simPayload, setSimPayload] = useState('{}');
   const [simResult, setSimResult] = useState(null);
+  const [predictions, setPredictions] = useState([]);
+  const [predictiveLoading, setPredictiveLoading] = useState(false);
+  const [scanning, setScanning] = useState(false);
 
   const loadAll = useCallback(async () => {
     try {
@@ -70,6 +75,26 @@ export default function AutomationTriggers() {
     catch { toast.error('Could not load history'); }
   };
   useEffect(() => { if (tab === 'history') loadExecutions(); }, [tab]);
+
+  const loadPredictions = useCallback(async () => {
+    setPredictiveLoading(true);
+    try { setPredictions((await rulesAPI.predictiveStockouts()).data.predictions); }
+    catch { toast.error('Could not load predictions'); }
+    finally { setPredictiveLoading(false); }
+  }, []);
+  useEffect(() => { if (tab === 'predictive') loadPredictions(); }, [tab, loadPredictions]);
+
+  const runPredictiveScan = async () => {
+    setScanning(true);
+    try {
+      const { data } = await rulesAPI.predictiveScan();
+      toast.success(data.emitted > 0
+        ? `Emitted ${data.emitted} new predicted-stockout event${data.emitted === 1 ? '' : 's'}`
+        : 'No new predictions to emit — everything already flagged is inside its 12h dedupe window');
+      loadPredictions();
+    } catch { toast.error('Scan failed'); }
+    finally { setScanning(false); }
+  };
 
   const openNew = () => { setForm(emptyRule); setEditId(null); setDialogOpen(true); };
   const openEdit = (r) => {
@@ -188,6 +213,7 @@ export default function AutomationTriggers() {
           <TabsTrigger value="rules" data-testid="tab-rules"><GitBranch size={14} className="mr-1" /> Rules</TabsTrigger>
           <TabsTrigger value="history" data-testid="tab-history"><History size={14} className="mr-1" /> History</TabsTrigger>
           <TabsTrigger value="catalog" data-testid="tab-catalog"><Cpu size={14} className="mr-1" /> Events &amp; Actions</TabsTrigger>
+          <TabsTrigger value="predictive" data-testid="tab-predictive"><TrendingDown size={14} className="mr-1" /> Predictive</TabsTrigger>
         </TabsList>
 
         <TabsContent value="rules">
@@ -348,6 +374,55 @@ export default function AutomationTriggers() {
               </div>
             </CardContent></Card>
           </div>
+        </TabsContent>
+
+        <TabsContent value="predictive">
+          <Card>
+            <CardContent className="p-4 space-y-4">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <h3 className="font-semibold flex items-center gap-2"><TrendingDown size={16} className="text-amber-600" /> Predicted stockouts</h3>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Projected from real sales velocity, not just today's stock count — flags anything on track
+                    to hit zero within 2 days, before inventory.low_stock or inventory.stockout would ever fire.
+                    Runs automatically every hour; emits <span className="font-mono text-[11px]">inventory.predicted_stockout</span> for
+                    any rule subscribed to it.
+                  </p>
+                </div>
+                <div className="flex gap-2 flex-shrink-0">
+                  <Button size="sm" variant="outline" onClick={loadPredictions} disabled={predictiveLoading} data-testid="predictive-refresh-btn">
+                    <RefreshCw size={12} className={`mr-1 ${predictiveLoading ? 'animate-spin' : ''}`} /> Refresh
+                  </Button>
+                  <Button size="sm" onClick={runPredictiveScan} disabled={scanning} data-testid="predictive-scan-btn">
+                    {scanning ? 'Scanning…' : 'Scan now'}
+                  </Button>
+                </div>
+              </div>
+
+              {predictions.length === 0 ? (
+                <p className="text-center text-slate-400 py-8 text-sm">
+                  {predictiveLoading ? 'Loading…' : 'Nothing projected to run out within 2 days.'}
+                </p>
+              ) : (
+                <div className="space-y-2" data-testid="predictive-list">
+                  {predictions.map(p => (
+                    <div key={p.productId} className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"
+                      data-testid={`predictive-row-${p.productId}`}>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{p.productName}</p>
+                        <p className="text-xs text-slate-500">
+                          {p.currentStock} left · selling ~{p.avgDailyUsage}/day
+                        </p>
+                      </div>
+                      <Badge className="bg-amber-600 text-white flex-shrink-0">
+                        {p.daysRemaining < 1 ? '< 1 day left' : `~${p.daysRemaining} days left`}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
 

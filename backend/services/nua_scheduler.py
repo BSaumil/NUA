@@ -91,6 +91,13 @@ async def _loop() -> None:
         except Exception as e:
             logger.warning(f"[ash] scheduler loop error: {e}")
         try:
+            from services import predictive_signals
+            pred = await predictive_signals.scan_and_emit_predicted_stockouts()
+            if pred["emitted"]:
+                logger.info(f"[ash] predictive scan emitted {pred['emitted']} stockout warning(s)")
+        except Exception as e:
+            logger.warning(f"[ash] predictive scan error: {e}")
+        try:
             await asyncio.sleep(interval)
         except asyncio.CancelledError:
             logger.info("[ash] scheduler cancelled — exiting cleanly")
