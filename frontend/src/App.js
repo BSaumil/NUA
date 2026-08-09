@@ -140,7 +140,6 @@ const DynamicPricing = lazyNamed(v25, 'DynamicPricing');
 const Subscriptions = lazyNamed(v25, 'Subscriptions');
 const EventsManager = lazyNamed(v26, 'EventsManager');
 const StaffAvailability = lazyNamed(v26, 'StaffAvailability');
-const MarketingEmails = lazyNamed(v26, 'MarketingEmails');
 const OnlineOrders = lazy(() => import('./pages/OnlineOrders'));
 const OrderOnline = lazy(() => import('./pages/OrderOnline'));
 const TrackOrder = lazy(() => import('./pages/TrackOrder'));
@@ -328,7 +327,7 @@ function ProtectedRoutes() {
         <Route path="/events" element={<EventsManager />} />
         <Route path="/staff-availability" element={<StaffAvailability />} />
         <Route path="/gift-card-sale" element={<Navigate to="/gift-cards" replace />} />
-        <Route path="/marketing-emails" element={<MarketingEmails />} />
+        <Route path="/marketing-emails" element={<Navigate to="/marketing?tab=email" replace />} />
         <Route path="/online-orders" element={<OnlineOrders />} />
         <Route path="/license" element={<LicensePage />} />
         <Route path="/whats-new" element={<WhatsNew />} />

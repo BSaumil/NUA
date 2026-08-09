@@ -773,11 +773,6 @@ export const v26API = {
   stopGiftCard: (code, reason) => api.post(`/v26/gift-cards/${code}/stop`, { reason }),
   reactivateGiftCard: (code) => api.post(`/v26/gift-cards/${code}/reactivate`),
   resendGiftCard: (code, email) => api.post(`/v26/gift-cards/${code}/resend`, email ? { email } : {}),
-  // Marketing emails
-  generateMarketingEmail: (data) => api.post('/v26/marketing/email/generate', data),
-  listMarketingEmails: () => api.get('/v26/marketing/emails'),
-  updateMarketingEmail: (id, data) => api.patch(`/v26/marketing/emails/${id}`, data),
-  deleteMarketingEmail: (id) => api.delete(`/v26/marketing/emails/${id}`),
   // Events
   listEvents: (upcomingOnly = false) => api.get('/v26/events', { params: { upcomingOnly } }),
   createEvent: (data) => api.post('/v26/events', data),

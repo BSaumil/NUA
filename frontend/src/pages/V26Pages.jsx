@@ -4,11 +4,9 @@
 import Barcode128 from '../components/Barcode128';
 import EventsManager from './v26/EventsManager';
 import StaffAvailability from './v26/StaffAvailability';
-import MarketingEmails from './v26/MarketingEmails';
 
 export {
   Barcode128,
   EventsManager,
   StaffAvailability,
-  MarketingEmails,
 };
