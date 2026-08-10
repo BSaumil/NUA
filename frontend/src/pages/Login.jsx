@@ -26,7 +26,10 @@ function loginErrorMessage(err, fallback) {
 export default function Login() {
   const { login, completeTwoFactor } = useAuth();
   const navigate = useNavigate();
-  const [mode, setMode] = useState('email'); // email | pin | forgot
+  // Remember whichever mode last signed someone in successfully on this
+  // device — a POS terminal used only for staff PIN clock-in should default
+  // to the PIN tab next time, not make staff tap past email every shift.
+  const [mode, setMode] = useState(() => (localStorage.getItem('nua_login_mode') === 'pin' ? 'pin' : 'email')); // email | pin | forgot
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [pin, setPin] = useState('');
@@ -48,6 +51,7 @@ export default function Login() {
       if (res.twoFactor) {
         setChallenge(res.twoFactor);
       } else {
+        localStorage.setItem('nua_login_mode', 'email');
         navigate('/', { replace: true }); // role-based landing (Today / POS / Kitchen)
       }
     } catch (err) {
@@ -69,6 +73,7 @@ export default function Login() {
           'nua_recovery_notice',
           `You signed in with a recovery code. ${res.recoveryCodesRemaining} left.`);
       }
+      localStorage.setItem('nua_login_mode', 'email');
       navigate('/', { replace: true });
     } catch (err) {
       setError(loginErrorMessage(err, 'Incorrect code'));
@@ -83,6 +88,7 @@ export default function Login() {
     try {
       const res = await staffMgmtAPI.pinLogin(pin);
       localStorage.setItem('nua_token', res.data.token);
+      localStorage.setItem('nua_login_mode', 'pin');
       window.location.assign('/'); // role-based landing (Today / POS / Kitchen)
     } catch (err) {
       setError(loginErrorMessage(err, 'Invalid PIN'));

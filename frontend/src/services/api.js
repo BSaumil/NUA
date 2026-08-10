@@ -963,6 +963,8 @@ export const businessAPI = {
   summary: (id) => api.get(`/business/${id}/summary`),
   exportData: (id, collection) => api.get(`/business/${id}/export`, { params: collection ? { collection } : {} }),
   backfillTenant: () => api.post('/business/backfill-tenant'),
+  purgeDemoData: () => api.post('/business/purge-demo-data', { confirm: 'PURGE' }),
+  setupStatus: (id) => api.get(`/business/${id}/setup-status`),
 };
 
 // Customer Identity — the free base layer + per-add-on entitlements

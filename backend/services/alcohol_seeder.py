@@ -203,6 +203,7 @@ async def _upsert_category(cat: Dict[str, Any]) -> Dict[str, Any]:
         "sortOrder": cat.get("sortOrder", 99),
         "prepTime": cat.get("prepTime", 4),
         "channels": ["dine-in", "pickup", "delivery"],
+        "isDemo": True,
     }
     return await stamped_insert("categories", doc, entity_type="category")
 
@@ -258,6 +259,7 @@ async def _upsert_product(name: str, category: Dict[str, Any], price: float,
         "active": True,
         "eightySixed": False,
         "isMeasured": bool(measured),
+        "isDemo": True,
     }
     saved = await stamped_insert("products", prod, entity_type="product")
 
@@ -270,6 +272,7 @@ async def _upsert_product(name: str, category: Dict[str, Any], price: float,
             "totalMeasure": measured["bottle"]["totalMeasure"],
             "costPerUnit": measured["bottle"]["cost"],
             "label": f"{measured['bottle']['totalMeasure']}{measured['bottle']['uom']} bottle",
+            "isDemo": True,
         }, entity_type="stock_unit")
         await stamped_insert("sell_variants", {
             "id": str(uuid.uuid4()),
@@ -277,6 +280,7 @@ async def _upsert_product(name: str, category: Dict[str, Any], price: float,
             "stockUnitId": su["id"],
             "uom": measured["pour"]["uom"],
             "deductAmount": measured["pour"]["amount"],
+            "isDemo": True,
             "label": measured["pour"]["label"],
         }, entity_type="sell_variant")
     return saved

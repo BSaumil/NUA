@@ -160,6 +160,7 @@ def _seed_reservations(customer_id: str, name: str, email: str, phone: str, coun
             "specialRequests": "" if i % 2 else "Birthday cake at the end",
             "source": "in-app",
             "createdAt": _iso(d - timedelta(days=2)),
+            "isDemo": True,
         })
     # 1 upcoming
     upcoming = datetime.now(timezone.utc) + timedelta(days=7)
@@ -219,6 +220,7 @@ def _seed_transactions(customer_id: str, count: int, avg_spend: float):
             "timestamp": _iso(d),
             "status": "completed",
             "source": "pos",
+            "isDemo": True,
         })
     return rows
 
@@ -248,6 +250,7 @@ def _seed_feedbacks(customer_id: str, name: str, count: int, avg_rating: float):
             "status": "new" if i == 0 else "responded",
             "response": "" if i == 0 else "Thanks so much for the kind words!",
             "createdAt": _iso(d),
+            "isDemo": True,
         })
     return rows
 
@@ -277,6 +280,7 @@ async def seed_demo_customers():
             **c,
             "joinDate": _iso(datetime.now(timezone.utc) - timedelta(days=180)),
             "reservationIds": [],
+            "isDemo": True,
         }
         await db.customers.insert_one(doc)
         seeded_ids.append(doc["id"])

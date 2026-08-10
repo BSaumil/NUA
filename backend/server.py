@@ -494,6 +494,13 @@ async def startup():
         start_coursing()
     except Exception as exc:
         logger.warning("Coursing scheduler failed to start: %s", exc)
+    # Daily automatic backup restore-drill — catches a silently-broken
+    # backup before the day it's actually needed.
+    try:
+        from services.backup_scheduler import start_scheduler as start_backup_drills
+        start_backup_drills()
+    except Exception as exc:
+        logger.warning("Backup drill scheduler failed to start: %s", exc)
     # Burned TOTP codes and trusted devices both expire on their own.
     try:
         from services.two_factor import ensure_indexes as ensure_2fa_indexes
@@ -533,6 +540,11 @@ async def shutdown_db_client():
     try:
         from services.coursing_scheduler import stop_scheduler as stop_coursing
         stop_coursing()
+    except Exception:
+        pass
+    try:
+        from services.backup_scheduler import stop_scheduler as stop_backup_drills
+        stop_backup_drills()
     except Exception:
         pass
     client.close()

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from deps import get_user, require_owner_or_manager
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from database import db
 from models.bas_report import BASReport, BASReportCreate
 from models.expense import Expense, ExpenseCreate
@@ -10,8 +10,10 @@ from middleware.actor_context import tenant_scope_filter
 from utils.dates import date_range_filter as _date_match
 import uuid
 import random
+import logging
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 async def _sum_transactions(match: dict) -> dict:
@@ -824,6 +826,32 @@ async def link_order_to_customer(transaction_id: str, customer_id: str, points_e
     return {"message": "Order linked and points awarded", "pointsEarned": points_earned}
 
 
+async def _notify_critical_alerts_once(today_iso: str, alerts: List[dict]) -> None:
+    """Fan critical Pulse alerts out through the in-app notification bell
+    (services/notification_service.py) so they reach the owner wherever
+    they are in the app, not only when they happen to have Pulse open.
+
+    Deduped per (date, kind) via db.pulse_alert_notifications — this
+    endpoint is polled every ~60s by the Pulse dashboard, so without a
+    dedup guard the same stockout would notify on every poll."""
+    from services import notification_service
+    for a in alerts:
+        if a.get("severity") != "critical":
+            continue
+        key = {"date": today_iso, "kind": a["kind"]}
+        already_sent = await db.pulse_alert_notifications.find_one(key, {"_id": 1})
+        if already_sent:
+            continue
+        try:
+            await notification_service.send(
+                kind="system", severity="critical", role="owner",
+                title="Needs attention", body=a["message"], link=a.get("link"),
+            )
+            await db.pulse_alert_notifications.insert_one(key)
+        except Exception as exc:
+            logger.warning("Failed to notify critical pulse alert %s: %s", a["kind"], exc)
+
+
 # ============ TODAY PULSE — one call that answers "is anything wrong right now?" ============
 @router.get("/analytics/today-pulse")
 async def get_today_pulse(_user: dict = Depends(get_user)):
@@ -887,6 +915,20 @@ async def get_today_pulse(_user: dict = Depends(get_user)):
     open_kitchen = await db.kitchen_orders.count_documents(
         {"status": {"$in": ["pending", "in_progress"]}})
 
+    # --- 7-day sales trend (today inclusive) for the Pulse sparkline ---
+    trend_start = day_start - timedelta(days=6)
+    trend_rows = await db.transactions.aggregate([
+        {"$match": {"timestamp": {"$gte": trend_start.replace(tzinfo=None)}}},
+        {"$group": {
+            "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$timestamp"}},
+            "total": {"$sum": "$total"},
+        }},
+    ]).to_list(30)
+    by_date = {r["_id"]: round(r["total"], 2) for r in trend_rows}
+    trend = [{"date": (trend_start + timedelta(days=i)).date().isoformat(),
+              "total": by_date.get((trend_start + timedelta(days=i)).date().isoformat(), 0)}
+             for i in range(7)]
+
     # --- Assemble alerts, most severe first ---
     alerts = []
     if stockouts:
@@ -910,6 +952,8 @@ async def get_today_pulse(_user: dict = Depends(get_user)):
         alerts.append({"severity": "info", "kind": "kitchen_load", "link": "/kitchen",
                        "message": f"{open_kitchen} open kitchen tickets — kitchen under load"})
 
+    await _notify_critical_alerts_once(today_iso, alerts)
+
     return {
         "date": today_iso,
         "sales": {"today": sales_today, "target": cfg["dailySalesTarget"],
@@ -923,6 +967,7 @@ async def get_today_pulse(_user: dict = Depends(get_user)):
                        "stockouts": stockouts[:10]},
         "service": {"bookingsTonight": bookings_tonight, "openKitchenTickets": open_kitchen},
         "alerts": alerts,
+        "trend": trend,
     }
 
 
