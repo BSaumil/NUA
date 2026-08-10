@@ -61,6 +61,7 @@ from routes.rules_engine import router as rules_engine_router
 from routes.audit import router as audit_router
 from routes.approvals import router as approvals_router
 from routes.nua import router as nua_router
+from routes.repo_sync import router as repo_sync_router
 from routes.hq import router as hq_router
 from routes.ops import router as ops_router
 from routes.changelog import router as changelog_router
@@ -123,6 +124,7 @@ api_router.include_router(rules_engine_router)
 api_router.include_router(audit_router)
 api_router.include_router(approvals_router)
 api_router.include_router(nua_router)
+api_router.include_router(repo_sync_router)
 api_router.include_router(hq_router)
 api_router.include_router(multi_tenant_router)
 api_router.include_router(ops_router)
@@ -494,6 +496,14 @@ async def startup():
         start_coursing()
     except Exception as exc:
         logger.warning("Coursing scheduler failed to start: %s", exc)
+    # Daily GitHub auto-sync — see services/repo_sync_scheduler.py.
+    # Polls every 30 min; performs one fetch+merge inside the target UTC hour
+    # (default 0 = midnight). Disabled by REPO_SYNC_ENABLED=false.
+    try:
+        from services.repo_sync_scheduler import start_scheduler as start_repo_sync
+        start_repo_sync()
+    except Exception as exc:
+        logger.warning("Repo-sync scheduler failed to start: %s", exc)
     # Burned TOTP codes and trusted devices both expire on their own.
     try:
         from services.two_factor import ensure_indexes as ensure_2fa_indexes
@@ -533,6 +543,11 @@ async def shutdown_db_client():
     try:
         from services.coursing_scheduler import stop_scheduler as stop_coursing
         stop_coursing()
+    except Exception:
+        pass
+    try:
+        from services.repo_sync_scheduler import stop_scheduler as stop_repo_sync
+        stop_repo_sync()
     except Exception:
         pass
     client.close()
