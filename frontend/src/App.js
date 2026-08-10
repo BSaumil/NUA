@@ -34,6 +34,7 @@ const WaitlistPage = lazy(() => import('./pages/Waitlist'));
 const Kitchen = lazy(() => import('./pages/Kitchen'));
 const CoursingAnalytics = lazy(() => import('./pages/CoursingAnalytics'));
 const PreShift = lazy(() => import('./pages/PreShift'));
+const ClockInPrompt = lazy(() => import('./pages/ClockInPrompt'));
 const CommandCenter = lazy(() => import('./pages/CommandCenter'));
 const MenuEngineering = lazy(() => import('./pages/MenuEngineering'));
 const AutomationTriggers = lazy(() => import('./pages/AutomationTriggers'));
@@ -145,6 +146,7 @@ const TrackOrder = lazy(() => import('./pages/TrackOrder'));
 const TrackWaitlist = lazy(() => import('./pages/TrackWaitlist'));
 const LoyaltyGuestPortal = lazy(() => import('./pages/LoyaltyGuestPortal'));
 import { useTheme } from './contexts/ThemeContext';
+import useIdleLogout from './hooks/useIdleLogout';
 
 function StaffLayout({ children }) {
   const { darkMode } = useTheme();
@@ -171,7 +173,11 @@ function StaffLayout({ children }) {
 }
 
 function ProtectedRoutes() {
-  const { user, loading } = useAuth();
+  const { user, loading, logout } = useAuth();
+  // Owner-configurable POS auto-logout (Settings → POS Session). Called
+  // unconditionally (Rules of Hooks) — the hook itself no-ops while
+  // enabled is false, i.e. before there's a session to time out.
+  useIdleLogout(!!user, logout);
   // Read (and persist) the shell BEFORE the login gate — a ?shell= query
   // param only ever shows up on the very first, pre-login page load, so it
   // must be captured into localStorage right away or it's lost the moment
@@ -214,6 +220,7 @@ function ProtectedRoutes() {
         <Route path="/owner-dashboard" element={<OwnerDashboardApp />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/pre-shift" element={<PreShift />} />
+        <Route path="/clock-in" element={<ClockInPrompt />} />
         <Route path="/command-center" element={<CommandCenter />} />
         <Route path="/pos" element={<POSTerminal />} />
         <Route path="/reservations" element={<Reservations />} />

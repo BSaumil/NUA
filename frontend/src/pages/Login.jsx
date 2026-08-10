@@ -1,12 +1,69 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 import { staffMgmtAPI, authAPI } from '../services/api';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent } from '../components/ui/card';
-import { Lock, Mail, AlertCircle, Hash, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { Lock, Mail, AlertCircle, Hash, ShieldCheck, CheckCircle2, Wifi, WifiOff, Printer, CreditCard, ShieldQuestion } from 'lucide-react';
 import Logo from '../components/brand/Logo';
+
+const API = process.env.REACT_APP_BACKEND_URL;
+
+// Live clock/date + internet status + this terminal's known peripherals —
+// the first thing anyone should see walking up to a POS station, before
+// they've even entered a PIN.
+function StatusStrip() {
+  const [now, setNow] = useState(new Date());
+  const [online, setOnline] = useState(navigator.onLine);
+  const [devices, setDevices] = useState(null);
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    const goOnline = () => setOnline(true);
+    const goOffline = () => setOnline(false);
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+    return () => { window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline); };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const check = () => axios.get(`${API}/api/ops/device-status`, { timeout: 4000 })
+      .then(r => { if (!cancelled) setDevices(r.data); })
+      .catch(() => { if (!cancelled) setDevices(null); });
+    check();
+    const t = setInterval(check, 30000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
+
+  return (
+    <div className="mb-5 text-center" data-testid="login-status-strip">
+      <p className="text-2xl font-mono font-bold text-white tracking-wide">
+        {now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+      </p>
+      <p className="text-xs text-gray-400 mb-3">
+        {now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}
+      </p>
+      <div className="flex items-center justify-center gap-3 text-[11px]">
+        <span className={`flex items-center gap-1 ${online ? 'text-emerald-400' : 'text-red-400'}`} data-testid="login-connection-status">
+          {online ? <Wifi size={13} /> : <WifiOff size={13} />} {online ? 'Online' : 'Offline'}
+        </span>
+        <span className={`flex items-center gap-1 ${devices?.receiptTemplateConfigured ? 'text-emerald-400' : 'text-gray-500'}`} title="Receipt template">
+          <Printer size={13} /> {devices?.receiptTemplateConfigured ? 'Printer ready' : 'Printer not set up'}
+        </span>
+        <span className={`flex items-center gap-1 ${devices?.cardReaderConnected ? 'text-emerald-400' : 'text-gray-500'}`} title="Card reader">
+          <CreditCard size={13} /> {devices?.cardReaderConnected ? `Card reader (${devices.cardReaderCount})` : 'No card reader'}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 // Every catch block on this page did `err.response?.data?.detail || '<wrong
 // password>'-style message`. That fallback fires for ANY failure with no
@@ -26,10 +83,11 @@ function loginErrorMessage(err, fallback) {
 export default function Login() {
   const { login, completeTwoFactor } = useAuth();
   const navigate = useNavigate();
-  // Remember whichever mode last signed someone in successfully on this
-  // device — a POS terminal used only for staff PIN clock-in should default
-  // to the PIN tab next time, not make staff tap past email every shift.
-  const [mode, setMode] = useState(() => (localStorage.getItem('nua_login_mode') === 'pin' ? 'pin' : 'email')); // email | pin | forgot
+  // PIN is the priority login method for staff terminals — a device
+  // defaults to PIN unless it's specifically the one an owner/manager last
+  // signed into with email (so an admin's own laptop doesn't flip to PIN
+  // just because they used it once).
+  const [mode, setMode] = useState(() => (localStorage.getItem('nua_login_mode') === 'email' ? 'email' : 'pin')); // email | pin | forgot
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [pin, setPin] = useState('');
@@ -42,6 +100,11 @@ export default function Login() {
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotSent, setForgotSent] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
+  // Set when pin-login reports the staff member isn't rostered right now —
+  // replaces the PIN form with a manager/owner PIN prompt to authorize on
+  // the spot, rather than a hard lock-out.
+  const [needsApproval, setNeedsApproval] = useState(null); // { staffId, staffName }
+  const [managerPin, setManagerPin] = useState('');
 
   const handleEmailLogin = async (e) => {
     e.preventDefault();
@@ -52,7 +115,7 @@ export default function Login() {
         setChallenge(res.twoFactor);
       } else {
         localStorage.setItem('nua_login_mode', 'email');
-        navigate('/', { replace: true }); // role-based landing (Today / POS / Kitchen)
+        navigate('/clock-in', { replace: true });
       }
     } catch (err) {
       setError(loginErrorMessage(err, 'Invalid credentials'));
@@ -74,7 +137,7 @@ export default function Login() {
           `You signed in with a recovery code. ${res.recoveryCodesRemaining} left.`);
       }
       localStorage.setItem('nua_login_mode', 'email');
-      navigate('/', { replace: true });
+      navigate('/clock-in', { replace: true });
     } catch (err) {
       setError(loginErrorMessage(err, 'Incorrect code'));
       setCode('');
@@ -87,11 +150,31 @@ export default function Login() {
     setError(''); setLoading(true);
     try {
       const res = await staffMgmtAPI.pinLogin(pin);
+      if (res.data.needsApproval) {
+        setNeedsApproval({ staffId: res.data.staffId, staffName: res.data.staffName });
+        setLoading(false);
+        return;
+      }
       localStorage.setItem('nua_token', res.data.token);
       localStorage.setItem('nua_login_mode', 'pin');
-      window.location.assign('/'); // role-based landing (Today / POS / Kitchen)
+      window.location.assign('/clock-in');
     } catch (err) {
       setError(loginErrorMessage(err, 'Invalid PIN'));
+    }
+    setLoading(false);
+  };
+
+  const handleApprovalSubmit = async (e) => {
+    e.preventDefault();
+    setError(''); setLoading(true);
+    try {
+      const res = await staffMgmtAPI.approvePinLogin(pin, managerPin);
+      localStorage.setItem('nua_token', res.data.token);
+      localStorage.setItem('nua_login_mode', 'pin');
+      window.location.assign('/clock-in');
+    } catch (err) {
+      setError(loginErrorMessage(err, 'Invalid manager/owner PIN'));
+      setManagerPin('');
     }
     setLoading(false);
   };
@@ -134,13 +217,47 @@ export default function Login() {
           {/* Login is a marketing-facing surface, so it gets the full
               wordmark lockup (BRAND-SPEC §3) — on this dark background the
               wordmark is orange (BRAND-SPEC §2), never a gradient. */}
-          <div className="flex flex-col items-center mb-6">
+          <div className="flex flex-col items-center mb-4">
             <Logo variant="marketing" background="dark" size={34} />
           </div>
 
-          {/* Second factor — replaces the whole form rather than sitting
-              alongside it, so there is no way to be half signed in. */}
-          {challenge ? (
+          <StatusStrip />
+
+          {/* Off-roster approval — replaces the PIN form rather than sitting
+              alongside it, same "no half-signed-in" reasoning as 2FA below.
+              Never a hard lock-out: a manager/owner PIN here always works. */}
+          {needsApproval ? (
+            <div data-testid="approval-step">
+              <div className="flex flex-col items-center mb-5">
+                <ShieldQuestion size={28} style={{ color: '#f58c14' }} />
+                <p className="text-white font-medium mt-2">{needsApproval.staffName} isn't rostered right now</p>
+                <p className="text-gray-400 text-sm text-center mt-1">
+                  Ask a manager or owner to enter their PIN to authorize this login.
+                </p>
+              </div>
+              {error && (
+                <div className="flex items-center gap-2 text-red-400 text-sm bg-red-950/50 p-3 rounded-lg mb-4" data-testid="approval-error">
+                  <AlertCircle size={16} /> {error}
+                </div>
+              )}
+              <form onSubmit={handleApprovalSubmit} className="space-y-4">
+                <div className="flex justify-center">
+                  <Input type="password" inputMode="numeric" maxLength={4} placeholder="Manager PIN" value={managerPin}
+                    autoFocus onChange={e => setManagerPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                    className="text-center text-3xl tracking-[0.5em] font-mono w-48 h-16 bg-gray-800 border-gray-700 text-white"
+                    data-testid="manager-approval-pin" />
+                </div>
+                <Button type="submit" className="w-full h-11 text-white font-medium hover:opacity-90"
+                  style={{ backgroundColor: '#f58c14' }} disabled={loading || managerPin.length < 2} data-testid="approval-submit">
+                  {loading ? 'Checking...' : 'Authorize login'}
+                </Button>
+              </form>
+              <button onClick={() => { setNeedsApproval(null); setManagerPin(''); setPin(''); setError(''); }}
+                className="mt-5 w-full text-sm text-gray-500 hover:text-gray-300" data-testid="approval-back">
+                Cancel
+              </button>
+            </div>
+          ) : challenge ? (
             <div data-testid="twofactor-step">
               <div className="flex flex-col items-center mb-5">
                 <ShieldCheck size={28} style={{ color: '#f58c14' }} />
@@ -233,17 +350,17 @@ export default function Login() {
             </div>
           ) : (
           <>
-          {/* Mode Toggle */}
+          {/* Mode Toggle — PIN first: the priority login method for staff terminals */}
           <div className="flex gap-1 mb-6 bg-gray-800 rounded-lg p-1">
-            <button onClick={() => setMode('email')} data-testid="mode-email"
-              className={`flex-1 py-2 text-sm rounded-md font-medium transition-colors ${mode === 'email' ? 'text-white' : 'text-gray-400 hover:text-white'}`}
-              style={mode === 'email' ? { backgroundColor: '#f58c14' } : {}}>
-              <Mail size={14} className="inline mr-1" /> Email
-            </button>
             <button onClick={() => setMode('pin')} data-testid="mode-pin"
               className={`flex-1 py-2 text-sm rounded-md font-medium transition-colors ${mode === 'pin' ? 'text-white' : 'text-gray-400 hover:text-white'}`}
               style={mode === 'pin' ? { backgroundColor: '#f58c14' } : {}}>
               <Hash size={14} className="inline mr-1" /> PIN Code
+            </button>
+            <button onClick={() => setMode('email')} data-testid="mode-email"
+              className={`flex-1 py-2 text-sm rounded-md font-medium transition-colors ${mode === 'email' ? 'text-white' : 'text-gray-400 hover:text-white'}`}
+              style={mode === 'email' ? { backgroundColor: '#f58c14' } : {}}>
+              <Mail size={14} className="inline mr-1" /> Email
             </button>
           </div>
 
