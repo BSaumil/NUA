@@ -86,7 +86,20 @@ export default function OwnerDashboardApp() {
   const labor = pulse?.labor || {};
   const service = pulse?.service || {};
   const alerts = pulse?.alerts || [];
+  const trend = pulse?.trend || [];
   const laborOver = labor.pct != null && labor.pct > (labor.threshold || 32);
+
+  if (loading && !pulse) {
+    return (
+      <div className="min-h-screen pb-10" style={{ background: darkMode ? '#0b0b0f' : '#f6f7fb' }} data-testid="owner-dashboard-app-page">
+        <div className="max-w-2xl mx-auto px-4 pt-8 space-y-5">
+          {[88, 140, 96, 220, 120].map((h, i) => (
+            <div key={i} className="rounded-xl animate-pulse" style={{ height: h, background: darkMode ? '#15151d' : '#e9eaf0' }} data-testid={`owner-dashboard-skeleton-${i}`} />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen pb-10" style={{ background: darkMode ? '#0b0b0f' : '#f6f7fb' }} data-testid="owner-dashboard-app-page">
@@ -153,6 +166,16 @@ export default function OwnerDashboardApp() {
             <p className="text-[11px] text-gray-400 mt-1">{service.openKitchenTickets || 0} open tickets</p>
           </CardContent></Card>
         </div>
+
+        {/* 7-day sales trend */}
+        {trend.length > 0 && (
+          <Card data-testid="owner-dashboard-trend">
+            <CardContent className="p-4">
+              <h2 className="font-semibold text-sm mb-3" style={{ color: darkMode ? '#eaeaea' : '#111827' }}>Last 7 days</h2>
+              <SalesTrendChart trend={trend} color={theme.primary} darkMode={darkMode} />
+            </CardContent>
+          </Card>
+        )}
 
         {/* Exceptions */}
         <Card data-testid="owner-dashboard-alerts">
@@ -226,5 +249,41 @@ export default function OwnerDashboardApp() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Plain inline-SVG bar chart — no chart library dependency for one sparkline.
+// Each bar carries its own $ label (not color alone) since a single-hue bar
+// against a light background doesn't pass a contrast-only encoding check.
+function SalesTrendChart({ trend, color, darkMode }) {
+  const max = Math.max(...trend.map(t => t.total), 1);
+  const barW = 28;
+  const gap = 14;
+  const chartH = 90;
+  const width = trend.length * (barW + gap);
+  return (
+    <svg viewBox={`0 0 ${width} ${chartH + 34}`} width="100%" height={chartH + 34} role="img"
+      aria-label="Sales total for each of the last 7 days" data-testid="owner-dashboard-trend-chart">
+      {trend.map((t, i) => {
+        const h = Math.max((t.total / max) * chartH, t.total > 0 ? 4 : 1);
+        const x = i * (barW + gap);
+        const isToday = i === trend.length - 1;
+        const day = new Date(t.date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short' })[0];
+        return (
+          <g key={t.date}>
+            <rect x={x} y={chartH - h} width={barW} height={h} rx={4}
+              fill={color} opacity={isToday ? 1 : 0.45} />
+            <text x={x + barW / 2} y={chartH - h - 6} textAnchor="middle" fontSize="9"
+              fill={darkMode ? '#9ca3af' : '#6b7280'}>
+              {t.total >= 1000 ? `${(t.total / 1000).toFixed(1)}k` : Math.round(t.total)}
+            </text>
+            <text x={x + barW / 2} y={chartH + 16} textAnchor="middle" fontSize="10" fontWeight={isToday ? 700 : 400}
+              fill={isToday ? color : (darkMode ? '#9ca3af' : '#6b7280')}>
+              {day}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
   );
 }

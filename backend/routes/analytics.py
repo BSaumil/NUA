@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from deps import get_user, require_owner_or_manager
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from database import db
 from models.bas_report import BASReport, BASReportCreate
 from models.expense import Expense, ExpenseCreate
@@ -887,6 +887,20 @@ async def get_today_pulse(_user: dict = Depends(get_user)):
     open_kitchen = await db.kitchen_orders.count_documents(
         {"status": {"$in": ["pending", "in_progress"]}})
 
+    # --- 7-day sales trend (today inclusive) for the Pulse sparkline ---
+    trend_start = day_start - timedelta(days=6)
+    trend_rows = await db.transactions.aggregate([
+        {"$match": {"timestamp": {"$gte": trend_start.replace(tzinfo=None)}}},
+        {"$group": {
+            "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$timestamp"}},
+            "total": {"$sum": "$total"},
+        }},
+    ]).to_list(30)
+    by_date = {r["_id"]: round(r["total"], 2) for r in trend_rows}
+    trend = [{"date": (trend_start + timedelta(days=i)).date().isoformat(),
+              "total": by_date.get((trend_start + timedelta(days=i)).date().isoformat(), 0)}
+             for i in range(7)]
+
     # --- Assemble alerts, most severe first ---
     alerts = []
     if stockouts:
@@ -923,6 +937,7 @@ async def get_today_pulse(_user: dict = Depends(get_user)):
                        "stockouts": stockouts[:10]},
         "service": {"bookingsTonight": bookings_tonight, "openKitchenTickets": open_kitchen},
         "alerts": alerts,
+        "trend": trend,
     }
 
 
