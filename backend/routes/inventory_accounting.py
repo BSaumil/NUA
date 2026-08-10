@@ -12,19 +12,17 @@ Unit conversion is canonical: every ingredient declares its `baseUnit` (g, mL,
 ea); all stock movements convert to that base before recording. This is what
 lets "kg" invoice lines correctly add to "g" recipes.
 """
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Depends
 from deps import get_user, require_owner, require_owner_or_manager
 from database import db
-from datetime import datetime, timezone, timedelta, date
+from datetime import datetime, timedelta, date
 from typing import Optional
-import uuid
+from middleware.actor_context import tenant_scope_filter
 
 router = APIRouter()
 
 
-def _now(): return datetime.now(timezone.utc)
-def _iso(dt): return dt.isoformat() if isinstance(dt, datetime) else dt
-def _uid(prefix: str) -> str: return f"{prefix}-{uuid.uuid4().hex[:8].upper()}"
+from utils.ids import now_utc as _now, to_iso as _iso, gen_uid as _uid
 
 
 # Conversion factors → BASE unit per source unit.
@@ -344,7 +342,7 @@ def _quarter_range(year: int, quarter: str):
 @router.get("/accounting/bas")
 async def bas_report(fy: Optional[int] = None, quarter: Optional[str] = None,
                      monthStart: Optional[str] = None, monthEnd: Optional[str] = None,
-                     _: dict = Depends(require_owner_or_manager)):
+                     user: dict = Depends(require_owner_or_manager)):
     """Australian GST/BAS report.
     Modes:
       - ?fy=2026&quarter=Q3   (Jan-Mar 2026)
@@ -370,11 +368,15 @@ async def bas_report(fy: Optional[int] = None, quarter: Optional[str] = None,
 
     # G1 / 1A — sales (POS + online transactions, GST-inclusive amounts)
     # transactions.timestamp is a datetime; also accept ISO string variants.
+    # Scoped to the caller's own business — a BAS/GST report is a tax
+    # document, so pulling another tenant's sales into "your" GST payable
+    # is a much sharper problem than the usual missing-filter bug.
+    date_or = {"$or": [
+        {"timestamp": {"$gte": datetime.fromisoformat(start_iso), "$lt": datetime.fromisoformat(end_iso)}},
+        {"createdAt": {"$gte": start_iso, "$lt": end_iso}},
+    ]}
     sales = await db.transactions.find(
-        {"$or": [
-            {"timestamp": {"$gte": datetime.fromisoformat(start_iso), "$lt": datetime.fromisoformat(end_iso)}},
-            {"createdAt": {"$gte": start_iso, "$lt": end_iso}},
-        ]},
+        {"$and": [date_or, tenant_scope_filter(user.get("businessId"))]},
         {"_id": 0, "total": 1, "items": 1, "gst": 1},
     ).to_list(50000)
     g1_total_sales = 0.0
@@ -385,7 +387,10 @@ async def bas_report(fy: Optional[int] = None, quarter: Optional[str] = None,
 
     # G11 / 1B — purchases (invoices in window)
     purchases = await db.invoices.find(
-        {"uploadedAt": {"$gte": start_iso, "$lt": end_iso}, "applied": True},
+        {"$and": [
+            {"uploadedAt": {"$gte": start_iso, "$lt": end_iso}, "applied": True},
+            tenant_scope_filter(user.get("businessId")),
+        ]},
         {"_id": 0, "parsed": 1},
     ).to_list(5000)
     g11_total_purchases = sum(float((p.get("parsed") or {}).get("total") or 0) for p in purchases)

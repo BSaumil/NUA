@@ -27,6 +27,7 @@ module.exports = {
   				orange: '#f58c14',
   				purple: '#8b5cf6',
   				pink:   '#ec4899',
+  				wine:   '#6b2737', // wordmark only, on light backgrounds — never icon/badge/AI/insight
   				ink:    '#1c1917',
   				paper:  '#fdfcfa'
   			},

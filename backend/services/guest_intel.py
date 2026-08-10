@@ -9,7 +9,6 @@ normal case at the booking desk.
 """
 import re
 from collections import Counter
-from typing import Optional
 
 from database import db
 
@@ -89,8 +88,20 @@ async def build_guest_intel(customer: dict) -> dict:
     email = (customer.get("email") or "").strip()
     phone_tail = normalize_phone(customer.get("phone", ""))
 
-    # --- Reservations (match by id or email; older rows may lack customerId)
-    res_query = {"$or": [{"customerId": cid}] + ([{"guestEmail": email}] if email else [])}
+    # --- Reservations (match by id, email, or phone; older rows may lack
+    # customerId entirely, and a guest who only ever gave a phone number at
+    # booking time — no account, no email — would otherwise never show up in
+    # their own history here). The regex lets any non-digit separator
+    # ("+61 400 111 222" vs "0400111222") sit between each digit of the
+    # tail, so it matches regardless of how the number was formatted when
+    # each reservation was taken — Mongo can't normalize that itself.
+    or_clauses = [{"customerId": cid}]
+    if email:
+        or_clauses.append({"guestEmail": email})
+    if phone_tail:
+        phone_regex = r"\D*".join(re.escape(d) for d in phone_tail)
+        or_clauses.append({"guestPhone": {"$regex": phone_regex}})
+    res_query = {"$or": or_clauses}
     reservations = await db.reservations.find(res_query, {"_id": 0}).to_list(500)
     reservations.sort(key=lambda r: f"{r.get('date','')} {r.get('time','')}", reverse=True)
 

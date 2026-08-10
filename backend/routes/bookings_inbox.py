@@ -11,7 +11,7 @@ Channels are stored as free-text strings so we can absorb new ones without a
 migration.
 """
 from fastapi import APIRouter, HTTPException, Request, Response
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime, timezone, date as date_cls
 from pydantic import BaseModel
 from database import db

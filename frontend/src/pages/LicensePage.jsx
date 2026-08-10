@@ -11,6 +11,7 @@ import { useToast } from '../hooks/use-toast';
 import { useTheme } from '../contexts/ThemeContext';
 import { useLicense } from '../contexts/LicenseContext';
 import { licenseAPI } from '../services/api';
+import Icon from '../components/brand/Icon';
 import {
   Shield, ShieldAlert, ShieldCheck, CreditCard, Building, Smartphone,
   CheckCircle, XCircle, Clock, RefreshCw, ExternalLink, Lock, Key
@@ -68,10 +69,12 @@ export function LicenseLockScreen() {
   return (
     <div className="fixed inset-0 z-[9999] bg-gradient-to-br from-slate-900 to-slate-800 text-white flex items-center justify-center p-6" data-testid="license-lockscreen">
       <div className="max-w-xl w-full text-center space-y-6">
-        {/* NUA brand mark */}
+        {/* NUA brand mark — the real Pulse Grid mono icon (solid brand
+            orange, white pulse glyph), not a hand-rolled gradient
+            approximation. */}
         <div className="flex flex-col items-center gap-2" data-testid="lockscreen-logo">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-xl">
-            <span className="text-2xl font-black text-slate-900 tracking-tight">N</span>
+          <div className="rounded-2xl shadow-xl overflow-hidden">
+            <Icon variant="mono" size={64} />
           </div>
           <p className="text-sm font-bold tracking-[0.4em] text-white/80">NUA</p>
         </div>

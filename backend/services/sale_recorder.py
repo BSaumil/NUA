@@ -25,6 +25,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from database import db
+from utils.errors import log_and_continue
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,15 @@ async def credit_loyalty_points(customer_id: str, points_earned: int, total: flo
         {"id": customer_id},
         {
             "$inc": {"totalSpent": total, "visits": 1, "points": points_earned},
-            "$set": {"lastVisit": datetime.utcnow().isoformat()},
+            # Two fields for the same fact, kept in lockstep on purpose:
+            # lastVisit (bare ISO string) is what nua_intelligence.py,
+            # nua_tools.py and v25_suite.py read; lastVisitDate is the
+            # Customer model's declared field and what loyalty_engine's
+            # segmentation and the marketing segment builder's "inactive for
+            # N days" rule read. Writing only one starves the other's
+            # readers of any real data.
+            "$set": {"lastVisit": datetime.utcnow().isoformat(),
+                     "lastVisitDate": datetime.utcnow().date().isoformat()},
         },
     )
     if points_earned > 0:
@@ -92,7 +101,7 @@ async def record_sale_side_effects(txn_dict: Dict[str, Any], memo: Optional[str]
             memo=memo or f"Sale {txn_dict.get('paymentMethod')} ${txn_dict.get('total')}",
         )
     except Exception as e:
-        logger.warning(f"Sale audit log write failed for txn {txn_dict.get('id')}: {e}")
+        log_and_continue(logger, f"Sale audit log write failed for txn {txn_dict.get('id')}", e)
 
     try:
         from services.accounting_service import auto_post_pos_sale
@@ -100,7 +109,7 @@ async def record_sale_side_effects(txn_dict: Dict[str, Any], memo: Optional[str]
         auto_txn = {**txn_dict, "timestamp": ts.isoformat() if hasattr(ts, "isoformat") else ts}
         await auto_post_pos_sale(auto_txn)
     except Exception as e:
-        logger.warning(f"Sale ledger auto-post skipped: {e}")
+        log_and_continue(logger, "Sale ledger auto-post skipped", e)
 
     try:
         from services.rules_engine import safe_emit

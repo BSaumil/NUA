@@ -42,9 +42,9 @@ Gift Card 2.0 (extends existing gift-card sale)
   POST   /gift-cards/{id}/reload     — top up an existing card
 """
 from __future__ import annotations
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from datetime import datetime, timezone, timedelta, date
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 from database import db
 from deps import get_user
@@ -93,29 +93,20 @@ def _gen_code(prefix: str = "NUA") -> str:
     body = "".join(secrets.choice(alphabet) for _ in range(8))
     return f"{prefix}-{body[:4]}-{body[4:]}"
 
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
-
-def _iso(dt) -> str:
-    return dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
+from utils.ids import now_utc as _now, to_iso as _iso
 
 
 # ═════════════════════════════════════════════════════════════════════════
 # Universal Voucher Engine
 # ═════════════════════════════════════════════════════════════════════════
-async def _issue_voucher(payload: dict, user: Optional[dict] = None) -> dict:
-    """Internal helper used by /vouchers, /refunds, promotion auto-issue."""
+def _build_voucher_doc(payload: dict, user: Optional[dict], customer_data: dict) -> dict:
+    """Pure (no I/O) construction of one voucher document — split out of
+    _issue_voucher so bulk issuance can build N of these in memory and
+    insert them in a single round trip, instead of one insert_one (and one
+    redundant customer lookup) per voucher."""
     code = _gen_code(payload.get("codePrefix", "NUA"))
     vid = str(uuid.uuid4())
     qr_payload = _sign_payload({"vid": vid, "code": code, "issued": int(_now().timestamp())})
-
-    customer_data = {}
-    if payload.get("customerId"):
-        c = await db.customers.find_one({"id": payload["customerId"]}, {"_id": 0}) or {}
-        customer_data = {
-            "customerEmail": c.get("email"),
-            "customerName": c.get("name"),
-        }
 
     v = Voucher(
         id=vid, code=code, qrPayload=qr_payload,
@@ -139,7 +130,20 @@ async def _issue_voucher(payload: dict, user: Optional[dict] = None) -> dict:
         metadata=payload.get("metadata") or {},
         businessId=payload.get("businessId") or (user or {}).get("businessId") or get_actor_context().get("businessId"),
     )
-    doc = v.dict()
+    return v.dict()
+
+
+async def _lookup_customer_data(customer_id: Optional[str]) -> dict:
+    if not customer_id:
+        return {}
+    c = await db.customers.find_one({"id": customer_id}, {"_id": 0}) or {}
+    return {"customerEmail": c.get("email"), "customerName": c.get("name")}
+
+
+async def _issue_voucher(payload: dict, user: Optional[dict] = None) -> dict:
+    """Internal helper used by /vouchers, /refunds, promotion auto-issue."""
+    customer_data = await _lookup_customer_data(payload.get("customerId"))
+    doc = _build_voucher_doc(payload, user, customer_data)
     await db.vouchers.insert_one(dict(doc))
     doc.pop("_id", None)
     return doc
@@ -154,17 +158,23 @@ async def issue_voucher(body: VoucherCreate, user: dict = Depends(get_user)):
 
 @router.post("/vouchers/bulk")
 async def bulk_issue_voucher(body: dict, user: dict = Depends(get_user)):
-    """Issue N identical vouchers — for corporate hand-outs, staff perks, event give-aways."""
+    """Issue N identical vouchers — for corporate hand-outs, staff perks, event give-aways.
+
+    Builds all N documents in memory (one customer lookup total, not one
+    per voucher — the customerId, if any, is the same for the whole batch)
+    and inserts them in a single insert_many instead of N sequential
+    insert_one round trips."""
     if user["role"] not in ("owner", "manager"):
         raise HTTPException(403, "Owner/manager only")
     count = int(body.get("count", 1))
     if count < 1 or count > 5000:
         raise HTTPException(400, "count must be 1..5000")
     template = {k: v for k, v in body.items() if k != "count"}
-    codes = []
-    for _ in range(count):
-        v = await _issue_voucher(template, user)
-        codes.append({"id": v["id"], "code": v["code"], "qrPayload": v["qrPayload"]})
+    customer_data = await _lookup_customer_data(template.get("customerId"))
+    docs = [_build_voucher_doc(template, user, customer_data) for _ in range(count)]
+    if docs:
+        await db.vouchers.insert_many([dict(d) for d in docs])
+    codes = [{"id": d["id"], "code": d["code"], "qrPayload": d["qrPayload"]} for d in docs]
     return {"issued": count, "vouchers": codes}
 
 
@@ -766,11 +776,23 @@ async def promo_analytics(days: int = 30, _: dict = Depends(get_user)):
     expired = sum(1 for v in vs if v.get("status") == "expired")
     revoked = sum(1 for v in vs if v.get("status") == "revoked")
 
-    revenue_generated = 0.0
-    for v in vs:
-        for r in v.get("redemptions", []):
-            tx = await db.transactions.find_one({"id": r.get("transactionId")}, {"_id": 0, "total": 1}) if r.get("transactionId") else None
-            revenue_generated += (tx or {}).get("total", 0)
+    # One batched $in lookup for every redemption's transaction instead of
+    # one find_one() per redemption — with thousands of vouchers each
+    # carrying multiple redemptions, this page used to issue thousands of
+    # individual queries on a single load.
+    txn_ids = list({
+        r["transactionId"] for v in vs for r in v.get("redemptions", []) if r.get("transactionId")
+    })
+    totals_by_txn = {}
+    if txn_ids:
+        rows = await db.transactions.find(
+            {"id": {"$in": txn_ids}}, {"_id": 0, "id": 1, "total": 1}
+        ).to_list(len(txn_ids))
+        totals_by_txn = {row["id"]: row.get("total", 0) for row in rows}
+    revenue_generated = sum(
+        totals_by_txn.get(r.get("transactionId"), 0)
+        for v in vs for r in v.get("redemptions", [])
+    )
 
     # By source type
     by_source: Dict[str, dict] = {}
@@ -806,23 +828,6 @@ _MILESTONES = [
     {"key": "big_spender_2k", "label": "$2,000 lifetime", "type": "spend", "threshold": 2000, "reward": {"type": "voucher", "amount": 100.0}},
 ]
 
-_TIER_THRESHOLDS = [
-    ("Bronze", 0),
-    ("Silver", 500),
-    ("Gold", 1500),
-    ("Platinum", 5000),
-    ("VIP", 10000),
-]
-
-
-def _tier_for_spend(total: float) -> str:
-    tier = "Bronze"
-    for name, threshold in _TIER_THRESHOLDS:
-        if total >= threshold:
-            tier = name
-    return tier
-
-
 @router.get("/loyalty/status/{customer_id}")
 async def loyalty_status(customer_id: str, _: dict = Depends(get_user)):
     c = await db.customers.find_one({"id": customer_id}, {"_id": 0})
@@ -831,13 +836,29 @@ async def loyalty_status(customer_id: str, _: dict = Depends(get_user)):
     txns = await db.transactions.find({"customerId": customer_id, "status": {"$in": ["completed", "paid", "closed"]}}, {"_id": 0}).to_list(5000)
     total_visits = len(txns)
     total_spend = sum(t.get("total", 0) for t in txns)
-    tier = _tier_for_spend(total_spend)
-    # Next tier
-    next_tier = None; next_threshold = None
-    for name, threshold in _TIER_THRESHOLDS:
-        if total_spend < threshold:
-            next_tier, next_threshold = name, threshold
-            break
+
+    # Tier comes from the same points-based db.loyalty_tiers ladder every
+    # other tier calculation in the app uses (loyalty_v2's progress view,
+    # checkout's own discount lookup, the leaderboard) — this endpoint used
+    # to run its own hardcoded, spend-based Bronze/Silver/Gold/Platinum/VIP
+    # thresholds instead, so the same customer could show as one tier on
+    # the wallet panel and a different tier everywhere else in the app.
+    points = int(c.get("points") or 0)
+    tiers = await db.loyalty_tiers.find({}, {"_id": 0}).sort("minPoints", 1).to_list(20)
+    current_tier_doc = tiers[0] if tiers else None
+    next_tier_doc = None
+    for t in tiers:
+        if points >= t["minPoints"]:
+            current_tier_doc = t
+        elif not next_tier_doc:
+            next_tier_doc = t
+    tier = current_tier_doc["name"] if current_tier_doc else "Bronze"
+    next_tier = next_tier_doc["name"] if next_tier_doc else None
+    next_threshold = next_tier_doc["minPoints"] if next_tier_doc else None
+    tier_progress_pct = 100.0
+    if current_tier_doc and next_tier_doc:
+        span = max(1, next_tier_doc["minPoints"] - current_tier_doc["minPoints"])
+        tier_progress_pct = round(max(0, min(100, (points - current_tier_doc["minPoints"]) / span * 100)), 1)
     # Streak — count consecutive weeks with at least one visit
     weeks_visited = set()
     for t in txns:
@@ -882,7 +903,8 @@ async def loyalty_status(customer_id: str, _: dict = Depends(get_user)):
         "tier": tier,
         "nextTier": next_tier,
         "nextTierAt": next_threshold,
-        "tierProgressPct": round((total_spend / next_threshold) * 100, 1) if next_threshold else 100.0,
+        "tierProgressPct": tier_progress_pct,
+        "points": points,
         "totalVisits": total_visits,
         "totalSpend": round(total_spend, 2),
         "streakWeeks": streak,
@@ -998,6 +1020,8 @@ async def personalisation(customer_id: str, _: dict = Depends(get_user)):
 @router.post("/gift-cards/schedule")
 async def schedule_gift(body: dict, user: dict = Depends(get_user)):
     """Buy a gift card now, deliver later (e.g. valentine's day)."""
+    if user["role"] not in ("owner", "manager"):
+        raise HTTPException(403, "Owner/manager only")
     if not body.get("deliverAt"):
         raise HTTPException(400, "deliverAt required")
     v = await _issue_voucher({
@@ -1019,11 +1043,20 @@ async def schedule_gift(body: dict, user: dict = Depends(get_user)):
             "delivered": False,
         },
     }, user)
+    # Gift cards mint real spendable value with no purchase transaction
+    # backing them (unlike a POS sale) — that made them invisible to the
+    # universal audit log entirely; owner/manager gating alone doesn't
+    # answer "who minted how much, and when."
+    from services.audit_service import log_event
+    await log_event(entity_type="gift_card", entity_id=v["id"], action="created",
+                     after=v, memo=f"Gift card scheduled: ${v['value']:.2f} by {user.get('email')}")
     return v
 
 
 @router.post("/gift-cards/{voucher_id}/reload")
 async def reload_gift(voucher_id: str, body: dict, user: dict = Depends(get_user)):
+    if user["role"] not in ("owner", "manager"):
+        raise HTTPException(403, "Owner/manager only")
     v = await db.vouchers.find_one({"id": voucher_id}, {"_id": 0})
     if not v or v.get("sourceType") != "gift_card":
         raise HTTPException(404, "Gift card not found")
@@ -1038,4 +1071,8 @@ async def reload_gift(voucher_id: str, body: dict, user: dict = Depends(get_user
         "faceValue": round(v.get("faceValue", 0) + amt, 2),
         "status": "partial" if new_residual > 0 else v.get("status"),
     }})
+    from services.audit_service import log_event
+    await log_event(entity_type="gift_card", entity_id=voucher_id, action="updated",
+                     before=v, after={**v, "value": new_value, "residualValue": new_residual},
+                     memo=f"Gift card reloaded: +${amt:.2f} by {user.get('email')} (new balance ${new_residual:.2f})")
     return {"ok": True, "newBalance": new_residual}

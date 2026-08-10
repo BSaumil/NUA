@@ -10,15 +10,13 @@ Australian Payroll — enhanced compliance routes.
   • GET  /payroll/roster-compliance   — flag award/NES violations across shifts
 """
 from fastapi import APIRouter, HTTPException, Depends, Response
-from typing import Optional, List
 from datetime import date, datetime, timezone, timedelta
 from pydantic import BaseModel
 from database import db
 from deps import get_user
 from utils.au_payroll import (
-    payg_for_period, super_guarantee, sg_rate_for, super_due_date_for_quarter,
+    sg_rate_for, super_due_date_for_quarter,
     assemble_payslip_row, build_stp2_pay_event, roster_compliance_issues,
-    DEFAULT_PENALTY_MATRIX, ANNUAL_LEAVE_HOURS_PER_ORDINARY_HOUR,
     effective_hourly_rate,
 )
 import uuid
@@ -183,6 +181,13 @@ async def commit_payrun(data: dict, user: dict = Depends(get_user)):
 async def payroll_register(days: int = 90, _: dict = Depends(get_user)):
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     runs = await db.payruns.find({"committedAt": {"$gte": since}}, {"_id": 0}).sort("committedAt", -1).to_list(500)
+    # Embed each run's per-employee rows so the register can expand a run and
+    # link straight to that employee's payslip PDF — the register view
+    # existed with just run-level totals for a while with nothing letting an
+    # owner get from "here's a committed run" to an actual payslip without
+    # knowing the runId/staffId to construct the URL by hand.
+    for r in runs:
+        r["rows"] = await db.payrun_rows.find({"runId": r["id"]}, {"_id": 0}).to_list(500)
     return {
         "count": len(runs),
         "totals": {

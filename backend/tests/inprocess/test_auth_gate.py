@@ -15,19 +15,15 @@ from conftest import OWNER, req
 
 # Reachable without logging in, on purpose. Anything not on this list that
 # answers an anonymous caller is a finding.
-INTENTIONALLY_PUBLIC = {
-    "/api/", "/api/health", "/api/healthz",
-    "/api/auth/login", "/api/auth/register", "/api/auth/logout",
-    "/api/auth/refresh", "/api/auth/me",
-    "/api/auth/forgot-password", "/api/auth/reset-password",
-    "/api/business/theme",
-    "/api/products", "/api/categories", "/api/modifiers",
-    "/api/online/categories", "/api/online/products", "/api/online/orders",
-    "/api/members/login", "/api/members/signup",
-    "/api/webhook/stripe", "/api/stripe/webhook",
-}
-PUBLIC_PREFIXES = ("/api/public/", "/api/table/", "/api/online/orders/track/",
-                   "/api/members/share-link/", "/api/stripe/checkout/status/")
+#
+# This used to be its own hand-maintained copy of server.py's allowlist,
+# which is exactly how the allowlist and reality drifted apart twice (kiosk
+# endpoints, then the licensing Stripe webhook, both under the wrong path)
+# without this test ever catching it — a second hardcoded list just agreed
+# with the first one being wrong. Importing the real thing means this sweep
+# and test_every_public_path_entry_matches_a_real_route below are checking
+# the actual production allowlist, not a snapshot of it.
+from server import PUBLIC_API_PATHS as INTENTIONALLY_PUBLIC, PUBLIC_API_PREFIXES as PUBLIC_PREFIXES
 
 MUST_BE_SHUT = [
     ("GET", "/api/customers"), ("GET", "/api/users"), ("GET", "/api/transactions"),
@@ -155,6 +151,33 @@ def test_storefront_order_and_tracking_work_for_a_guest(anon):
         assert req(anon, "GET", f"/api/online/orders/track/{code}").status_code == 200
 
 
+def test_kiosk_ordering_works_for_a_guest_end_to_end(anon):
+    """A self-service kiosk terminal has no staff login on it at all — this
+    whole flow previously 401'd on the very first call, because the
+    default-deny allowlist listed /api/kiosk/session (missing the /v25
+    prefix the real route actually lives under) instead of the real
+    /api/v25/kiosk/session path. Every kiosk endpoint was unreachable by an
+    actual guest kiosk client until that was fixed."""
+    products = req(anon, "GET", "/api/products")
+    assert products.status_code == 200 and products.json()
+    pid = products.json()[0]["id"]
+
+    start = req(anon, "POST", "/api/v25/kiosk/session", json={"guests": 2})
+    assert start.status_code == 200, start.text[:200]
+    sid = start.json()["id"]
+
+    added = req(anon, "POST", f"/api/v25/kiosk/session/{sid}/add",
+                json={"item": {"productId": pid, "name": "Thing", "price": 10.0, "quantity": 1}})
+    assert added.status_code == 200, added.text[:200]
+
+    checkout = req(anon, "POST", f"/api/v25/kiosk/session/{sid}/checkout")
+    assert checkout.status_code == 200, checkout.text[:200]
+
+    # The staff-facing "every active kiosk session" view stays behind auth —
+    # this is the one kiosk endpoint that must NOT be on the public list.
+    assert req(anon, "GET", "/api/v25/kiosk/sessions").status_code in (401, 403)
+
+
 def test_login_and_brand_theme_stay_reachable(anon):
     assert req(anon, "POST", "/api/auth/login", json=OWNER).status_code == 200
     assert req(anon, "GET", "/api/business/theme").status_code == 200
@@ -185,3 +208,64 @@ def test_staff_still_see_cost_and_stock(client, owner_headers):
     r = req(client, "GET", "/api/products", headers=owner_headers)
     assert r.status_code == 200
     assert any(p.get("cost") for p in r.json()), "no product carried a cost for a logged-in user"
+
+
+# ── The allowlist itself must point at routes that actually exist ──────────
+# Twice now (kiosk endpoints under the wrong path, the licensing Stripe
+# webhook under the wrong path) an entry in server.py's PUBLIC_API_PATHS /
+# PUBLIC_API_PREFIXES referenced a path that doesn't match anything actually
+# registered — because the real router carries a class-level prefix
+# (APIRouter(prefix="...")) the entry's author didn't account for. Each such
+# entry is two bugs at once: the intended-public route silently 401s for the
+# only caller it's meant to serve, and the stale path sits in the allowlist
+# looking like it's doing something. This walks every entry against the
+# actual FastAPI route table so a new one can't go unnoticed the same way.
+
+def test_every_public_path_entry_matches_a_real_route(app):
+    import server
+    real_paths = {r.path for r in app.routes if hasattr(r, "path")}
+    for path in server.PUBLIC_API_PATHS:
+        assert path in real_paths, f"{path!r} is in PUBLIC_API_PATHS but no route is registered at that exact path"
+
+
+def test_every_public_prefix_covers_at_least_one_real_route(app):
+    import server
+    real_paths = [r.path for r in app.routes if hasattr(r, "path")]
+    for prefix in server.PUBLIC_API_PREFIXES:
+        assert any(p.startswith(prefix) for p in real_paths), \
+            f"{prefix!r} is in PUBLIC_API_PREFIXES but no registered route starts with it"
+
+
+def test_public_prefixes_dont_accidentally_cover_a_staff_only_neighbor(app):
+    """A prefix match is a startswith check, not an exact one — it's easy to
+    write one that's technically correct today but would silently widen to
+    cover a new staff-only route sharing the same stem tomorrow (e.g. a
+    prefix "/api/v25/kiosk/session/" is safe; the same prefix WITHOUT its
+    trailing slash would also match the staff-facing GET
+    /api/v25/kiosk/sessions). Concretely: no public prefix should ever
+    match a route that itself has no trailing-slash-delimited child segment
+    after the prefix — that shape (bare plural collection, no ID/action
+    after it) is the staff "list everything active" pattern, never
+    something a single unauthenticated guest should reach."""
+    import server
+    real_paths = {r.path for r in app.routes if hasattr(r, "path")}
+
+    for prefix in server.PUBLIC_API_PREFIXES:
+        assert prefix.endswith("/"), \
+            f"{prefix!r} has no trailing slash — it can match a sibling plural/collection route by accident"
+        for path in real_paths:
+            if path.startswith(prefix):
+                remainder = path[len(prefix):]
+                assert remainder, f"{prefix!r} matches its own bare stem {path!r}"
+
+
+# Regression pin for the exact near-miss this test class exists to catch:
+# a kiosk session prefix without the trailing slash would also match the
+# staff-only "list every active kiosk session" view.
+def test_kiosk_session_prefix_does_not_reach_the_staff_session_list(app):
+    import server
+    assert "/api/v25/kiosk/session/" in server.PUBLIC_API_PREFIXES
+    real_paths = {r.path for r in app.routes if hasattr(r, "path")}
+    assert "/api/v25/kiosk/sessions" in real_paths, "the staff session-list route moved or was renamed"
+    assert not "/api/v25/kiosk/sessions".startswith("/api/v25/kiosk/session/"), \
+        "the kiosk prefix would now also cover the staff-only session list"

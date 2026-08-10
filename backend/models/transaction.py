@@ -1,7 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional, Any
 from datetime import datetime
-import uuid
 
 class SelectedModifier(BaseModel):
     modifierId: str

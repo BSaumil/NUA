@@ -24,12 +24,14 @@ export default function OpsHealthPanel() {
   const { theme } = useTheme();
   const [health, setHealth] = useState(null);
   const [errors, setErrors] = useState(null);
+  const [clientErrors, setClientErrors] = useState(null);
   const [loading, setLoading] = useState(false);
 
   const load = async () => {
     setLoading(true);
     try { setHealth((await opsAPI.health()).data); } catch { setHealth({ status: 'unreachable', checks: {} }); }
     try { setErrors((await opsAPI.recentErrors(25)).data.errors); } catch { /* silent — owner-only, might 403 */ }
+    try { setClientErrors((await opsAPI.recentClientErrors(25)).data.errors); } catch { /* silent — owner-only, might 403 */ }
     setLoading(false);
   };
   useEffect(() => { load(); }, []);
@@ -109,6 +111,46 @@ export default function OpsHealthPanel() {
                       <td className="py-2 pr-3 font-mono text-xs">{e.method} {e.path}</td>
                       <td className="py-2 pr-3">{e.error}</td>
                       <td className="py-2 pr-3 font-mono text-xs opacity-60 select-all">{e.requestId}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card style={card}>
+        <CardContent className="p-6">
+          <h3 className="font-bold mb-1 flex items-center gap-2">
+            <AlertTriangle size={18} /> Recent browser errors
+          </h3>
+          <p className="text-sm opacity-70 mb-3">
+            JS errors caught in someone's browser — POS, Kitchen, guest ordering, any screen.
+            The backend never sees these on its own since nothing crashed server-side.
+          </p>
+          {clientErrors === null && <p className="text-sm opacity-60">Loading…</p>}
+          {clientErrors && clientErrors.length === 0 && (
+            <p className="text-sm opacity-60">None recorded. That's the good outcome.</p>
+          )}
+          {clientErrors && clientErrors.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left opacity-60 border-b" style={{ borderColor: theme.border || '#e5e7eb' }}>
+                    <th className="py-2 pr-3">When</th>
+                    <th className="py-2 pr-3">Page</th>
+                    <th className="py-2 pr-3">Message</th>
+                    <th className="py-2 pr-3">Who</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {clientErrors.map((e, i) => (
+                    <tr key={i} className="border-b" style={{ borderColor: theme.border || '#f3f4f6' }}>
+                      <td className="py-2 pr-3 whitespace-nowrap">{new Date(e.at).toLocaleString()}</td>
+                      <td className="py-2 pr-3 font-mono text-xs max-w-[200px] truncate" title={e.url}>{e.url}</td>
+                      <td className="py-2 pr-3">{e.message}</td>
+                      <td className="py-2 pr-3 text-xs opacity-60">{e.actor?.role || 'guest'}</td>
                     </tr>
                   ))}
                 </tbody>

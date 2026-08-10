@@ -5,21 +5,56 @@ import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../components/ui/select';
 import { Button } from '../components/ui/button';
-import { History, Search, User, Shield, Clock } from 'lucide-react';
+import { History, Search, User, Shield, Clock, RotateCcw, Download, FileCheck } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAuth } from '../contexts/AuthContext';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nua_token')}` });
 
 const ACTION_COLORS = { created: 'bg-emerald-100 text-emerald-700', updated: 'bg-blue-100 text-blue-700', deleted: 'bg-rose-100 text-rose-700', restored: 'bg-purple-100 text-purple-700' };
 
+const IGNORED_DIFF_KEYS = new Set(['_id', 'updatedAt', 'version']);
+
+// Most fields on a real document don't change between before/after — the
+// two full JSON panels made you scan the whole document to spot the one
+// field that actually moved. This reduces it to just the changed fields.
+function diffFields(before, after) {
+  const b = before || {};
+  const a = after || {};
+  const keys = new Set([...Object.keys(b), ...Object.keys(a)]);
+  const rows = [];
+  keys.forEach(k => {
+    if (IGNORED_DIFF_KEYS.has(k)) return;
+    const bv = b[k];
+    const av = a[k];
+    if (JSON.stringify(bv) === JSON.stringify(av)) return;
+    rows.push({ key: k, before: bv, after: av });
+  });
+  return rows.sort((x, y) => x.key.localeCompare(y.key));
+}
+
+function formatDiffValue(v) {
+  if (v === undefined) return '—';
+  if (v === null) return 'null';
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
+}
+
 export default function AuditLog() {
+  const { user } = useAuth();
+  const isOwner = user?.role === 'owner';
   const [events, setEvents] = useState([]);
   const [summary, setSummary] = useState(null);
   const [entityType, setEntityType] = useState('');
   const [action, setAction] = useState('');
   const [actor, setActor] = useState('');
   const [expanded, setExpanded] = useState(null);
+  const [restoring, setRestoring] = useState(null);
+  const [showRaw, setShowRaw] = useState(false);
+  const [complianceStart, setComplianceStart] = useState('');
+  const [complianceEnd, setComplianceEnd] = useState('');
+  const [complianceExporting, setComplianceExporting] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -37,12 +72,73 @@ export default function AuditLog() {
   }, [entityType, action, actor]);
   useEffect(() => { load(); }, [load]);
 
+  const restoreTo = async (e) => {
+    const version = e.before?.version;
+    if (!version) return;
+    if (!window.confirm(`Restore ${e.entityType} ${(e.entityId || '').slice(0, 8)} to its state before this change (version ${version})?`)) return;
+    setRestoring(e.id);
+    try {
+      await axios.post(`${API}/audit/restore/${e.entityType}/${e.entityId}/${version}`, {}, { headers: H() });
+      toast.success('Restored');
+      load();
+    } catch (err) { toast.error(err.response?.data?.detail || 'Restore failed'); }
+    finally { setRestoring(null); }
+  };
+
+  const downloadComplianceExport = async () => {
+    setComplianceExporting(true);
+    try {
+      const params = {};
+      if (complianceStart) params.start = complianceStart;
+      if (complianceEnd) params.end = complianceEnd;
+      const r = await axios.get(`${API}/audit/compliance-export.csv`, { headers: H(), params, responseType: 'blob' });
+      const url = URL.createObjectURL(r.data);
+      const a = document.createElement('a');
+      const label = `${complianceStart || 'all-time'}_to_${complianceEnd || 'now'}`;
+      a.href = url; a.download = `compliance-${label}.csv`; a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Compliance export downloaded');
+    } catch (err) { toast.error(err.response?.data?.detail || 'Export failed'); }
+    finally { setComplianceExporting(false); }
+  };
+
   return (
     <div className="space-y-6" data-testid="audit-log-page">
       <div>
         <h1 className="text-3xl font-bold flex items-center gap-2"><History className="text-slate-600" /> Universal Audit Log</h1>
         <p className="text-sm text-slate-500 mt-1">Every mutation, everywhere. Filter and drill into the full before/after diff.</p>
       </div>
+
+      {isOwner && (
+        <Card className="border-indigo-200 bg-indigo-50/60" data-testid="compliance-export-card">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <FileCheck size={16} className="text-indigo-600" />
+              <p className="font-semibold text-sm text-indigo-800">Compliance export</p>
+            </div>
+            <p className="text-xs text-indigo-700/80">
+              Every approval, rule firing, and Ash trust change in one chronological CSV — evidence of exactly
+              what an autonomous action did, who requested it, and who (or what) decided it.
+            </p>
+            <div className="flex flex-wrap items-end gap-2">
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-indigo-600 block mb-1">From</label>
+                <Input type="date" value={complianceStart} onChange={e => setComplianceStart(e.target.value)}
+                  className="w-40" data-testid="compliance-start-date" />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-indigo-600 block mb-1">To</label>
+                <Input type="date" value={complianceEnd} onChange={e => setComplianceEnd(e.target.value)}
+                  className="w-40" data-testid="compliance-end-date" />
+              </div>
+              <Button size="sm" onClick={downloadComplianceExport} disabled={complianceExporting}
+                data-testid="compliance-export-btn">
+                <Download size={12} className="mr-1" /> {complianceExporting ? 'Exporting…' : 'Download CSV'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {summary && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -106,7 +202,7 @@ export default function AuditLog() {
           <tbody>
             {events.map(e => (
               <React.Fragment key={e.id}>
-                <tr className="border-t hover:bg-slate-50 cursor-pointer" onClick={() => setExpanded(expanded === e.id ? null : e.id)}>
+                <tr className="border-t hover:bg-slate-50 cursor-pointer" onClick={() => { setExpanded(expanded === e.id ? null : e.id); setShowRaw(false); }}>
                   <td className="p-2 pl-4 text-xs">{new Date(e.ts).toLocaleString()}</td>
                   <td className="p-2 text-xs font-mono">{e.actor}</td>
                   <td className="p-2"><Badge className={`text-[10px] ${ACTION_COLORS[e.action] || 'bg-slate-100'}`}>{e.action}</Badge></td>
@@ -117,16 +213,53 @@ export default function AuditLog() {
                 {expanded === e.id && (
                   <tr className="border-t bg-slate-50/70">
                     <td colSpan="6" className="p-4">
-                      <div className="grid md:grid-cols-2 gap-3 text-[11px]">
-                        <div>
-                          <p className="font-medium mb-1">Before</p>
-                          <pre className="bg-white border rounded p-2 overflow-auto max-h-64">{JSON.stringify(e.before, null, 2)}</pre>
+                      {(() => {
+                        const rows = diffFields(e.before, e.after);
+                        if (rows.length === 0) {
+                          return <p className="text-xs text-slate-400">No field-level differences (only ignored fields like version/updatedAt changed).</p>;
+                        }
+                        return (
+                          <table className="w-full text-[11px]" data-testid={`diff-table-${e.id}`}>
+                            <thead><tr className="text-slate-500">
+                              <th className="text-left font-medium pb-1 pr-3">Field</th>
+                              <th className="text-left font-medium pb-1 pr-3">Before</th>
+                              <th className="text-left font-medium pb-1">After</th>
+                            </tr></thead>
+                            <tbody>
+                              {rows.map(r => (
+                                <tr key={r.key} className="border-t border-slate-200">
+                                  <td className="py-1 pr-3 font-mono text-slate-600">{r.key}</td>
+                                  <td className="py-1 pr-3 text-rose-600 bg-rose-50/50 max-w-xs truncate">{formatDiffValue(r.before)}</td>
+                                  <td className="py-1 text-emerald-700 bg-emerald-50/50 max-w-xs truncate">{formatDiffValue(r.after)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        );
+                      })()}
+                      <button className="text-[11px] text-blue-600 hover:underline mt-2"
+                        onClick={() => setShowRaw(s => !s)} data-testid={`toggle-raw-${e.id}`}>
+                        {showRaw ? 'Hide raw JSON' : 'Show raw JSON'}
+                      </button>
+                      {showRaw && (
+                        <div className="grid md:grid-cols-2 gap-3 text-[11px] mt-2">
+                          <div>
+                            <p className="font-medium mb-1">Before</p>
+                            <pre className="bg-white border rounded p-2 overflow-auto max-h-64">{JSON.stringify(e.before, null, 2)}</pre>
+                          </div>
+                          <div>
+                            <p className="font-medium mb-1">After</p>
+                            <pre className="bg-white border rounded p-2 overflow-auto max-h-64">{JSON.stringify(e.after, null, 2)}</pre>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-medium mb-1">After</p>
-                          <pre className="bg-white border rounded p-2 overflow-auto max-h-64">{JSON.stringify(e.after, null, 2)}</pre>
-                        </div>
-                      </div>
+                      )}
+                      {e.before?.version && (
+                        <Button size="sm" variant="outline" className="mt-3 text-xs" disabled={restoring === e.id}
+                          onClick={() => restoreTo(e)} data-testid={`restore-${e.id}`}>
+                          <RotateCcw size={12} className="mr-1" />
+                          {restoring === e.id ? 'Restoring...' : `Restore to before this change (v${e.before.version})`}
+                        </Button>
+                      )}
                     </td>
                   </tr>
                 )}

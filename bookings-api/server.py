@@ -10,6 +10,7 @@ import logging
 from fastapi import FastAPI
 
 import routes_admin
+import routes_public
 import routes_v1
 
 logging.basicConfig(level=logging.INFO)
@@ -24,6 +25,7 @@ app = FastAPI(
 
 app.include_router(routes_v1.router)
 app.include_router(routes_admin.router)
+app.include_router(routes_public.router)
 
 
 @app.get("/health")

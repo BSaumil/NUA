@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Edit, Trash2, Tag, Package, ImageIcon } from 'lucide-react';
+import { Plus, Edit, Trash2, Tag, Package, ImageIcon, Sparkles } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Textarea } from '../components/ui/textarea';
@@ -31,6 +31,7 @@ const makeEmptyPromo = () => ({
   category: '', categories: [], products: [],
   startDate: '', endDate: '',
   activeDays: [], startTime: '', endTime: '',
+  channels: [],
 });
 const emptyBulkPatch = () => ({
   image: '', addModifierIds: [], removeModifierIds: [],
@@ -50,6 +51,8 @@ const Products = () => {
   const [showTranslateDialog, setShowTranslateDialog] = useState(false);
   const [translatingProduct, setTranslatingProduct] = useState(null);
   const [translationForm, setTranslationForm] = useState({});
+  const [autoTranslating, setAutoTranslating] = useState(false);
+  const [bulkTranslating, setBulkTranslating] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [editingPromo, setEditingPromo] = useState(null);
   const [productForm, setProductForm] = useState(makeEmptyProduct);
@@ -169,6 +172,35 @@ const Products = () => {
       fetchData();
     } catch (e) { toast.error(e.response?.data?.detail || 'Failed to save translations'); }
   };
+  const autoTranslateProduct = async () => {
+    if (!translatingProduct) return;
+    setAutoTranslating(true);
+    try {
+      const res = await productsAPI.autoTranslate(translatingProduct.id);
+      // Merge into the form rather than replace, so any language a staff
+      // member already hand-edited in this session isn't clobbered.
+      setTranslationForm(prev => ({ ...prev, ...res.data.translations }));
+      toast.success('AI draft ready — review before saving');
+    } catch (e) { toast.error(e.response?.data?.detail || 'Auto-translate failed'); }
+    finally { setAutoTranslating(false); }
+  };
+  const bulkAutoTranslateMenu = async () => {
+    setBulkTranslating(true);
+    try {
+      const res = await productsAPI.bulkAutoTranslate(true);
+      const { translated, failed, skipped, total } = res.data;
+      if (total === 0) {
+        toast.info('Every product already has translations — nothing to do');
+      } else {
+        toast.success(
+          `Translated ${translated} of ${total} product${total === 1 ? '' : 's'}`
+          + (failed || skipped ? ` (${failed + skipped} skipped)` : '')
+        );
+      }
+      fetchData();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Bulk translate failed'); }
+    finally { setBulkTranslating(false); }
+  };
 
   const toggleModifierForProduct = (mid) => {
     const arr = productForm.modifierIds || [];
@@ -200,6 +232,7 @@ const Products = () => {
       products: p.products || [],
       startDate: p.startDate || '', endDate: p.endDate || '',
       activeDays: p.activeDays || [], startTime: p.startTime || '', endTime: p.endTime || '',
+      channels: p.channels || [],
     });
     setShowPromoDialog(true);
   };
@@ -492,6 +525,10 @@ const Products = () => {
         </div>
         {view === 'products' ? (
           <div className="flex gap-2">
+            <Button variant="outline" className="gap-2" onClick={bulkAutoTranslateMenu} disabled={bulkTranslating} data-testid="bulk-translate-btn">
+              <Sparkles className="w-4 h-4" style={{ color: '#8b5cf6' }} />
+              {bulkTranslating ? 'Translating menu…' : 'Translate menu with AI'}
+            </Button>
             <Button variant="outline" onClick={() => document.getElementById('csv-import-input')?.click()} data-testid="csv-import-btn">
               CSV Import
             </Button>
@@ -661,6 +698,13 @@ const Products = () => {
                           )}
                         </div>
                       )}
+                      {(promo.channels || []).length > 0 && (
+                        <div className="mt-1 text-xs">
+                          <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">
+                            {promo.channels.map(c => c === 'dine-in' ? 'Dine-in' : 'Takeaway').join(' + ')} only
+                          </span>
+                        </div>
+                      )}
                     </div>
                     <div className="flex gap-2">
                       <Button variant="outline" size="sm" onClick={() => openEditPromo(promo)} data-testid={`edit-promo-${promo.id}`}><Edit size={14} /></Button>
@@ -772,6 +816,16 @@ const Products = () => {
           <p className="text-xs text-gray-500 -mt-2">
             Leave a language blank to show the English name/description on customer-facing menus.
           </p>
+          <Button
+            variant="outline"
+            className="w-full gap-2"
+            onClick={autoTranslateProduct}
+            disabled={autoTranslating}
+            data-testid="auto-translate-btn"
+          >
+            <Sparkles className="w-4 h-4" style={{ color: '#8b5cf6' }} />
+            {autoTranslating ? 'Drafting translations…' : 'Draft all languages with AI'}
+          </Button>
           <div className="space-y-4">
             {LANGUAGES.filter(l => l.code !== 'en').map(l => (
               <div key={l.code} className="border rounded-lg p-3 space-y-2">

@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi.responses import StreamingResponse
 from typing import List, Optional
 from datetime import datetime
 from database import db
@@ -7,6 +8,11 @@ from services import floor_tables
 from models.reservation import Reservation, ReservationCreate, ReservationUpdate
 from models.floor_plan import FloorPlan, FloorPlanCreate, FloorPlanUpdate
 from models.waitlist import WaitlistEntry, WaitlistEntryCreate, WaitlistEntryUpdate
+from middleware.actor_context import tenant_scope_filter
+import asyncio
+import json
+import logging
+import os
 
 router = APIRouter()
 
@@ -43,7 +49,8 @@ async def guest_intel(customer_id: str):
 
 # ============ RESERVATIONS API ============
 @router.get("/reservations", response_model=List[Reservation])
-async def get_reservations(date: Optional[str] = None, status: Optional[str] = None, section: Optional[str] = None):
+async def get_reservations(date: Optional[str] = None, status: Optional[str] = None, section: Optional[str] = None,
+                           user: dict = Depends(get_user)):
     query = {}
     if date:
         query["date"] = date
@@ -51,6 +58,9 @@ async def get_reservations(date: Optional[str] = None, status: Optional[str] = N
         query["status"] = status
     if section:
         query["section"] = section
+    # Guest name/phone/party-size reservation data had no tenant filter —
+    # comparable to v15_features.py's drawer events, which already scopes.
+    query.update(tenant_scope_filter(user.get("businessId")))
     reservations = await db.reservations.find(query, {"_id": 0}).sort("time", 1).to_list(1000)
     return [Reservation(**r) for r in reservations]
 
@@ -362,6 +372,11 @@ async def update_floor_plan(plan_id: str, update: FloorPlanUpdate):
     if not result:
         raise HTTPException(status_code=404, detail="Floor plan not found")
     result.pop("_id", None)
+    try:
+        from services import realtime
+        await realtime.broadcast({"type": "floor_plan.updated", "planId": plan_id})
+    except Exception:
+        pass
     return FloorPlan(**result)
 
 @router.delete("/floor-plans/{plan_id}")
@@ -384,6 +399,11 @@ async def update_table_status(table_id: str, status: str, plan_id: Optional[str]
             await db.floor_plans.update_one(
                 {"id": plan_id}, {"$set": {"tables": tables, "updatedAt": datetime.utcnow().isoformat()}}
             )
+    try:
+        from services import realtime
+        await realtime.broadcast({"type": "floor_plan.updated", "planId": plan_id, "tableId": table_id, "status": status})
+    except Exception:
+        pass
     return {"message": f"Table {table_id} status updated to {status}"}
 
 # ── Typed-table validation (POS dine-in) ──────────────────────────────────
@@ -434,6 +454,11 @@ async def occupy_table_by_number(number: str, order_id: Optional[str] = None,
                             detail=f"Table '{number}' is not on the floor plan")
     table, plan_id = hit
     await floor_tables.set_table_status(table["id"], plan_id, "occupied", order_id)
+    try:
+        from services import realtime
+        await realtime.broadcast({"type": "floor_plan.updated", "planId": plan_id, "tableId": table["id"], "status": "occupied"})
+    except Exception:
+        pass
     return {"ok": True, "tableId": table["id"], "planId": plan_id,
             "number": table.get("number"), "status": "occupied"}
 
@@ -446,6 +471,11 @@ async def free_table_by_number(number: str, _: dict = Depends(get_user)):
                             detail=f"Table '{number}' is not on the floor plan")
     table, plan_id = hit
     await floor_tables.set_table_status(table["id"], plan_id, "available")
+    try:
+        from services import realtime
+        await realtime.broadcast({"type": "floor_plan.updated", "planId": plan_id, "tableId": table["id"], "status": "available"})
+    except Exception:
+        pass
     return {"ok": True, "tableId": table["id"], "planId": plan_id,
             "number": table.get("number"), "status": "available"}
 
@@ -513,6 +543,80 @@ async def remove_from_waitlist(entry_id: str):
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Entry not found")
     return {"message": "Removed from waitlist"}
+
+
+# ============ PUBLIC WAITLIST TRACKING (no auth — by entry code) ============
+# public_join_waitlist (routes/public.py) hands the guest back their entry's
+# own id as the tracking code — same access model as online order tracking
+# (routes/online_orders.py): the code is the only credential, and it's only
+# ever known to whoever joined the waitlist.
+WAITLIST_SSE_INTERVAL_SECONDS = float(os.environ.get('TRACK_SSE_INTERVAL', '4'))
+WAITLIST_SSE_MAX_SECONDS = float(os.environ.get('TRACK_SSE_MAX_SECONDS', '600'))
+
+
+async def _public_waitlist_view(entry: dict) -> dict:
+    """Position is recomputed live against everyone still actually waiting,
+    not the value stamped at join time — that value goes stale the moment
+    anyone ahead gets seated, cancels, or leaves."""
+    ahead = None
+    if entry.get("status") == "waiting":
+        ahead = await db.waitlist.count_documents({
+            "status": "waiting", "position": {"$lt": entry.get("position", 0)},
+        })
+    return {
+        "id": entry["id"], "guestName": entry.get("guestName"),
+        "partySize": entry.get("partySize"), "status": entry.get("status"),
+        "position": (ahead + 1) if ahead is not None else None,
+        "aheadOfYou": ahead,
+        "quotedWait": entry.get("quotedWait"),
+        "checkInTime": entry.get("checkInTime"),
+        "seatedTime": entry.get("seatedTime"),
+    }
+
+
+@router.get("/waitlist/track/{code}")
+async def track_waitlist(code: str):
+    entry = await db.waitlist.find_one({"id": code.upper()}, {"_id": 0})
+    if not entry:
+        raise HTTPException(status_code=404, detail="Waitlist entry not found")
+    return await _public_waitlist_view(entry)
+
+
+@router.get("/waitlist/track/stream/{code}")
+async def track_waitlist_stream(code: str, request: Request):
+    """Server-sent events for one guest's own waitlist entry — the same
+    push-instead-of-poll pattern as online order tracking, so a guest
+    watching this page sees their position drop the moment a table frees
+    up instead of waiting out a polling interval."""
+    async def events():
+        last = None
+        started = asyncio.get_event_loop().time()
+        while True:
+            if asyncio.get_event_loop().time() - started > WAITLIST_SSE_MAX_SECONDS:
+                return
+            if await request.is_disconnected():
+                return
+            try:
+                entry = await db.waitlist.find_one({"id": code.upper()}, {"_id": 0})
+                if not entry:
+                    yield "event: not_found\ndata: {}\n\n"
+                    return
+                payload = json.dumps(await _public_waitlist_view(entry), default=str)
+                if payload != last:
+                    last = payload
+                    yield f"event: waitlist\ndata: {payload}\n\n"
+                else:
+                    yield ": keepalive\n\n"
+            except Exception as e:
+                logging.getLogger(__name__).warning("waitlist tracking stream error for %s: %s", code, e)
+                yield ": error\n\n"
+            await asyncio.sleep(WAITLIST_SSE_INTERVAL_SECONDS)
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    })
 
 
 # ============ AI TABLE AUTO-ASSIGN ============

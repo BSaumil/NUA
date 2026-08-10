@@ -6,7 +6,8 @@ import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../components/ui/select';
 import { toast } from 'sonner';
-import { ShieldCheck, RefreshCw, Search, Lock, Zap, Eye, Sparkles, TrendingUp } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { ShieldCheck, RefreshCw, Search, Lock, Zap, Eye, Sparkles, TrendingUp, Flag, Undo2, History } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const H = () => ({ Authorization: `Bearer ${localStorage.getItem('nua_token')}` });
@@ -28,6 +29,8 @@ const PERMISSION_TONE = {
 };
 
 export default function AshPermissions() {
+  const { user } = useAuth();
+  const isOwner = user?.role === 'owner';
   const [tools, setTools] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState('');
@@ -37,19 +40,42 @@ export default function AshPermissions() {
   const [suggestions, setSuggestions] = useState([]);
   const [dismissed, setDismissed] = useState(() => new Set());
   const [promoting, setPromoting] = useState(() => new Set());
+  // Shadow-audit review feed: recent auto-tier executions an owner can
+  // spot-check and, if one was wrong, flag for instant demotion.
+  const [executions, setExecutions] = useState([]);
+  const [flagging, setFlagging] = useState(() => new Set());
+  const [showAllExecutions, setShowAllExecutions] = useState(false);
 
   const load = useCallback(async () => {
     setRefreshing(true);
     try {
-      const [toolsRes, suggRes] = await Promise.allSettled([
+      const [toolsRes, suggRes, execRes] = await Promise.allSettled([
         axios.get(`${API}/nua/tools`, { headers: H() }),
         axios.get(`${API}/nua/trust/suggestions`, { headers: H() }),
+        axios.get(`${API}/nua/tools/auto-executions`, { headers: H(), params: { limit: 30 } }),
       ]);
       if (toolsRes.status === 'fulfilled') setTools(toolsRes.value.data);
       else toast.error('Failed to load tools');
       if (suggRes.status === 'fulfilled') setSuggestions(suggRes.value.data);
+      if (execRes.status === 'fulfilled') setExecutions(execRes.value.data);
     } finally { setRefreshing(false); }
   }, []);
+
+  const flagExecution = async (auditId, toolName, undo) => {
+    setFlagging(s => new Set(s).add(auditId));
+    try {
+      const { data } = await axios.post(`${API}/nua/tools/executions/${auditId}/flag`,
+        { reason: 'Flagged from the auto-execution review feed', undo },
+        { headers: H() });
+      toast.success(`${data.label || toolName} demoted back to Approval${data.undo?.undone ? ' — action undone' : ''}`);
+      setExecutions(rows => rows.map(r => r.auditId === auditId ? { ...r, flagged: true } : r));
+      load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Failed to flag this action');
+    } finally {
+      setFlagging(s => { const n = new Set(s); n.delete(auditId); return n; });
+    }
+  };
 
   useEffect(() => { load(); }, [load]);
 
@@ -151,11 +177,19 @@ export default function AshPermissions() {
                 <div className="flex gap-2 flex-shrink-0">
                   <Button size="sm" variant="ghost" onClick={() => setDismissed(d => new Set(d).add(s.toolName))}
                     data-testid={`dismiss-suggestion-${s.toolName}`}>Not yet</Button>
-                  <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                    disabled={promoting.has(s.toolName)} onClick={() => promoteTool(s.toolName)}
-                    data-testid={`promote-${s.toolName}`}>
-                    <TrendingUp size={14} className="mr-1" /> {promoting.has(s.toolName) ? 'Promoting…' : 'Promote to Auto'}
-                  </Button>
+                  {/* POST /nua/tools/{tool}/promote is intentionally gated
+                      tighter than the rest of this page (owner-only) — a
+                      manager could see the suggestion but got a confusing
+                      403 on click. */}
+                  {isOwner ? (
+                    <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                      disabled={promoting.has(s.toolName)} onClick={() => promoteTool(s.toolName)}
+                      data-testid={`promote-${s.toolName}`}>
+                      <TrendingUp size={14} className="mr-1" /> {promoting.has(s.toolName) ? 'Promoting…' : 'Promote to Auto'}
+                    </Button>
+                  ) : (
+                    <span className="text-[11px] text-slate-400 italic">Owner only</span>
+                  )}
                 </div>
               </div>
             ))}
@@ -186,6 +220,74 @@ export default function AshPermissions() {
           );
         })}
       </div>
+
+      {/* Shadow-audit review feed: what auto-tier tools actually did */}
+      {executions.length > 0 && (
+        <Card data-testid="auto-executions-feed">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <History size={16} className="text-slate-500" />
+                <p className="font-semibold text-sm">Recent auto actions</p>
+                <span className="text-xs text-slate-400">
+                  {executions.filter(e => !e.flagged).length} unreviewed of {executions.length}
+                </span>
+              </div>
+              {executions.length > 5 && (
+                <Button size="sm" variant="ghost" onClick={() => setShowAllExecutions(v => !v)}
+                  data-testid="toggle-executions">
+                  {showAllExecutions ? 'Show less' : `Show all ${executions.length}`}
+                </Button>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-500">
+              Every capability that ran on Auto is logged here as it happens — nothing here needs your
+              approval, but flagging one as wrong instantly demotes that tool back to Approval and resets
+              its trust streak.
+            </p>
+            <div className="space-y-2">
+              {(showAllExecutions ? executions : executions.slice(0, 5)).map(e => (
+                <div key={e.auditId}
+                  className={`flex items-start justify-between gap-3 rounded-lg border px-3 py-2 ${e.flagged ? 'bg-rose-50 border-rose-200' : 'bg-white border-slate-200'}`}
+                  data-testid={`execution-${e.auditId}`}>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">
+                      {e.label} <span className="text-slate-400 font-normal">· {e.actor || 'system'}</span>
+                    </p>
+                    <p className="text-xs text-slate-500 truncate">
+                      {e.outcome && typeof e.outcome === 'object' && e.outcome.error
+                        ? <span className="text-rose-600">Failed: {e.outcome.error}</span>
+                        : JSON.stringify(e.outcome || {})}
+                    </p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      {e.ts ? new Date(e.ts).toLocaleString() : ''}
+                      {e.flagged && <span className="text-rose-600 font-medium"> · flagged, demoted to Approval</span>}
+                    </p>
+                  </div>
+                  {!e.flagged && isOwner && (
+                    <div className="flex gap-1.5 flex-shrink-0">
+                      {e.rollbackAvailable && (
+                        <Button size="sm" variant="outline" className="text-xs"
+                          disabled={flagging.has(e.auditId)}
+                          onClick={() => flagExecution(e.auditId, e.toolName, true)}
+                          data-testid={`undo-${e.auditId}`}>
+                          <Undo2 size={12} className="mr-1" /> Undo & flag
+                        </Button>
+                      )}
+                      <Button size="sm" variant="outline" className="text-xs text-rose-600 border-rose-200 hover:bg-rose-50"
+                        disabled={flagging.has(e.auditId)}
+                        onClick={() => flagExecution(e.auditId, e.toolName, false)}
+                        data-testid={`flag-${e.auditId}`}>
+                        <Flag size={12} className="mr-1" /> Flag as wrong
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Filters */}
       <Card>

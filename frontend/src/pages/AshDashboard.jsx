@@ -38,6 +38,7 @@ export default function AshDashboard() {
   const [tab, setTab] = useState('all');
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
+  const [digest, setDigest] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -50,6 +51,9 @@ export default function AshDashboard() {
     } catch { toast.error('Failed to load NUA insights'); }
   }, []);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    axios.get(`${API}/nua/scheduler/status`, { headers: H() }).then(r => setDigest(r.data)).catch(() => {});
+  }, []);
 
   const run = async (includeSummary) => {
     setRunning(true);
@@ -79,6 +83,14 @@ export default function AshDashboard() {
             <Brain className="text-indigo-500" /> NUA — Autonomous Operating Layer
           </h1>
           <p className="text-sm text-slate-500 mt-1">16 always-on jobs continuously scanning inventory, staff, customers, kitchen, weather &amp; finance.</p>
+          {digest && (
+            <p className="text-xs text-slate-400 mt-1" data-testid="digest-status">
+              {digest.lastDigest
+                ? `Last digest sent ${new Date(digest.lastDigest.sentAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+                : 'No digest sent yet'}
+              {digest.enabled ? ` · hourly scan every ${Math.round(digest.hourlyIntervalSeconds / 60)}m` : ' · scheduler disabled'}
+            </p>
+          )}
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => run(true)} disabled={running} data-testid="ash-summary-btn">

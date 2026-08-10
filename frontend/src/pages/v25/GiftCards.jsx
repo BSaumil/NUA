@@ -86,14 +86,16 @@ export default function GiftCards() {
 
   const refreshDetail = async (code) => {
     const fresh = cards.find(c => c.code === code);
-    try {
-      const list = await v26API.listGiftCards();
-      setCards(list.data || []);
-      const updated = (list.data || []).find(c => c.code === code) || fresh;
+    const [listRes, txnsRes] = await Promise.allSettled([
+      v26API.listGiftCards(),
+      v26API.giftTransactions(code),
+    ]);
+    if (listRes.status === 'fulfilled') {
+      setCards(listRes.value.data || []);
+      const updated = (listRes.value.data || []).find(c => c.code === code) || fresh;
       setDetail(updated);
-    } catch { /* list refresh best-effort */ }
-    try { const r = await v26API.giftTransactions(code); setTxns(r.data || []); }
-    catch { /* transaction history refresh best-effort */ }
+    }
+    if (txnsRes.status === 'fulfilled') setTxns(txnsRes.value.data || []);
   };
 
   const startEdit = () => {

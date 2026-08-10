@@ -9,10 +9,10 @@ Mount path: /api/measured-inventory
 """
 from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any
 from database import db
 from deps import get_user
-from services.entity_service import stamped_insert, stamped_update
+from services.entity_service import stamped_insert
 from services import measured_inventory_service as mi
 from models.measured_inventory import (
     StockUnitCreate, SellVariantCreate, OpenContainerCreate, WastageEventCreate,

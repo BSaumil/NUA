@@ -1,15 +1,27 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
 from datetime import datetime, timezone
+import asyncio
+import json
+import logging
+import os
 import uuid
 from database import db
 from deps import get_user, optional_user, require_owner_or_manager
 from models.product import Product, ProductCreate, ProductUpdate
-from models.category import Category, CategoryCreate
-from models.modifier import Modifier, ModifierCreate
+from middleware.actor_context import tenant_scope_filter, tenant_owns
 from pydantic import BaseModel
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+# Must stay in sync with frontend/src/i18n/translations.js's LANGUAGES list
+# (minus 'en', which is the untranslated base). There's no shared source of
+# truth between the two stacks for this today.
+_TRANSLATABLE_LANGUAGES = {
+    "it": "Italian", "zh": "Chinese (Simplified)", "hi": "Hindi",
+    "es": "Spanish", "vi": "Vietnamese", "ar": "Arabic", "pt": "Portuguese",
+}
 
 # ============ PRODUCTS API ============
 # Deliberately reachable without logging in: the kiosk and the QR table-order
@@ -23,8 +35,14 @@ GUEST_HIDDEN_PRODUCT_FIELDS = ("cost", "stock", "sku")
 async def get_products(category: Optional[str] = None, search: Optional[str] = None,
                        include_deleted: bool = False, user=Depends(optional_user)):
     query = {}
+    and_clauses = []
     if not include_deleted:
-        query["$or"] = [{"deletedAt": None}, {"deletedAt": {"$exists": False}}]
+        and_clauses.append({"$or": [{"deletedAt": None}, {"deletedAt": {"$exists": False}}]})
+    tenant_filter = tenant_scope_filter(user.get("businessId") if user else None)
+    if tenant_filter:
+        and_clauses.append(tenant_filter)
+    if and_clauses:
+        query["$and"] = and_clauses
     if category:
         query["category"] = category
     if search:
@@ -48,8 +66,11 @@ async def create_product(product: ProductCreate, _: dict = Depends(require_owner
     return Product(**doc)
 
 @router.put("/products/{product_id}", response_model=Product)
-async def update_product(product_id: str, product_update: ProductUpdate, _: dict = Depends(require_owner_or_manager)):
+async def update_product(product_id: str, product_update: ProductUpdate, user: dict = Depends(require_owner_or_manager)):
     from services.entity_service import stamped_update
+    existing = await db.products.find_one({"id": product_id}, {"_id": 0, "businessId": 1})
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Product not found")
     update_data = {k: v for k, v in product_update.dict().items() if v is not None}
     result = await stamped_update("products", product_id, update_data, entity_type="product")
     if not result:
@@ -57,19 +78,22 @@ async def update_product(product_id: str, product_update: ProductUpdate, _: dict
     return Product(**result)
 
 @router.delete("/products/{product_id}")
-async def delete_product(product_id: str, _: dict = Depends(require_owner_or_manager)):
+async def delete_product(product_id: str, user: dict = Depends(require_owner_or_manager)):
     from services.entity_service import soft_delete
+    existing = await db.products.find_one({"id": product_id}, {"_id": 0, "businessId": 1})
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Product not found")
     result = await soft_delete("products", product_id, entity_type="product")
     if not result:
         raise HTTPException(status_code=404, detail="Product not found")
     return {"message": "Product soft-deleted", "id": product_id}
 
 @router.post("/products/{product_id}/adjust-stock")
-async def adjust_stock(product_id: str, data: dict, _: dict = Depends(get_user)):
+async def adjust_stock(product_id: str, data: dict, user: dict = Depends(require_owner_or_manager)):
     adjustment = data.get("adjustment", 0)
     reason = data.get("reason", "Manual adjustment")
     product = await db.products.find_one({"id": product_id})
-    if not product:
+    if not product or not tenant_owns(product.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Product not found")
     new_stock = product.get("stock", 0) + adjustment
     if new_stock < 0:
@@ -82,6 +106,137 @@ async def adjust_stock(product_id: str, data: dict, _: dict = Depends(get_user))
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
     return {"message": "Stock adjusted", "newStock": new_stock}
+
+
+async def _draft_translations_core(name: str, description: str, session_suffix: str) -> dict:
+    """Shared LLM call behind both the single-product and bulk auto-translate
+    endpoints. Raises ValueError/whatever the SDK raises on any failure —
+    callers decide how that should surface (a hard 502 for one product vs.
+    just skipping that item out of a bulk run)."""
+    lang_list = ", ".join(f"{code} ({label})" for code, label in _TRANSLATABLE_LANGUAGES.items())
+    system = (
+        "You translate restaurant menu items. Given a dish name and optional "
+        "description, translate both into every requested language. Keep dish "
+        "names natural for a menu (don't over-literalize), and keep descriptions "
+        "concise. Respond with ONLY a JSON object, no prose, no markdown fences, "
+        'shaped exactly like: {"it": {"name": "...", "description": "..."}, "es": '
+        '{"name": "...", "description": "..."}, ...} — one key per language code, '
+        "using every language code requested. Omit \"description\" for a language "
+        "entry if the source description was empty."
+    )
+    user_text = f"Languages: {lang_list}\n\nDish name: {name}\nDescription: {description or '(none)'}"
+
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    chat = LlmChat(
+        api_key=os.environ["EMERGENT_LLM_KEY"], session_id=f"translate-{session_suffix}",
+        system_message=system,
+    ).with_model("openai", "gpt-5.2")
+    resp = await chat.send_message(UserMessage(text=user_text))
+    text = (resp or "").strip().strip("`")
+    try:
+        drafted = json.loads(text)
+    except Exception:
+        import re
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        drafted = json.loads(m.group(0)) if m else {}
+
+    # Only keep languages we actually asked for, and only well-formed entries —
+    # never let a malformed LLM response corrupt existing saved translations.
+    cleaned = {
+        code: {"name": v.get("name", "").strip(), "description": (v.get("description") or "").strip()}
+        for code, v in (drafted or {}).items()
+        if code in _TRANSLATABLE_LANGUAGES and isinstance(v, dict) and v.get("name", "").strip()
+    }
+    if not cleaned:
+        raise ValueError("AI returned no usable translations")
+    return cleaned
+
+
+@router.post("/products/{product_id}/auto-translate")
+async def auto_translate_product(product_id: str, user: dict = Depends(require_owner_or_manager)):
+    """AI-draft translations for every supported language from this
+    product's name/description, for staff to review before saving.
+
+    Menu translations only ever showed up on the Customer Facing Display
+    (and kiosk/QR/online menus) when a staff member manually typed every
+    language for every product one at a time via the Translate dialog — a
+    real, tedious per-item task nobody does for a full menu, so in
+    practice almost every product just fell back to English regardless of
+    what language a guest picked. This doesn't remove that manual step
+    (staff still review and hit Save), it just means starting from an AI
+    draft instead of a blank form. For translating the whole menu in one
+    go instead of one product at a time, see bulk_auto_translate_products
+    below.
+    """
+    product = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not product or not tenant_owns(product.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="AI translation is not configured")
+
+    name = product.get("name", "")
+    if not name:
+        raise HTTPException(status_code=400, detail="Product has no name to translate")
+
+    try:
+        cleaned = await _draft_translations_core(
+            name, product.get("description", ""), f"{product_id}-{uuid.uuid4().hex[:6]}")
+    except Exception as e:
+        logger.warning(f"Auto-translate failed for product {product_id}: {e}")
+        raise HTTPException(status_code=502, detail="AI translation failed — try again")
+    return {"translations": cleaned}
+
+
+@router.post("/products/bulk-auto-translate")
+async def bulk_auto_translate_products(only_missing: bool = True, user: dict = Depends(require_owner_or_manager)):
+    """AI-draft AND SAVE translations for every product on the menu in one
+    pass, instead of the per-product Translate dialog's one-at-a-time flow.
+
+    That per-product flow (including its own AI-draft button) still needed
+    a staff member to open each product and hit Save individually — for a
+    50+ item menu that's realistically never finished, which is exactly why
+    the Customer Facing Display kept showing English regardless of the
+    language a guest picked. This saves directly rather than requiring
+    per-product review (reviewing 50+ drafts one at a time defeats the
+    point of "in one pass"); a manager who wants to hand-correct a specific
+    dish can still do that afterward via the normal Translate dialog.
+
+    only_missing=True (default) skips products that already have at least
+    one saved translation, so re-running this after a manual correction
+    doesn't clobber it. Runs up to 5 products concurrently — serial would
+    make a real menu take minutes.
+    """
+    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="AI translation is not configured")
+
+    query = tenant_scope_filter(user.get("businessId"))
+    if only_missing:
+        query = {"$and": [query, {"$or": [{"translations": {"$exists": False}}, {"translations": {}}]}]}
+    products = await db.products.find(query, {"_id": 0, "id": 1, "name": 1, "description": 1}).to_list(2000)
+
+    sem = asyncio.Semaphore(5)
+    counts = {"translated": 0, "failed": 0, "skipped": 0}
+
+    async def _one(p):
+        if not p.get("name"):
+            counts["skipped"] += 1
+            return
+        async with sem:
+            try:
+                cleaned = await _draft_translations_core(
+                    p["name"], p.get("description", ""), f"bulk-{p['id']}-{uuid.uuid4().hex[:4]}")
+            except Exception as e:
+                logger.warning(f"Bulk auto-translate failed for product {p['id']}: {e}")
+                counts["failed"] += 1
+                return
+        await db.products.update_one({"id": p["id"]}, {"$set": {"translations": cleaned}})
+        counts["translated"] += 1
+
+    await asyncio.gather(*(_one(p) for p in products))
+    return {"total": len(products), **counts}
 
 
 # ============ BULK PRODUCT EDIT ============
@@ -135,9 +290,11 @@ async def bulk_edit_products(payload: BulkProductEdit, user: dict = Depends(requ
     if payload.replaceModifierIds is not None:
         common["modifierIds"] = list(payload.replaceModifierIds)
 
+    tenant_filter = tenant_scope_filter(user.get("businessId"))
+
     if not needs_per_row:
         res = await db.products.update_many(
-            {"id": {"$in": payload.productIds}},
+            {"id": {"$in": payload.productIds}, **tenant_filter},
             {"$set": common},
         )
         return {"updated": res.modified_count, "failed": [], "mode": "update_many"}
@@ -146,7 +303,7 @@ async def bulk_edit_products(payload: BulkProductEdit, user: dict = Depends(requ
     updated = 0
     failed: List[str] = []
     for pid in payload.productIds:
-        prod = await db.products.find_one({"id": pid})
+        prod = await db.products.find_one({"id": pid, **tenant_filter})
         if not prod:
             failed.append(pid)
             continue

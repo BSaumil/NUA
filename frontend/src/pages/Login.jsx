@@ -1,17 +1,32 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { staffMgmtAPI } from '../services/api';
+import { staffMgmtAPI, authAPI } from '../services/api';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent } from '../components/ui/card';
-import { Lock, Mail, AlertCircle, Hash, ShieldCheck } from 'lucide-react';
+import { Lock, Mail, AlertCircle, Hash, ShieldCheck, CheckCircle2 } from 'lucide-react';
 import Logo from '../components/brand/Logo';
+
+// Every catch block on this page did `err.response?.data?.detail || '<wrong
+// password>'-style message`. That fallback fires for ANY failure with no
+// response object — a CORS rejection, a dropped connection, a cold backend
+// instance still waking up, a request that timed out — not just a real
+// 401/403 from the server. A transient network hiccup on the login POST was
+// showing up as "Invalid credentials," which reads as "your password is
+// wrong" when the true story is "we couldn't reach the server that time."
+// Retrying the exact same correct password after the hiccup passed is
+// exactly the "doesn't work at first, works on retry" pattern that produces
+// — this tells the two apart instead of collapsing them into one message.
+function loginErrorMessage(err, fallback) {
+  if (err.response) return err.response.data?.detail || fallback;
+  return "Couldn't reach the server — check your connection and try again.";
+}
 
 export default function Login() {
   const { login, completeTwoFactor } = useAuth();
   const navigate = useNavigate();
-  const [mode, setMode] = useState('email'); // email | pin
+  const [mode, setMode] = useState('email'); // email | pin | forgot
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [pin, setPin] = useState('');
@@ -21,6 +36,9 @@ export default function Login() {
   const [challenge, setChallenge] = useState(null);
   const [code, setCode] = useState('');
   const [trustDevice, setTrustDevice] = useState(true);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotSent, setForgotSent] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
 
   const handleEmailLogin = async (e) => {
     e.preventDefault();
@@ -33,7 +51,7 @@ export default function Login() {
         navigate('/', { replace: true }); // role-based landing (Today / POS / Kitchen)
       }
     } catch (err) {
-      setError(err.response?.data?.detail || 'Invalid credentials');
+      setError(loginErrorMessage(err, 'Invalid credentials'));
     }
     setLoading(false);
   };
@@ -53,7 +71,7 @@ export default function Login() {
       }
       navigate('/', { replace: true });
     } catch (err) {
-      setError(err.response?.data?.detail || 'Incorrect code');
+      setError(loginErrorMessage(err, 'Incorrect code'));
       setCode('');
     }
     setLoading(false);
@@ -67,9 +85,40 @@ export default function Login() {
       localStorage.setItem('nua_token', res.data.token);
       window.location.assign('/'); // role-based landing (Today / POS / Kitchen)
     } catch (err) {
-      setError(err.response?.data?.detail || 'Invalid PIN');
+      setError(loginErrorMessage(err, 'Invalid PIN'));
     }
     setLoading(false);
+  };
+
+  // The server allows 5 forgot-password requests per IP before a 15-minute
+  // lockout — this 60s client-side cooldown is just to stop an impatient
+  // double-click (or "it didn't arrive yet" retry-spam) from quietly
+  // burning through most of that allowance before the first email even
+  // has a chance to land.
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const t = setTimeout(() => setResendCooldown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendCooldown]);
+
+  const requestPasswordReset = async () => {
+    setError(''); setLoading(true);
+    try {
+      // The backend deliberately answers identically whether or not the
+      // email has an account — never branch on the response here in a way
+      // that would let this screen leak that back to the caller.
+      await authAPI.forgotPassword(forgotEmail);
+      setForgotSent(true);
+      setResendCooldown(60);
+    } catch (err) {
+      setError(loginErrorMessage(err, 'Something went wrong — try again'));
+    }
+    setLoading(false);
+  };
+
+  const handleForgotSubmit = async (e) => {
+    e.preventDefault();
+    await requestPasswordReset();
   };
 
   return (
@@ -77,9 +126,10 @@ export default function Login() {
       <Card className="w-full max-w-sm border-gray-800 bg-gray-900/80 backdrop-blur">
         <CardContent className="p-8">
           {/* Login is a marketing-facing surface, so it gets the full
-              gradient lockup (BRAND-SPEC §3). */}
+              wordmark lockup (BRAND-SPEC §3) — on this dark background the
+              wordmark is orange (BRAND-SPEC §2), never a gradient. */}
           <div className="flex flex-col items-center mb-6">
-            <Logo variant="marketing" size={34} />
+            <Logo variant="marketing" background="dark" size={34} />
           </div>
 
           {/* Second factor — replaces the whole form rather than sitting
@@ -131,6 +181,50 @@ export default function Login() {
                 Use a different account
               </button>
             </div>
+          ) : mode === 'forgot' ? (
+            <div data-testid="forgot-password-step">
+              <div className="flex flex-col items-center mb-5">
+                <Lock size={28} style={{ color: '#f58c14' }} />
+                <p className="text-white font-medium mt-2">Reset your password</p>
+                <p className="text-gray-400 text-sm text-center mt-1">
+                  Enter your email and we'll send you a link to set a new password.
+                </p>
+              </div>
+              {error && (
+                <div className="flex items-center gap-2 text-red-400 text-sm bg-red-950/50 p-3 rounded-lg mb-4" data-testid="forgot-error">
+                  <AlertCircle size={16} /> {error}
+                </div>
+              )}
+              {forgotSent ? (
+                <div>
+                  <div className="flex items-start gap-2 text-emerald-400 text-sm bg-emerald-950/40 p-3 rounded-lg mb-3" data-testid="forgot-sent">
+                    <CheckCircle2 size={16} className="mt-0.5 flex-shrink-0" />
+                    If that email has an account, a reset link is on its way. Check your inbox.
+                  </div>
+                  <Button variant="outline" className="w-full h-10 text-sm border-gray-700 text-gray-300 hover:text-white"
+                    onClick={requestPasswordReset} disabled={loading || resendCooldown > 0} data-testid="forgot-resend">
+                    {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : loading ? 'Sending...' : "Didn't get it? Resend"}
+                  </Button>
+                </div>
+              ) : (
+                <form onSubmit={handleForgotSubmit} className="space-y-4">
+                  <div className="relative">
+                    <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                    <Input type="email" placeholder="Email" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)}
+                      className="pl-10 bg-gray-800 border-gray-700 text-white" required data-testid="forgot-email" />
+                  </div>
+                  <Button type="submit" className="w-full h-11 text-white font-medium hover:opacity-90"
+                    style={{ backgroundColor: '#f58c14' }} disabled={loading} data-testid="forgot-submit">
+                    {loading ? 'Sending...' : 'Send Reset Link'}
+                  </Button>
+                </form>
+              )}
+              <button onClick={() => { setMode('email'); setError(''); setForgotSent(false); setForgotEmail(''); setResendCooldown(0); }}
+                className="mt-5 w-full text-sm text-gray-500 hover:text-gray-300"
+                data-testid="forgot-back">
+                Back to sign in
+              </button>
+            </div>
           ) : (
           <>
           {/* Mode Toggle */}
@@ -164,6 +258,12 @@ export default function Login() {
                 <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
                 <Input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)}
                   className="pl-10 bg-gray-800 border-gray-700 text-white" required data-testid="login-password" />
+              </div>
+              <div className="text-right">
+                <button type="button" onClick={() => { setMode('forgot'); setError(''); }}
+                  className="text-xs text-gray-500 hover:text-gray-300" data-testid="forgot-password-link">
+                  Forgot password?
+                </button>
               </div>
               <Button type="submit" className="w-full h-11 text-white font-medium hover:opacity-90" style={{ backgroundColor: '#f58c14' }} disabled={loading} data-testid="login-submit">
                 {loading ? 'Signing in...' : 'Sign In'}

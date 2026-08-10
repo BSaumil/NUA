@@ -54,6 +54,12 @@ class Product(BaseModel):
     eightySixedBy: Optional[str] = None
     createdAt: Optional[datetime] = None
     updatedAt: Optional[datetime] = None
+    # Written automatically by stamped_insert() (services/entity_service.py)
+    # from the actor's JWT — was never declared on this model, so it got
+    # silently dropped from every /products response even though it was
+    # already sitting in Mongo on every product created since that helper
+    # existed.
+    businessId: Optional[str] = None
 
 class ProductCreate(BaseModel):
     name: str

@@ -21,8 +21,12 @@ export default function Clubmember() {
 
   useEffect(() => { fetchData(); }, []);
   const fetchData = async () => {
-    try { const r = await reservationFeaturesAPI.getClubOffers(); setOffers(r.data); } catch {}
-    try { const r = await reservationFeaturesAPI.getSocialAccounts(); setSocialAccounts(r.data); } catch {}
+    const [offersRes, accountsRes] = await Promise.allSettled([
+      reservationFeaturesAPI.getClubOffers(),
+      reservationFeaturesAPI.getSocialAccounts(),
+    ]);
+    if (offersRes.status === 'fulfilled') setOffers(offersRes.value.data);
+    if (accountsRes.status === 'fulfilled') setSocialAccounts(accountsRes.value.data);
   };
 
   const openAdd = () => { setEditing(null); setForm({ title: '', description: '', discount: 20, startDate: '', startTime: '00:00', endDate: '', endTime: '23:59', totalSlots: 10, active: true, socialPlatforms: ['instagram', 'facebook'] }); setShowDialog(true); };

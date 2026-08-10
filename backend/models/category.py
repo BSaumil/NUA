@@ -12,6 +12,7 @@ class Category(BaseModel):
     sortOrder: int = 0
     active: bool = True
     createdAt: datetime = Field(default_factory=datetime.utcnow)
+    businessId: Optional[str] = None
 
 class CategoryCreate(BaseModel):
     name: str

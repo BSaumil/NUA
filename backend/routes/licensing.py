@@ -365,7 +365,17 @@ async def stripe_webhook(request: Request, stripe_signature: Optional[str] = Hea
     secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
     try:
         if secret:
-            event = stripe.Webhook.construct_event(payload, stripe_signature, secret)
+            # construct_event returns a stripe.Event — a StripeObject, not a
+            # plain dict. It supports [] and attribute access but NOT
+            # .get(), which raises AttributeError rather than falling back
+            # to a default the way dict.get() does. Every call below uses
+            # .get() (an intentional, defensive style for a webhook payload
+            # whose exact shape isn't guaranteed) — so without this
+            # conversion, every correctly-signed, real webhook delivery
+            # crashed with a 500 immediately on the first `event.get(...)`.
+            # The insecure dev-fallback path below never hit this because
+            # json.loads() already produces a plain dict.
+            event = stripe.Webhook.construct_event(payload, stripe_signature, secret).to_dict()
         else:
             # Dev fallback — skip signature verification but log a warning
             import json
@@ -383,6 +393,18 @@ async def stripe_webhook(request: Request, stripe_signature: Optional[str] = Hea
     lic = await db.tenant_licenses.find_one({"stripeCustomerId": cust_id}, {"_id": 0})
     if not lic:
         return {"received": True, "ignored": "no license linked"}
+    # A Stripe customer can carry more than one Subscription object (a stray
+    # duplicate, a test subscription, a plan-change that left the old one
+    # lingering) — this license is tied to one specific stripeSubscriptionId
+    # at creation time, so an event for a *different* subscription under the
+    # same customer must not be allowed to flip this tenant's state. Only
+    # enforced when both sides actually have a subscription id to compare —
+    # invoice events on a not-yet-linked license, or a license created before
+    # this field existed, fall through to the old any-event-for-this-customer
+    # behavior rather than being silently ignored.
+    linked_sub_id = lic.get("stripeSubscriptionId")
+    if linked_sub_id and sub_id and sub_id != linked_sub_id:
+        return {"received": True, "ignored": "event for a different subscription on this customer"}
     tenant_id = lic["tenantId"]
 
     if et == "invoice.paid":

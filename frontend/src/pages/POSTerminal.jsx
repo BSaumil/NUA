@@ -509,7 +509,7 @@ const POSTerminal = () => {
         const items = cart.map(i => ({
           productId: i.id, id: i.id, name: i.name, price: i.price, quantity: i.quantity, category: i.category,
         }));
-        const r = await v26API.applyPromos(items);
+        const r = await v26API.applyPromos(items, orderType);
         if (cancelled) return;
         (r.data?.applied || []).forEach(p => addDiscount({
           promotionId: p.promotionId, label: p.label, discount: p.discount, auto: true,
@@ -518,8 +518,10 @@ const POSTerminal = () => {
     };
     run();
     return () => { cancelled = true; };
-    // Intentionally only depend on cart contents — avoids feedback loop with appliedDiscounts
-  }, [cart]);  // eslint-disable-line
+    // Intentionally only depend on cart contents + orderType — avoids feedback loop with appliedDiscounts.
+    // orderType is included so switching dine-in <-> takeaway immediately drops/re-adds
+    // channel-restricted promos (e.g. a dine-in-only Happy Hour) instead of leaving a stale one applied.
+  }, [cart, orderType]);  // eslint-disable-line
 
   // Push live cart to the customer-facing display (debounced ~400ms) — also
   // carries split-payment progress while a split is in flight, so a guest
@@ -530,7 +532,7 @@ const POSTerminal = () => {
       v26API.cfdPush({
         cart: cart.map(i => ({ id: i.id, name: i.name, price: i.price, quantity: i.quantity, image: i.image, translations: i.translations })),
         selectedCustomer: selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name, membershipTier: selectedCustomer.membershipTier } : null,
-        tableNumber, walkInName,
+        tableNumber, walkInName, orderType,
         splitInProgress: paymentView === 'split',
         splitParts: paymentView === 'split'
           ? splitParts.map(s => ({ payerName: s.payerName, amount: s.amount, status: s.status }))
@@ -538,7 +540,7 @@ const POSTerminal = () => {
       }).catch(() => {});
     }, 400);
     return () => clearTimeout(t);
-  }, [cart, selectedCustomer, tableNumber, walkInName, paymentView, splitParts]);
+  }, [cart, selectedCustomer, tableNumber, walkInName, orderType, paymentView, splitParts]);
 
   // Live-update products & categories every 12s + on tab focus so any edit done in
   // another window reflects without a manual refresh.
@@ -995,12 +997,29 @@ const POSTerminal = () => {
   };
 
   // ---- Stripe Checkout ----
+  // Stripe redirects the whole browser away and back — nothing in this
+  // component's React state (cart, discounts, table…) survives that round
+  // trip. So the full sale payload (same shape POST /transactions takes)
+  // travels WITH the checkout session and gets rung up server-side once
+  // Stripe confirms payment, instead of relying on this tab still being
+  // open and in the right state when the guest returns.
   const handleStripeCheckout = async () => {
+    if (tableBlocked) {
+      toast({ title: 'Unknown table', description: tableCheck.message, variant: 'destructive' });
+      return;
+    }
     setLoading(true);
     try {
       const res = await stripeAPI.createCheckout({
         originUrl: window.location.origin,
         amount: totalNum,
+        sale: {
+          items: cart.map(item => toTxItem(item, true)),
+          paymentMethod: 'Stripe',
+          customerId: selectedCustomer?.id || null, location: currentLocation, cashier: currentUser.name,
+          orderType, tableNumber: orderType === 'dine-in' ? tableNumber : null,
+          ...buildDiscountPayload(),
+        },
       });
       if (res.data.url) window.location.href = res.data.url;
     } catch {
@@ -1583,12 +1602,14 @@ const POSTerminal = () => {
             </div>
           )}
         </div>
-        {/* Active Promotions */}
-        {promotions.filter(p => p.active).length > 0 && (
+        {/* Active Promotions — only ones that can actually fire for the
+            current order type, so a dine-in-only Happy Hour doesn't show as
+            "active" while ringing up a takeaway sale it will never apply to. */}
+        {promotions.filter(p => p.active && (!p.channels?.length || p.channels.includes(orderType))).length > 0 && (
           <div className="mt-2 p-2.5 bg-gradient-to-r from-yellow-50 to-orange-50 rounded-lg border border-yellow-200">
             <div className="flex gap-2 overflow-x-auto items-center">
               <h3 className="text-[10px] font-bold uppercase text-yellow-700 whitespace-nowrap">Promotions</h3>
-              {promotions.filter(p => p.active).map(promo => (
+              {promotions.filter(p => p.active && (!p.channels?.length || p.channels.includes(orderType))).map(promo => (
                 <div key={promo.id} className="bg-white px-3 py-1.5 rounded-md border text-xs whitespace-nowrap">
                   <span className="font-medium">{promo.name}</span>
                   <span className="ml-2 font-bold" style={{ color: theme.accent }}>{promo.discount}% OFF</span>
@@ -1733,6 +1754,21 @@ const POSTerminal = () => {
           </div>
         ) : (
         <>
+        {/* Scrollable body — everything that can stack up (customer card,
+            "Your Usual", cart items, AI upsell strip, totals, discount
+            picker, and the payment method/cash sub-views) used to sit in
+            plain flex flow with only the cart-items list itself scrollable.
+            On a short viewport, a selected customer + "Your Usual" +
+            AI-suggested upsells could push the cart items to zero height
+            and shove the Send to Table / Proceed to Payment buttons clean
+            off the bottom of the panel with no way to scroll to them —
+            they weren't just hidden, they were unreachable. Wrapping the
+            whole body in one scrollable region and pinning the action
+            buttons below it (outside this div, so they're a fixed flex
+            sibling) fixes both: everything above is always reachable by
+            scrolling, and the buttons are always visible without needing
+            to. */}
+        <div className="flex-1 overflow-y-auto min-h-0 -mr-1 pr-1">
         {/* Customer Selection */}
         <Card className="mb-4"><CardContent className="p-4">
           <div className="flex items-center gap-2 mb-2">
@@ -1870,7 +1906,7 @@ const POSTerminal = () => {
         {coursingOn && kitchenOrder && (
           <ReadyBanner courses={ready} onServe={serveCourseFromCart} busy={coursingBusy} />
         )}
-        <div className="flex-1 overflow-y-auto mb-4">
+        <div className="mb-4">
           {cart.length === 0 ? (
             <div className="text-center py-12 text-gray-400">
               <ShoppingCart size={48} className="mx-auto mb-3 opacity-50" /><p>Cart is empty</p><p className="text-sm">Tap a product to add</p>
@@ -2127,6 +2163,10 @@ const POSTerminal = () => {
             )}
           </CardContent></Card>
         )}
+        </div>
+        {/* End of scrollable body — the actions below are a fixed flex
+            sibling, not part of the scroll region, so they stay visible
+            without needing to scroll to them. */}
 
         {/* Send-to-Table + Payment buttons */}
         {!showPayment && cart.length > 0 && (
@@ -2167,8 +2207,17 @@ const POSTerminal = () => {
           </p>
         )}
 
+        {/* Payment Methods Panel + Cash Payment Panel — same fixed-height
+            cart panel as the body above, but these two were never given
+            their own scroll region either. On a short/embedded viewport
+            (e.g. a kiosk tablet with an on-screen keyboard eating vertical
+            space) Split Payment / Cancel / Complete Sale could get pushed
+            out of the panel with nothing able to scroll to them — this is
+            the literal payment step, hit on every sale. */}
+        {showPayment && (
+        <div className="flex-1 overflow-y-auto min-h-0 -mr-1 pr-1">
         {/* Payment Methods Panel */}
-        {showPayment && paymentView === 'methods' && (
+        {paymentView === 'methods' && (
           <div className="space-y-2" data-testid="payment-methods-panel">
             <div className="grid grid-cols-2 gap-2">
               <Button className="h-14 flex-col gap-1" variant="outline" onClick={() => handleCheckout('Card')} data-testid="pay-card">
@@ -2205,7 +2254,7 @@ const POSTerminal = () => {
         )}
 
         {/* Cash Payment Panel */}
-        {showPayment && paymentView === 'cash' && (
+        {paymentView === 'cash' && (
           <div className="space-y-3" data-testid="cash-payment-panel">
             {!showCashChange ? (
               <>
@@ -2249,6 +2298,8 @@ const POSTerminal = () => {
               </div>
             )}
           </div>
+        )}
+        </div>
         )}
         </>
         )}

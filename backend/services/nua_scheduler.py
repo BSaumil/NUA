@@ -91,6 +91,20 @@ async def _loop() -> None:
         except Exception as e:
             logger.warning(f"[ash] scheduler loop error: {e}")
         try:
+            from services import predictive_signals
+            pred = await predictive_signals.scan_and_emit_predicted_stockouts()
+            if pred["emitted"]:
+                logger.info(f"[ash] predictive scan emitted {pred['emitted']} stockout warning(s)")
+        except Exception as e:
+            logger.warning(f"[ash] predictive scan error: {e}")
+        try:
+            from services import ops_signals
+            ops = await ops_signals.scan_and_emit()
+            if ops["server"]["emitted"] or ops["client"]["emitted"]:
+                logger.info(f"[ash] ops scan: server_emitted={ops['server']['emitted']} client_emitted={ops['client']['emitted']}")
+        except Exception as e:
+            logger.warning(f"[ash] ops scan error: {e}")
+        try:
             await asyncio.sleep(interval)
         except asyncio.CancelledError:
             logger.info("[ash] scheduler cancelled — exiting cleanly")
@@ -109,7 +123,6 @@ def start_scheduler() -> None:
 
 
 def stop_scheduler() -> None:
-    global _task
     if _task and not _task.done():
         _task.cancel()
 

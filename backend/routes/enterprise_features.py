@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException, Request, Depends
-from deps import get_user, require_owner, require_owner_or_manager
+from deps import require_owner, require_owner_or_manager
 from database import db
 from middleware.actor_context import tenant_scope_filter
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import uuid
 
 router = APIRouter()
@@ -129,7 +129,7 @@ async def get_live_sales(user: dict = Depends(require_owner_or_manager)):
 
 # ============ CUSTOM PERMISSIONS (Granular) ============
 from services.permission_catalog import (
-    PERMISSION_CATALOG, DEFAULT_ROLE_PERMISSIONS,
+    DEFAULT_ROLE_PERMISSIONS,
     all_permission_ids, catalog_for_ui,
 )
 
@@ -198,7 +198,6 @@ async def set_role_permissions(role: str, data: dict, _: dict = Depends(require_
     if not isinstance(perms, list):
         raise HTTPException(status_code=400, detail="permissions must be a list")
     valid = [p for p in perms if p in ALL_PERMISSIONS]
-    from services.entity_service import stamped_update
     from datetime import datetime, timezone
     now_iso = datetime.now(timezone.utc).isoformat()
     await db.role_permissions.update_one(
@@ -304,7 +303,6 @@ async def generate_report(data: dict, _: dict = Depends(require_owner_or_manager
     """Generate a report on demand"""
 
     report_type = data.get("type", "detailed")  # itemised, category, detailed
-    period = data.get("period", "today")
 
     txns = await db.transactions.find({}, {"_id": 0}).to_list(50000)
     products = await db.products.find({}, {"_id": 0}).to_list(10000)

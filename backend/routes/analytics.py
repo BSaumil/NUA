@@ -7,32 +7,11 @@ from models.bas_report import BASReport, BASReportCreate
 from models.expense import Expense, ExpenseCreate
 from models.supplier import Supplier, SupplierCreate, PurchaseOrder, PurchaseOrderCreate
 from middleware.actor_context import tenant_scope_filter
+from utils.dates import date_range_filter as _date_match
 import uuid
 import random
-import math
 
 router = APIRouter()
-
-
-def _date_match(field: str, start_date: Optional[str], end_date: Optional[str]) -> dict:
-    """A $match stage for an optional date range, or {} for all-time.
-
-    Kept optional and defaulting to all-time rather than forcing a window:
-    these are lifetime P&L figures a venue expects to see by default, and
-    changing that default silently would change what the report means. What
-    this actually fixes is that the sum is now computed by the database
-    instead of by shipping every row to Python and adding it up there — a
-    P&L that summed the first 10,000 transactions and silently ignored the
-    rest was the real bug once a venue had traded past that many.
-    """
-    if not start_date and not end_date:
-        return {}
-    rng = {}
-    if start_date:
-        rng["$gte"] = datetime.fromisoformat(start_date)
-    if end_date:
-        rng["$lte"] = datetime.fromisoformat(end_date)
-    return {field: rng}
 
 
 async def _sum_transactions(match: dict) -> dict:
@@ -59,7 +38,7 @@ COGS_CATEGORIES = ("Ingredients", "Food Supplies", "Beverages")
 async def get_accounting_summary(start_date: Optional[str] = None, end_date: Optional[str] = None,
                                  user: dict = Depends(require_owner_or_manager)):
     txn_totals = await _sum_transactions({**_date_match("timestamp", start_date, end_date), **tenant_scope_filter(user.get("businessId"))})
-    expense_rows = await _sum_expenses(_date_match("date", start_date, end_date))
+    expense_rows = await _sum_expenses({**_date_match("date", start_date, end_date), **tenant_scope_filter(user.get("businessId"))})
     total_expenses = sum(r["amount"] for r in expense_rows)
     total_gst_paid = sum(r["gst"] for r in expense_rows)
     return {
@@ -75,7 +54,7 @@ async def get_accounting_summary(start_date: Optional[str] = None, end_date: Opt
 async def get_p_and_l(start_date: Optional[str] = None, end_date: Optional[str] = None,
                       user: dict = Depends(require_owner_or_manager)):
     txn_totals = await _sum_transactions({**_date_match("timestamp", start_date, end_date), **tenant_scope_filter(user.get("businessId"))})
-    expense_rows = await _sum_expenses(_date_match("date", start_date, end_date))
+    expense_rows = await _sum_expenses({**_date_match("date", start_date, end_date), **tenant_scope_filter(user.get("businessId"))})
     revenue = txn_totals["revenue"]
     cogs = sum(r["amount"] for r in expense_rows if r["_id"] in COGS_CATEGORIES)
     operating = sum(r["amount"] for r in expense_rows if r["_id"] not in COGS_CATEGORIES)
@@ -248,8 +227,8 @@ async def bas_worksheet(period_start: str, period_end: str):
 
 # ============ EXPENSES API ============
 @router.get("/expenses", response_model=List[Expense])
-async def get_expenses(start_date: Optional[str] = None, end_date: Optional[str] = None, category: Optional[str] = None, _: dict = Depends(require_owner_or_manager)):
-    query = {}
+async def get_expenses(start_date: Optional[str] = None, end_date: Optional[str] = None, category: Optional[str] = None, user: dict = Depends(require_owner_or_manager)):
+    query = tenant_scope_filter(user.get("businessId"))
     if category:
         query["category"] = category
     if start_date and end_date:
@@ -258,20 +237,20 @@ async def get_expenses(start_date: Optional[str] = None, end_date: Optional[str]
     return [Expense(**e) for e in expenses]
 
 @router.post("/expenses", response_model=Expense)
-async def create_expense(expense: ExpenseCreate, _: dict = Depends(require_owner_or_manager)):
-    expense_obj = Expense(**expense.dict())
+async def create_expense(expense: ExpenseCreate, user: dict = Depends(require_owner_or_manager)):
+    expense_obj = Expense(**expense.dict(), businessId=user.get("businessId"))
     await db.expenses.insert_one(expense_obj.dict())
     return expense_obj
 
 # ============ SUPPLIERS API ============
 @router.get("/suppliers", response_model=List[Supplier])
-async def get_suppliers(_: dict = Depends(get_user)):
-    suppliers = await db.suppliers.find().to_list(1000)
+async def get_suppliers(user: dict = Depends(get_user)):
+    suppliers = await db.suppliers.find(tenant_scope_filter(user.get("businessId"))).to_list(1000)
     return [Supplier(**s) for s in suppliers]
 
 @router.post("/suppliers", response_model=Supplier)
-async def create_supplier(supplier: SupplierCreate, _: dict = Depends(require_owner_or_manager)):
-    supplier_obj = Supplier(**supplier.dict())
+async def create_supplier(supplier: SupplierCreate, user: dict = Depends(require_owner_or_manager)):
+    supplier_obj = Supplier(**supplier.dict(), businessId=user.get("businessId"))
     await db.suppliers.insert_one(supplier_obj.dict())
     return supplier_obj
 
@@ -335,10 +314,18 @@ async def export_report_csv(report_type: str, start_date: str, end_date: str, _:
 async def get_pre_shift_data(_: dict = Depends(get_user)):
     today = datetime.utcnow().strftime('%Y-%m-%d')
     reservations = await db.reservations.find({"date": today}, {"_id": 0}).sort("time", 1).to_list(100)
+    # One batched $in lookup instead of one find_one() per reservation, per
+    # loop — the VIP pass and the dietary-alerts pass below both used to
+    # re-fetch the same customer doc a second time.
+    cust_ids = list({r["customerId"] for r in reservations if r.get("customerId")})
+    customers_by_id = {}
+    if cust_ids:
+        rows = await db.customers.find({"id": {"$in": cust_ids}}, {"_id": 0}).to_list(len(cust_ids))
+        customers_by_id = {c["id"]: c for c in rows}
     vip_guests = []
     for r in reservations:
         if r.get("customerId"):
-            cust = await db.customers.find_one({"id": r["customerId"]}, {"_id": 0})
+            cust = customers_by_id.get(r["customerId"])
             if cust and cust.get("isVip"):
                 vip_guests.append({**r, "customerProfile": cust})
         elif "VIP" in (r.get("tags") or []):
@@ -347,7 +334,7 @@ async def get_pre_shift_data(_: dict = Depends(get_user)):
     for r in reservations:
         alerts = []
         if r.get("customerId"):
-            cust = await db.customers.find_one({"id": r["customerId"]}, {"_id": 0})
+            cust = customers_by_id.get(r["customerId"])
             if cust:
                 if cust.get("dietaryRestrictions"):
                     alerts.extend(cust["dietaryRestrictions"])
@@ -561,7 +548,6 @@ async def what_if_simulation(changes: List[dict]):
 # ============ DEMAND FORECASTING API ============
 @router.get("/analytics/demand-forecast")
 async def get_demand_forecast():
-    all_txns = await db.transactions.find({}, {"_id": 0}).to_list(10000)
     reservations = await db.reservations.find({}, {"_id": 0}).to_list(1000)
     today = datetime.utcnow()
     forecast = []

@@ -37,6 +37,7 @@ AR (Invoices)
 Customer Deposits
   GET/POST   /accounting/deposits
   POST       /accounting/deposits/{id}/apply
+  POST       /accounting/deposits/{id}/refund
 
 Bank Reconciliation
   GET   /accounting/bank/statement/{account_code}
@@ -45,23 +46,25 @@ Bank Reconciliation
   POST  /accounting/bank/{line_id}/ignore
 
 Budgets
-  GET/POST /accounting/budgets
+  GET/POST      /accounting/budgets
+  PUT/DELETE    /accounting/budgets/{id}
 
 Dashboard / KPIs
   GET   /accounting/kpis
 """
 from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Depends, Query
-from typing import Optional, List, Dict, Any
-from datetime import datetime, timezone, date, timedelta
+from typing import Optional, Dict, Any
+from datetime import datetime, timezone, timedelta
 from database import db
 from deps import get_user, require_owner_or_manager
 from models.accounting import (
-    Account, JournalEntry, JournalLine, Bill, Invoice, CustomerDeposit,
-    Budget, BudgetLine, BankStatementLine,
+    Account, JournalEntry, Bill, Invoice, CustomerDeposit,
+    Budget, BankStatementLine,
 )
 from utils.mongo_safe import safe_parse_list
 from services import accounting_service as svc
+from middleware.actor_context import tenant_scope_filter
 import uuid
 import logging
 
@@ -131,7 +134,7 @@ async def list_journals(
     source_type: Optional[str] = None,
     account_code: Optional[str] = None,
     limit: int = 200,
-    _: dict = Depends(get_user),
+    user: dict = Depends(get_user),
 ):
     q: Dict[str, Any] = {}
     if from_date or to_date:
@@ -144,6 +147,9 @@ async def list_journals(
         q["sourceType"] = source_type
     if account_code:
         q["lines.accountCode"] = account_code
+    # journal_entries had no tenant filter at all — any authenticated user
+    # could list every business's ledger entries, not just their own.
+    q.update(tenant_scope_filter(user.get("businessId")))
     rows = await db.journal_entries.find(q, {"_id": 0}).sort("date", -1).limit(limit).to_list(limit)
     return safe_parse_list(rows, JournalEntry, where="journal_entries")
 
@@ -172,8 +178,9 @@ async def create_journal(body: dict, user: dict = Depends(require_owner_or_manag
             from services.audit_service import log_event
             await log_event(entity_type="journal_entry", entity_id=je.get("id"),
                             action="created", after=je, memo=f"Manual journal {je.get('journalNumber')}")
-        except Exception:
-            pass
+        except Exception as e:
+            from utils.errors import log_and_continue
+            log_and_continue(logger, f"Journal entry audit log write failed for {je.get('id')}", e)
         return je
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -288,10 +295,12 @@ async def report_budget_vs_actual(
 # AP — Bills
 # ═════════════════════════════════════════════════════════════════════════
 @router.get("/bills")
-async def list_bills(status: Optional[str] = None, supplier_id: Optional[str] = None, _: dict = Depends(get_user)):
+async def list_bills(status: Optional[str] = None, supplier_id: Optional[str] = None, user: dict = Depends(get_user)):
     q: Dict[str, Any] = {}
     if status: q["status"] = status
     if supplier_id: q["supplierId"] = supplier_id
+    # Accounts-payable bills, same missing-filter gap as journal_entries above.
+    q.update(tenant_scope_filter(user.get("businessId")))
     rows = await db.bills.find(q, {"_id": 0}).sort("dueDate", 1).to_list(500)
     return safe_parse_list(rows, Bill, where="bills")
 
@@ -482,6 +491,24 @@ async def apply_deposit(did: str, body: dict, user: dict = Depends(require_owner
     return {"applied": True, "journalEntryId": je["id"] if je else None}
 
 
+@router.post("/deposits/{did}/refund")
+async def refund_deposit(did: str, user: dict = Depends(require_owner_or_manager)):
+    dep = await db.customer_deposits.find_one({"id": did}, {"_id": 0})
+    if not dep:
+        raise HTTPException(404, "Deposit not found")
+    if dep.get("status") != "held":
+        raise HTTPException(400, f"Deposit already {dep.get('status')}")
+    try:
+        je = await svc.auto_post_deposit_refunded(dep)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    await db.customer_deposits.update_one(
+        {"id": did}, {"$set": {"status": "refunded",
+                                "refundedJournalEntryId": je["id"] if je else None}}
+    )
+    return {"refunded": True, "journalEntryId": je["id"] if je else None}
+
+
 # ═════════════════════════════════════════════════════════════════════════
 # Bank reconciliation
 # ═════════════════════════════════════════════════════════════════════════
@@ -576,6 +603,24 @@ async def create_budget(body: dict, _: dict = Depends(require_owner_or_manager))
     b = Budget(**body).dict()
     await db.budgets.insert_one(dict(b))
     return b
+
+
+@router.put("/budgets/{bid}")
+async def update_budget(bid: str, body: dict, _: dict = Depends(require_owner_or_manager)):
+    existing = await db.budgets.find_one({"id": bid}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Budget not found")
+    updated = Budget(**{**existing, **body, "id": bid}).dict()
+    await db.budgets.replace_one({"id": bid}, updated)
+    return updated
+
+
+@router.delete("/budgets/{bid}")
+async def delete_budget(bid: str, _: dict = Depends(require_owner_or_manager)):
+    result = await db.budgets.delete_one({"id": bid})
+    if result.deleted_count == 0:
+        raise HTTPException(404, "Budget not found")
+    return {"deleted": True}
 
 
 # ═════════════════════════════════════════════════════════════════════════

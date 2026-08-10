@@ -30,7 +30,7 @@ import logging
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import jwt
 import pyotp

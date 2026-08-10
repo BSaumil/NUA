@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Truck, Plus, Package, RefreshCw } from 'lucide-react';
+import { Truck, Plus, Package, RefreshCw, Mail, MailWarning } from 'lucide-react';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -26,7 +26,20 @@ export default function PurchaseOrders() {
     } catch { toast.error('PO generation failed'); }
     setLoading(false);
   };
-  const act = async (id, action) => { try { await phaseEFAPI.updatePO(id, action); toast.success(`PO ${action}d`); refresh(); } catch (e) { toast.error('Failed'); } };
+  const act = async (id, action) => {
+    try {
+      const r = await phaseEFAPI.updatePO(id, action);
+      if (action === 'send') {
+        const er = r.data?.emailResult;
+        if (er?.delivered) toast.success('PO emailed to the supplier');
+        else if (er?.reason === 'no_supplier_email_on_file') toast.warning('PO marked sent — but this supplier has no email on file, so nothing actually went out');
+        else toast.warning('PO marked sent — but email isn’t configured, so nothing actually went out');
+      } else {
+        toast.success(`PO ${action}d`);
+      }
+      refresh();
+    } catch (e) { toast.error('Failed'); }
+  };
 
   return (
     <div className="space-y-6" data-testid="po-page">
@@ -51,6 +64,16 @@ export default function PurchaseOrders() {
                     <Badge className={STATUS_COLORS[po.status] || 'bg-gray-100'}>{po.status}</Badge>
                   </div>
                   <p className="text-xs text-gray-500 font-mono">{po.id} · {new Date(po.createdAt).toLocaleString()}</p>
+                  {po.emailResult && (
+                    <p className={`text-xs mt-1 flex items-center gap-1 ${po.emailResult.delivered ? 'text-emerald-600' : 'text-amber-600'}`}
+                      data-testid={`po-email-status-${po.id}`}>
+                      {po.emailResult.delivered
+                        ? <><Mail size={11} /> Emailed to supplier</>
+                        : <><MailWarning size={11} /> {po.emailResult.reason === 'no_supplier_email_on_file'
+                            ? 'No supplier email on file — not actually sent'
+                            : 'Email not configured — not actually sent'}</>}
+                    </p>
+                  )}
                 </div>
                 <div className="text-right">
                   <p className="text-xs text-gray-500 uppercase">Total</p>

@@ -6,16 +6,15 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from auth import generate_key, hash_key, require_platform_admin
 from database import db
-from models import Partner, PartnerCreate
+from models import Partner, PartnerCreate, PartnerApplicationCreate
 from usage import monthly_report
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_platform_admin)])
 
 
-@router.post("/partners")
-async def create_partner(body: PartnerCreate):
-    """Provision a partner. The raw live + sandbox keys are returned ONCE,
-    here — only their hashes are stored."""
+def _provision_partner(body: PartnerCreate) -> tuple[dict, str, str]:
+    """Shared by direct admin creation and application approval — exactly
+    one place mints keys, so the two paths can never drift apart."""
     live_key = generate_key(test=False)
     test_key = generate_key(test=True)
     partner = Partner(
@@ -24,8 +23,16 @@ async def create_partner(body: PartnerCreate):
         test_key_hash=hash_key(test_key),
         created_at=datetime.now(timezone.utc).isoformat(),
     )
-    await db.partners.insert_one(partner.dict())
-    out = partner.dict()
+    return partner.dict(), live_key, test_key
+
+
+@router.post("/partners")
+async def create_partner(body: PartnerCreate):
+    """Provision a partner. The raw live + sandbox keys are returned ONCE,
+    here — only their hashes are stored."""
+    partner_doc, live_key, test_key = _provision_partner(body)
+    await db.partners.insert_one(partner_doc)
+    out = dict(partner_doc)
     out.pop("api_key_hash"); out.pop("test_key_hash")
     out["api_key"] = live_key
     out["test_api_key"] = test_key
@@ -53,3 +60,48 @@ async def rotate_key(partner_id: str, test: bool = False):
 async def usage_monthly(month: str):
     """month=YYYY-MM — the wholesale invoicing feed."""
     return {"month": month, "partners": await monthly_report(month)}
+
+
+# ---- Partner application review queue ----
+@router.get("/partner-applications")
+async def list_applications(status: str = ""):
+    q = {"status": status} if status else {}
+    return await db.partner_applications.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+
+@router.post("/partner-applications/{application_id}/approve")
+async def approve_application(application_id: str, billing_tier: str = "standard"):
+    application = await db.partner_applications.find_one({"id": application_id}, {"_id": 0})
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+    if application["status"] != "pending":
+        raise HTTPException(status_code=400, detail=f"Application already {application['status']}")
+
+    partner_doc, live_key, test_key = _provision_partner(
+        PartnerCreate(name=application["company_name"], billing_tier=billing_tier))
+    await db.partners.insert_one(partner_doc)
+    await db.partner_applications.update_one(
+        {"id": application_id},
+        {"$set": {"status": "approved", "partner_id": partner_doc["id"],
+                  "resolved_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    return {
+        "applicationId": application_id, "partnerId": partner_doc["id"],
+        "name": partner_doc["name"], "api_key": live_key, "test_api_key": test_key,
+    }
+
+
+@router.post("/partner-applications/{application_id}/reject")
+async def reject_application(application_id: str, reason: str = ""):
+    application = await db.partner_applications.find_one({"id": application_id}, {"_id": 0})
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+    if application["status"] != "pending":
+        raise HTTPException(status_code=400, detail=f"Application already {application['status']}")
+
+    await db.partner_applications.update_one(
+        {"id": application_id},
+        {"$set": {"status": "rejected", "rejection_reason": reason or None,
+                  "resolved_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    return {"applicationId": application_id, "status": "rejected"}

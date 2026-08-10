@@ -14,10 +14,13 @@ Idempotency guaranteed by `customer_badges` composite key {customerId, badgeId}.
 """
 from __future__ import annotations
 from typing import Any, Dict, List, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Depends
 from database import db
 from deps import get_user, require_owner_or_manager
+from utils.notifications import send_sms
+import hashlib
+import secrets
 import uuid
 import logging
 
@@ -164,9 +167,14 @@ async def evaluate_customer(customer_id: str) -> Dict[str, Any]:
             }
             await db.customer_badges.insert_one(dict(doc))
             if doc["pointsAwarded"]:
+                # "points" is the canonical balance field (Customer model,
+                # POS checkout earn/redeem) — "loyaltyPoints" doesn't exist
+                # on the customer document, so badge point awards were
+                # invisible everywhere else: checkout redemption, the
+                # wallet, the liability report, tier progress below.
                 await db.customers.update_one(
                     {"id": customer_id},
-                    {"$inc": {"loyaltyPoints": doc["pointsAwarded"]}},
+                    {"$inc": {"points": doc["pointsAwarded"]}},
                 )
             awarded_badges.append(doc)
 
@@ -188,23 +196,24 @@ async def evaluate_customer(customer_id: str) -> Dict[str, Any]:
         await db.customer_milestones.insert_one(dict(rec))
         # Apply the reward
         if reward.get("type") == "points":
-            await db.customers.update_one({"id": customer_id}, {"$inc": {"loyaltyPoints": int(reward.get("value") or 0)}})
+            await db.customers.update_one({"id": customer_id}, {"$inc": {"points": int(reward.get("value") or 0)}})
         elif reward.get("type") == "tier":
             await db.customers.update_one({"id": customer_id}, {"$set": {"membershipTier": reward.get("value")}})
         elif reward.get("type") == "voucher":
-            v = {
-                "id": str(uuid.uuid4()),
-                "customerId": customer_id,
-                "sourceType": "loyalty_milestone",
-                "sourceRef": m["id"],
-                "label": reward.get("label") or "Milestone voucher",
-                "valueType": "amount",
-                "value": float(reward.get("value") or 0),
-                "status": "active",
-                "createdAt": _now(),
-            }
+            # Routed through the shared issuer (commerce_v29._issue_voucher)
+            # rather than a hand-rolled insert — a bare {id, value, status}
+            # dict is missing the code/qrPayload the redemption flow and the
+            # admin voucher list both require, so it was created, shown in
+            # the wallet, and permanently unredeemable. See _issue_voucher
+            # for the fields that actually matter.
             try:
-                await db.vouchers.insert_one(dict(v))
+                from routes.commerce_v29 import _issue_voucher
+                v = await _issue_voucher({
+                    "sourceType": "loyalty_milestone", "sourceRef": m["id"],
+                    "label": reward.get("label") or "Milestone voucher",
+                    "valueType": "amount", "value": float(reward.get("value") or 0),
+                    "customerId": customer_id, "businessId": customer.get("businessId"),
+                })
                 rec["voucherId"] = v["id"]
             except Exception:
                 pass
@@ -290,16 +299,18 @@ async def evaluate_customer(customer_id: str) -> Dict[str, Any]:
         if completed and not (prog or {}).get("rewarded"):
             reward = ch.get("reward") or {}
             if reward.get("type") == "points":
-                await db.customers.update_one({"id": customer_id}, {"$inc": {"loyaltyPoints": int(reward.get("value") or 0)}})
+                await db.customers.update_one({"id": customer_id}, {"$inc": {"points": int(reward.get("value") or 0)}})
             elif reward.get("type") == "voucher":
-                v = {
-                    "id": str(uuid.uuid4()), "customerId": customer_id,
-                    "sourceType": "loyalty_challenge", "sourceRef": ch["id"],
-                    "label": reward.get("label") or ch["name"],
-                    "valueType": "amount", "value": float(reward.get("value") or 0),
-                    "status": "active", "createdAt": _now(),
-                }
-                await db.vouchers.insert_one(dict(v))
+                try:
+                    from routes.commerce_v29 import _issue_voucher
+                    await _issue_voucher({
+                        "sourceType": "loyalty_challenge", "sourceRef": ch["id"],
+                        "label": reward.get("label") or ch["name"],
+                        "valueType": "amount", "value": float(reward.get("value") or 0),
+                        "customerId": customer_id, "businessId": customer.get("businessId"),
+                    })
+                except Exception:
+                    pass
             await db.customer_challenge_progress.update_one(
                 {"customerId": customer_id, "challengeId": ch["id"]},
                 {"$set": {"rewarded": True, "rewardedAt": _now()}},
@@ -318,7 +329,7 @@ async def get_customer_progress(customer_id: str) -> Dict[str, Any]:
 
     # Tier calculation
     tiers = await db.loyalty_tiers.find({}, {"_id": 0}).sort("minPoints", 1).to_list(20)
-    points = int(customer.get("loyaltyPoints") or 0)
+    points = int(customer.get("points") or 0)
     current_tier = tiers[0] if tiers else None
     next_tier = None
     for t in tiers:
@@ -465,6 +476,137 @@ async def get_progress(customer_id: str, _: dict = Depends(get_user)):
     return await get_customer_progress(customer_id)
 
 
+@router.get("/passport/{customer_id}")
+async def get_passport(customer_id: str, _: dict = Depends(get_user)):
+    """Staff-facing: does this customer have loyalty accounts at sibling
+    locations (same owner), and what does their combined picture look
+    like? Anchors the group lookup on this customer's own record rather
+    than the caller's business context, so it works the same whichever
+    location's staff happen to be looking."""
+    from services import loyalty_group
+    customer = await db.customers.find_one({"id": customer_id}, {"_id": 0, "phone": 1, "businessId": 1})
+    if not customer:
+        raise HTTPException(404, "Customer not found")
+    if not customer.get("phone"):
+        return {"found": False}
+    return await loyalty_group.passport_view(customer["phone"], customer.get("businessId"))
+
+
+GUEST_OTP_TTL_SECONDS = 300      # code is texted, so 5 minutes is generous but not loose
+GUEST_OTP_MAX_ATTEMPTS = 5
+
+
+def _clean_guest_phone(raw: Any) -> str:
+    return "".join(ch for ch in str(raw or "") if ch.isdigit() or ch == "+").strip()
+
+
+def _hash_guest_otp(phone: str, code: str) -> str:
+    return hashlib.sha256(f"{phone}:{code}".encode()).hexdigest()
+
+
+@router.post("/guest-lookup/request-code")
+async def guest_lookup_request_code(body: Dict[str, Any]):
+    """Step 1 of guest lookup: text a one-time code before revealing anything.
+
+    Before this, /guest-lookup returned name + points + badges to anyone who
+    typed in a phone number — the per-IP rate limit slowed down scraping but
+    never actually proved the caller owns the phone. This closes that: the
+    code has to arrive on that phone before the account details do.
+
+    Always responds the same way regardless of whether the number matches a
+    real account, so this endpoint itself can't be used to enumerate which
+    numbers are registered customers.
+    """
+    phone = _clean_guest_phone((body or {}).get("phone"))
+    if not phone:
+        raise HTTPException(400, "phone is required")
+
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    await db.loyalty_guest_otp.update_one(
+        {"phone": phone},
+        {"$set": {
+            "phone": phone,
+            "codeHash": _hash_guest_otp(phone, code),
+            "attempts": 0,
+            "createdAt": datetime.now(timezone.utc),
+            "expiresAt": datetime.now(timezone.utc) + timedelta(seconds=GUEST_OTP_TTL_SECONDS),
+        }},
+        upsert=True,
+    )
+    # Best-effort — send_sms no-ops (and logs) when Twilio isn't configured,
+    # same graceful-degrade posture as every other notification channel here.
+    await send_sms(phone, f"Your NUA rewards code is {code}. It expires in 5 minutes.")
+    return {"sent": True}
+
+
+@router.post("/guest-lookup")
+async def guest_lookup(body: Dict[str, Any]):
+    """Unauthenticated counterpart to /progress/{customer_id} — lets a
+    customer check their own points, tier and badges from their phone
+    without asking staff to look it up on a register. No login exists for
+    a guest, so phone number is the identifier (the same one checkout
+    already keys loyalty accounts on).
+
+    Now requires a `code` from /guest-lookup/request-code first — proof the
+    caller actually holds the phone, not just knows the number.
+
+    Deliberately minimal, same posture as /vouchers/public-check: an
+    unauthenticated caller gets first name only, never the full customer
+    record (email, address, full name, id). A phone that matches nothing
+    gets the same generic response as a genuine miss, so this can't be
+    used to enumerate which numbers are registered customers.
+    """
+    phone = _clean_guest_phone((body or {}).get("phone"))
+    code = "".join(ch for ch in str((body or {}).get("code", "")) if ch.isdigit())
+    if not phone:
+        raise HTTPException(400, "phone is required")
+    if not code:
+        raise HTTPException(400, "code is required")
+
+    otp = await db.loyalty_guest_otp.find_one({"phone": phone})
+    if not otp:
+        raise HTTPException(401, "Enter the code we texted you, or request a new one")
+    if otp.get("attempts", 0) >= GUEST_OTP_MAX_ATTEMPTS:
+        raise HTTPException(401, "Too many attempts — request a new code")
+    expires = otp.get("expiresAt")
+    if hasattr(expires, "tzinfo") and expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if not expires or expires < datetime.now(timezone.utc):
+        raise HTTPException(401, "That code expired — request a new one")
+    if otp.get("codeHash") != _hash_guest_otp(phone, code):
+        await db.loyalty_guest_otp.update_one({"phone": phone}, {"$inc": {"attempts": 1}})
+        raise HTTPException(401, "That code didn't match")
+
+    # Single use — burn it the moment it's spent, win or lose.
+    await db.loyalty_guest_otp.delete_one({"phone": phone})
+
+    customer = await db.customers.find_one({"phone": phone}, {"_id": 0, "id": 1, "name": 1, "businessId": 1})
+    if not customer:
+        return {"found": False}
+
+    progress = await get_customer_progress(customer["id"])
+    if progress.get("error"):
+        return {"found": False}
+
+    # If this phone also has an account at a sibling location (same owner,
+    # different venue), surface the combined picture instead of leaving the
+    # guest to think the one record found here is their whole relationship.
+    from services import loyalty_group
+    passport = await loyalty_group.passport_view(phone, customer.get("businessId"))
+
+    first_name = (customer.get("name") or "").strip().split(" ")[0] or "there"
+    return {
+        "found": True,
+        "firstName": first_name,
+        "points": progress["points"],
+        "tier": progress["tier"],
+        "tierProgress": progress["tierProgress"],
+        "badges": [b for b in progress["badges"] if b["earned"]],
+        "passport": passport if passport.get("isMultiLocation") else None,
+        "milestones": progress["milestones"],
+    }
+
+
 @router.post("/evaluate/{customer_id}")
 async def evaluate(customer_id: str, _: dict = Depends(get_user)):
     return await evaluate_customer(customer_id)
@@ -541,21 +683,18 @@ async def complete_referral(ref_id: str, body: dict, user: dict = Depends(get_us
     if not referee_id:
         raise HTTPException(400, "refereeId is required")
 
-    def _make_voucher(cust_id: str, reward: Dict[str, Any]) -> Dict[str, Any]:
-        return {
-            "id": str(uuid.uuid4()),
-            "customerId": cust_id,
-            "sourceType": "loyalty_referral",
-            "sourceRef": ref_id,
-            "label": reward.get("label"),
-            "valueType": "amount",
+    from routes.commerce_v29 import _issue_voucher
+
+    async def _issue_referral_voucher(cust_id: str, reward: Dict[str, Any]) -> Dict[str, Any]:
+        cust = await db.customers.find_one({"id": cust_id}, {"_id": 0, "businessId": 1})
+        return await _issue_voucher({
+            "sourceType": "loyalty_referral", "sourceRef": ref_id,
+            "label": reward.get("label"), "valueType": "amount",
             "value": float(reward.get("value") or 0),
-            "status": "active",
-            "createdAt": _now(),
-        }
-    referrer_v = _make_voucher(r["referrerId"], REFERRAL_REWARD_REFERRER)
-    referee_v = _make_voucher(referee_id, REFERRAL_REWARD_REFEREE)
-    await db.vouchers.insert_many([dict(referrer_v), dict(referee_v)])
+            "customerId": cust_id, "businessId": (cust or {}).get("businessId"),
+        })
+    referrer_v = await _issue_referral_voucher(r["referrerId"], REFERRAL_REWARD_REFERRER)
+    referee_v = await _issue_referral_voucher(referee_id, REFERRAL_REWARD_REFEREE)
 
     await db.customers.update_one({"id": r["referrerId"]}, {"$inc": {"referrals": 1}})
     await db.loyalty_referrals.update_one({"id": ref_id}, {"$set": {
@@ -581,16 +720,25 @@ async def complete_referral(ref_id: str, body: dict, user: dict = Depends(get_us
 
 @router.get("/leaderboard")
 async def leaderboard(metric: str = "points", limit: int = 20, _: dict = Depends(get_user)):
-    """Top customers by metric ∈ {points, visits, spend, referrals}."""
+    """Top customers by metric ∈ {points, visits, spend, referrals}.
+
+    field_map previously pointed at loyaltyPoints/totalVisits/totalSpend —
+    none of which exist on the Customer model (models/customer.py has
+    points/visits/totalSpent) — so `{field: {"$gt": 0}}` matched zero real
+    customers for 3 of the 4 metrics. The leaderboard has been effectively
+    empty since it was built. Response keys are kept as-is (the frontend
+    already reads totalVisits/totalSpend/loyaltyPoints) — only the Mongo
+    field names driving the query/sort/projection needed fixing.
+    """
     field_map = {
-        "points": "loyaltyPoints", "visits": "totalVisits",
-        "spend": "totalSpend", "referrals": "referrals",
+        "points": "points", "visits": "visits",
+        "spend": "totalSpent", "referrals": "referrals",
     }
-    field = field_map.get(metric, "loyaltyPoints")
+    field = field_map.get(metric, "points")
     rows = await db.customers.find(
         {field: {"$gt": 0}},
         {"_id": 0, "id": 1, "name": 1, "email": 1, "membershipTier": 1,
-          "loyaltyPoints": 1, "totalVisits": 1, "totalSpend": 1, "referrals": 1},
+          "points": 1, "visits": 1, "totalSpent": 1, "referrals": 1},
     ).sort(field, -1).limit(limit).to_list(limit)
     return {
         "metric": metric,
@@ -598,9 +746,9 @@ async def leaderboard(metric: str = "points", limit: int = 20, _: dict = Depends
             {"rank": i + 1, "customerId": r["id"], "name": r.get("name") or r.get("email"),
              "tier": r.get("membershipTier"),
              "value": r.get(field, 0),
-             "loyaltyPoints": r.get("loyaltyPoints", 0),
-             "totalVisits": r.get("totalVisits", 0),
-             "totalSpend": r.get("totalSpend", 0),
+             "loyaltyPoints": r.get("points", 0),
+             "totalVisits": r.get("visits", 0),
+             "totalSpend": r.get("totalSpent", 0),
              "referrals": r.get("referrals", 0)}
             for i, r in enumerate(rows)
         ],

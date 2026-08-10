@@ -11,17 +11,16 @@ Ladder: approval-gated -> eligible (suggested, nothing changes yet) ->
 auto (owner confirmed). A single rejection while still approval-gated
 resets the streak to zero — no partial credit.
 
-Scope note: this is the "climb" half only. It does not yet ship the
-shadow-audit review feed (sampling auto executions + "flag as wrong" +
-instant demotion) that makes it safe to walk away from a promoted tool —
-that's required before any tool should be promoted in a real production
-business, and is intentionally a separate follow-up. Until it ships, an
-owner who promotes a tool is relying on the existing manual permission
-dropdown to notice and revert anything that goes wrong, not an automated
-safety net.
+The "fall" half lives here too: every auto-tier execution already writes
+an audit_service entry (nua_tools.execute_tool -> log_event), so
+list_recent_executions() replays that trail as a review feed instead of
+sampling separately, and demote() gives an owner an instant, one-click
+way to flag one of those entries as wrong — immediate revert to
+approval-gated plus a reset trust window, not just a dent in the streak,
+since the whole point is this ran unsupervised.
 """
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
+from typing import List
 from datetime import datetime, timezone, timedelta
 from database import db
 from services import nua_tools
@@ -242,3 +241,67 @@ async def promote(tool_name: str, actor: str) -> dict:
         {"consecutiveApproved": trust.get("consecutiveApproved", 0)}, actor=actor,
     )
     return {"toolName": tool_name, "permission": "auto", "promotedBy": "trust"}
+
+
+async def demote(tool_name: str, actor: str, reason: str = "") -> dict:
+    """Instant demotion — an owner has flagged an auto-executed action as
+    wrong. Unlike a rejected approval (which only zeroes the streak and
+    leaves permission alone), this immediately revokes 'auto' back to
+    'approval', since a promoted tool doing the wrong thing unsupervised is
+    exactly the failure mode the streak was supposed to have ruled out.
+    Re-earning auto requires a fresh clean streak from zero, same as any
+    other reset."""
+    tool = nua_tools.TOOLS.get(tool_name)
+    settings = await get_settings()
+    cfg = await db.ash_tool_config.find_one({"toolName": tool_name}, {"_id": 0})
+    trust = (cfg or {}).get("trust") or _empty_trust(settings["minStreak"])
+    now = _now()
+    trust["consecutiveApproved"] = 0
+    trust["totalRejected"] = trust.get("totalRejected", 0) + 1
+    trust["streakStartedAt"] = None
+    trust["eligibleSince"] = None
+    trust["lastDemotedAt"] = now
+    await db.ash_tool_config.update_one(
+        {"toolName": tool_name},
+        {"$set": {"toolName": tool_name, "permission": "approval", "promotedBy": None,
+                  "updatedAt": now, "trust": trust}},
+        upsert=True,
+    )
+    await _log_event(
+        tool_name, "demoted", reason or "Flagged as wrong from the auto-execution review feed",
+        {"consecutiveApproved": 0}, actor=actor,
+    )
+    return {"toolName": tool_name, "permission": "approval", "demoted": True,
+            "label": tool.label if tool else tool_name}
+
+
+async def list_recent_executions(limit: int = 50) -> List[dict]:
+    """Shadow-audit review feed. Every auto-tier tool call already writes an
+    audit_service entry (see nua_tools.execute_tool) — this just replays
+    that trail filtered to ash-agent executions, newest first, so an owner
+    can spot-check what ran unsupervised without a separate logging path."""
+    rows = await db.audit_events.find(
+        {"tags": "ash_agent", "action": "executed", "entityType": {"$regex": "^ash_tool:"}},
+        {"_id": 0},
+    ).sort("ts", -1).limit(limit).to_list(limit)
+    out = []
+    for r in rows:
+        tool_name = r.get("entityId")
+        tool = nua_tools.TOOLS.get(tool_name)
+        after = r.get("after") or {}
+        out.append({
+            "auditId": r.get("id"),
+            "toolName": tool_name,
+            "label": tool.label if tool else tool_name,
+            "module": tool.module if tool else None,
+            "risk": tool.risk if tool else None,
+            "rollbackAvailable": bool(tool and tool.rollback),
+            "args": after.get("args"),
+            "outcome": after.get("outcome"),
+            "actor": r.get("actor"),
+            "ts": r.get("ts"),
+            "flagged": bool(r.get("flagged")),
+            "flaggedBy": r.get("flaggedBy"),
+            "flagReason": r.get("flagReason"),
+        })
+    return out

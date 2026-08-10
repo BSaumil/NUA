@@ -84,16 +84,19 @@ function LeaderboardPanel() {
 function ReportsPanel() {
   const [liability, setLiability] = React.useState(null);
   const [flags, setFlags] = React.useState(null);
+  const [locked, setLocked] = React.useState(null);
   const [loading, setLoading] = React.useState(false);
   const load = React.useCallback(async () => {
     setLoading(true);
     try {
-      const [l, f] = await Promise.all([
+      const [l, f, lk] = await Promise.all([
         axios.get(`${API}/loyalty/reports/liability`, { headers: H() }),
         axios.get(`${API}/loyalty/reports/fraud-flags`, { headers: H() }),
+        axios.get(`${API}/loyalty/reports/locked-accounts`, { headers: H() }),
       ]);
       setLiability(l.data);
       setFlags(f.data);
+      setLocked(lk.data);
     } catch { toast.error('Failed to load loyalty reports'); }
     finally { setLoading(false); }
   }, []);
@@ -108,6 +111,17 @@ function ReportsPanel() {
       load();
     } catch (e) { toast.error(e.response?.data?.detail || 'Failed to resolve flag'); }
     finally { setResolving(null); }
+  };
+
+  const [unlocking, setUnlocking] = React.useState(null);
+  const unlockAccount = async (customerId) => {
+    setUnlocking(customerId);
+    try {
+      await axios.post(`${API}/loyalty/customers/${customerId}/unlock`, {}, { headers: H() });
+      toast.success('Loyalty account unlocked');
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to unlock account'); }
+    finally { setUnlocking(null); }
   };
 
   return (
@@ -186,6 +200,26 @@ function ReportsPanel() {
               ) : (
                 <Badge variant="outline" className="text-[10px] flex-shrink-0">{f.type.replace('_', ' ')}</Badge>
               )}
+            </div>
+          ))}
+        </div>
+      </CardContent></Card>
+
+      <Card><CardContent className="p-5">
+        <h3 className="font-semibold flex items-center gap-2 mb-1"><Lock size={16} className="text-red-500" /> Locked Loyalty Accounts</h3>
+        <p className="text-xs text-slate-500 mb-4">Confirming a point-farming flag above locks the account here — no redemption until it's unlocked.</p>
+        {locked?.accounts?.length === 0 && <p className="text-center text-sm text-slate-400 py-6">No locked accounts.</p>}
+        <div className="space-y-2">
+          {(locked?.accounts || []).map(c => (
+            <div key={c.id} className="flex items-center justify-between gap-3 p-3 rounded border border-red-200 bg-red-50" data-testid={`locked-account-${c.id}`}>
+              <div className="min-w-0">
+                <p className="text-sm font-medium truncate">{c.name || c.id}</p>
+                <p className="text-xs text-slate-500">{c.email || '—'} · {(c.points || 0).toLocaleString()} pts</p>
+              </div>
+              <Button size="sm" variant="outline" className="h-7 text-xs flex-shrink-0" disabled={unlocking === c.id}
+                onClick={() => unlockAccount(c.id)} data-testid={`unlock-account-${c.id}`}>
+                {unlocking === c.id ? 'Unlocking...' : 'Unlock'}
+              </Button>
             </div>
           ))}
         </div>

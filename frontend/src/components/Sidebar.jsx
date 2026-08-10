@@ -8,111 +8,144 @@ import {
   ChefHat, BarChart3, Zap, Award, TrendingUp,
   FlaskConical, Sunrise, Brain, Plug, Users2, LogOut, ShieldCheck, Store,
   Mail, ClipboardList, DollarSign, Trophy, Printer, PieChart,
-  ChevronDown, ChevronRight, Timer
+  ChevronDown, ChevronRight, Timer,
+  CalendarCheck, LayoutGrid, SlidersHorizontal, Boxes, Layers, Puzzle,
+  Percent, XCircle, Grid3x3, Scale, Sparkles, Ticket, Megaphone, Receipt,
+  FileBadge, Wallet, PiggyBank, Target, BookMarked, Cpu,
+  CreditCard, KeyRound, Building2, Rocket, Fingerprint
 } from 'lucide-react';
 
 // Progressive disclosure: the everyday screens live in a handful of merged
-// groups; power/config screens live under "Advanced" so the 95%-of-the-time
-// sidebar stays clean. Everything is still reachable — nothing was removed.
+// groups; power/config screens live under three focused groups (rather than
+// one 10-item "Advanced" catch-all) so the 95%-of-the-time sidebar stays
+// clean. Every child carries its own icon now — with 4-7 items per group,
+// text alone made scanning slower than it needed to be. Everything is still
+// reachable — nothing was removed, only regrouped and relabeled for clarity
+// (e.g. two different screens were both called "Command Center").
 const NAV_STRUCTURE = [
   { path: '/today', icon: Sunrise, label: 'Today', access: ['owner', 'manager'] },
+  { path: '/whats-new', icon: Rocket, label: "What's New", access: ['owner', 'manager'] },
   { path: '/pos', icon: ShoppingCart, label: 'POS Terminal', access: ['owner', 'manager', 'cashier'] },
   { path: '/kitchen', icon: ChefHat, label: 'Kitchen', access: ['owner', 'manager', 'kitchen'] },
   { path: '/coursing-analytics', icon: Timer, label: 'Coursing', access: ['owner', 'manager'] },
   {
     icon: Utensils, label: 'Bookings & Floor', access: ['owner', 'manager', 'cashier', 'kitchen'],
     children: [
-      { path: '/reservations', label: 'Bookings' },
-      { path: '/floor-plan', label: 'Floor Plan' },
-      { path: '/waitlist', label: 'Waitlist' },
-      { path: '/pre-shift', label: 'Pre-Shift Briefing' },
-      { path: '/table-layout', label: 'Table Layout' },
-      { path: '/booking-settings', label: 'Booking Rules' },
-      { path: '/booking-analytics', label: 'Booking Analytics' },
+      { path: '/reservations', label: 'Bookings', icon: CalendarCheck },
+      { path: '/floor-plan', label: 'Floor Plan', icon: MapPin },
+      { path: '/waitlist', label: 'Waitlist', icon: Clock },
+      { path: '/pre-shift', label: 'Pre-Shift Briefing', icon: ClipboardList },
+      { path: '/table-layout', label: 'Table Layout', icon: LayoutGrid },
+      { path: '/booking-settings', label: 'Booking Rules', icon: SlidersHorizontal },
+      { path: '/booking-analytics', label: 'Booking Analytics', icon: BarChart3 },
     ],
   },
   {
     icon: Package, label: 'Menu & Items', access: ['owner', 'manager', 'cashier'],
     children: [
-      { path: '/products', label: 'Item Library' },
-      { path: '/categories', label: 'Categories' },
-      { path: '/modifiers', label: 'Modifiers' },
-      { path: '/discounts', label: 'Discounts & Offers' },
-      { path: '/comp-void', label: 'Comp / Void' },
-      { path: '/menu-engineering', label: 'Menu Matrix' },
-      { path: '/what-if', label: 'What-If Simulator' },
+      { path: '/products', label: 'Item Library', icon: Boxes },
+      { path: '/categories', label: 'Categories', icon: Layers },
+      { path: '/modifiers', label: 'Modifiers', icon: Puzzle },
+      { path: '/discounts', label: 'Discounts & Offers', icon: Percent },
+      { path: '/comp-void', label: 'Comp / Void', icon: XCircle },
+      { path: '/menu-engineering', label: 'Menu Matrix', icon: Grid3x3 },
+      { path: '/what-if', label: 'What-If Simulator', icon: FlaskConical },
     ],
   },
   {
     icon: Warehouse, label: 'Inventory', access: ['owner', 'manager'],
     children: [
-      { path: '/inventory', label: 'Stock Levels' },
-      { path: '/measured-stock', label: 'Measured Stock' },
-      { path: '/ai-pantry', label: 'AI Smart Pantry' },
-      { path: '/purchase-orders', label: 'Purchase Orders' },
-      { path: '/forecasting', label: 'Forecasting' },
+      { path: '/inventory', label: 'Stock Levels', icon: Warehouse },
+      { path: '/measured-stock', label: 'Measured Stock', icon: Scale },
+      { path: '/ai-pantry', label: 'AI Smart Pantry', icon: Sparkles },
+      { path: '/purchase-orders', label: 'Purchase Orders', icon: FileText },
+      { path: '/forecasting', label: 'Forecasting', icon: TrendingUp },
     ],
   },
   {
     icon: Users, label: 'Customers', access: ['owner', 'manager', 'cashier'],
     children: [
-      { path: '/customers', label: 'Customer List' },
-      { path: '/vouchers', label: 'Vouchers' },
-      { path: '/loyalty', label: 'Loyalty & Events' },
-      { path: '/loyalty-config', label: 'Loyalty Config' },
-      { path: '/loyalty-progress', label: 'Loyalty Progression' },
-      { path: '/marketing', label: 'Marketing Hub' },
+      { path: '/customers', label: 'Customer List', icon: Users },
+      { path: '/vouchers', label: 'Vouchers', icon: Ticket },
+      { path: '/loyalty', label: 'Loyalty & Events', icon: Award },
+      { path: '/loyalty-config', label: 'Loyalty Config', icon: Settings },
+      { path: '/loyalty-progress', label: 'Loyalty Progression', icon: TrendingUp },
+      { path: '/marketing', label: 'Marketing Hub', icon: Megaphone },
     ],
   },
   {
     icon: Users2, label: 'Team', access: ['owner', 'manager', 'cashier', 'kitchen'],
     children: [
-      { path: '/staff', label: 'Staff' },
-      { path: '/staff-roster', label: 'Roster & Payrun' },
-      { path: '/leaderboard', label: 'Leaderboard' },
-      { path: '/tip-management', label: 'Tip Management' },
+      // GET /staff and GET|POST /tips* are owner/manager-only server-side —
+      // a cashier or kitchen role reaching either of these used to get a
+      // silently-failed toast and a blank page, since the group itself
+      // (and therefore every child in it, pre-fix) was visible to them.
+      { path: '/staff', label: 'Staff', icon: Users2, access: ['owner', 'manager'] },
+      { path: '/staff-roster', label: 'Roster & Payrun', icon: Clock },
+      { path: '/leaderboard', label: 'Leaderboard', icon: Trophy },
+      { path: '/tip-management', label: 'Tip Management', icon: DollarSign, access: ['owner', 'manager'] },
     ],
   },
   {
     icon: Calculator, label: 'Money', access: ['owner'],
     children: [
-      { path: '/finance', label: 'Finance Suite' },
-      { path: '/accounting', label: 'Transactions' },
-      { path: '/bas-gst', label: 'BAS/GST' },
-      { path: '/payroll', label: 'Payroll' },
-      { path: '/super', label: 'Super' },
-      { path: '/end-of-day', label: 'End of Day' },
+      { path: '/finance', label: 'Finance Suite', icon: Calculator },
+      { path: '/accounting', label: 'Transactions', icon: Receipt },
+      { path: '/bas-gst', label: 'BAS/GST', icon: FileBadge },
+      { path: '/payroll', label: 'Payroll', icon: Wallet },
+      { path: '/super', label: 'Super', icon: PiggyBank },
+      { path: '/end-of-day', label: 'End of Day', icon: Printer },
     ],
   },
   {
+    // "Command Center" used to name two unrelated screens (this group's
+    // business-analytics one and the AI group's agent-ops one) — relabeled
+    // to "Margins & Insights" here to match what it actually shows.
     icon: BarChart3, label: 'Insights', access: ['owner', 'manager'],
     children: [
-      { path: '/dashboard', label: 'Dashboard (classic)' },
-      { path: '/command-center', label: 'Command Center' },
-      { path: '/quarterly-review', label: 'Quarterly Review' },
+      { path: '/dashboard', label: 'Classic Dashboard', icon: LayoutDashboard },
+      { path: '/command-center', label: 'Margins & Insights', icon: PieChart },
+      { path: '/quarterly-review', label: 'Quarterly Review', icon: TrendingUp },
     ],
   },
   {
     icon: Brain, label: 'NUA AI', access: ['owner', 'manager'],
     children: [
-      { path: '/ash', label: 'Intelligence' },
-      { path: '/ash-hq', label: 'AI Command Center' },
-      { path: '/ash-plans', label: 'Planner' },
-      { path: '/ash-memory', label: 'Memory' },
-      { path: '/automation', label: 'Automation Engine' },
-      { path: '/automation-triggers', label: 'Automation Brain' },
+      // "Intelligence" renamed to match what the page itself calls itself
+      // (the Autonomous Operating Layer). The old "Automation Engine" entry
+      // (threshold alerts, rebranded "Alert Rules") is gone entirely now —
+      // its rules were write-only, never read by anything that could fire
+      // them. "Automation Brain" is the one real, event-driven rules engine.
+      { path: '/ash', label: 'Autonomy', icon: Sparkles },
+      { path: '/ash-hq', label: 'Agent Command Center', icon: Zap },
+      { path: '/ash-plans', label: 'Planner', icon: Target },
+      { path: '/ash-memory', label: 'Memory', icon: BookMarked },
+      { path: '/automation-triggers', label: 'Automation Brain', icon: Cpu },
     ],
   },
   {
-    icon: Settings, label: 'Advanced', access: ['owner', 'manager'], advanced: true,
+    icon: SlidersHorizontal, label: 'Configuration', access: ['owner', 'manager'], advanced: true,
     children: [
-      { path: '/settings', label: 'Settings' },
-      { path: '/integrations', label: 'Integrations' },
-      { path: '/approvals', label: 'Approvals' },
-      { path: '/audit', label: 'Audit Log' },
-      { path: '/ash-permissions', label: 'AI Permissions' },
-      { path: '/hq', label: 'HQ Roll-up' },
-      { path: '/license', label: 'License' },
+      { path: '/settings', label: 'Settings', icon: Settings },
+      { path: '/integrations', label: 'Integrations', icon: Plug },
+      { path: '/eftpos-terminals', label: 'EFTPOS Terminals', icon: CreditCard },
+    ],
+  },
+  {
+    icon: ShieldCheck, label: 'Governance', access: ['owner', 'manager'],
+    children: [
+      { path: '/approvals', label: 'Approvals', icon: ShieldCheck },
+      { path: '/audit', label: 'Audit Log', icon: FileText },
+      { path: '/ash-permissions', label: 'AI Permissions', icon: KeyRound },
+      { path: '/identity-settings', label: 'Identity & Add-Ons', icon: Fingerprint },
+      { path: '/license', label: 'License', icon: FileBadge },
+    ],
+  },
+  {
+    icon: Store, label: 'Organization', access: ['owner', 'manager'],
+    children: [
+      { path: '/hq', label: 'HQ Roll-up', icon: Store },
+      { path: '/multi-business', label: 'Multi-Business', icon: Building2 },
     ],
   },
 ];
@@ -174,9 +207,16 @@ const Sidebar = () => {
           if (item.children) {
             const isOpen = openGroups[item.label] || isGroupActive(item.children);
             const Icon = item.icon;
+            // Most groups are uniform — every child open to whoever can see
+            // the group. A few (Team: Staff/Tip Management vs Roster/
+            // Leaderboard) mix screens with genuinely different backend
+            // access requirements under one group; `access` on a child
+            // narrows the group's default for that child only, e.g. so
+            // Tip Management doesn't show for a cashier the backend was
+            // always going to 403.
             const filteredChildren = hasCustomPerms && role !== 'owner'
               ? item.children.filter(c => customPerms.includes(c.path.replace('/', '')))
-              : item.children;
+              : item.children.filter(c => role === 'owner' || !c.access || c.access.includes(role));
             if (filteredChildren.length === 0) return null;
             return (
               <div key={item.label} className={item.advanced ? 'pt-2 mt-2 border-t border-gray-100' : ''}>
@@ -190,14 +230,18 @@ const Sidebar = () => {
                 </button>
                 {isOpen && (
                   <div className="ml-7 mt-0.5 space-y-0.5 border-l-2 pl-3" style={{ borderColor: `${theme.primary}30` }}>
-                    {filteredChildren.map(child => (
-                      <NavLink key={child.path} to={child.path}
-                        className={({ isActive }) => `block px-3 py-1.5 rounded text-sm transition-all ${isActive ? 'font-medium text-white' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'}`}
-                        style={({ isActive }) => isActive ? { backgroundColor: theme.primary } : {}}
-                        data-testid={`nav-${child.path.replace('/', '')}`}>
-                        {child.label}
-                      </NavLink>
-                    ))}
+                    {filteredChildren.map(child => {
+                      const ChildIcon = child.icon;
+                      return (
+                        <NavLink key={child.path} to={child.path}
+                          className={({ isActive }) => `flex items-center gap-2 px-3 py-1.5 rounded text-sm transition-all ${isActive ? 'font-medium text-white' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'}`}
+                          style={({ isActive }) => isActive ? { backgroundColor: theme.primary } : {}}
+                          data-testid={`nav-${child.path.replace('/', '')}`}>
+                          {ChildIcon && <ChildIcon size={13} className="flex-shrink-0" />}
+                          <span>{child.label}</span>
+                        </NavLink>
+                      );
+                    })}
                   </div>
                 )}
               </div>

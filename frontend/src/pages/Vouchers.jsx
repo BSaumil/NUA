@@ -62,7 +62,7 @@ export default function Vouchers() {
       if (filter.sourceType) params.source_type = filter.sourceType;
       const r = await finalizeAPI.listVouchers(params);
       setRows(r.data || []);
-    } catch { /* silent */ }
+    } catch { toast.error('Could not load vouchers'); }
   };
   const loadAnalytics = async () => {
     try { const r = await finalizeAPI.promoAnalytics(30); setAnalytics(r.data); } catch { /* silent */ }

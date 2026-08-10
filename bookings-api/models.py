@@ -27,6 +27,35 @@ class Partner(BaseModel):
     created_at: str = ""
 
 
+# ---- Partner application (self-serve request, before any key exists) ----
+# Provisioning a Partner has only ever been possible with the deploy-time
+# platform admin key — there was no way for an outside integrator to even
+# ask for access without already having the one credential that's supposed
+# to be the platform operator's alone. This is the other half: a public,
+# unauthenticated way to apply, and an admin-side queue to approve/reject.
+
+class PartnerApplicationCreate(BaseModel):
+    company_name: str
+    contact_name: str
+    contact_email: str
+    use_case: str = ""
+    website: Optional[str] = None
+
+
+class PartnerApplication(BaseModel):
+    id: str = Field(default_factory=lambda: _uid("APP"))
+    company_name: str
+    contact_name: str
+    contact_email: str
+    use_case: str = ""
+    website: Optional[str] = None
+    status: str = "pending"          # pending | approved | rejected
+    partner_id: Optional[str] = None  # set once approved
+    rejection_reason: Optional[str] = None
+    created_at: str = ""
+    resolved_at: Optional[str] = None
+
+
 # ---- Venue ----
 
 class VenueCreate(BaseModel):

@@ -18,6 +18,7 @@ export default function PaymentSuccess() {
       attempts++;
       try {
         const res = await stripeAPI.checkStatus(sessionId);
+        if (res.data.configured === false) { setStatus('failed'); return; }
         if (res.data.paymentStatus === 'paid') { setStatus('paid'); return; }
         if (res.data.status === 'expired') { setStatus('failed'); return; }
         setTimeout(poll, 2000);

@@ -206,7 +206,22 @@ export default function Integrations() {
                       <p className="text-xs text-gray-500">{integration.category}</p>
                     </div>
                   </div>
-                  <StatusBadge status={integration.status} />
+                  <div className="flex flex-col items-end gap-1">
+                    <StatusBadge status={integration.status} />
+                    {/* Stripe secret keys are self-describing (sk_test_/sk_live_) — surface
+                        which one is live so nobody discovers a venue is still on test-mode
+                        payments (or accidentally live during a demo) by reading env vars. */}
+                    {integration.mode && (
+                      <Badge
+                        className={`text-[10px] ${integration.mode === 'live'
+                          ? 'bg-red-100 text-red-700 border-red-300'
+                          : 'bg-amber-100 text-amber-700 border-amber-300'}`}
+                        data-testid={`${integration.slug}-mode-badge`}
+                      >
+                        {integration.mode === 'live' ? 'Live mode' : 'Test mode'}
+                      </Badge>
+                    )}
+                  </div>
                 </div>
                 <p className="text-sm text-gray-500 mb-2 line-clamp-2">{integration.description}</p>
                 {integration.note && (

@@ -22,7 +22,7 @@ Design
 """
 from __future__ import annotations
 from typing import Any, Dict, List, Optional, Callable, Awaitable
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from database import db
 import uuid
 import logging
@@ -45,6 +45,7 @@ EVENT_CATALOG = {
     "inventory.low_stock":      {"module": "inventory", "label": "Product below threshold",     "fields": ["productId", "productName", "stock", "threshold"]},
     "inventory.stockout":       {"module": "inventory", "label": "Product hit zero",            "fields": ["productId", "productName"]},
     "inventory.received":       {"module": "inventory", "label": "Stock received",              "fields": ["productId", "quantity", "supplierId"]},
+    "inventory.predicted_stockout": {"module": "inventory", "label": "Predicted to run out soon", "fields": ["productId", "productName", "currentStock", "avgDailyUsage", "daysRemaining"]},
     # CRM
     "customer.created":         {"module": "crm",       "label": "Customer created",            "fields": ["id", "name", "email"]},
     "customer.spend_milestone": {"module": "crm",       "label": "Customer spend milestone",    "fields": ["customerId", "totalSpent", "milestone"]},
@@ -67,6 +68,8 @@ EVENT_CATALOG = {
     # Finance
     "finance.ap_due_soon":      {"module": "finance",   "label": "AP bill due soon",            "fields": ["billId", "amount", "supplierName"]},
     "finance.cash_low":         {"module": "finance",   "label": "Cash balance low",            "fields": ["accountCode", "balance"]},
+    # Ops / observability
+    "ops.error_spike":          {"module": "ops",       "label": "Error rate spike",            "fields": ["source", "count", "threshold", "windowMinutes"]},
 }
 
 

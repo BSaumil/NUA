@@ -22,7 +22,14 @@ export const TRANSLATIONS = {
       pointsMissed: 'Sign up to earn {n} points — ask staff to add you!',
       splitPayment: 'Split Payment', paid: 'Paid', waiting: 'Waiting',
     },
-    kiosk: { title: 'Self-Service Kiosk', startOrder: 'Start Order', checkout: 'Checkout', orderSent: 'Order sent to kitchen' },
+    kiosk: {
+      title: 'Self-Service Kiosk', startOrder: 'Start Order', checkout: 'Checkout', orderSent: 'Order sent to kitchen',
+      unavailableTapForAlternatives: 'Unavailable — tap for alternatives',
+      notAvailable: '{name} isn\'t available right now',
+      loadingAlternatives: 'Finding alternatives…',
+      noAlternatives: 'No similar items available right now.',
+      substituteFailed: "Couldn't load alternatives",
+    },
     kitchen: { fire: 'Fire', hold: 'Hold', ready: 'Ready', serve: 'Serve', atPass: 'at pass', cooking: 'cooking', held: 'held', queued: 'queued', served: 'served', course: 'Course', station: 'Station', allStations: 'All stations', allergens: 'ALLERGENS' },
     tableOrder: {
       loadingMenu: 'Loading menu...', tableLabel: 'Table', ordersBtn: 'Orders', backToMenu: 'Back to Menu',
@@ -33,7 +40,7 @@ export const TRANSLATIONS = {
       menuLoadFailed: 'Failed to load menu', orderPlaced: 'Order placed!', orderFailed: 'Failed to place order',
     },
     orderOnline: {
-      brandTitle: 'NUA · Order Online', subtitle: 'Fresh food, real-time ETA', trackOrder: 'Track an order',
+      brandTitle: 'NUA · Order Online', subtitle: 'Fresh food, real-time ETA', trackOrder: 'Track an order', myRewards: 'My Rewards',
       channelPickup: 'Pickup', channelPickupHint: 'Skip the queue', channelDelivery: 'Delivery', channelDeliveryHint: 'To your door',
       channelDineIn: 'Dine-in', channelDineInHint: 'Order ahead', allCategory: 'All', yourCart: 'Your Cart', prepTime: 'prep',
       emptyCartPrompt: 'Add items to start your order', namePlaceholder: 'Your name *', phonePlaceholder: 'Phone',
@@ -55,7 +62,14 @@ export const TRANSLATIONS = {
       pointsMissed: 'Iscriviti per guadagnare {n} punti — chiedi al personale di aggiungerti!',
       splitPayment: 'Pagamento Diviso', paid: 'Pagato', waiting: 'In attesa',
     },
-    kiosk: { title: 'Chiosco Self-Service', startOrder: 'Inizia Ordine', checkout: 'Cassa', orderSent: 'Ordine inviato in cucina' },
+    kiosk: {
+      title: 'Chiosco Self-Service', startOrder: 'Inizia Ordine', checkout: 'Cassa', orderSent: 'Ordine inviato in cucina',
+      unavailableTapForAlternatives: 'Non disponibile — tocca per le alternative',
+      notAvailable: '{name} non è disponibile al momento',
+      loadingAlternatives: 'Ricerca alternative…',
+      noAlternatives: 'Nessun articolo simile disponibile al momento.',
+      substituteFailed: 'Impossibile caricare le alternative',
+    },
     kitchen: { fire: 'Manda', hold: 'Trattieni', ready: 'Pronto', serve: 'Servi', atPass: 'al passe', cooking: 'in cottura', held: 'trattenuto', queued: 'in coda', served: 'servito', course: 'Portata', station: 'Postazione', allStations: 'Tutte le postazioni', allergens: 'ALLERGENI' },
     tableOrder: {
       loadingMenu: 'Caricamento menu...', tableLabel: 'Tavolo', ordersBtn: 'Ordini', backToMenu: 'Torna al Menu',
@@ -66,7 +80,7 @@ export const TRANSLATIONS = {
       menuLoadFailed: 'Impossibile caricare il menu', orderPlaced: 'Ordine inviato!', orderFailed: "Impossibile inviare l'ordine",
     },
     orderOnline: {
-      brandTitle: 'NUA · Ordina Online', subtitle: "Cibo fresco, tempi d'attesa in tempo reale", trackOrder: 'Traccia un ordine',
+      brandTitle: 'NUA · Ordina Online', subtitle: "Cibo fresco, tempi d'attesa in tempo reale", trackOrder: 'Traccia un ordine', myRewards: 'I miei premi',
       channelPickup: 'Ritiro', channelPickupHint: 'Salta la fila', channelDelivery: 'Consegna', channelDeliveryHint: 'A casa tua',
       channelDineIn: 'Al Tavolo', channelDineInHint: 'Ordina in anticipo', allCategory: 'Tutti', yourCart: 'Il Tuo Carrello', prepTime: 'preparazione',
       emptyCartPrompt: 'Aggiungi articoli per iniziare il tuo ordine', namePlaceholder: 'Il tuo nome *', phonePlaceholder: 'Telefono',
@@ -85,7 +99,14 @@ export const TRANSLATIONS = {
       pointsMissed: '注册即可获得 {n} 积分 — 请让服务员为您添加！',
       splitPayment: '分摊付款', paid: '已付款', waiting: '等待中',
     },
-    kiosk: { title: '自助点餐机', startOrder: '开始点餐', checkout: '结账', orderSent: '订单已发送至厨房' },
+    kiosk: {
+      title: '自助点餐机', startOrder: '开始点餐', checkout: '结账', orderSent: '订单已发送至厨房',
+      unavailableTapForAlternatives: '缺货 — 点击查看替代选项',
+      notAvailable: '{name} 暂时缺货',
+      loadingAlternatives: '正在查找替代品…',
+      noAlternatives: '暂无类似商品可供选择。',
+      substituteFailed: '无法加载替代选项',
+    },
     kitchen: { fire: '出单', hold: '暂缓', ready: '备好', serve: '上菜', atPass: '在出菜口', cooking: '烹饪中', held: '暂缓', queued: '排队中', served: '已上菜', course: '道次', station: '工位', allStations: '全部工位', allergens: '过敏原' },
     tableOrder: {
       loadingMenu: '菜单加载中...', tableLabel: '桌号', ordersBtn: '订单', backToMenu: '返回菜单',
@@ -96,7 +117,7 @@ export const TRANSLATIONS = {
       menuLoadFailed: '菜单加载失败', orderPlaced: '下单成功！', orderFailed: '下单失败',
     },
     orderOnline: {
-      brandTitle: 'NUA · 在线点餐', subtitle: '新鲜美食，实时预计时间', trackOrder: '查询订单',
+      brandTitle: 'NUA · 在线点餐', subtitle: '新鲜美食，实时预计时间', trackOrder: '查询订单', myRewards: '我的积分',
       channelPickup: '自取', channelPickupHint: '免排队', channelDelivery: '外送', channelDeliveryHint: '送到家门口',
       channelDineIn: '堂食', channelDineInHint: '提前点餐', allCategory: '全部', yourCart: '您的购物车', prepTime: '制作时间',
       emptyCartPrompt: '添加菜品以开始下单', namePlaceholder: '您的姓名 *', phonePlaceholder: '电话',
@@ -115,7 +136,14 @@ export const TRANSLATIONS = {
       pointsMissed: '{n} पॉइंट्स कमाने के लिए साइन अप करें — स्टाफ़ से जोड़ने को कहें!',
       splitPayment: 'विभाजित भुगतान', paid: 'भुगतान हो गया', waiting: 'प्रतीक्षा में',
     },
-    kiosk: { title: 'सेल्फ़-सर्विस कियोस्क', startOrder: 'ऑर्डर शुरू करें', checkout: 'चेकआउट', orderSent: 'ऑर्डर रसोई में भेज दिया गया' },
+    kiosk: {
+      title: 'सेल्फ़-सर्विस कियोस्क', startOrder: 'ऑर्डर शुरू करें', checkout: 'चेकआउट', orderSent: 'ऑर्डर रसोई में भेज दिया गया',
+      unavailableTapForAlternatives: 'अनुपलब्ध — विकल्पों के लिए टैप करें',
+      notAvailable: '{name} अभी उपलब्ध नहीं है',
+      loadingAlternatives: 'विकल्प खोजे जा रहे हैं…',
+      noAlternatives: 'अभी कोई समान आइटम उपलब्ध नहीं है।',
+      substituteFailed: 'विकल्प लोड नहीं हो सके',
+    },
     kitchen: { fire: 'भेजें', hold: 'रोकें', ready: 'तैयार', serve: 'परोसें', atPass: 'पास पर', cooking: 'पक रहा', held: 'रोका', queued: 'कतार में', served: 'परोसा', course: 'कोर्स', station: 'स्टेशन', allStations: 'सभी स्टेशन', allergens: 'एलर्जन' },
     tableOrder: {
       loadingMenu: 'मेनू लोड हो रहा है...', tableLabel: 'टेबल', ordersBtn: 'ऑर्डर', backToMenu: 'मेनू पर वापस जाएं',
@@ -126,7 +154,7 @@ export const TRANSLATIONS = {
       menuLoadFailed: 'मेनू लोड नहीं हो सका', orderPlaced: 'ऑर्डर हो गया!', orderFailed: 'ऑर्डर देने में विफल',
     },
     orderOnline: {
-      brandTitle: 'NUA · ऑनलाइन ऑर्डर करें', subtitle: 'ताज़ा खाना, रीयल-टाइम समय अनुमान', trackOrder: 'ऑर्डर ट्रैक करें',
+      brandTitle: 'NUA · ऑनलाइन ऑर्डर करें', subtitle: 'ताज़ा खाना, रीयल-टाइम समय अनुमान', trackOrder: 'ऑर्डर ट्रैक करें', myRewards: 'मेरे रिवॉर्ड्स',
       channelPickup: 'पिकअप', channelPickupHint: 'लाइन छोड़ें', channelDelivery: 'डिलीवरी', channelDeliveryHint: 'आपके दरवाज़े तक',
       channelDineIn: 'डाइन-इन', channelDineInHint: 'पहले से ऑर्डर करें', allCategory: 'सभी', yourCart: 'आपकी कार्ट', prepTime: 'तैयारी',
       emptyCartPrompt: 'ऑर्डर शुरू करने के लिए आइटम जोड़ें', namePlaceholder: 'आपका नाम *', phonePlaceholder: 'फ़ोन',
@@ -145,7 +173,14 @@ export const TRANSLATIONS = {
       pointsMissed: 'Regístrate para ganar {n} puntos — ¡pide al personal que te agregue!',
       splitPayment: 'Pago Dividido', paid: 'Pagado', waiting: 'Esperando',
     },
-    kiosk: { title: 'Quiosco de Autoservicio', startOrder: 'Iniciar Pedido', checkout: 'Pagar', orderSent: 'Pedido enviado a la cocina' },
+    kiosk: {
+      title: 'Quiosco de Autoservicio', startOrder: 'Iniciar Pedido', checkout: 'Pagar', orderSent: 'Pedido enviado a la cocina',
+      unavailableTapForAlternatives: 'No disponible — toca para ver alternativas',
+      notAvailable: '{name} no está disponible en este momento',
+      loadingAlternatives: 'Buscando alternativas…',
+      noAlternatives: 'No hay artículos similares disponibles en este momento.',
+      substituteFailed: 'No se pudieron cargar las alternativas',
+    },
     kitchen: { fire: 'Marchar', hold: 'Retener', ready: 'Listo', serve: 'Servir', atPass: 'en el pase', cooking: 'cocinando', held: 'retenido', queued: 'en cola', served: 'servido', course: 'Plato', station: 'Estación', allStations: 'Todas las estaciones', allergens: 'ALÉRGENOS' },
     tableOrder: {
       loadingMenu: 'Cargando menú...', tableLabel: 'Mesa', ordersBtn: 'Pedidos', backToMenu: 'Volver al Menú',
@@ -156,7 +191,7 @@ export const TRANSLATIONS = {
       menuLoadFailed: 'Error al cargar el menú', orderPlaced: '¡Pedido realizado!', orderFailed: 'No se pudo realizar el pedido',
     },
     orderOnline: {
-      brandTitle: 'NUA · Pedir en Línea', subtitle: 'Comida fresca, tiempo de espera en tiempo real', trackOrder: 'Rastrear un pedido',
+      brandTitle: 'NUA · Pedir en Línea', subtitle: 'Comida fresca, tiempo de espera en tiempo real', trackOrder: 'Rastrear un pedido', myRewards: 'Mis recompensas',
       channelPickup: 'Recoger', channelPickupHint: 'Sin hacer fila', channelDelivery: 'Entrega', channelDeliveryHint: 'Hasta tu puerta',
       channelDineIn: 'Comer Aquí', channelDineInHint: 'Pide con anticipación', allCategory: 'Todos', yourCart: 'Tu Carrito', prepTime: 'preparación',
       emptyCartPrompt: 'Agrega artículos para empezar tu pedido', namePlaceholder: 'Tu nombre *', phonePlaceholder: 'Teléfono',
@@ -175,7 +210,14 @@ export const TRANSLATIONS = {
       pointsMissed: 'Đăng ký để nhận {n} điểm — hãy nhờ nhân viên thêm bạn!',
       splitPayment: 'Thanh Toán Chia', paid: 'Đã thanh toán', waiting: 'Đang chờ',
     },
-    kiosk: { title: 'Ki-ốt Tự Phục Vụ', startOrder: 'Bắt Đầu Đặt Hàng', checkout: 'Thanh Toán', orderSent: 'Đơn hàng đã được gửi đến bếp' },
+    kiosk: {
+      title: 'Ki-ốt Tự Phục Vụ', startOrder: 'Bắt Đầu Đặt Hàng', checkout: 'Thanh Toán', orderSent: 'Đơn hàng đã được gửi đến bếp',
+      unavailableTapForAlternatives: 'Hết hàng — chạm để xem lựa chọn thay thế',
+      notAvailable: '{name} hiện không có sẵn',
+      loadingAlternatives: 'Đang tìm lựa chọn thay thế…',
+      noAlternatives: 'Hiện không có món tương tự nào.',
+      substituteFailed: 'Không thể tải các lựa chọn thay thế',
+    },
     kitchen: { fire: 'Ra món', hold: 'Giữ lại', ready: 'Sẵn sàng', serve: 'Phục vụ', atPass: 'tại quầy ra món', cooking: 'đang nấu', held: 'đang giữ', queued: 'chờ', served: 'đã phục vụ', course: 'Món', station: 'Trạm', allStations: 'Tất cả các trạm', allergens: 'CHẤT GÂY DỊ ỨNG' },
     tableOrder: {
       loadingMenu: 'Đang tải thực đơn...', tableLabel: 'Bàn', ordersBtn: 'Đơn hàng', backToMenu: 'Quay Lại Thực Đơn',
@@ -186,7 +228,7 @@ export const TRANSLATIONS = {
       menuLoadFailed: 'Không thể tải thực đơn', orderPlaced: 'Đặt hàng thành công!', orderFailed: 'Đặt hàng không thành công',
     },
     orderOnline: {
-      brandTitle: 'NUA · Đặt Hàng Trực Tuyến', subtitle: 'Đồ ăn tươi ngon, thời gian ước tính theo thời gian thực', trackOrder: 'Theo dõi đơn hàng',
+      brandTitle: 'NUA · Đặt Hàng Trực Tuyến', subtitle: 'Đồ ăn tươi ngon, thời gian ước tính theo thời gian thực', trackOrder: 'Theo dõi đơn hàng', myRewards: 'Ưu đãi của tôi',
       channelPickup: 'Tự đến lấy', channelPickupHint: 'Không cần xếp hàng', channelDelivery: 'Giao hàng', channelDeliveryHint: 'Đến tận cửa nhà bạn',
       channelDineIn: 'Dùng tại chỗ', channelDineInHint: 'Đặt trước', allCategory: 'Tất cả', yourCart: 'Giỏ Hàng Của Bạn', prepTime: 'chuẩn bị',
       emptyCartPrompt: 'Thêm món để bắt đầu đặt hàng', namePlaceholder: 'Tên của bạn *', phonePlaceholder: 'Số điện thoại',
@@ -205,7 +247,14 @@ export const TRANSLATIONS = {
       pointsMissed: 'سجّل لتحصل على {n} نقطة — اطلب من الموظف إضافتك!',
       splitPayment: 'دفع مقسّم', paid: 'تم الدفع', waiting: 'في الانتظار',
     },
-    kiosk: { title: 'كشك الخدمة الذاتية', startOrder: 'ابدأ الطلب', checkout: 'الدفع', orderSent: 'تم إرسال الطلب إلى المطبخ' },
+    kiosk: {
+      title: 'كشك الخدمة الذاتية', startOrder: 'ابدأ الطلب', checkout: 'الدفع', orderSent: 'تم إرسال الطلب إلى المطبخ',
+      unavailableTapForAlternatives: 'غير متوفر — اضغط لعرض البدائل',
+      notAvailable: '{name} غير متوفر حاليًا',
+      loadingAlternatives: 'جارٍ البحث عن بدائل…',
+      noAlternatives: 'لا توجد عناصر مشابهة متاحة حاليًا.',
+      substituteFailed: 'تعذّر تحميل البدائل',
+    },
     kitchen: { fire: 'إرسال', hold: 'تعليق', ready: 'جاهز', serve: 'تقديم', atPass: 'عند التسليم', cooking: 'قيد الطهي', held: 'معلّق', queued: 'في الانتظار', served: 'تم التقديم', course: 'طبق', station: 'محطة', allStations: 'كل المحطات', allergens: 'مسببات الحساسية' },
     tableOrder: {
       loadingMenu: 'جارٍ تحميل القائمة...', tableLabel: 'طاولة', ordersBtn: 'الطلبات', backToMenu: 'العودة إلى القائمة',
@@ -216,7 +265,7 @@ export const TRANSLATIONS = {
       menuLoadFailed: 'فشل تحميل القائمة', orderPlaced: 'تم إرسال الطلب!', orderFailed: 'فشل إرسال الطلب',
     },
     orderOnline: {
-      brandTitle: 'NUA · اطلب أونلاين', subtitle: 'طعام طازج، وقت انتظار فوري', trackOrder: 'تتبع الطلب',
+      brandTitle: 'NUA · اطلب أونلاين', subtitle: 'طعام طازج، وقت انتظار فوري', trackOrder: 'تتبع الطلب', myRewards: 'مكافآتي',
       channelPickup: 'استلام', channelPickupHint: 'تخطَّ الطابور', channelDelivery: 'توصيل', channelDeliveryHint: 'حتى باب منزلك',
       channelDineIn: 'تناول في المطعم', channelDineInHint: 'اطلب مسبقًا', allCategory: 'الكل', yourCart: 'سلتك', prepTime: 'التحضير',
       emptyCartPrompt: 'أضف عناصر لبدء طلبك', namePlaceholder: 'اسمك *', phonePlaceholder: 'رقم الهاتف',
@@ -235,7 +284,14 @@ export const TRANSLATIONS = {
       pointsMissed: 'Cadastre-se para ganhar {n} pontos — peça à equipe para adicionar você!',
       splitPayment: 'Pagamento Dividido', paid: 'Pago', waiting: 'Aguardando',
     },
-    kiosk: { title: 'Quiosque de Autoatendimento', startOrder: 'Iniciar Pedido', checkout: 'Finalizar', orderSent: 'Pedido enviado à cozinha' },
+    kiosk: {
+      title: 'Quiosque de Autoatendimento', startOrder: 'Iniciar Pedido', checkout: 'Finalizar', orderSent: 'Pedido enviado à cozinha',
+      unavailableTapForAlternatives: 'Indisponível — toque para ver alternativas',
+      notAvailable: '{name} não está disponível no momento',
+      loadingAlternatives: 'Buscando alternativas…',
+      noAlternatives: 'Nenhum item semelhante disponível no momento.',
+      substituteFailed: 'Não foi possível carregar as alternativas',
+    },
     kitchen: { fire: 'Enviar', hold: 'Segurar', ready: 'Pronto', serve: 'Servir', atPass: 'no passe', cooking: 'a cozinhar', held: 'retido', queued: 'na fila', served: 'servido', course: 'Prato', station: 'Estação', allStations: 'Todas as estações', allergens: 'ALERGÉNIOS' },
     tableOrder: {
       loadingMenu: 'Carregando cardápio...', tableLabel: 'Mesa', ordersBtn: 'Pedidos', backToMenu: 'Voltar ao Cardápio',
@@ -246,7 +302,7 @@ export const TRANSLATIONS = {
       menuLoadFailed: 'Falha ao carregar o cardápio', orderPlaced: 'Pedido enviado!', orderFailed: 'Falha ao enviar o pedido',
     },
     orderOnline: {
-      brandTitle: 'NUA · Peça Online', subtitle: 'Comida fresca, tempo estimado em tempo real', trackOrder: 'Rastrear um pedido',
+      brandTitle: 'NUA · Peça Online', subtitle: 'Comida fresca, tempo estimado em tempo real', trackOrder: 'Rastrear um pedido', myRewards: 'Minhas recompensas',
       channelPickup: 'Retirada', channelPickupHint: 'Sem filas', channelDelivery: 'Entrega', channelDeliveryHint: 'Até a sua porta',
       channelDineIn: 'Comer no Local', channelDineInHint: 'Peça com antecedência', allCategory: 'Todos', yourCart: 'Seu Carrinho', prepTime: 'preparo',
       emptyCartPrompt: 'Adicione itens para começar seu pedido', namePlaceholder: 'Seu nome *', phonePlaceholder: 'Telefone',

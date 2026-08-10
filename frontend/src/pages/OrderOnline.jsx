@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ShoppingBag, MapPin, Store, Bike, Plus, Minus, Clock, ArrowRight, Trash2 } from 'lucide-react';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -16,6 +16,11 @@ function productName(p, lang) { return p?.translations?.[lang]?.name || p.name; 
 
 export default function OrderOnline() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // ?business=<slug-or-id> — a deployment with multiple businesses hands
+  // each one its own online-ordering link. Absent on a single-business
+  // deployment, where it's a no-op (backend treats it the same as unset).
+  const businessParam = searchParams.get('business') || undefined;
   const { toast } = useToast();
   const { lang, setLang, t, dir, languages } = useLanguage('nua_online_lang');
   const CHANNELS = [
@@ -38,12 +43,38 @@ export default function OrderOnline() {
   const [voucherApplied, setVoucherApplied] = useState(null); // { code, discount, label }
   const [voucherChecking, setVoucherChecking] = useState(false);
   const [voucherError, setVoucherError] = useState('');
+  // null = no ?business= param (normal, unscoped menu) or still checking;
+  // true/false once a param is present and its resolution is known. Without
+  // this, a stale or mistyped ?business= slug silently fell back to showing
+  // every business's menu combined instead of telling the guest their link
+  // is broken.
+  const [businessFound, setBusinessFound] = useState(null);
+  const [menuLoading, setMenuLoading] = useState(true);
+  const [menuError, setMenuError] = useState(false);
 
   useEffect(() => {
-    Promise.all([onlineAPI.publicProducts(), onlineAPI.publicCategories()])
+    if (!businessParam) { setBusinessFound(null); return; }
+    onlineAPI.businessInfo(businessParam)
+      .then(r => setBusinessFound(!!r.data?.found))
+      .catch(() => setBusinessFound(null));
+  }, [businessParam]);
+
+  const loadMenu = React.useCallback(() => {
+    setMenuLoading(true);
+    setMenuError(false);
+    Promise.all([onlineAPI.publicProducts(businessParam), onlineAPI.publicCategories(businessParam)])
       .then(([p, c]) => { setProducts(p.data || []); setCategories(c.data || []); })
-      .catch(() => {});
-  }, []);
+      // A guest hitting a slow/broken backend used to just see an empty
+      // product grid with zero explanation — no loading state, no error,
+      // no way to tell "nothing on the menu" from "couldn't load the menu."
+      .catch(() => setMenuError(true))
+      .finally(() => setMenuLoading(false));
+  }, [businessParam]);
+
+  useEffect(() => {
+    if (businessParam && businessFound === false) return;
+    loadMenu();
+  }, [businessParam, businessFound, loadMenu]);
 
   // Filter categories by selected channel
   const cats = useMemo(() => categories.filter(c => true), [categories]);
@@ -117,13 +148,37 @@ export default function OrderOnline() {
         customerName: name, customerPhone: phone, customerEmail: email,
         address: channel === 'delivery' ? address : '', notes,
         voucherCode: voucherApplied?.code || undefined,
+        business: businessParam,
       });
       toast({ title: t('orderOnline.toastOrderPlaced'), description: t('orderOnline.toastTrackingCode', { code: r.data.id }) });
+      // If Stripe is configured, send the guest to pay now instead of the
+      // old "pay at pickup" default — falls back to the tracking page (same
+      // as before this existed) if payments aren't set up for this venue.
+      try {
+        const pay = await onlineAPI.checkout(r.data.id, window.location.origin);
+        if (pay.data?.configured && pay.data?.url) { window.location.href = pay.data.url; return; }
+      } catch { /* fall through to tracking page */ }
       navigate(`/track/${r.data.id}`);
     } catch (e) {
       toast({ title: t('orderOnline.toastFailed'), description: e?.response?.data?.detail, variant: 'destructive' });
     } finally { setPlacing(false); }
   };
+
+  if (businessParam && businessFound === false) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6" data-testid="order-online-not-found">
+        <Card className="max-w-md w-full">
+          <CardContent className="p-8 text-center space-y-2">
+            <Store className="mx-auto text-gray-300" size={40} />
+            <h1 className="text-xl font-bold">Ordering link not found</h1>
+            <p className="text-sm text-gray-500">
+              This link doesn't match a business we know about. Double-check the link, or ask the venue for their current online-ordering link.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50" dir={dir} data-testid="order-online-page">
@@ -135,6 +190,7 @@ export default function OrderOnline() {
           </div>
           <div className="flex items-center gap-3">
             <LanguageSelector lang={lang} setLang={setLang} languages={languages} variant="light" label={t('common.language')} />
+            <Button variant="ghost" onClick={() => navigate('/rewards')} className="text-sm">{t('orderOnline.myRewards')}</Button>
             <Button variant="ghost" onClick={() => navigate('/track')} className="text-sm">{t('orderOnline.trackOrder')}</Button>
           </div>
         </header>
@@ -175,8 +231,20 @@ export default function OrderOnline() {
                 </button>
               ))}
             </div>
+            {menuError && (
+              <div className="text-center py-10 border border-dashed rounded-lg" data-testid="online-menu-error">
+                <p className="text-sm text-gray-500 mb-2">Couldn't load the menu — please check your connection.</p>
+                <Button size="sm" variant="outline" onClick={loadMenu} data-testid="online-menu-retry">Try again</Button>
+              </div>
+            )}
+            {menuLoading && !menuError && (
+              <div className="text-center py-10 text-sm text-gray-400" data-testid="online-menu-loading">Loading menu…</div>
+            )}
+            {!menuLoading && !menuError && filteredProducts.length === 0 && (
+              <div className="text-center py-10 text-sm text-gray-400" data-testid="online-menu-empty">Nothing available in this category right now.</div>
+            )}
             <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(170px,1fr))]">
-              {filteredProducts.map(p => (
+              {!menuLoading && !menuError && filteredProducts.map(p => (
                 <Card key={p.id} className="overflow-hidden cursor-pointer hover:shadow-md transition" onClick={() => addItem(p)} data-testid={`online-product-${p.id}`}>
                   <img src={p.image || 'https://placehold.co/300x180/e5e7eb/9ca3af?text=NUA'} alt={productName(p, lang)} className="w-full h-28 object-cover" />
                   <CardContent className="p-2.5">

@@ -47,7 +47,7 @@ def test_retention_status_lists_only_ephemeral_collections(client, owner_headers
     r = req(client, "GET", "/api/ops/retention", headers=owner_headers)
     assert r.status_code == 200
     collections = {row["collection"] for row in r.json()["policy"]}
-    assert collections == {"kiosk_sessions", "notifications", "login_attempts"}
+    assert collections == {"kiosk_sessions", "notifications", "login_attempts", "loyalty_guest_otp"}
     assert "transactions" not in collections
     assert "audit_log" not in collections
     assert "bas_reports" not in collections

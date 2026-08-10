@@ -7,11 +7,12 @@ from models.location import Location, LocationCreate
 from models.user import User, UserCreate
 from models.table import Table, TableCreate
 from models.eftpos import EFTPOSConfig, EFTPOSConfigCreate, EFTPOSTransaction, EFTPOSTransactionRequest
-from models.integration import Integration, IntegrationCreate, IntegrationUpdate, SyncRequest
-from models.employee import EmployeeSchedule, EmployeeScheduleCreate, TimeOffRequest, AgeVerification
-from models.staff import StaffCommission, StaffShift
+from models.staff import StaffShift
 from utils.mongo_safe import safe_find_list
+from middleware.actor_context import tenant_scope_filter
+from utils.dates import date_range_filter
 import logging
+import uuid
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -216,6 +217,17 @@ async def delete_eftpos_terminal(terminal_id: str, _: dict = Depends(require_own
         raise HTTPException(status_code=404, detail="Terminal not found")
     return {"message": "Terminal deleted successfully"}
 
+async def _log_eftpos_test(terminal_id: str, success: bool, message: str) -> None:
+    """A failed test just flipped `status` with no record of when or how
+    many times — Test Connection had no history, only a current snapshot.
+    """
+    await db.eftpos_test_log.insert_one({
+        "id": str(uuid.uuid4()), "terminalId": terminal_id,
+        "success": success, "message": message,
+        "testedAt": datetime.utcnow(),
+    })
+
+
 @router.post("/eftpos/terminals/{terminal_id}/test")
 async def test_eftpos_connection(terminal_id: str, _: dict = Depends(require_owner_or_manager)):
     terminal = await db.eftpos_terminals.find_one({"id": terminal_id})
@@ -228,12 +240,22 @@ async def test_eftpos_connection(terminal_id: str, _: dict = Depends(require_own
         if connected:
             await provider.disconnect()
             await db.eftpos_terminals.update_one({"id": terminal_id}, {"$set": {"status": "active", "lastPing": datetime.utcnow()}})
+            await _log_eftpos_test(terminal_id, True, "Connection successful")
             return {"success": True, "message": "Connection successful"}
         else:
             await db.eftpos_terminals.update_one({"id": terminal_id}, {"$set": {"status": "error"}})
+            await _log_eftpos_test(terminal_id, False, "Connection failed")
             return {"success": False, "message": "Connection failed"}
     except Exception as e:
+        await _log_eftpos_test(terminal_id, False, str(e)[:200])
         return {"success": False, "message": str(e)}
+
+
+@router.get("/eftpos/terminals/{terminal_id}/test-history")
+async def get_eftpos_test_history(terminal_id: str, limit: int = 50, _: dict = Depends(require_owner_or_manager)):
+    rows = await db.eftpos_test_log.find({"terminalId": terminal_id}, {"_id": 0}) \
+        .sort("testedAt", -1).limit(limit).to_list(limit)
+    return rows
 
 @router.post("/eftpos/transaction", response_model=EFTPOSTransaction)
 async def process_eftpos_transaction(request: EFTPOSTransactionRequest, _: dict = Depends(get_user)):
@@ -271,12 +293,15 @@ async def process_eftpos_transaction(request: EFTPOSTransactionRequest, _: dict 
 @router.get("/eftpos/transactions", response_model=List[EFTPOSTransaction])
 async def get_eftpos_transactions(start_date: Optional[str] = None, end_date: Optional[str] = None,
                                   terminal_id: Optional[str] = None,
-                                  _: dict = Depends(require_owner_or_manager)):
+                                  user: dict = Depends(require_owner_or_manager)):
     query = {}
     if terminal_id:
         query["terminalId"] = terminal_id
     if start_date and end_date:
-        query["timestamp"] = {"$gte": datetime.fromisoformat(start_date), "$lte": datetime.fromisoformat(end_date)}
+        query.update(date_range_filter("timestamp", start_date, end_date))
+    # EFTPOS terminal transactions had no tenant filter — comparable financial
+    # data to transactions.py, which already scopes correctly.
+    query.update(tenant_scope_filter(user.get("businessId")))
     transactions = await db.eftpos_transactions.find(query).sort("timestamp", -1).to_list(1000)
     return [EFTPOSTransaction(**t) for t in transactions]
 

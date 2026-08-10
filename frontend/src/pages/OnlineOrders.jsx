@@ -124,6 +124,22 @@ export default function OnlineOrders() {
                     </div>
                     <p className="text-sm font-medium truncate">{(o.customer || {}).name}</p>
                     <p className="text-xs text-gray-500 capitalize">{o.channel} · {o.items.length} items</p>
+                    <div className="flex gap-1 flex-wrap">
+                      {o.paymentStatus === 'paid' && (
+                        <Badge className="bg-emerald-100 text-emerald-700 border-0 text-[9px]" data-testid={`order-paid-badge-${o.id}`}>Paid</Badge>
+                      )}
+                      {o.paymentStatus === 'refunded' && (
+                        <Badge variant="outline" className="text-gray-500 text-[9px]" data-testid={`order-refunded-badge-${o.id}`}>Refunded</Badge>
+                      )}
+                      {o.paymentStatus === 'refund_failed' && (
+                        <Badge className="bg-red-100 text-red-700 border-0 text-[9px]" data-testid={`order-refund-failed-badge-${o.id}`}>Refund failed</Badge>
+                      )}
+                      {o.voucherDiscount > 0 && (
+                        <Badge variant="outline" className="text-emerald-700 border-emerald-300 text-[9px]" data-testid={`order-voucher-badge-${o.id}`}>
+                          Voucher −${o.voucherDiscount.toFixed(2)}
+                        </Badge>
+                      )}
+                    </div>
                     {o.eta && (
                       <div className="flex items-center gap-1 text-[11px] text-gray-600 mt-1">
                         <Clock size={11} /> {o.eta.etaMinutes} min
@@ -150,7 +166,21 @@ export default function OnlineOrders() {
                   <p className="font-mono font-bold text-lg" style={{ color: colorFor(opened.status) }}>{opened.id}</p>
                   <p className="text-xs text-gray-500 uppercase tracking-wider">{opened.channel} · {opened.status}</p>
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => setOpened(null)}><X size={16} /></Button>
+                <div className="flex items-center gap-2">
+                  {opened.paymentStatus === 'paid' && (
+                    <Badge className="bg-emerald-100 text-emerald-700 border-0" data-testid="order-paid-badge">Paid online</Badge>
+                  )}
+                  {opened.paymentStatus === 'refunded' && (
+                    <Badge variant="outline" className="text-gray-500" data-testid="order-refunded-badge">Refunded</Badge>
+                  )}
+                  {opened.paymentStatus === 'refund_failed' && (
+                    <Badge className="bg-red-100 text-red-700 border-0" data-testid="order-refund-failed-badge">Refund failed — refund manually</Badge>
+                  )}
+                  {(!opened.paymentStatus || opened.paymentStatus === 'unpaid') && (
+                    <Badge variant="outline" className="text-gray-500" data-testid="order-unpaid-badge">Unpaid</Badge>
+                  )}
+                  <Button variant="ghost" size="sm" onClick={() => setOpened(null)}><X size={16} /></Button>
+                </div>
               </div>
 
               <Card><CardContent className="p-3 space-y-1.5">
@@ -186,7 +216,27 @@ export default function OnlineOrders() {
                     <span className="font-mono">${(it.price * it.quantity).toFixed(2)}</span>
                   </div>
                 ))}
+                {opened.voucherDiscount > 0 && (
+                  <div className="pt-2 space-y-0.5" data-testid="order-voucher-line">
+                    <div className="flex justify-between text-sm text-gray-500">
+                      <span>Subtotal</span><span>${opened.subtotal.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm text-emerald-700">
+                      <span>Voucher {opened.voucherCode ? `(${opened.voucherCode})` : ''} {opened.voucherLabel ? `— ${opened.voucherLabel}` : ''}</span>
+                      <span>−${opened.voucherDiscount.toFixed(2)}</span>
+                    </div>
+                  </div>
+                )}
                 <div className="flex justify-between text-sm pt-2 font-bold"><span>Total</span><span>${opened.total.toFixed(2)}</span></div>
+                {opened.paymentStatus === 'paid' ? (
+                  <p className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1 mt-1">
+                    Already paid online — nothing to collect at pickup/delivery.
+                  </p>
+                ) : opened.voucherDiscount > 0 && (
+                  <p className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1">
+                    Voucher already deducted above — charge exactly ${opened.total.toFixed(2)} when you process payment for this order.
+                  </p>
+                )}
               </div>
 
               {STAGE_NEXT[opened.status] && (

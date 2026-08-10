@@ -68,8 +68,12 @@ export default function Categories() {
 
   useEffect(() => { fetchData(); }, []);
   const fetchData = async () => {
-    try { const r = await itemsSystemAPI.getCategories(); setCategories(r.data); } catch {}
-    try { const r = await productsAPI.getAll(); setProducts(r.data || []); } catch {}
+    const [catsRes, prodsRes] = await Promise.allSettled([
+      itemsSystemAPI.getCategories(),
+      productsAPI.getAll(),
+    ]);
+    if (catsRes.status === 'fulfilled') setCategories(catsRes.value.data);
+    if (prodsRes.status === 'fulfilled') setProducts(prodsRes.value.data || []);
   };
 
   const countByCategory = useMemo(() => {

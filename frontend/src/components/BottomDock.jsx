@@ -114,7 +114,7 @@ const ALL_FEATURES = [
     { path: '/integrations', label: 'Integrations', icon: Plug, access: ['owner'] },
   ]},
   { group: 'System', items: [
-    { path: '/automation', label: 'Automation', icon: Zap, access: ['owner', 'manager'] },
+    { path: '/automation-triggers', label: 'Automation', icon: Zap, access: ['owner', 'manager'] },
     { path: '/settings', label: 'Settings', icon: Settings, access: ['owner', 'manager'] },
   ]},
   { group: 'Enterprise (v25)', items: [
@@ -148,7 +148,7 @@ const ALL_FEATURES = [
     { path: '/events', label: 'Events & Experiences', icon: Trophy, access: ['owner', 'manager'] },
     { path: '/staff-availability', label: 'Staff Availability', icon: Users, access: ['owner', 'manager'] },
     { path: '/gift-cards', label: 'Sell Gift Card', icon: Tag, access: ['owner', 'manager', 'cashier'] },
-    { path: '/marketing-emails', label: 'AI Marketing Emails', icon: Sparkles, access: ['owner', 'manager'] },
+    { path: '/marketing?tab=email', label: 'AI Marketing Emails', icon: Sparkles, access: ['owner', 'manager'] },
     { path: '/online-orders', label: 'Online Orders', icon: ShoppingBag, access: ['owner', 'manager', 'cashier', 'kitchen'] },
     { path: '/inventory-accounting', label: 'Inventory & BAS', icon: Receipt, access: ['owner', 'manager'] },
   ]},
@@ -223,10 +223,11 @@ export default function BottomDock() {
       >
         <div className="max-w-screen-2xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-1 text-sm">
-            {/* In-product chrome — product variant only, never the gradient
-                marketing lockup (BRAND-SPEC §3). */}
-            <span className="px-2" style={{ color: theme.primary }}>
-              <Logo variant="product" size={22} />
+            {/* In-product chrome — product variant only, never the marketing
+                lockup (BRAND-SPEC §3). Wordmark colour follows the dock's own
+                background, not the theme accent (BRAND-SPEC §2). */}
+            <span className="px-2">
+              <Logo variant="product" background={darkMode ? 'dark' : 'light'} size={22} />
             </span>
             <span className={`text-[10px] mr-2 hidden sm:inline ${darkMode ? 'text-zinc-500' : 'text-gray-400'}`}>{user.name} · {role}</span>
           </div>

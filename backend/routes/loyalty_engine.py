@@ -14,6 +14,9 @@ from datetime import datetime, timezone, timedelta
 import uuid
 import os
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -69,6 +72,16 @@ async def update_loyalty_config(data: dict, _: dict = Depends(require_owner)):
 # =============================================================================
 # EARN POINTS (called after a successful transaction)
 # =============================================================================
+# Neither /loyalty/earn nor /loyalty/redeem below is currently called by
+# anything — routes/transactions.py earns/redeems points inline as part of
+# checkout (its own _redeem helper + earn calc, not this module) instead of
+# calling out to these. That inlining is what actually runs today; these
+# stay as the auth-protected place to wire any future NON-checkout
+# redemption flow (e.g. a customer scanning a QR code to redeem points
+# without a cashier present — see routes/loyalty.py's comment on why that
+# must go through an auth-protected handler, not a bare unauthenticated
+# one). Not dead code to delete on sight; genuinely unused today, kept on
+# purpose.
 @router.post("/loyalty/earn")
 async def earn_points(data: dict, _: dict = Depends(get_user)):
     customer_id = data.get("customerId")
@@ -210,6 +223,19 @@ async def get_liability_report(_: dict = Depends(require_owner_or_manager)):
     }
 
 
+@router.get("/loyalty/reports/locked-accounts")
+async def get_locked_accounts(_: dict = Depends(require_owner_or_manager)):
+    """Confirming a point-farming flag locks the account, but nothing ever
+    listed who's currently locked — the only way to find out was to already
+    know the customerId and check their profile. This is the other half of
+    that action: see who's locked, so the unlock endpoint has somewhere to
+    be driven from."""
+    customers = await db.customers.find(
+        {"loyaltyLocked": True}, {"_id": 0, "id": 1, "name": 1, "email": 1, "points": 1}
+    ).to_list(500)
+    return {"accounts": customers, "count": len(customers)}
+
+
 async def _compute_fraud_signals() -> list:
     """Two concrete, computable signals from data that already exists —
     not a general fraud model, just the two patterns explicitly called out
@@ -344,8 +370,9 @@ async def resolve_fraud_flag(flag_id: str, data: dict, user: dict = Depends(requ
         from services.audit_service import log_event
         await log_event(entity_type="loyalty_fraud_flag", entity_id=flag_id, action=new_status,
                          memo=f"{flag['type']} flag resolved: {new_status}" + (f" — {action_taken}" if action_taken else ""))
-    except Exception:
-        pass
+    except Exception as e:
+        from utils.errors import log_and_continue
+        log_and_continue(logger, f"Fraud flag audit log write failed for {flag_id}", e)
     return {"ok": True, "status": new_status, "actionTaken": action_taken}
 
 
@@ -364,16 +391,23 @@ async def unlock_loyalty_account(customer_id: str, user: dict = Depends(require_
 # AUTONOMOUS AI AGENT (Ash) — observes, decides, acts
 # =============================================================================
 async def _segment_customers():
-    """Auto-segment customers: VIP / regular / at-risk / first-timer."""
+    """Auto-segment customers: VIP / regular / at-risk / first-timer.
+
+    Was reading totalVisits/totalSpend/lastVisit — none of which exist on
+    the Customer model (models/customer.py has visits/totalSpent/
+    lastVisitDate). Every customer silently read as 0/0/"" and fell
+    through to "first_timer" for anyone with visits<=1 (which is all of
+    them, since totalVisits was always 0) — this has been mis-segmenting
+    every customer since the field was added.
+    """
     customers = await db.customers.find({}, {"_id": 0}).to_list(5000)
     now = datetime.now(timezone.utc)
-    sixty_days_ago = (now - timedelta(days=60)).isoformat()
-    thirty_days_ago = (now - timedelta(days=30)).isoformat()
+    sixty_days_ago = (now - timedelta(days=60)).date().isoformat()
     segments = {"vip": [], "regular": [], "at_risk": [], "first_timer": []}
     for c in customers:
-        visits = int(c.get("totalVisits", 0) or 0)
-        spend = float(c.get("totalSpend", 0) or 0)
-        last_visit = c.get("lastVisit", "")
+        visits = int(c.get("visits", 0) or 0)
+        spend = float(c.get("totalSpent", 0) or 0)
+        last_visit = c.get("lastVisitDate", "")
         if spend > 500 and visits > 10:
             segments["vip"].append(c["id"])
         elif visits <= 1:
@@ -602,7 +636,7 @@ async def agent_tick(request: Request, user: dict = Depends(require_owner_or_man
     except Exception:
         pass
     # 5. Tonight-only blast suggestion if low booking count
-    today_iso = today.date().isoformat()
+    today_iso = datetime.now(timezone.utc).date().isoformat()
     bookings_today = await db.reservations.count_documents({"date": today_iso})
     if bookings_today < 5:
         decisions.append(await _record_decision("blast_suggested",

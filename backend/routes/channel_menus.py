@@ -18,8 +18,6 @@ from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel
 from database import db
 from deps import require_owner_or_manager
-import os
-import json
 import uuid
 
 router = APIRouter()
@@ -243,10 +241,15 @@ async def ai_discount_slow_movers(channel: str, body: dict, _: dict = Depends(re
     weakest = weakest[:bottom_n]
 
     now_iso = datetime.now(timezone.utc).isoformat()
+    # all_products (fetched above) already has price + name for every
+    # product — this loop used to re-fetch each one individually with its
+    # own find_one(), which was both an N+1 and, for every unsold row, a
+    # literally redundant re-fetch of data already in hand.
+    product_by_id = {p["id"]: p for p in all_products}
     applied = []
     for row in weakest:
         pid = row["_id"]
-        prod = await db.products.find_one({"id": pid}, {"_id": 0, "price": 1, "name": 1})
+        prod = product_by_id.get(pid)
         if not prod:
             continue
         base = float(prod.get("price") or 0)

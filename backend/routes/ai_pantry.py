@@ -1,5 +1,5 @@
-from fastapi import APIRouter, HTTPException, Request, Depends
-from deps import get_user, require_owner, require_owner_or_manager
+from fastapi import APIRouter, HTTPException, Depends
+from deps import get_user, require_owner_or_manager
 from database import db
 import os
 import uuid

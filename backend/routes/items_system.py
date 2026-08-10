@@ -2,14 +2,18 @@ from fastapi import APIRouter, HTTPException, Depends
 from database import db
 from datetime import datetime, timezone
 import uuid
-from deps import require_owner, require_owner_or_manager, require_permission
+import logging
+from deps import require_owner, require_owner_or_manager, require_permission, optional_user
+from middleware.actor_context import tenant_scope_filter
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 # ============ CATEGORIES ============
 @router.get("/categories")
-async def get_categories():
-    cats = await db.categories.find({}, {"_id": 0}).to_list(200)
+async def get_categories(user=Depends(optional_user)):
+    cats = await db.categories.find(tenant_scope_filter(user.get("businessId") if user else None), {"_id": 0}).to_list(200)
     if not cats:
         defaults = [
             {"id": "cat-beverages", "name": "Beverages", "sortOrder": 0, "active": True, "icon": "Coffee", "color": "#8b5cf6"},
@@ -24,9 +28,10 @@ async def get_categories():
     return cats
 
 @router.post("/categories")
-async def create_category(data: dict, _: dict = Depends(require_owner_or_manager)):
+async def create_category(data: dict, user: dict = Depends(require_owner_or_manager)):
     cat = {
         "id": f"cat-{str(uuid.uuid4())[:8]}",
+        "businessId": user.get("businessId"),
         "name": data.get("name", ""), "sortOrder": data.get("sortOrder", 99),
         "active": data.get("active", True),
         "icon": data.get("icon", "Tag"),          # lucide-react icon name
@@ -136,11 +141,19 @@ async def cleanup_legacy_categories(_: dict = Depends(require_owner)):
     Cakes & Slices/Pasta). Safe — products are unaffected."""
     canonical = {c["name"] for c in SEED_CATEGORIES}
     all_cats = await db.categories.find({}, {"_id": 0}).to_list(200)
+    candidates = [cat for cat in all_cats if cat["name"] not in canonical]
+    # One aggregation for all candidate categories' product counts, instead
+    # of one count_documents() per category.
+    counts_by_category = {}
+    if candidates:
+        agg = await db.products.aggregate([
+            {"$match": {"category": {"$in": [c["name"] for c in candidates]}}},
+            {"$group": {"_id": "$category", "count": {"$sum": 1}}},
+        ]).to_list(len(candidates))
+        counts_by_category = {row["_id"]: row["count"] for row in agg}
     removed, kept = [], []
-    for cat in all_cats:
-        if cat["name"] in canonical:
-            continue
-        product_count = await db.products.count_documents({"category": cat["name"]})
+    for cat in candidates:
+        product_count = counts_by_category.get(cat["name"], 0)
         if product_count == 0:
             await db.categories.delete_one({"id": cat["id"]})
             removed.append(cat["name"])
@@ -452,6 +465,22 @@ async def create_comp_void(data: dict, user: dict = Depends(require_permission("
     }
     await db.comp_voids.insert_one(record)
     record.pop("_id", None)
+
+    # Comp/void records lived only in their own narrow list (the old
+    # standalone Audit Log page, since retired in favor of the universal
+    # one) — nothing wrote them into the real audit trail, so restoring a
+    # transaction's history never showed the comp/void issued against it.
+    try:
+        from services.audit_service import log_event
+        await log_event(
+            entity_type="comp_void", entity_id=record["id"], action="created",
+            after=record, severity="notice",
+            memo=f"{record['type'].upper()} — {record['reason'] or 'no reason given'} (${record['amount']})",
+        )
+    except Exception as e:
+        from utils.errors import log_and_continue
+        log_and_continue(logger, f"Comp/void audit log write failed for {record['id']}", e)
+
     return record
 
 @router.get("/comp-void")

@@ -6,7 +6,7 @@ vouchers, and auto-issued occasion offers (birthday month, etc.).
 Occasion offers are issued lazily whenever a wallet is read (and in bulk
 by the loyalty agent tick), deduped per customer per occasion per year.
 """
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Optional
 import calendar
 import uuid
@@ -121,10 +121,41 @@ async def get_wallet(customer_id: str) -> Optional[dict]:
     }
 
 
-async def redeem_wallet_voucher(voucher_id: str, txn_id: str) -> bool:
-    """Mark a wallet voucher used (atomically) when a sale consumes it."""
+async def redeem_wallet_voucher(voucher_id: str, txn_id: str, requested_amount: float = 0.0) -> float:
+    """Atomically validate and consume a wallet voucher used as a POS
+    discount. Returns the amount actually applied, capped to what the
+    voucher is really worth — the caller's requested_amount is a display
+    hint, never authoritative, since it ultimately comes from the client.
+
+    Sets status to "redeemed"/"partial" (not the old "used") because that's
+    the only vocabulary the rest of the voucher lifecycle — in particular
+    commerce_v29.py's _validate_voucher_rules, which gates re-redemption —
+    actually checks. A voucher left in status "used" was invisible to that
+    check and could be redeemed a second time through /vouchers/redeem.
+    """
+    v = await db.vouchers.find_one({"id": voucher_id}, {"_id": 0})
+    if not v or v.get("status") not in ("active", "partial"):
+        return 0.0
+
+    if v.get("valueType") == "percentage":
+        applied = max(0.0, float(requested_amount))
+    else:
+        cap = float(v.get("residualValue")) if v.get("partialRedeemable") else float(v.get("value", 0) or 0)
+        applied = max(0.0, min(float(requested_amount), max(cap, 0.0)))
+    if applied <= 0:
+        return 0.0
+
+    update = {"usedAt": datetime.now(timezone.utc).isoformat(), "transactionId": txn_id}
+    if v.get("partialRedeemable"):
+        prev_residual = float(v.get("residualValue") if v.get("residualValue") is not None else v.get("value", 0))
+        new_residual = round(max(0.0, prev_residual - applied), 2)
+        update["residualValue"] = new_residual
+        update["status"] = "partial" if new_residual > 0 else "redeemed"
+    else:
+        update["status"] = "redeemed"
+
     res = await db.vouchers.find_one_and_update(
-        {"id": voucher_id, "status": "active"},
-        {"$set": {"status": "used", "usedAt": datetime.now(timezone.utc).isoformat(), "transactionId": txn_id}},
+        {"id": voucher_id, "status": v["status"]},
+        {"$set": update, "$inc": {"redemptionCount": 1}},
     )
-    return res is not None
+    return round(applied, 2) if res is not None else 0.0

@@ -7,13 +7,16 @@ Endpoints:
 - PATCH  /api/online/orders/{id}/status      — owner moves to next stage (auth)
 - POST   /api/online/orders/{id}/eta         — AI-recomputed ETA (auth)
 - GET    /api/online/orders/track/{code}     — public order tracking
+- GET    /api/online/orders/track/stream/{code} — public order tracking, SSE
 - GET    /api/online/kitchen/load            — current pending + preparing counts
 """
 from fastapi import APIRouter, HTTPException, Request, Depends
-from deps import get_user, require_owner, require_owner_or_manager
+from fastapi.responses import StreamingResponse
+from deps import get_user
+import asyncio
 import logging
 from database import db
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 from typing import Optional
 import os
 import json
@@ -21,13 +24,19 @@ import uuid
 
 from utils.notifications import notify_order
 from routes.commerce_v29 import _resolve_voucher, _validate_voucher_rules
+from middleware.actor_context import tenant_scope_filter, tenant_owns
 
 router = APIRouter()
 
+# Same env-tunable pattern as coursing.py's SSE stream — short poll interval,
+# bounded connection lifetime so a guest who wanders off without closing the
+# tab doesn't leak a connection + Mongo poll loop forever (EventSource
+# reconnects on its own once the bound is hit).
+TRACK_SSE_INTERVAL_SECONDS = float(os.environ.get('TRACK_SSE_INTERVAL', '4'))
+TRACK_SSE_MAX_SECONDS = float(os.environ.get('TRACK_SSE_MAX_SECONDS', '600'))
 
-def _now(): return datetime.now(timezone.utc)
-def _iso(dt): return dt.isoformat() if isinstance(dt, datetime) else dt
-def _uid(prefix: str) -> str: return f"{prefix}-{uuid.uuid4().hex[:8].upper()}"
+
+from utils.ids import now_utc as _now, to_iso as _iso, gen_uid as _uid
 
 
 # Allowed lifecycle transitions per channel.
@@ -122,6 +131,21 @@ async def _ai_eta_explanation(order: dict, eta: dict) -> str:
         return fallback
 
 
+async def _adjust_stock_for_items(items: list, sign: int):
+    """+1 to restock, -1 to deduct. Online orders never touched db.products
+    stock at all before this — an accepted online order didn't reduce
+    on-hand count the way a POS sale does, so this is what accepting one
+    now does (mirroring routes/transactions.py's create_transaction), and
+    cancelling a previously-accepted paid order reverses it — the same
+    deduct-on-sale/restore-on-refund pairing the POS already has."""
+    for item in items or []:
+        pid = item.get("productId") or item.get("id")
+        qty = int(item.get("quantity", 1))
+        if not pid or qty <= 0:
+            continue
+        await db.products.update_one({"id": pid}, {"$inc": {"stock": sign * qty}})
+
+
 def _append_event(order: dict, kind: str, message: str, actor: Optional[str] = None) -> dict:
     event = {"kind": kind, "message": message, "actor": actor, "at": _iso(_now())}
     order.setdefault("events", []).append(event)
@@ -139,11 +163,42 @@ def _notification(order: dict, message: str) -> dict:
 # =============================================================================
 # CATEGORY PREP TIMES (helper used by the storefront)
 # =============================================================================
+async def _resolve_business_id(business: Optional[str]) -> Optional[str]:
+    """?business=<slug-or-id> on the public storefront — lets a deployment
+    with multiple businesses give each one its own online-ordering link
+    (/order-online?business=my-cafe) instead of every business sharing one
+    undifferentiated menu. Returns None (unscoped — every product/category
+    visible, same as before this existed) when absent or unresolvable, so a
+    single-business deployment with no reason to ever pass this param is
+    completely unaffected."""
+    if not business:
+        return None
+    biz = await db.businesses.find_one({"$or": [{"id": business}, {"slug": business}]}, {"_id": 0, "id": 1})
+    return biz["id"] if biz else None
+
+
+@router.get("/online/business")
+async def public_business_info(business: Optional[str] = None):
+    """Lets the storefront tell "no ?business= param, unscoped menu" (normal
+    on a single-business deployment) apart from "?business= was set but
+    didn't match anything" (a stale/mistyped link) — the products/categories
+    endpoints alone can't distinguish these since both resolve to the same
+    unscoped fallback. Only exposes what a guest already sees on the page."""
+    if not business:
+        return {"found": None}
+    biz = await db.businesses.find_one({"$or": [{"id": business}, {"slug": business}]}, {"_id": 0, "id": 1, "name": 1})
+    if not biz:
+        return {"found": False}
+    return {"found": True, "id": biz["id"], "name": biz.get("name", "")}
+
+
 @router.get("/online/categories")
-async def public_categories():
+async def public_categories(business: Optional[str] = None):
     """Public — only returns active categories that are enabled for online
     channels (pickup OR delivery)."""
-    cats = await db.categories.find({"active": True}, {"_id": 0}).to_list(200)
+    business_id = await _resolve_business_id(business)
+    query = {"active": True, **tenant_scope_filter(business_id)}
+    cats = await db.categories.find(query, {"_id": 0}).to_list(200)
     rows = []
     for c in cats:
         channels = c.get("channels") or ["dine-in", "pickup", "delivery"]
@@ -154,12 +209,17 @@ async def public_categories():
 
 
 @router.get("/online/products")
-async def public_products():
+async def public_products(business: Optional[str] = None):
     """Public storefront catalog: in-stock, not 86'd, with online-enabled category."""
-    cats = await public_categories()
+    business_id = await _resolve_business_id(business)
+    cats = await public_categories(business)
     allowed = {c["name"] for c in cats}
+    query = {
+        "category": {"$in": list(allowed)}, "stock": {"$gt": 0}, "eightySixed": {"$ne": True},
+        **tenant_scope_filter(business_id),
+    }
     products = await db.products.find(
-        {"category": {"$in": list(allowed)}, "stock": {"$gt": 0}, "eightySixed": {"$ne": True}},
+        query,
         # This is a storefront anyone on the internet can hit, so it hands back
         # the menu and nothing behind it — no unit cost, no on-hand count, no
         # SKU. Those are the same fields /products strips for guests.
@@ -217,8 +277,10 @@ async def place_order(data: dict):
     code = _uid("ORD")
     load = await _kitchen_load()
     eta = await _compute_eta(items, channel, load)
+    business_id = await _resolve_business_id(data.get("business"))
     order = {
         "id": code, "trackingCode": code,
+        "businessId": business_id,
         "channel": channel,
         "customer": customer,
         "items": items,
@@ -229,6 +291,13 @@ async def place_order(data: dict):
         "gst": gst,
         "total": total,
         "status": "pending",
+        # "unpaid" until a Stripe checkout for this order actually confirms —
+        # set by /online/orders/{id}/checkout + the shared Stripe status/webhook
+        # handlers in routes/integrations.py. Orders placed with Stripe not
+        # configured (or where the guest abandons checkout) simply stay
+        # "unpaid" forever, same as the "pay at pickup/delivery" model this
+        # replaces for anyone who does complete payment.
+        "paymentStatus": "unpaid",
         "eta": eta,
         "etaMessage": await _ai_eta_explanation({"channel": channel, "items": items}, eta),
         "events": [], "notifications": [],
@@ -244,22 +313,93 @@ async def place_order(data: dict):
 
 
 # =============================================================================
+# PAYMENT — Stripe Checkout for an already-placed online order
+# =============================================================================
+# Online orders previously never got paid through this system at all — the
+# order was created, a tracking code handed back, and actual payment
+# happened entirely out of band (staff took payment at pickup/delivery,
+# with nothing here recording it). This endpoint is the missing prerequisite
+# for online ordering to be a sellable, complete product on its own: it
+# reuses the exact Stripe Checkout flow the in-store POS already uses
+# (routes/integrations.py), just pointed at an online order's total instead
+# of a POS cart, and tagged so the shared status-poll/webhook handlers know
+# to flip the ORDER's paymentStatus too, not just the generic payment ledger.
+@router.post("/online/orders/checkout")
+async def create_online_order_checkout(data: dict, http_request: Request):
+    """Public — a guest who just placed an order has no session to attach.
+    Takes orderId in the body rather than the URL (POST /online/orders/{id}/checkout
+    would need a path-param-aware entry in server.py's public-path matcher,
+    which only does prefix matching — a body field keeps this an exact,
+    easily-audited allowlist entry instead)."""
+    from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
+
+    order_id = data.get("orderId")
+    if not order_id:
+        raise HTTPException(status_code=400, detail="orderId is required")
+    order = await db.online_orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.get("paymentStatus") == "paid":
+        raise HTTPException(status_code=400, detail="Order is already paid")
+
+    api_key = os.environ.get("STRIPE_API_KEY")
+    if not api_key:
+        # Not a hard failure — the guest just falls back to paying at
+        # pickup/delivery like every online order before this endpoint existed.
+        return {"configured": False, "url": None}
+
+    origin_url = data.get("originUrl", str(http_request.base_url).rstrip("/"))
+    host_url = str(http_request.base_url).rstrip("/")
+    webhook_url = f"{host_url}/api/webhook/stripe"
+    stripe_checkout = StripeCheckout(api_key=api_key, webhook_url=webhook_url)
+
+    success_url = f"{origin_url}/track/{order_id}?session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{origin_url}/track/{order_id}"
+
+    checkout_request = CheckoutSessionRequest(
+        amount=float(order["total"]),
+        currency="aud",
+        success_url=success_url,
+        cancel_url=cancel_url,
+        metadata={"orderId": order_id, "source": "nua_pos", "kind": "online_order"},
+    )
+    session = await stripe_checkout.create_checkout_session(checkout_request)
+
+    payment_doc = {
+        "id": f"SPAY-{uuid.uuid4().hex[:8].upper()}",
+        "sessionId": session.session_id,
+        "orderId": order_id,
+        "amount": float(order["total"]),
+        "currency": "aud",
+        "status": "initiated",
+        "paymentStatus": "pending",
+        "provider": "stripe",
+        "kind": "online_order",
+        "createdAt": _iso(_now()),
+    }
+    await db.payment_transactions.insert_one(payment_doc)
+    await db.online_orders.update_one({"id": order_id}, {"$set": {"paymentSessionId": session.session_id}})
+    return {"configured": True, "url": session.url, "sessionId": session.session_id}
+
+
+# =============================================================================
 # OWNER INBOX + MANAGEMENT
 # =============================================================================
 @router.get("/online/orders")
 async def list_orders( status: Optional[str] = None, limit: int = 100, user: dict = Depends(get_user)):
     if user["role"] not in ("owner", "manager", "cashier", "kitchen"):
         raise HTTPException(status_code=403, detail="Staff only")
-    q = {}
+    q = tenant_scope_filter(user.get("businessId"))
     if status: q["status"] = status
     rows = await db.online_orders.find(q, {"_id": 0}).sort("createdAt", -1).to_list(limit)
     return rows
 
 
 @router.get("/online/orders/{order_id}")
-async def get_order(order_id: str, _: dict = Depends(get_user)):
+async def get_order(order_id: str, user: dict = Depends(get_user)):
     row = await db.online_orders.find_one({"id": order_id}, {"_id": 0})
-    if not row: raise HTTPException(status_code=404, detail="Order not found")
+    if not row or not tenant_owns(row.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Order not found")
     return row
 
 
@@ -315,6 +455,9 @@ async def update_status(order_id: str, data: dict, user: dict = Depends(get_user
         except Exception as e:
             logging.getLogger(__name__).warning(
                 "online order %s: kitchen ticket failed — %s", order_id, e)
+        if not order.get("stockDeducted"):
+            await _adjust_stock_for_items(order.get("items") or [], sign=-1)
+            order["stockDeducted"] = True
         # Recompute ETA with fresh kitchen-load snapshot
         load = await _kitchen_load()
         order["eta"] = await _compute_eta(order.get("items", []), ch, load)
@@ -326,6 +469,40 @@ async def update_status(order_id: str, data: dict, user: dict = Depends(get_user
         order["readyAt"] = _iso(_now())
     if new_status == "completed":
         order["completedAt"] = _iso(_now())
+    if new_status == "cancelled" and order.get("stockDeducted") and not order.get("stockRestored"):
+        # Only accepted orders ever deducted stock (above) — an order
+        # cancelled while still "pending" never touched inventory, so there's
+        # nothing to give back.
+        await _adjust_stock_for_items(order.get("items") or [], sign=1)
+        order["stockRestored"] = True
+    if new_status == "cancelled" and order.get("paymentStatus") in ("paid", "refund_failed"):
+        # This order was actually charged (Stripe checkout added last round)
+        # — cancelling it without reversing the charge would just take the
+        # guest's money for food they're never getting. Doesn't block the
+        # cancellation on a failed refund call (network/Stripe-side issues
+        # shouldn't trap staff into being unable to cancel an order) — it
+        # flags the order for manual follow-up instead. Re-cancelling an
+        # order already flagged refund_failed retries it — refund_stripe_
+        # payment() is itself safe to call again against an already-refunded
+        # charge, so this can't produce a double refund.
+        payment = await db.payment_transactions.find_one(
+            {"orderId": order_id, "kind": "online_order", "paymentStatus": "paid"}, {"_id": 0})
+        if payment and payment.get("sessionId"):
+            from routes.integrations import refund_stripe_payment
+            refunded = await refund_stripe_payment(payment["sessionId"])
+            if refunded:
+                order["paymentStatus"] = "refunded"
+                await db.payment_transactions.update_one(
+                    {"sessionId": payment["sessionId"]},
+                    {"$set": {"paymentStatus": "refunded", "status": "refunded", "updatedAt": _iso(_now())}},
+                )
+                _append_event(order, "payment:refunded", "Payment refunded in full.")
+            else:
+                order["paymentStatus"] = "refund_failed"
+                _append_event(order, "payment:refund_failed",
+                               "Automatic refund failed — needs manual refund via the Stripe dashboard.")
+                logging.getLogger(__name__).error(
+                    "online order %s: cancelled but Stripe refund failed — needs manual reconciliation", order_id)
     update_fields = {k: v for k, v in order.items() if k != "id"}
     await db.online_orders.update_one({"id": order_id}, {"$set": update_fields})
     return order
@@ -352,11 +529,10 @@ async def kitchen_load_endpoint(_: dict = Depends(get_user)):
 # =============================================================================
 # PUBLIC TRACKING (no auth — by order code)
 # =============================================================================
-@router.get("/online/orders/track/{code}")
-async def track_order(code: str):
-    order = await db.online_orders.find_one({"id": code.upper()}, {"_id": 0})
-    if not order: raise HTTPException(status_code=404, detail="Order not found")
-    # Strip internal fields the customer doesn't need.
+def _public_order_view(order: dict) -> dict:
+    """Strip internal fields the customer doesn't need — shared by the
+    polled REST endpoint and the SSE stream below so they can never drift
+    into showing different shapes for the same order."""
     customer = order.get("customer") or {}
     return {
         "id": order["id"], "status": order["status"], "channel": order.get("channel"),
@@ -371,3 +547,50 @@ async def track_order(code: str):
         "readyAt": order.get("readyAt"),
         "completedAt": order.get("completedAt"),
     }
+
+@router.get("/online/orders/track/{code}")
+async def track_order(code: str):
+    order = await db.online_orders.find_one({"id": code.upper()}, {"_id": 0})
+    if not order: raise HTTPException(status_code=404, detail="Order not found")
+    return _public_order_view(order)
+
+@router.get("/online/orders/track/stream/{code}")
+async def track_order_stream(code: str, request: Request):
+    """Server-sent events for one guest's own order — replaces every
+    guest currently watching their order polling every ~12s with one
+    long-lived connection each. Public, same access model as the REST
+    endpoint above: the tracking code (emailed/texted to the guest, and
+    already right there in the /track/{code} URL) is the only credential,
+    same as it already was for the polled version — this just pushes
+    instead of making the guest's browser ask again and again.
+    """
+    async def events():
+        last = None
+        started = asyncio.get_event_loop().time()
+        while True:
+            if asyncio.get_event_loop().time() - started > TRACK_SSE_MAX_SECONDS:
+                return
+            if await request.is_disconnected():
+                return
+            try:
+                order = await db.online_orders.find_one({"id": code.upper()}, {"_id": 0})
+                if not order:
+                    yield "event: not_found\ndata: {}\n\n"
+                    return
+                payload = json.dumps(_public_order_view(order), default=str)
+                if payload != last:
+                    last = payload
+                    yield f"event: order\ndata: {payload}\n\n"
+                else:
+                    yield ": keepalive\n\n"
+            except Exception as e:
+                logging.getLogger(__name__).warning("order tracking stream error for %s: %s", code, e)
+                yield ": error\n\n"
+            await asyncio.sleep(TRACK_SSE_INTERVAL_SECONDS)
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        # nginx buffers SSE by default, which would defeat the whole point.
+        "X-Accel-Buffering": "no",
+    })

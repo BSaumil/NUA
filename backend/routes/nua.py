@@ -57,18 +57,6 @@ async def run(include_summary: bool = False, _: dict = Depends(require_owner_or_
     return await nua_intelligence.run_all_insights(include_summary=include_summary)
 
 
-@router.post("/summary/weekly")
-async def weekly_summary(_: dict = Depends(require_owner_or_manager)):
-    doc = await nua_intelligence.generate_weekly_summary()
-    if doc:
-        await db.ash_insights.update_one(
-            {"category": doc["category"], "key": doc["key"]},
-            {"$set": doc, "$setOnInsert": {"firstSeenAt": doc["createdAt"]}},
-            upsert=True,
-        )
-    return doc
-
-
 @router.post("/insights/{iid}/dismiss")
 async def dismiss_insight(iid: str, _: dict = Depends(require_owner_or_manager)):
     from datetime import datetime, timezone
@@ -330,7 +318,7 @@ async def draft_campaign(body: dict, user: dict = Depends(require_owner_or_manag
 
     # ── Gather grounding data ──
     try:
-        churning = await db.customers.count_documents({"totalVisits": {"$gte": 3}})
+        churning = await db.customers.count_documents({"visits": {"$gte": 3}})
     except Exception:
         churning = 0
     try:
@@ -536,6 +524,52 @@ async def promote_tool(tool_name: str, user: dict = Depends(require_owner)):
         return await nua_trust.promote(tool_name, actor=user.get("email") or "owner")
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+@router.get("/tools/auto-executions")
+async def auto_executions(limit: int = 50, _: dict = Depends(get_user)):
+    """Shadow-audit review feed: recent auto-tier tool calls, newest first,
+    so an owner can spot-check what NUA ran unsupervised."""
+    return await nua_trust.list_recent_executions(limit=min(max(limit, 1), 200))
+
+
+@router.post("/tools/executions/{audit_id}/flag")
+async def flag_execution(audit_id: str, body: dict, user: dict = Depends(require_owner)):
+    """Owner-only: flag one auto-executed action as wrong. Instantly demotes
+    the tool back to approval-gated (see nua_trust.demote) and, if the tool
+    exposes a rollback and the caller asked for one, attempts to undo it."""
+    reason = (body or {}).get("reason")
+    row = await db.audit_events.find_one({"id": audit_id}, {"_id": 0})
+    if not row:
+        raise HTTPException(404, "Execution not found")
+    tool_name = row.get("entityId")
+    tool = nua_tools.TOOLS.get(tool_name)
+    if not tool:
+        raise HTTPException(400, "Not a recognized NUA tool execution")
+
+    await db.audit_events.update_one(
+        {"id": audit_id},
+        {"$set": {"flagged": True, "flaggedBy": user.get("email"),
+                  "flaggedAt": datetime.now(timezone.utc).isoformat(), "flagReason": reason}},
+    )
+    result = await nua_trust.demote(
+        tool_name, actor=user.get("email") or "owner",
+        reason=reason or "Flagged as wrong from the auto-execution review feed",
+    )
+
+    undo = None
+    if body.get("undo"):
+        outcome = (row.get("after") or {}).get("outcome")
+        if tool.rollback and outcome and not (isinstance(outcome, dict) and outcome.get("error")):
+            try:
+                await tool.rollback(outcome)
+                undo = {"undone": True}
+            except Exception as e:
+                undo = {"undone": False, "error": str(e)}
+        else:
+            undo = {"undone": False, "error": "No rollback available for this action"}
+
+    return {**result, "auditId": audit_id, "undo": undo}
 
 
 @router.get("/health-score")

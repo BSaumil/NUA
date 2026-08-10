@@ -67,3 +67,39 @@ def test_a_genuinely_unhandled_exception_is_captured_and_readable(app, client, o
     assert matching, "the captured error should be readable back through /api/ops/errors"
     assert "synthetic failure for test_observability" in matching[0]["error"]
     assert matching[0]["actor"]["role"] == "owner"
+
+
+def test_client_error_report_requires_no_authentication(anon):
+    # Has to work from a guest ordering page and the login screen, neither
+    # of which carries a token.
+    r = req(anon, "POST", "/api/ops/client-errors", json={
+        "message": "TypeError: cannot read property of undefined",
+        "stack": "at TrackOrder.jsx:42",
+        "url": "https://example.com/order/track/ABC123",
+    })
+    assert r.status_code == 200
+    assert r.json() == {"recorded": True}
+
+
+def test_client_error_report_is_readable_back_by_an_owner(client, owner_headers):
+    unique_message = "synthetic client crash for test_observability"
+    r = req(client, "POST", "/api/ops/client-errors", json={
+        "message": unique_message, "stack": "at Kitchen.jsx:100", "url": "/kitchen",
+    })
+    assert r.status_code == 200
+
+    errs = req(client, "GET", "/api/ops/client-errors", headers=owner_headers).json()["errors"]
+    matching = [e for e in errs if e["message"] == unique_message]
+    assert matching, "the captured client error should be readable back through /api/ops/client-errors"
+    assert matching[0]["url"] == "/kitchen"
+
+
+def test_client_errors_endpoint_requires_owner_or_manager(anon):
+    r = req(anon, "GET", "/api/ops/client-errors")
+    assert r.status_code == 401
+
+
+def test_client_error_report_tolerates_a_missing_body(anon):
+    r = req(anon, "POST", "/api/ops/client-errors", json={})
+    assert r.status_code == 200
+    assert r.json() == {"recorded": True}

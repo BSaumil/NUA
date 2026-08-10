@@ -16,6 +16,55 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Silent refresh on a 401: the access token lasts 8 hours, and until now
+// there was nothing between "still valid" and "force a full re-login" — any
+// session left open past that window (an unattended kiosk, an overnight
+// shift) just started throwing 401s on every call with no recovery. POST
+// /auth/refresh reads the httpOnly refresh_token cookie set at login (valid
+// 7 days) and returns a fresh access token; on success this updates
+// localStorage and retries the original request exactly once. Concurrent
+// 401s (several polling components failing around the same moment) share
+// one in-flight refresh instead of each firing their own.
+let refreshPromise = null;
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const original = error.config;
+    const isAuthEndpoint = original?.url?.includes('/auth/refresh') || original?.url?.includes('/auth/login');
+    if (error.response?.status === 401 && original && !original._retriedAfterRefresh && !isAuthEndpoint) {
+      original._retriedAfterRefresh = true;
+      try {
+        if (!refreshPromise) {
+          refreshPromise = axios
+            .post(`${API_BASE_URL}/auth/refresh`, {}, { withCredentials: true })
+            .finally(() => { refreshPromise = null; });
+        }
+        const r = await refreshPromise;
+        const newToken = r.data?.token;
+        if (newToken) {
+          localStorage.setItem('nua_token', newToken);
+          original.headers.Authorization = `Bearer ${newToken}`;
+          return api(original);
+        }
+      } catch {
+        // Refresh token is itself missing/expired — the session is genuinely
+        // over, not just the access token. Fall through to the rejection
+        // below; AuthContext's next checkAuth (or a protected-route guard)
+        // is what actually navigates to /login, this just stops pretending
+        // localStorage still holds something usable.
+        localStorage.removeItem('nua_token');
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
+// Auth — self-service password recovery (login/logout/2FA live in AuthContext)
+export const authAPI = {
+  forgotPassword: (email) => api.post('/auth/forgot-password', { email }),
+  resetPassword: (token, password) => api.post('/auth/reset-password', { token, password }),
+};
+
 // Products API
 export const productsAPI = {
   getAll: (params) => api.get('/products', { params }),
@@ -23,6 +72,19 @@ export const productsAPI = {
   update: (id, data) => api.put(`/products/${id}`, data),
   delete: (id) => api.delete(`/products/${id}`),
   adjustStock: (id, data) => api.post(`/products/${id}/adjust-stock`, data),
+  autoTranslate: (id) => api.post(`/products/${id}/auto-translate`),
+  bulkAutoTranslate: (onlyMissing = true) => api.post('/products/bulk-auto-translate', null, { params: { only_missing: onlyMissing } }),
+};
+
+// EFTPOS terminals
+export const eftposAPI = {
+  listTerminals: () => api.get('/eftpos/terminals'),
+  createTerminal: (data) => api.post('/eftpos/terminals', data),
+  updateTerminal: (id, data) => api.put(`/eftpos/terminals/${id}`, data),
+  deleteTerminal: (id) => api.delete(`/eftpos/terminals/${id}`),
+  testTerminal: (id) => api.post(`/eftpos/terminals/${id}/test`),
+  listTransactions: (terminalId) => api.get('/eftpos/transactions', { params: terminalId ? { terminal_id: terminalId } : {} }),
+  testHistory: (id) => api.get(`/eftpos/terminals/${id}/test-history`),
 };
 
 // Promotions API
@@ -48,29 +110,24 @@ export const customersAPI = {
 
 // Feedback API
 export const feedbackAPI = {
-  getAll: (params) => api.get('/feedback', { params }),
   create: (data) => api.post('/feedback', data),
-  respond: (id, response) => api.put(`/feedback/${id}/respond`, null, { params: { response } }),
 };
 
 // Transactions API
 export const transactionsAPI = {
   getAll: (params) => api.get('/transactions', { params }),
   create: (data) => api.post('/transactions', data),
-  getHourly: () => api.get('/transactions/hourly'),
   getDetail: (id) => api.get(`/transactions/${id}`),
 };
 
 // Refunds API
 export const refundsAPI = {
-  getAll: () => api.get('/refunds'),
   create: (data) => api.post('/refunds', data),
 };
 
 // Accounting API
 export const accountingAPI = {
   getSummary: () => api.get('/accounting/summary'),
-  getPandL: () => api.get('/accounting/p-and-l'),
 };
 
 // Enterprise Finance & Accounting (double-entry)
@@ -78,12 +135,9 @@ export const financeAPI = {
   // Chart of Accounts
   listAccounts: () => api.get('/accounting/accounts'),
   createAccount: (data) => api.post('/accounting/accounts', data),
-  updateAccount: (code, data) => api.put(`/accounting/accounts/${code}`, data),
   deleteAccount: (code) => api.delete(`/accounting/accounts/${code}`),
-  seedCoA: () => api.post('/accounting/seed'),
   // Journals
   listJournals: (params) => api.get('/accounting/journals', { params }),
-  getJournal: (id) => api.get(`/accounting/journals/${id}`),
   createJournal: (data) => api.post('/accounting/journals', data),
   reverseJournal: (id, data) => api.post(`/accounting/journals/${id}/reverse`, data),
   // Reports
@@ -91,22 +145,19 @@ export const financeAPI = {
   profitLoss: (params) => api.get('/accounting/reports/profit-loss', { params }),
   balanceSheet: (params) => api.get('/accounting/reports/balance-sheet', { params }),
   cashFlow: (params) => api.get('/accounting/reports/cash-flow', { params }),
-  generalLedger: (code, params) => api.get(`/accounting/reports/general-ledger/${code}`, { params }),
-  budgetVsActual: (params) => api.get('/accounting/reports/budget-vs-actual', { params }),
   // AP
   listBills: (params) => api.get('/accounting/bills', { params }),
   createBill: (data) => api.post('/accounting/bills', data),
   payBill: (id, data) => api.post(`/accounting/bills/${id}/pay`, data),
-  deleteBill: (id) => api.delete(`/accounting/bills/${id}`),
   // AR
   listInvoices: (params) => api.get('/accounting/invoices', { params }),
   createInvoice: (data) => api.post('/accounting/invoices', data),
   receiveInvoice: (id, data) => api.post(`/accounting/invoices/${id}/receive`, data),
-  deleteInvoice: (id) => api.delete(`/accounting/invoices/${id}`),
   // Deposits
-  listDeposits: (params) => api.get('/accounting/deposits', { params }),
+  listDeposits: (status) => api.get('/accounting/deposits', { params: status ? { status } : {} }),
   createDeposit: (data) => api.post('/accounting/deposits', data),
   applyDeposit: (id, data) => api.post(`/accounting/deposits/${id}/apply`, data),
+  refundDeposit: (id) => api.post(`/accounting/deposits/${id}/refund`),
   // Bank rec
   bankStatement: (code, params) => api.get(`/accounting/bank/statement/${code}`, { params }),
   importBank: (data) => api.post('/accounting/bank/import', data),
@@ -115,6 +166,9 @@ export const financeAPI = {
   // Budgets
   listBudgets: () => api.get('/accounting/budgets'),
   createBudget: (data) => api.post('/accounting/budgets', data),
+  updateBudget: (id, data) => api.put(`/accounting/budgets/${id}`, data),
+  deleteBudget: (id) => api.delete(`/accounting/budgets/${id}`),
+  budgetVsActual: (params) => api.get('/accounting/reports/budget-vs-actual', { params }),
   // KPIs
   kpis: () => api.get('/accounting/kpis'),
 };
@@ -122,7 +176,6 @@ export const financeAPI = {
 // BAS/GST API
 export const basGstAPI = {
   getReports: () => api.get('/bas-gst/reports'),
-  create: (data) => api.post('/bas-gst/reports', data),
   submit: (id, useApi) => api.post(`/bas-gst/submit/${id}`, null, { params: { use_api: useApi } }),
 };
 
@@ -134,16 +187,9 @@ export const locationsAPI = {
   delete: (id) => api.delete(`/locations/${id}`),
 };
 
-// Users API
-export const usersAPI = {
-  getAll: () => api.get('/users'),
-  create: (data) => api.post('/users', data),
-};
-
 // Categories API
 export const categoriesAPI = {
   getAll: () => api.get('/categories'),
-  create: (data) => api.post('/categories', data),
 };
 
 // Product Image Library
@@ -169,11 +215,9 @@ export const bookingsInboxAPI = {
 // Awards (Fair Work / multi-country) + Super calc
 export const awardsAPI = {
   catalogue: (country) => api.get('/awards/catalogue', { params: country ? { country } : {} }),
-  installed: () => api.get('/awards/installed'),
   install: (code) => api.post('/awards/install', { code }),
   uninstall: (code) => api.delete(`/awards/${code}`),
   superByAward: (payload) => api.post('/payruns/super-by-award', payload),
-  syncFairwork: () => api.post('/awards/sync-fairwork'),
 };
 
 // Channel Menus — per-channel pricing, availability, prep, AI discounts
@@ -184,7 +228,6 @@ export const channelMenusAPI = {
   bulkPrice: (channel, body) => api.post(`/channel-menus/${channel}/bulk-price`, body),
   aiPrepTimes: (channel) => api.post(`/channel-menus/${channel}/ai-prep-times`),
   aiDiscountSlow: (channel, body) => api.post(`/channel-menus/${channel}/ai-discount-slow`, body),
-  removeOverride: (channel, productId) => api.delete(`/channel-menus/${channel}/${productId}`),
 };
 
 // Reservations: AI table auto-assign
@@ -196,12 +239,6 @@ export const reservationsAIAPI = {
 // Modifiers API
 export const modifiersAPI = {
   getAll: () => api.get('/modifiers'),
-  create: (data) => api.post('/modifiers', data),
-};
-
-// Offline Sync API
-export const offlineAPI = {
-  sync: (data) => api.post('/offline/sync', data),
 };
 
 // Reservations API
@@ -221,7 +258,6 @@ export const reservationsAPI = {
   autoAssign: (id) => api.get(`/reservations/auto-assign/${id}`),
   // Booking calendar helpers
   dayCounts: (fromDate, toDate) => api.get('/reservations/day-counts', { params: { fromDate, toDate } }),
-  listBlackouts: (fromDate, toDate) => api.get('/reservations/blackouts', { params: { fromDate, toDate } }),
   createBlackout: (data) => api.post('/reservations/blackouts', data),
   deleteBlackout: (date) => api.delete(`/reservations/blackouts/${date}`),
 };
@@ -232,39 +268,30 @@ export const floorPlansAPI = {
   get: (id) => api.get(`/floor-plans/${id}`),
   create: (data) => api.post('/floor-plans', data),
   update: (id, data) => api.put(`/floor-plans/${id}`, data),
-  delete: (id) => api.delete(`/floor-plans/${id}`),
-  updateTableStatus: (tableId, status, planId) => api.post(`/floor-plans/tables/${tableId}/status`, null, { params: { status, plan_id: planId } }),
-  assignServer: (sectionId, serverId, planId) => api.post(`/floor-plans/sections/${sectionId}/assign`, null, { params: { server_id: serverId, plan_id: planId } }),
   // Typed-table validation for POS dine-in.
   listTables: () => api.get('/floor-plans/tables/all'),
-  resolveTable: (number) => api.get('/floor-plans/tables/resolve', { params: { number } }),
   occupyByNumber: (number, orderId) => api.post(`/floor-plans/tables/by-number/${encodeURIComponent(number)}/occupy`, null, { params: { order_id: orderId } }),
-  freeByNumber: (number) => api.post(`/floor-plans/tables/by-number/${encodeURIComponent(number)}/free`),
 };
 
 // Coursing API — course assignment, fire/hold config, POS -> kitchen
 export const coursingAPI = {
   getConfig: () => api.get('/coursing/config'),
   updateConfig: (data) => api.put('/coursing/config', data),
-  preview: (data) => api.post('/coursing/preview', data),
   sendToKitchen: (data) => api.post('/coursing/send-to-kitchen', data),
   openOrders: (params) => api.get('/coursing/orders/open', { params }),
   addRound: (id, data) => api.post(`/coursing/orders/${id}/add-round`, data),
-  autoFireTick: () => api.post('/coursing/auto-fire/tick'),
   settle: (data) => api.post('/coursing/settle', data),
   voidItems: (id, data) => api.post(`/coursing/orders/${id}/void`, data),
   // SSE endpoint — consumed via EventSource, not axios.
-  moveTicket: (fromTable, toTable) => api.post('/coursing/move-ticket', { fromTable, toTable }),
-  timings: (orderId) => api.get(`/kitchen/orders/${orderId}/timings`),
-  printTargets: () => api.get('/print-targets'),
   setPrintTarget: (printer, data) => api.put(`/print-targets/${encodeURIComponent(printer)}`, data),
-  printEscpos: (jobId) => api.post(`/print-jobs/${jobId}/escpos`),
   printHealth: () => api.get('/print-targets/health'),
   printSelfTest: (printer) => api.post(`/print-targets/${encodeURIComponent(printer)}/test`),
   analytics: (days = 7) => api.get('/coursing/analytics', { params: { days } }),
   streamUrl: (tableNumber) =>
     `${API_BASE_URL}/coursing/stream?tableNumber=${encodeURIComponent(tableNumber || '')}`
     + `&token=${encodeURIComponent(localStorage.getItem('nua_token') || '')}`,
+  endOfService: () => api.get('/coursing/end-of-service'),
+  closeService: (reason) => api.post('/coursing/end-of-service/close', { reason }),
 };
 
 // Two-factor sign-in
@@ -283,6 +310,8 @@ export const twoFactorAPI = {
 export const opsAPI = {
   health: () => api.get('/health'),
   recentErrors: (limit = 50) => api.get('/ops/errors', { params: { limit } }),
+  recentClientErrors: (limit = 50) => api.get('/ops/client-errors', { params: { limit } }),
+  reportClientError: (payload) => api.post('/ops/client-errors', payload),
 };
 
 // Backup / restore
@@ -319,7 +348,6 @@ export const kitchenAPI = {
   serveCourse: (id, course) => api.post(`/kitchen/orders/${id}/serve-course/${course}`),
   readyCourse: (id, course) => api.post(`/kitchen/orders/${id}/ready-course/${course}`),
   setPriority: (id, priority) => api.post(`/kitchen/orders/${id}/priority`, null, { params: { priority } }),
-  getPrepList: () => api.get('/kitchen/prep-list'),
   getAvgOrderTime: () => api.get('/kitchen/avg-order-time'),
   getNextOrderETA: () => api.get('/kitchen/next-order-eta'),
   getDocketConfig: () => api.get('/kitchen/docket-config'),
@@ -340,34 +368,11 @@ export const analyticsAPI = {
   saveTodayTargets: (data) => api.post('/analytics/today-targets', data),
 };
 
-// Automation API
-export const automationAPI = {
-  getRules: () => api.get('/automation/rules'),
-  createRule: (data) => api.post('/automation/rules', data),
-  updateRule: (id, data) => api.put(`/automation/rules/${id}`, data),
-  deleteRule: (id) => api.delete(`/automation/rules/${id}`),
-  toggleRule: (id) => api.post(`/automation/rules/${id}/toggle`),
-  getAlerts: () => api.get('/automation/alerts'),
-};
-
-// Predictive Customer Matching
-export const predictiveAPI = {
-  predictCustomer: (items) => api.post('/orders/predict-customer', items),
-  linkCustomer: (txnId, customerId, points) => api.post('/orders/link-customer', null, { params: { transaction_id: txnId, customer_id: customerId, points_earned: points } }),
-};
-
-// What-If Simulator
-export const simulatorAPI = {
-  simulate: (changes) => api.post('/analytics/what-if', changes),
-};
-
-// Loyalty Program
 // Events & Experiences
 export const eventsAPI = {
   getAll: (params) => api.get('/events', { params }),
   create: (data) => api.post('/events', data),
   update: (id, data) => api.put(`/events/${id}`, data),
-  bookTicket: (id, customerId, qty) => api.post(`/events/${id}/book`, null, { params: { customer_id: customerId, quantity: qty } }),
 };
 
 // Demand Forecasting
@@ -378,11 +383,6 @@ export const forecastAPI = {
   getSuggestions: () => api.get('/analytics/forecast-suggestions'),
 };
 
-// QR Menu
-export const qrMenuAPI = {
-  getData: () => api.get('/menu/qr-data'),
-};
-
 // Public Booking Portal
 export const publicAPI = {
   getMenu: () => api.get('/public/menu'),
@@ -390,12 +390,13 @@ export const publicAPI = {
   book: (data) => api.post('/public/book', data),
   joinWaitlist: (data) => api.post('/public/join-waitlist', data),
   getEvents: () => api.get('/public/events'),
+  trackWaitlist: (code) => api.get(`/waitlist/track/${code}`),
+  trackWaitlistStreamUrl: (code) => `${API_BASE_URL}/waitlist/track/stream/${encodeURIComponent(code)}`,
 };
 
 // QR Payment
 export const paymentAPI = {
   generateQR: (data) => api.post('/payments/generate-qr', data),
-  createSplit: (data) => api.post('/payments/split', data),
   confirm: (paymentId) => api.post(`/payments/${paymentId}/confirm`),
 };
 
@@ -404,8 +405,6 @@ export const tableOrderAPI = {
   getMenu: (tableId) => api.get(`/table/${tableId}/menu`),
   placeOrder: (tableId, data) => api.post(`/table/${tableId}/order`, data),
   getOrders: (tableId) => api.get(`/table/${tableId}/orders`),
-  getOrderStatus: (orderId) => api.get(`/table/order/${orderId}/status`),
-  getTableQRCodes: () => api.get('/tables/qr-codes'),
 };
 
 // Stripe Checkout
@@ -431,7 +430,6 @@ export const advancedAPI = {
   addTip: (data) => api.post('/tips/add', data),
   getTips: () => api.get('/tips'),
   getTipsSummary: () => api.get('/tips/summary'),
-  distributeTipPool: () => api.post('/tips/pool-distribute'),
   getTrainingMode: () => api.get('/settings/training-mode'),
   setTrainingMode: (enabled) => api.post('/settings/training-mode', { enabled }),
   getEndOfDayReport: (params) => api.get('/reports/end-of-day', { params }),
@@ -441,10 +439,18 @@ export const advancedAPI = {
   getCampaigns: () => api.get('/marketing/campaigns'),
   createCampaign: (data) => api.post('/marketing/campaigns', data),
   sendCampaign: (id) => api.post(`/marketing/campaigns/${id}/send`),
+  runCampaignNow: (id) => api.post(`/marketing/campaigns/${id}/run-now`),
+  runDueCampaigns: () => api.post('/marketing/campaigns/run-due'),
   deleteCampaign: (id) => api.delete(`/marketing/campaigns/${id}`),
   getCampaignTemplates: () => api.get('/marketing/campaigns/templates'),
   draftCampaign: (data) => api.post('/marketing/campaigns/draft', data),
   improveCampaignCopy: (data) => api.post('/marketing/campaigns/improve', data),
+  previewSegment: (rules) => api.post('/marketing/segments/preview', { rules }),
+  getSegments: () => api.get('/marketing/segments'),
+  createSegment: (data) => api.post('/marketing/segments', data),
+  updateSegment: (id, data) => api.put(`/marketing/segments/${id}`, data),
+  deleteSegment: (id) => api.delete(`/marketing/segments/${id}`),
+  getSegmentCustomers: (id) => api.get(`/marketing/segments/${id}/customers`),
 };
 
 // Staff Management — PIN, Timecards, Roster, Payrun
@@ -475,11 +481,9 @@ export const staffMgmtAPI = {
 
 // Menu Features — AI Import, Price Adjust, What-If Advanced
 export const menuFeaturesAPI = {
-  aiImportMenu: (data) => api.post('/menu/ai-import', data),
   aiPreviewMenu: (data) => api.post('/menu/ai-preview', data, { timeout: 90000 }),
   aiCommitMenu: (data) => api.post('/menu/ai-commit', data),
   bulkPriceAdjust: (data) => api.post('/menu/price-adjust', data),
-  whatIfAdvanced: (data) => api.post('/analytics/what-if-advanced', data),
 };
 
 // Enterprise Features — Surcharging, Live Sales, Permissions, Reports, Hardware
@@ -491,7 +495,6 @@ export const enterpriseAPI = {
   // Auto-gratuity
   getGratuitySettings: () => api.get('/gratuity/settings'),
   saveGratuitySettings: (data) => api.post('/gratuity/settings', data),
-  checkGratuity: (covers) => api.get('/gratuity/check', { params: { covers } }),
   // Live Sales
   getLiveSales: () => api.get('/live-sales'),
   // Permissions
@@ -504,11 +507,9 @@ export const enterpriseAPI = {
   setStaffPermissions: (staffId, permissions) => api.post(`/permissions/staff/${staffId}`, { permissions }),
   clearStaffPermissionsOverride: (staffId) => api.delete(`/permissions/staff/${staffId}`),
   // Upsells
-  getUpsells: (items) => api.get('/pos/upsells', { params: { items: items.join(',') } }),
   // Reports
   getReportConfig: () => api.get('/reports/automated-config'),
   saveReportConfig: (data) => api.post('/reports/automated-config', data),
-  generateReport: (data) => api.post('/reports/generate', data),
   // Hardware
   getPrinters: () => api.get('/hardware/printers'),
   addPrinter: (data) => api.post('/hardware/printers', data),
@@ -526,8 +527,6 @@ export const gamificationAPI = {
   getPrintRouting: () => api.get('/print-routing/config'),
   savePrintRouting: (data) => api.post('/print-routing/config', data),
   sendToPrinters: (data) => api.post('/print-routing/send', data),
-  getPrintQueue: (printer) => api.get('/print-routing/queue', { params: { printer } }),
-  completePrintJob: (id) => api.post(`/print-routing/complete/${id}`),
 };
 
 // Reservation Features — Table Combos, Booking Rules, Schedule, Experiences, Clubmember, Analytics
@@ -551,9 +550,6 @@ export const reservationFeaturesAPI = {
   getSocialAccounts: () => api.get('/clubmember/social-accounts'),
   addSocialAccount: (data) => api.post('/clubmember/social-accounts', data),
   removeSocialAccount: (id) => api.delete(`/clubmember/social-accounts/${id}`),
-  sendTestEmail: (data) => api.post('/email/test', data),
-  getEmailSettings: () => api.get('/email/settings'),
-  saveEmailSettings: (data) => api.post('/email/settings', data),
 };
 
 // Loyalty API (enhanced)
@@ -564,6 +560,12 @@ export const loyaltyAPI = {
   createReward: (data) => api.post('/loyalty/rewards', data),
   updateReward: (id, data) => api.put(`/loyalty/rewards/${id}`, data),
   deleteReward: (id) => api.delete(`/loyalty/rewards/${id}`),
+};
+
+// Guest-facing loyalty portal — unauthenticated, phone-only lookup
+export const loyaltyGuestAPI = {
+  requestCode: (phone) => api.post('/loyalty/v2/guest-lookup/request-code', { phone }),
+  lookup: (phone, code) => api.post('/loyalty/v2/guest-lookup', { phone, code }),
 };
 
 // Items System — Categories, Modifiers, Discounts, Comp/Void, Payment Links
@@ -587,13 +589,10 @@ export const itemsSystemAPI = {
   createPaymentLink: (data) => api.post('/payment-links', data),
   getPaymentLinks: () => api.get('/payment-links'),
   deletePaymentLink: (id) => api.delete(`/payment-links/${id}`),
-  seedCatalog: () => api.post('/seed/catalog'),
 };
 
 // AI Pantry — invoice OCR + insights
 export const aiPantryAPI = {
-  generate: () => api.get('/ai-pantry/generate'),
-  history: () => api.get('/ai-pantry/history'),
   parseInvoice: (data) => api.post('/ai-pantry/parse-invoice', data),
   applyInvoice: (id, selections) => api.post(`/ai-pantry/apply-invoice/${id}`, { selections }),
   listInvoices: () => api.get('/ai-pantry/invoices'),
@@ -609,7 +608,6 @@ export const inventoryAPI = {
   lowStock: () => api.get('/ingredients/low-stock'),
   getRecipe: (productId) => api.get(`/recipes/product/${productId}`),
   saveRecipe: (productId, data) => api.put(`/recipes/product/${productId}`, data),
-  listRecipes: () => api.get('/recipes'),
   createStockTake: (data) => api.post('/stock-takes', data),
   listStockTakes: () => api.get('/stock-takes'),
   assignInvoiceToStock: (invoiceId, assignments, priceUpdates) => api.post(`/invoices/${invoiceId}/assign-stock`, { assignments, priceUpdates }),
@@ -619,46 +617,37 @@ export const inventoryAPI = {
 
 // Online Ordering — public storefront + owner inbox + AI ETA
 export const onlineAPI = {
-  publicCategories: () => api.get('/online/categories'),
-  publicProducts: () => api.get('/online/products'),
+  businessInfo: (business) => api.get('/online/business', { params: business ? { business } : {} }),
+  publicCategories: (business) => api.get('/online/categories', { params: business ? { business } : {} }),
+  publicProducts: (business) => api.get('/online/products', { params: business ? { business } : {} }),
   placeOrder: (data) => api.post('/online/orders', data),
   listOrders: (status) => api.get('/online/orders', { params: status ? { status } : {} }),
-  getOrder: (id) => api.get(`/online/orders/${id}`),
   updateStatus: (id, data) => api.patch(`/online/orders/${id}/status`, data),
   recomputeEta: (id) => api.post(`/online/orders/${id}/eta`),
   track: (code) => api.get(`/online/orders/track/${code}`),
+  // SSE endpoint — consumed via EventSource, not axios.
+  trackStreamUrl: (code) => `${API_BASE_URL}/online/orders/track/stream/${encodeURIComponent(code)}`,
   kitchenLoad: () => api.get('/online/kitchen/load'),
   checkVoucher: (code, cart) => api.post('/vouchers/public-check', { code, cart }),
+  checkout: (orderId, originUrl) => api.post('/online/orders/checkout', { orderId, originUrl }),
 };
 
 // v17 — Loyalty engine + AI Agent (Ash)
 export const loyaltyEngineAPI = {
   getConfig: () => api.get('/loyalty/config'),
   updateConfig: (data) => api.put('/loyalty/config', data),
-  earn: (data) => api.post('/loyalty/earn', data),
-  redeem: (data) => api.post('/loyalty/redeem', data),
   getBalance: (customerId) => api.get(`/loyalty/balance/${customerId}`),
-  getLedger: (customerId) => api.get(`/loyalty/ledger/${customerId}`),
-  getLiabilityReport: () => api.get('/loyalty/reports/liability'),
-  getFraudFlags: (status = 'open') => api.get('/loyalty/reports/fraud-flags', { params: { status } }),
-  resolveFraudFlag: (id, data) => api.put(`/loyalty/reports/fraud-flags/${id}`, data),
-  unlockLoyaltyAccount: (customerId) => api.post(`/loyalty/customers/${customerId}/unlock`),
 };
 export const agentAPI = {
   getSegments: () => api.get('/agent/segments'),
   getDecisions: (limit = 100) => api.get('/agent/decisions', { params: { limit } }),
   tick: () => api.post('/agent/tick'),
-  voiceCommand: (text, audioBase64, mime) => api.post('/agent/voice-command', { text, audioBase64, mime }),
-  getCatalog: () => api.get('/agent/voice-catalog'),
 };
 // Phase E+F — Autonomy config, Phone Agent, POs, A/B tests, Your Usual
 export const phaseEFAPI = {
   getAutonomy: () => api.get('/agent/autonomy'),
   updateAutonomy: (data) => api.put('/agent/autonomy', data),
-  getSmsQueue: () => api.get('/comms/sms-queue'),
-  autoConfirm: (resId) => api.post(`/comms/auto-confirm/${resId}`),
   voiceExtended: (text) => api.post('/agent/voice-extended', { text }),
-  autoPublishRoster: (weekStart) => api.post('/agent/auto-publish-roster', { weekStart }),
   tickExtended: () => api.post('/agent/tick-extended'),
   getCalls: () => api.get('/phone-agent/calls'),
   simulateCall: (caller, transcript) => api.post('/phone-agent/simulate', { caller, transcript }),
@@ -690,31 +679,20 @@ export const aiWave2API = {
 // v25 Suite — Enterprise / AI GM / Profit / Recipes / Franchise / Fraud / etc.
 export const v25API = {
   // Must-have
-  pushSync: (ops) => api.post('/v25/sync-queue', { ops }),
-  syncQueue: () => api.get('/v25/sync-queue'),
-  processSync: () => api.post('/v25/sync-queue/process'),
   exceptions: () => api.get('/v25/exceptions'),
-  sites: () => api.get('/v25/sites'),
   addSite: (data) => api.post('/v25/sites', data),
-  publish: (siteIds, bundle) => api.post('/v25/sites/publish', { siteIds, bundle }),
-  rollback: (pubId) => api.post(`/v25/sites/rollback/${pubId}`),
   hardware: () => api.get('/v25/hardware'),
-  heartbeat: (data) => api.post('/v25/hardware/heartbeat', data),
   disputes: () => api.get('/v25/disputes'),
   openDispute: (data) => api.post('/v25/disputes', data),
   attachEvidence: (id, notes) => api.post(`/v25/disputes/${id}/evidence`, { notes }),
   compareSuppliers: (item) => api.get('/v25/suppliers/compare', { params: { item } }),
-  addQuote: (data) => api.post('/v25/suppliers/quote', data),
   // Should-have
   kioskStart: (data) => api.post('/v25/kiosk/session', data),
   kioskAdd: (sid, item) => api.post(`/v25/kiosk/session/${sid}/add`, { item }),
   kioskSetCourse: (sid, data) => api.post(`/v25/kiosk/session/${sid}/course`, data),
   kioskCheckout: (sid) => api.post(`/v25/kiosk/session/${sid}/checkout`),
-  kioskList: () => api.get('/v25/kiosk/sessions'),
-  kioskUpsell: (sid) => api.post(`/v25/kiosk/session/${sid}/upsell`),
-  cfdCurrent: () => api.get('/v25/cfd/current'),
   substitute: (productId) => api.post('/v25/substitute', { productId }),
-  toggle86: (productId, eightySixed) => api.post(`/v25/products/${productId}/86`, { eightySixed }),
+  cfdCurrent: () => api.get('/v25/cfd/current'),
   churnRisk: () => api.get('/v25/recovery/churn-risk'),
   winBack: (customerIds, voucherValue) => api.post('/v25/recovery/win-back', { customerIds, voucherValue }),
   stationReadiness: () => api.get('/v25/station-readiness'),
@@ -738,7 +716,6 @@ export const v25API = {
   cancelSubMember: (id) => api.delete(`/v25/subscriptions/members/${id}`),
   // Gift cards live under v26API now — see below.
   // Tier 3
-  recipes: () => api.get('/v25/recipes/list'),
   upsertRecipe: (data) => api.post('/v25/recipes/upsert', data),
   getRecipe: (pid) => api.get(`/v25/recipes/${pid}`),
   predictiveOrders: () => api.post('/v25/predictive-orders'),
@@ -746,15 +723,12 @@ export const v25API = {
   logWaste: (data) => api.post('/v25/waste', data),
   wasteInsights: () => api.get('/v25/waste/insights'),
   // Tier 4
-  universalGuest: (id) => api.get(`/v25/guest/${id}`),
   concierge: (message) => api.post('/v25/concierge', { message }),
   reputation: () => api.get('/v25/reputation'),
   respondReview: (reviewId, response) => api.post('/v25/reputation/respond', { reviewId, response }),
-  recoveryAction: (data) => api.post('/v25/recovery-action', data),
   // Tier 5
   franchiseDashboard: () => api.get('/v25/franchise/dashboard'),
   benchmark: () => api.get('/v25/benchmark'),
-  warehouseExport: (collection, limit = 1000) => api.get('/v25/warehouse/export', { params: { collection, limit } }),
   fraudDetection: () => api.get('/v25/fraud-detection'),
 };
 
@@ -778,9 +752,8 @@ export const v26API = {
   updateVoucher: (vid, data) => api.patch(`/v26/vouchers/${vid}`, data),
   deleteVoucher: (vid) => api.delete(`/v26/vouchers/${vid}`),
   applyVoucher: (code, cart) => api.post(`/v26/vouchers/${code}/apply`, { cart }),
-  recordRedemption: (vid, data) => api.post(`/v26/vouchers/${vid}/redeem`, data),
   // Auto-apply promotions
-  applyPromos: (cart) => api.post('/v26/cart/apply-promos', { cart }),
+  applyPromos: (cart, orderType) => api.post('/v26/cart/apply-promos', { cart, orderType }),
   activePromos: () => api.get('/v26/promotions/active-now'),
   // Subscriptions
   updateSubPlan: (id, data) => api.patch(`/v26/subscriptions/plans/${id}`, data),
@@ -788,7 +761,6 @@ export const v26API = {
   // Gift cards
   listGiftCards: (status) => api.get('/v26/gift-cards', { params: status ? { status } : {} }),
   sellGift: (data) => api.post('/v26/gift-cards/sell', data),
-  assignGift: (codeOrId, customerId) => api.post(`/v26/gift-cards/${codeOrId}/assign`, { customerId }),
   lookupGift: (code) => api.get(`/v26/gift-cards/lookup/${code}`),
   activateGift: (code, data) => api.post(`/v26/gift-cards/${code}/activate`, data || {}),
   redeemGiftPartial: (code, amount, transactionId) => api.post(`/v26/gift-cards/${code}/redeem`, { amount, transactionId }),
@@ -798,16 +770,10 @@ export const v26API = {
   stopGiftCard: (code, reason) => api.post(`/v26/gift-cards/${code}/stop`, { reason }),
   reactivateGiftCard: (code) => api.post(`/v26/gift-cards/${code}/reactivate`),
   resendGiftCard: (code, email) => api.post(`/v26/gift-cards/${code}/resend`, email ? { email } : {}),
-  // Marketing emails
-  generateMarketingEmail: (data) => api.post('/v26/marketing/email/generate', data),
-  listMarketingEmails: () => api.get('/v26/marketing/emails'),
-  updateMarketingEmail: (id, data) => api.patch(`/v26/marketing/emails/${id}`, data),
-  deleteMarketingEmail: (id) => api.delete(`/v26/marketing/emails/${id}`),
   // Events
   listEvents: (upcomingOnly = false) => api.get('/v26/events', { params: { upcomingOnly } }),
   createEvent: (data) => api.post('/v26/events', data),
   updateEvent: (eid, data) => api.patch(`/v26/events/${eid}`, data),
-  deleteEvent: (eid) => api.delete(`/v26/events/${eid}`),
   bookEvent: (eid, data) => api.post(`/v26/events/${eid}/book`, data),
   eventAiPreview: (date) => api.post('/v26/events/ai-preview', { date }),
   // Staff availability
@@ -830,20 +796,14 @@ export const v15API = {
   mergeTabs: (id, otherTabId) => api.post(`/pos/tabs/${id}/merge`, { otherTabId }),
   splitTab: (id, ways, tableNumbers) => api.post(`/pos/tabs/${id}/split`, { ways, tableNumbers }),
   // Favorites
-  getFavorites: () => api.get('/pos/favorites'),
-  saveFavorites: (productIds) => api.post('/pos/favorites', { productIds }),
   // Variants
-  setVariants: (productId, data) => api.put(`/products/${productId}/variants`, data),
   // CSV import
-  bulkImport: (rows) => api.post('/items/bulk-import', { rows }),
   // Voice POS
   voiceOrder: (audioBase64, mime) => api.post('/pos/voice-order', { audioBase64, mime }),
   openDrawer: (data) => api.post('/pos/open-drawer', data),
   getDrawerEvents: () => api.get('/pos/drawer-events'),
   // Ask NUA
-  askNua: (question) => api.post('/ai/ask-nua', { question }),
   // Item image gen
-  generateImage: (name, cuisine) => api.post('/items/generate-image', { name, cuisine }),
   // Anomalies
   getAnomalies: () => api.get('/analytics/inventory-anomalies'),
   // Auto-roster
@@ -859,8 +819,6 @@ export const v15API = {
   // Heatmap & cohort
   getBookingHeatmap: () => api.get('/analytics/booking-heatmap'),
   getCohortRetention: () => api.get('/analytics/cohort-retention'),
-  // Audit
-  getAuditLogs: (limit = 200) => api.get('/audit/logs', { params: { limit } }),
   // 2FA
   setup2FA: () => api.post('/auth/2fa/setup'),
   verify2FA: (code) => api.post('/auth/2fa/verify', { code }),
@@ -869,7 +827,6 @@ export const v15API = {
   gdprExport: (customerId) => api.get(`/customers/${customerId}/gdpr-export`),
   gdprErase: (customerId) => api.delete(`/customers/${customerId}/gdpr-erase`),
   // BAS e-file
-  efileBas: (reportId, abn) => api.post(`/bas-gst/efile/${reportId}`, { abn }),
   // i18n
   getLabels: (lang) => api.get(`/i18n/labels/${lang}`),
 };
@@ -899,7 +856,6 @@ export const superAPI = {
   commitWeeklyRun: (body) => api.post('/super/weekly-runs', body),
   listWeeklyRuns: (params = {}) => api.get('/super/weekly-runs', { params }),
   markPaid: (id, data) => api.patch(`/super/weekly-runs/${id}`, data),
-  basLine: (params) => api.get('/super/bas-line', { params }),
   summary: (fy) => api.get('/super/summary', { params: fy ? { fy } : {} }),
 };
 
@@ -921,22 +877,16 @@ export const temperatureAPI = {
 
 // ── Table Courses / Send-nudge ──────────────────────────────────────────
 export const tableCoursesAPI = {
-  getSettings: () => api.get('/table-courses/settings'),
   updateSettings: (data) => api.put('/table-courses/settings', data),
   listStates: () => api.get('/table-courses/states'),
   upsertState: (data) => api.post('/table-courses/states', data),
   send: (data) => api.post('/table-courses/send', data),
-  listNotifications: (params) => api.get('/table-courses/notifications', { params }),
-  markNotifRead: (id) => api.post(`/table-courses/notifications/${id}/read`),
 };
 
 // ── Finalize batch (v27.7): pre-shift, day rules, marketing analytics,
 // channel controls, digital wallet, PDF exports, automation triggers ─────
 export const finalizeAPI = {
   preShiftBriefing: () => api.get('/preshift/briefing'),
-  getDayRules: () => api.get('/bookings/day-rules'),
-  updateDayRule: (weekday, data) => api.put(`/bookings/day-rules/${weekday}`, data),
-  promoQR: (params) => api.get('/marketing/promo-qr', { params }),
   marketingAnalytics: (days = 30) => api.get('/marketing/analytics', { params: { days } }),
   channelStates: () => api.get('/channels/state'),
   updateChannelState: (data) => api.post('/channels/state', data),
@@ -946,24 +896,15 @@ export const finalizeAPI = {
   guestWallet: (customerId) => api.get(`/customers/${customerId}/wallet`),
   guestWalletApplePkpassUrl: (customerId) => `${process.env.REACT_APP_BACKEND_URL}/api/customers/${customerId}/wallet/apple.pkpass`,
   guestWalletGoogle: (customerId) => api.get(`/customers/${customerId}/wallet/google`),
-  lookupByToken: (token) => api.post('/customers/lookup-by-token', { token }),
-  lowStockPdfUrl: () => `${process.env.REACT_APP_BACKEND_URL}/api/inventory/low-stock/pdf`,
-  aiPantryPdfUrl: () => `${process.env.REACT_APP_BACKEND_URL}/api/ai-pantry/order-sheet/pdf`,
-  listTriggers: () => api.get('/automations/triggers'),
-  createTrigger: (data) => api.post('/automations/triggers', data),
-  updateTrigger: (id, data) => api.patch(`/automations/triggers/${id}`, data),
-  deleteTrigger: (id) => api.delete(`/automations/triggers/${id}`),
-  aiSuggestAutomation: (prompt) => api.post('/automations/ai-suggest', { prompt }),
   gmbSync: (locationId) => api.post(`/locations/${locationId}/gmb-sync`),
 
   // Payroll (Australian compliance)
   payrunCalculate: (data) => api.post('/payroll/payrun/calculate', data),
   payrunCommit: (data) => api.post('/payroll/payrun/commit', data),
   payrollRegister: (days = 90) => api.get(`/payroll/register?days=${days}`),
-  payrollYtd: (staffId) => api.get(`/payroll/ytd/${staffId}`),
-  payslipPdfUrl: (runId, staffId) => `${process.env.REACT_APP_BACKEND_URL}/api/payroll/payslip/${runId}/${staffId}/pdf`,
-  stpBuild: (data) => api.post('/payroll/stp/build', data),
   rosterCompliance: (daysAhead = 14) => api.get(`/payroll/roster-compliance?days_ahead=${daysAhead}`),
+  payrollYtd: (staffId) => api.get(`/payroll/ytd/${staffId}`),
+  payslipPdf: (runId, staffId) => api.get(`/payroll/payslip/${runId}/${staffId}/pdf`, { responseType: 'blob' }),
 
   // Wallet credentials
   walletCredentialsStatus: () => api.get('/settings/wallet-credentials'),
@@ -980,16 +921,11 @@ export const finalizeAPI = {
   issueVoucher: (data) => api.post('/vouchers', data),
   bulkVoucher: (data) => api.post('/vouchers/bulk', data),
   listVouchers: (params = {}) => api.get('/vouchers', { params }),
-  getVoucher: (id) => api.get(`/vouchers/${id}`),
-  lookupVoucher: (code) => api.get(`/vouchers/lookup/${encodeURIComponent(code)}`),
   validateVoucher: (data) => api.post('/vouchers/validate', data),
-  redeemVoucher: (data) => api.post('/vouchers/redeem', data),
   revokeVoucher: (id, reason) => api.post(`/vouchers/${id}/revoke`, { reason }),
 
   // Unified Wallet
   walletGet: (customerId) => api.get(`/wallet/${customerId}`),
-  walletCredit: (customerId, data) => api.post(`/wallet/${customerId}/credit`, { customerId, ...data }),
-  walletDebit: (customerId, data) => api.post(`/wallet/${customerId}/debit`, { customerId, ...data }),
   walletTimeline: (customerId) => api.get(`/wallet/${customerId}/timeline`),
 
   // Flexible Refunds
@@ -1003,14 +939,11 @@ export const finalizeAPI = {
 
   // Loyalty 2.0
   loyaltyStatus: (customerId) => api.get(`/loyalty/status/${customerId}`),
-  loyaltyAward: (data) => api.post('/loyalty/award', data),
 
   // AI Personalisation
   personalisation: (customerId) => api.get(`/personalisation/${customerId}`),
 
   // Gift Card 2.0
-  scheduleGift: (data) => api.post('/gift-cards/schedule', data),
-  reloadGift: (voucherId, amount) => api.post(`/gift-cards/${voucherId}/reload`, { amount }),
 };
 
 // NUA — daily briefing, insights, agent chat (AI surface reused by the Owner Dashboard app)
@@ -1018,10 +951,45 @@ export const nuaAPI = {
   getBriefing: (force) => api.get('/nua/briefing', { params: force ? { force: true } : {} }),
   regenerateBriefing: () => api.post('/nua/briefing/regenerate'),
   getInsights: (limit = 50) => api.get(`/nua/insights?limit=${limit}`),
-  getInsightsSummary: () => api.get('/nua/insights/summary'),
-  dismissInsight: (id) => api.post(`/nua/insights/${id}/dismiss`),
   getHealthScore: () => api.get('/nua/health-score'),
-  chat: (data) => api.post('/nua/chat', data),
+};
+
+// Multi-Business / Multi-Tenant — create/list/edit businesses, tenant data
+// export, and the one-time businessId backfill migration for pre-tenancy data
+export const businessAPI = {
+  create: (data) => api.post('/business/create', data),
+  list: () => api.get('/business/list'),
+  update: (id, data) => api.put(`/business/${id}`, data),
+  summary: (id) => api.get(`/business/${id}/summary`),
+  exportData: (id, collection) => api.get(`/business/${id}/export`, { params: collection ? { collection } : {} }),
+  backfillTenant: () => api.post('/business/backfill-tenant'),
+};
+
+// Customer Identity — the free base layer + per-add-on entitlements
+// (bookings-guests, loyalty, punch-card, marketing). Every checkout and
+// booking already writes into this layer; this is its admin surface.
+export const identityAPI = {
+  getEntitlements: () => api.get('/identity/entitlements'),
+  setEntitlements: (data) => api.put('/identity/entitlements', data),
+  search: (search) => api.get('/identity/customers', { params: search ? { search } : {} }),
+  getCustomer: (id) => api.get(`/identity/customers/${id}`),
+  migrateLegacyCrm: () => api.post('/identity/migrate-legacy-crm'),
+};
+
+// Passwordless guest identity — one verified phone session any guest-facing
+// surface (booking, waitlist, online ordering) can use to prefill forms
+// instead of asking a returning guest to re-type their details every time.
+export const guestSessionAPI = {
+  requestCode: (phone) => api.post('/guest/session/request-code', { phone }),
+  verify: (phone, code) => api.post('/guest/session/verify', { phone, code }),
+  me: (token) => api.get('/guest/session/me', { headers: { Authorization: `Bearer ${token}` } }),
+};
+
+// What's New — release notes for owners/managers
+export const changelogAPI = {
+  list: (window) => api.get('/changelog', { params: window ? { window } : {} }),
+  upcoming: () => api.get('/changelog/upcoming'),
+  summary: () => api.get('/changelog/summary'),
 };
 
 export default api;

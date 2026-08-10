@@ -2,16 +2,16 @@
 Nano Banana image gen, anomaly detection, auto-rostering, audit log, variants, CSV import,
 cohort retention, booking heatmap, 2FA, GDPR.
 """
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Depends
 from deps import get_user, require_owner, require_owner_or_manager, require_permission
 from database import db
+from middleware.actor_context import tenant_scope_filter
 from datetime import datetime, timezone, timedelta
 import logging
 import uuid
 import os
 import base64
 import json
-import secrets
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -230,16 +230,16 @@ async def open_cash_drawer(data: dict, user: dict = Depends(require_permission("
         await log_event(entity_type="cash_drawer", entity_id=event["id"], action="executed",
                         after=event, memo=f"No-sale drawer open — {reason}" + (f" ({note})" if note else ""),
                         severity="notice")
-    except Exception:
-        pass
+    except Exception as e:
+        from utils.errors import log_and_continue
+        log_and_continue(logger, f"No-sale drawer-open audit log write failed for {event['id']}", e)
     return event
 
 
 @router.get("/pos/drawer-events")
 async def list_drawer_events(user: dict = Depends(require_owner_or_manager)):
     """Owner/manager oversight — every no-sale drawer open, who and why."""
-    business_id = user.get("businessId") or "default"
-    rows = await db.drawer_events.find({"businessId": business_id}, {"_id": 0}).sort("openedAt", -1).to_list(200)
+    rows = await db.drawer_events.find(tenant_scope_filter(user.get("businessId")), {"_id": 0}).sort("openedAt", -1).to_list(200)
     return rows
 
 
@@ -733,25 +733,6 @@ async def cohort_retention(_: dict = Depends(require_owner_or_manager)):
 # =============================================================================
 # AUDIT LOG
 # =============================================================================
-@router.get("/audit/logs")
-async def get_audit_logs( limit: int = 200, user: dict = Depends(require_owner_or_manager)):
-    # Aggregate from multiple sources: comp_voids, refunds, login attempts
-    logs = []
-    cv = await db.comp_voids.find({}, {"_id": 0}).sort("processedAt", -1).to_list(100)
-    for c in cv:
-        logs.append({"id": c["id"], "type": c.get("type", "comp").upper(), "user": c.get("processedBy", "?"),
-                     "details": f"${c.get('amount',0):.2f} - {c.get('reason', '')}",
-                     "timestamp": c.get("processedAt")})
-    refunds = await db.refunds.find({}, {"_id": 0}).sort("createdAt", -1).to_list(100)
-    for r in refunds:
-        logs.append({"id": r.get("id", str(uuid.uuid4())[:8]), "type": "REFUND", "user": r.get("processedBy", "?"),
-                     "details": f"${r.get('amount',0):.2f} - {r.get('reason', '')}",
-                     "timestamp": r.get("createdAt")})
-    # Sort by timestamp desc
-    logs.sort(key=lambda x: x.get("timestamp") or "", reverse=True)
-    return logs[:limit]
-
-
 # =============================================================================
 # 2FA (TOTP)
 #

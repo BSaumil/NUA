@@ -3,7 +3,7 @@ NUA Cross-Module Rules Engine — REST endpoints.
 """
 from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any
 from datetime import datetime, timezone
 from database import db
 from deps import get_user, require_owner_or_manager
@@ -138,6 +138,46 @@ async def emit(body: dict, _: dict = Depends(get_user)):
     if event_type not in re_svc.EVENT_CATALOG:
         raise HTTPException(400, f"Unknown event type: {event_type}")
     return await re_svc.emit_event(event_type, body.get("payload") or {}, body.get("entityId"))
+
+
+@router.get("/predictive/stockouts")
+async def predictive_stockouts(lookback_days: int = 7, horizon_days: float = 2.0, _: dict = Depends(get_user)):
+    """Preview-only — projects days-remaining from recent sales velocity
+    without touching db.rule_events, so checking this never affects the
+    hourly scheduler's own dedupe window for the real scan."""
+    from services import predictive_signals
+    predictions = await predictive_signals.compute_predicted_stockouts(
+        lookback_days=lookback_days, horizon_days=horizon_days)
+    return {"predictions": predictions}
+
+
+@router.post("/predictive/scan")
+async def run_predictive_scan(_: dict = Depends(require_owner_or_manager)):
+    """Manually trigger the same predictive scan the hourly scheduler runs
+    — emits inventory.predicted_stockout for anything newly at risk, same
+    dedupe window as the automatic pass."""
+    from services import predictive_signals
+    return await predictive_signals.scan_and_emit_predicted_stockouts()
+
+
+@router.get("/ops/error-status")
+async def ops_error_status(_: dict = Depends(get_user)):
+    """Preview-only — current error counts in the rolling window without
+    touching db.rule_events, so checking this never affects the hourly
+    scheduler's own dedupe window for the real scan."""
+    from services import ops_signals
+    server = await ops_signals.check_server_errors()
+    client = await ops_signals.check_client_errors()
+    return {"server": server, "client": client}
+
+
+@router.post("/ops/scan")
+async def run_ops_scan(_: dict = Depends(require_owner_or_manager)):
+    """Manually trigger the same observability scan the hourly scheduler
+    runs — emits ops.error_spike for whichever source just crossed its
+    threshold and isn't already inside its dedupe window."""
+    from services import ops_signals
+    return await ops_signals.scan_and_emit()
 
 
 @router.post("/simulate")

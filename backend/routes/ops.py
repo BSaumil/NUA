@@ -5,12 +5,12 @@ Two audiences: a deep health check for uptime monitors and load balancers
 owner, who has no other way to see that something has been failing quietly
 since 3am.
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 
 from database import db
 from deps import require_owner, require_owner_or_manager
-from services.observability import check_health
+from services.observability import check_health, record_client_error, _actor_from_request
 from services import retention
 from services import backup
 
@@ -21,6 +21,33 @@ router = APIRouter()
 @router.get("/healthz")
 async def health():
     return await check_health()
+
+
+@router.post("/ops/client-errors")
+async def report_client_error(payload: dict, request: Request):
+    """A browser reports its own crash — window.onerror / unhandledrejection,
+    wired up in src/lib/errorReporting.js. Public and unauthenticated by
+    design: the guest ordering/tracking pages can crash too, and a reporting
+    endpoint that requires a login can't hear about the login screen itself
+    breaking. Never raises back to the reporter — losing an error report is
+    a much smaller problem than a reporting call becoming a second error.
+    """
+    await record_client_error(payload or {}, _actor_from_request(request))
+    return {"recorded": True}
+
+
+@router.get("/ops/client-errors")
+async def recent_client_errors(limit: int = 50, _: dict = Depends(require_owner_or_manager)):
+    """The last N browser-side errors, newest first — same audience and
+    shape as /ops/errors, just the client half of the picture."""
+    limit = max(1, min(limit, 200))
+    rows = await db.client_error_log.find({}, {"_id": 0}).sort("at", -1).to_list(limit)
+    for r in rows:
+        at = r.get("at")
+        r["at"] = at.isoformat() if hasattr(at, "isoformat") else at
+        exp = r.get("expiresAt")
+        r["expiresAt"] = exp.isoformat() if hasattr(exp, "isoformat") else exp
+    return {"errors": rows, "count": len(rows)}
 
 
 @router.get("/ops/errors")

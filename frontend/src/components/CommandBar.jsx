@@ -41,7 +41,7 @@ const DESTINATIONS = [
   { label: 'Gift Cards', path: '/gift-cards', keywords: 'sell voucher card barcode reload stop resend', roles: ['owner', 'manager', 'cashier'] },
   { label: 'Pre-Shift Briefing', path: '/pre-shift', keywords: 'briefing vips 86', roles: ['owner', 'manager', 'kitchen'] },
   { label: 'NUA AI', path: '/ash', keywords: 'ai assistant intelligence brain ash', roles: ['owner', 'manager'] },
-  { label: 'Automation Engine', path: '/automation', keywords: 'rules triggers', roles: ['owner', 'manager'] },
+  { label: 'Automation Brain', path: '/automation-triggers', keywords: 'rules triggers automation', roles: ['owner', 'manager'] },
   { label: 'Approvals', path: '/approvals', keywords: 'pending requests', roles: ['owner', 'manager'] },
   { label: 'Audit Log', path: '/audit', keywords: 'history changes who', roles: ['owner'] },
   { label: 'Integrations', path: '/integrations', keywords: 'xero deliveroo connect api', roles: ['owner'] },

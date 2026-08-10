@@ -73,7 +73,7 @@ export default function Reservations() {
       ]);
       setReservations(resRes.data);
       setFloorPlans(fpRes.data);
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); toast.error('Could not load bookings'); }
   }, [selectedDate, statusFilter]);
 
   useEffect(() => { fetchData(); }, [fetchData]);

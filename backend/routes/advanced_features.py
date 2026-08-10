@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Depends
 from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone, timedelta
@@ -159,8 +159,6 @@ async def toggle_training_mode(data: dict, _: dict = Depends(require_owner_or_ma
 @router.get("/reports/end-of-day")
 async def get_end_of_day_report( period: str = "today", start_date: str = None, end_date: str = None, _: dict = Depends(require_owner_or_manager)):
 
-    # Build date filter
-    query = {}
     now = datetime.now(timezone.utc)
     if period == "today":
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -444,6 +442,146 @@ def _split_first_name(full_name: str) -> str:
     return (full_name or "").strip().split(" ")[0] or "there"
 
 
+# ============ AUDIENCE SEGMENTS ============
+# Campaign targeting used to mean "all customers" or "one loyalty tier" —
+# nothing in between. Rules are intentionally flat (AND'd together) rather
+# than a general expression engine: the fields are exactly the ones the
+# Customer record already carries (no time-windowed spend/visit aggregation
+# over raw transactions, which would need new infrastructure this doesn't
+# have yet).
+def _build_segment_query(rules: dict) -> dict:
+    q: dict = {}
+    if rules.get("tier"):
+        q["membershipTier"] = rules["tier"]
+    if rules.get("minSpend") not in (None, "", 0):
+        q["totalSpent"] = {"$gte": float(rules["minSpend"])}
+    if rules.get("minVisits") not in (None, "", 0):
+        q["visits"] = {"$gte": int(rules["minVisits"])}
+    if rules.get("inactiveForDays") not in (None, ""):
+        # "Hasn't visited in N days" — win-back targeting. Customers with no
+        # lastVisitDate at all (never actually visited) count as inactive.
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=int(rules["inactiveForDays"]))).date().isoformat()
+        q["$or"] = [{"lastVisitDate": {"$lt": cutoff}}, {"lastVisitDate": None}, {"lastVisitDate": {"$exists": False}}]
+    return q
+
+
+async def _customer_ids_spending_in_window(days: int, min_spend: float) -> set:
+    """"Spent >= $X in the last N days" — totalSpent on the customer record
+    is a lifetime total, so this can't be a customer-field filter; it needs
+    an aggregation over actual transactions in the window."""
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+    pipeline = [
+        {"$match": {"customerId": {"$ne": None}, "timestamp": {"$gte": cutoff}}},
+        {"$group": {"_id": "$customerId", "spend": {"$sum": "$total"}}},
+        {"$match": {"spend": {"$gte": min_spend}}},
+    ]
+    rows = await db.transactions.aggregate(pipeline).to_list(20000)
+    return {r["_id"] for r in rows}
+
+
+async def _resolve_segment_customers(rules: dict, *, limit: int = 10000) -> list:
+    query = _build_segment_query(rules)
+    window_days = rules.get("spendInLastDays")
+    window_min = rules.get("minSpendInWindow")
+    if window_days not in (None, "") and window_min not in (None, "", 0):
+        ids = await _customer_ids_spending_in_window(int(window_days), float(window_min))
+        query["id"] = {"$in": list(ids)}
+    return await db.customers.find(query, {"_id": 0, "password_hash": 0}).to_list(limit)
+
+
+@router.post("/marketing/segments/preview")
+async def preview_segment(data: dict, _: dict = Depends(require_owner_or_manager)):
+    rules = data.get("rules") or {}
+    customers = await _resolve_segment_customers(rules)
+    sample = [{"id": c["id"], "name": c.get("name"), "email": c.get("email"),
+               "totalSpent": c.get("totalSpent", 0), "visits": c.get("visits", 0),
+               "membershipTier": c.get("membershipTier")} for c in customers[:20]]
+    return {"count": len(customers), "sample": sample}
+
+
+@router.get("/marketing/segments")
+async def list_segments(_: dict = Depends(require_owner_or_manager)):
+    return await db.customer_segments.find({}, {"_id": 0}).sort("createdAt", -1).to_list(200)
+
+
+@router.get("/marketing/segments/{segment_id}/customers")
+async def get_segment_customers(segment_id: str, limit: int = 500, _: dict = Depends(require_owner_or_manager)):
+    """The full matching list, not just preview's 20-row sample — for an
+    owner who wants to actually see (or export) who's in a segment."""
+    segment = await db.customer_segments.find_one({"id": segment_id}, {"_id": 0})
+    if not segment:
+        raise HTTPException(status_code=404, detail="Segment not found")
+    customers = await _resolve_segment_customers(segment.get("rules") or {}, limit=min(limit, 5000))
+    return {
+        "segment": segment,
+        "count": len(customers),
+        "customers": [{"id": c["id"], "name": c.get("name"), "email": c.get("email"),
+                       "totalSpent": c.get("totalSpent", 0), "visits": c.get("visits", 0),
+                       "membershipTier": c.get("membershipTier")} for c in customers],
+    }
+
+
+@router.put("/marketing/segments/{segment_id}")
+async def update_segment(segment_id: str, data: dict, user: dict = Depends(require_owner_or_manager)):
+    existing = await db.customer_segments.find_one({"id": segment_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Segment not found")
+    name = (data.get("name") or existing["name"]).strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Segment name is required")
+    updated = {**existing, "name": name, "rules": data.get("rules", existing["rules"]),
+               "updatedBy": user["id"], "updatedAt": datetime.now(timezone.utc).isoformat()}
+    await db.customer_segments.replace_one({"id": segment_id}, updated)
+    return updated
+
+
+@router.post("/marketing/segments")
+async def create_segment(data: dict, user: dict = Depends(require_owner_or_manager)):
+    name = (data.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Segment name is required")
+    rules = data.get("rules") or {}
+    segment = {
+        "id": f"SEG-{str(uuid.uuid4())[:8].upper()}",
+        "name": name, "rules": rules,
+        "createdBy": user["id"], "createdAt": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.customer_segments.insert_one(dict(segment))
+    segment.pop("_id", None)
+    return segment
+
+
+@router.delete("/marketing/segments/{segment_id}")
+async def delete_segment(segment_id: str, _: dict = Depends(require_owner_or_manager)):
+    result = await db.customer_segments.delete_one({"id": segment_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Segment not found")
+    return {"deleted": True}
+
+
+async def _campaign_recipients(campaign: dict) -> list:
+    """Resolve a campaign's actual recipient list against the LIVE customer
+    collection. Older campaigns only ever set targetTier; segmentId (or an
+    inline rules dict) is additive, not a replacement — either narrows who
+    a campaign reaches, never both at once.
+
+    This used to query db.members, a collection nothing has written to
+    since the member-portal router was removed several rounds ago — on any
+    deployment created after that removal, every campaign silently had 0
+    real recipients. db.customers is the actual, live guest record.
+    """
+    if campaign.get("segmentId"):
+        segment = await db.customer_segments.find_one({"id": campaign["segmentId"]}, {"_id": 0})
+        rules = (segment or {}).get("rules") or {}
+    elif campaign.get("segmentRules"):
+        rules = campaign["segmentRules"]
+    else:
+        rules = {}
+    if campaign.get("targetTier"):
+        rules = {**rules, "tier": campaign["targetTier"]}
+    return await _resolve_segment_customers(rules)
+
+
 @router.post("/marketing/campaigns")
 async def create_campaign(data: dict, user: dict = Depends(require_owner_or_manager)):
 
@@ -452,7 +590,9 @@ async def create_campaign(data: dict, user: dict = Depends(require_owner_or_mana
         "name": data.get("name", ""),
         "subject": data.get("subject", ""),
         "body": data.get("body", ""),
-        "targetTier": data.get("targetTier"),  # None = all members
+        "targetTier": data.get("targetTier"),  # None = all customers
+        "segmentId": data.get("segmentId"),  # optional saved segment, narrows targetTier further
+        "segmentRules": data.get("segmentRules"),  # or inline rules, for a one-off segment never saved
         "status": "draft",
         "createdBy": user["id"],
         "createdAt": datetime.now(timezone.utc).isoformat(),
@@ -501,9 +641,26 @@ async def create_campaign(data: dict, user: dict = Depends(require_owner_or_mana
         if voucher_doc["manualCode"] not in campaign["body"]:
             campaign["body"] = (campaign["body"] or "") + redeem_blurb
 
-    # Count target recipients
-    query = {} if not campaign["targetTier"] else {"tier": campaign["targetTier"]}
-    campaign["recipientCount"] = await db.members.count_documents(query)
+    # Recurring: a saved segment re-resolved fresh on every run (that's the
+    # entire point — "newly inactive" or "just crossed $X spend" changes
+    # week to week) instead of a one-off snapshot sent once and done.
+    # There's no background scheduler in this codebase — automations
+    # (agent_tick, automation triggers) are all "due work runs when
+    # something calls the tick endpoint," not self-scheduling, and this
+    # follows the same established pattern rather than introducing a new one.
+    recurring_req = data.get("recurring") or {}
+    if recurring_req.get("enabled"):
+        interval_days = max(1, int(recurring_req.get("intervalDays") or 7))
+        campaign["recurring"] = {"enabled": True, "intervalDays": interval_days}
+        campaign["status"] = "recurring"
+        campaign["nextRunAt"] = datetime.now(timezone.utc).isoformat()
+        campaign["lastRunAt"] = None
+        campaign["runCount"] = 0
+    else:
+        campaign["recurring"] = None
+
+    # Count target recipients against the live customer collection.
+    campaign["recipientCount"] = len(await _campaign_recipients(campaign))
     await db.campaigns.insert_one(dict(campaign))
     campaign.pop("_id", None)
     return campaign
@@ -513,16 +670,12 @@ async def get_campaigns(_: dict = Depends(require_owner_or_manager)):
     campaigns = await db.campaigns.find({}, {"_id": 0}).sort("createdAt", -1).to_list(100)
     return campaigns
 
-@router.post("/marketing/campaigns/{campaign_id}/send")
-async def send_campaign(campaign_id: str, _: dict = Depends(require_owner_or_manager)):
 
-    campaign = await db.campaigns.find_one({"id": campaign_id}, {"_id": 0})
-    if not campaign:
-        raise HTTPException(status_code=404, detail="Campaign not found")
-
-    query = {} if not campaign.get("targetTier") else {"tier": campaign["targetTier"]}
-    members = await db.members.find(query, {"_id": 0, "password_hash": 0}).to_list(10000)
-
+async def _send_campaign_emails(campaign: dict) -> dict:
+    """The actual send loop, shared by the one-off Send button and the
+    recurring run/run-due path — a recurring campaign never reaches
+    "sent" as a terminal status, it just runs again."""
+    members = await _campaign_recipients(campaign)
     from utils.notifications import send_email
 
     # Log + best-effort send each recipient. A delivery failure on one
@@ -541,21 +694,76 @@ async def send_campaign(campaign_id: str, _: dict = Depends(require_owner_or_man
         if receipt.get("delivered"):
             delivered_count += 1
         await db.campaign_sends.insert_one({
-            "campaignId": campaign_id, "memberId": m["id"],
+            "campaignId": campaign["id"], "memberId": m["id"],
             "email": m.get("email"), "status": "sent" if receipt.get("delivered") else "queued",
             "deliveryReason": receipt.get("reason"),
             "sentAt": datetime.now(timezone.utc).isoformat(),
         })
+    return {"recipientCount": len(members), "deliveredCount": delivered_count}
 
+
+@router.post("/marketing/campaigns/{campaign_id}/send")
+async def send_campaign(campaign_id: str, _: dict = Depends(require_owner_or_manager)):
+    campaign = await db.campaigns.find_one({"id": campaign_id}, {"_id": 0})
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if campaign.get("status") == "recurring":
+        raise HTTPException(status_code=400, detail="Recurring campaigns run automatically — use run-now instead")
+
+    result = await _send_campaign_emails(campaign)
     await db.campaigns.update_one(
         {"id": campaign_id},
         {"$set": {"status": "sent", "sentAt": datetime.now(timezone.utc).isoformat(),
-                   "recipientCount": len(members), "deliveredCount": delivered_count}}
+                   "recipientCount": result["recipientCount"], "deliveredCount": result["deliveredCount"]}}
     )
-
-    return {"message": f"Campaign sent to {len(members)} members ({delivered_count} delivered via SendGrid, "
+    return {"message": f"Campaign sent to {result['recipientCount']} members ({result['deliveredCount']} delivered via SendGrid, "
                         f"rest queued — configure SENDGRID_API_KEY to send live)",
-            "recipientCount": len(members), "deliveredCount": delivered_count}
+            **result}
+
+
+async def _run_recurring_campaign(campaign: dict) -> dict:
+    result = await _send_campaign_emails(campaign)
+    interval_days = campaign.get("recurring", {}).get("intervalDays", 7)
+    now = datetime.now(timezone.utc)
+    await db.campaigns.update_one(
+        {"id": campaign["id"]},
+        {"$set": {"lastRunAt": now.isoformat(),
+                   "nextRunAt": (now + timedelta(days=interval_days)).isoformat(),
+                   "recipientCount": result["recipientCount"], "deliveredCount": result["deliveredCount"]},
+         "$inc": {"runCount": 1}}
+    )
+    return result
+
+
+@router.post("/marketing/campaigns/{campaign_id}/run-now")
+async def run_campaign_now(campaign_id: str, _: dict = Depends(require_owner_or_manager)):
+    """Manually fire one recurring campaign immediately, without waiting
+    for its schedule — same effect as run-due picking it up, just now."""
+    campaign = await db.campaigns.find_one({"id": campaign_id}, {"_id": 0})
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if campaign.get("status") != "recurring":
+        raise HTTPException(status_code=400, detail="Only recurring campaigns can be run this way")
+    result = await _run_recurring_campaign(campaign)
+    return {"message": f"Sent to {result['recipientCount']} members", **result}
+
+
+@router.post("/marketing/campaigns/run-due")
+async def run_due_campaigns(_: dict = Depends(require_owner_or_manager)):
+    """Process every recurring campaign whose nextRunAt has passed. No
+    background scheduler exists in this codebase (see agent_tick) — this
+    is meant to be called periodically the same way, or via the "Run due
+    campaigns" button in Email Marketing."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    due = await db.campaigns.find(
+        {"status": "recurring", "nextRunAt": {"$lte": now_iso}}, {"_id": 0}
+    ).to_list(200)
+    results = []
+    for campaign in due:
+        result = await _run_recurring_campaign(campaign)
+        results.append({"campaignId": campaign["id"], "name": campaign["name"], **result})
+    return {"ran": len(results), "campaigns": results}
+
 
 @router.delete("/marketing/campaigns/{campaign_id}")
 async def delete_campaign(campaign_id: str, _: dict = Depends(require_owner_or_manager)):

@@ -2,12 +2,41 @@
 Universal audit / history / restore endpoints.
 """
 from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi.responses import Response
 from typing import Optional
 from deps import get_user, require_owner_or_manager, require_owner
 from services import audit_service, entity_service
 from database import db
+from middleware.actor_context import tenant_scope_filter
+import csv
+import io
 
 router = APIRouter(prefix="/audit")
+
+# entity_type (what audit events are tagged with, e.g. from stamped_update's
+# entity_type= kwarg) -> the actual Mongo collection name. Restoring a
+# version needs the real collection, and the two names diverge often enough
+# (singular vs. plural, "category" -> "categories") that guessing it
+# client-side would be a good way to silently restore into the wrong
+# collection. Callers that already know the right collection can still pass
+# ?collection= explicitly to override this.
+ENTITY_TYPE_TO_COLLECTION = {
+    "customer": "customers",
+    "product": "products",
+    "category": "categories",
+    "stock_unit": "stock_units",
+    "sell_variant": "sell_variants",
+    "wastage_event": "wastage_events",
+    "approval": "approvals",
+    "open_container": "open_containers",
+    "journal_entry": "journal_entries",
+    "ash_plan": "ash_plans",
+    "cash_drawer": "cash_drawers",
+    "kitchen_order": "kitchen_orders",
+    "stocktake_reconcile": "stocktake_reconciles",
+    "transaction": "transactions",
+    "loyalty_fraud_flag": "loyalty_fraud_flags",
+}
 
 
 @router.get("/events")
@@ -33,9 +62,12 @@ async def history(entity_type: str, entity_id: str, user: dict = Depends(get_use
 
 @router.post("/restore/{entity_type}/{entity_id}/{version}")
 async def restore(entity_type: str, entity_id: str, version: int,
-                  collection: str = Query(...),
+                  collection: Optional[str] = Query(None),
                   _: dict = Depends(require_owner_or_manager)):
-    r = await entity_service.restore_version(collection, entity_type, entity_id, version)
+    coll_name = collection or ENTITY_TYPE_TO_COLLECTION.get(entity_type)
+    if not coll_name:
+        raise HTTPException(400, f"Unknown entity_type '{entity_type}' — pass ?collection= explicitly")
+    r = await entity_service.restore_version(coll_name, entity_type, entity_id, version)
     if not r:
         raise HTTPException(404, "Version not found")
     return r
@@ -56,7 +88,11 @@ async def gdpr_purge(entity_type: str, entity_id: str,
 async def summary(user: dict = Depends(get_user)):
     """Quick actor / action mix over the recent audit stream."""
     business_id = user.get("businessId") or "default"
-    match = {"$match": {"businessId": business_id}}
+    # tenant_scope_filter, not a plain equality match, so events written
+    # before tenant stamping still count instead of vanishing from a
+    # not-yet-backfilled business's summary.
+    scope = tenant_scope_filter(business_id)
+    match = {"$match": scope}
     pipeline_action = [match, {"$group": {"_id": "$action", "count": {"$sum": 1}}}, {"$sort": {"count": -1}}]
     pipeline_type = [match, {"$group": {"_id": "$entityType", "count": {"$sum": 1}}}, {"$sort": {"count": -1}}, {"$limit": 20}]
     pipeline_actor = [match, {"$group": {"_id": "$actor", "count": {"$sum": 1}}}, {"$sort": {"count": -1}}, {"$limit": 10}]
@@ -64,5 +100,39 @@ async def summary(user: dict = Depends(get_user)):
         "byAction": await db.audit_events.aggregate(pipeline_action).to_list(20),
         "byEntity": await db.audit_events.aggregate(pipeline_type).to_list(20),
         "byActor": await db.audit_events.aggregate(pipeline_actor).to_list(10),
-        "total": await db.audit_events.count_documents({"businessId": business_id}),
+        "total": await db.audit_events.count_documents(scope),
     }
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Compliance export — the approval queue, rule firings, and trust ladder
+# already record every autonomous decision individually; this assembles
+# them into one chronological, exportable trail for a date range instead
+# of an operator having to piece it together from three different screens.
+# ═════════════════════════════════════════════════════════════════════════
+@router.get("/compliance-report")
+async def compliance_report(start: Optional[str] = None, end: Optional[str] = None,
+                            user: dict = Depends(require_owner)):
+    from services import compliance_export
+    return await compliance_export.build_report(
+        business_id=user.get("businessId"), start_date=start, end_date=end)
+
+
+@router.get("/compliance-export.csv")
+async def compliance_export_csv(start: Optional[str] = None, end: Optional[str] = None,
+                                user: dict = Depends(require_owner)):
+    from services import compliance_export
+    report = await compliance_export.build_report(
+        business_id=user.get("businessId"), start_date=start, end_date=end)
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["At", "Kind", "Source", "Summary", "Actor", "Decided By", "Status", "Reference"])
+    for row in report["timeline"]:
+        writer.writerow([row["at"], row["kind"], row["source"], row["summary"],
+                         row.get("actor"), row.get("decidedBy"), row["status"], row.get("reference")])
+
+    range_label = f"{start or 'all-time'}_to_{end or 'now'}".replace(" ", "_")
+    range_label = range_label.encode("ascii", "ignore").decode("ascii") or "export"
+    return Response(content=buf.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename=compliance-{range_label}.csv"})

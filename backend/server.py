@@ -7,7 +7,7 @@ from starlette.middleware.cors import CORSMiddleware
 import logging
 import os
 
-from database import db, client
+from database import client
 
 from routes.products import router as products_router
 from routes.transactions import router as transactions_router
@@ -17,7 +17,6 @@ from routes.reservations import router as reservations_router
 from routes.kitchen import router as kitchen_router
 from routes.coursing import router as coursing_router
 from routes.analytics import router as analytics_router
-from routes.automation import router as automation_router
 from routes.settings import router as settings_router
 from routes.loyalty import router as loyalty_router
 from routes.public import router as public_router
@@ -25,7 +24,6 @@ from routes.table_ordering import router as table_ordering_router
 from routes.integrations import router as integrations_router
 from routes.auth import router as auth_router, seed_admin
 from routes.ai_pantry import router as ai_pantry_router
-from routes.members import router as members_router
 from routes.multi_tenant import router as multi_tenant_router, seed_default_business
 from routes.advanced_features import router as advanced_features_router
 from routes.realtime import router as realtime_router
@@ -42,6 +40,7 @@ from routes.items_system import router as items_system_router
 from routes.v15_features import router as v15_router
 from routes.loyalty_engine import router as loyalty_engine_router
 from routes.loyalty_v2 import router as loyalty_v2_router
+from routes.guest_session import router as guest_session_router
 from routes.measured_inventory import router as measured_inventory_router
 from routes.notifications import router as notifications_router
 from routes.phase_ef import router as phase_ef_router
@@ -64,6 +63,7 @@ from routes.approvals import router as approvals_router
 from routes.nua import router as nua_router
 from routes.hq import router as hq_router
 from routes.ops import router as ops_router
+from routes.changelog import router as changelog_router
 from middleware.license_middleware import LicenseEnforcementMiddleware
 from middleware.actor_context import ActorContextMiddleware
 
@@ -81,17 +81,16 @@ api_router.include_router(reservations_router)
 api_router.include_router(kitchen_router)
 api_router.include_router(coursing_router)
 api_router.include_router(analytics_router)
-api_router.include_router(automation_router)
 api_router.include_router(settings_router)
 api_router.include_router(loyalty_router)
 api_router.include_router(loyalty_v2_router)
+api_router.include_router(guest_session_router)
 api_router.include_router(measured_inventory_router)
 api_router.include_router(notifications_router)
 api_router.include_router(public_router)
 api_router.include_router(table_ordering_router)
 api_router.include_router(integrations_router)
 api_router.include_router(ai_pantry_router)
-api_router.include_router(members_router)
 api_router.include_router(advanced_features_router)  # Must be before multi_tenant to avoid /business/settings conflict
 api_router.include_router(realtime_router)
 api_router.include_router(staff_mgmt_router)
@@ -127,6 +126,7 @@ api_router.include_router(nua_router)
 api_router.include_router(hq_router)
 api_router.include_router(multi_tenant_router)
 api_router.include_router(ops_router)
+api_router.include_router(changelog_router)
 
 @api_router.get("/")
 async def root():
@@ -196,15 +196,28 @@ PUBLIC_API_PREFIXES = (
     "/api/public/",              # booking portal: menu, slots, book, waitlist, events
     "/api/table/",               # QR table ordering: menu, place order, order status
     "/api/online/orders/track/", # order tracking by code, from the SMS link
-    "/api/members/share-link/",  # member referral links
+    "/api/waitlist/track/",      # waitlist position tracking by code, same access model
     "/api/stripe/checkout/status/",
+    # Self-service kiosk: add-to-cart, course, checkout, upsell — no staff
+    # login exists on a kiosk terminal. Deliberately "session/" (trailing
+    # slash) so this never matches GET /api/v25/kiosk/sessions (plural, no
+    # trailing slash) — that one's the staff-facing "what's on every kiosk
+    # right now" view and stays behind auth. Actually under /api/v25/kiosk/,
+    # not /api/kiosk/ — the v25_suite router is mounted with prefix "/v25";
+    # this list previously used the wrong path entirely (missing the /v25
+    # segment), meaning EVERY kiosk endpoint 401'd for the guest kiosk client
+    # they're meant to serve, on a terminal with no way to log in.
+    "/api/v25/kiosk/session/",
 )
 
 PUBLIC_API_PATHS = {
     "/api/", "/api/health", "/api/healthz",
-    # Auth itself, plus the endpoints the login screen needs before there is a user
+    # Auth itself, plus the endpoints the login screen needs before there is a user.
     "/api/auth/login", "/api/auth/register", "/api/auth/logout", "/api/auth/refresh",
-    "/api/auth/me", "/api/auth/forgot-password", "/api/auth/reset-password",
+    "/api/auth/me",
+    # A locked-out staff member has no session by definition — both steps of
+    # self-service password recovery have to be reachable with no token.
+    "/api/auth/forgot-password", "/api/auth/reset-password",
     # The second half of login: password passed, code still owed. It carries
     # its own short-lived challenge token in the body instead of a session
     # token, which this middleware doesn't know how to read — the endpoint
@@ -214,16 +227,44 @@ PUBLIC_API_PATHS = {
     # The menu, as guests see it. /products strips cost/stock/sku for guests.
     "/api/products", "/api/categories", "/api/modifiers",
     "/api/online/categories", "/api/online/products", "/api/online/orders",
+    "/api/online/orders/checkout",
     # Guest-facing voucher check (online ordering, table QR) — dry-run only,
     # deliberately returns nothing beyond a discount amount + label.
     "/api/vouchers/public-check",
-    # Member self-service signup
-    "/api/members/login", "/api/members/signup",
-    # Payment provider callbacks — signed by the provider, not by a user
-    "/api/webhook/stripe", "/api/stripe/webhook",
+    # Guest-facing loyalty portal — a customer checking their own points/tier
+    # by phone, no staff login involved. Returns first name only, never the
+    # full customer record.
+    "/api/loyalty/v2/guest-lookup",
+    "/api/loyalty/v2/guest-lookup/request-code",
+    # Passwordless guest identity (services/guest_session.py) — same
+    # unauthenticated-by-design posture as the loyalty guest lookup above,
+    # generalized for booking/waitlist/ordering instead of loyalty-only.
+    # The token itself, not this middleware, is what verifies the caller.
+    "/api/guest/session/request-code",
+    "/api/guest/session/verify",
+    "/api/guest/session/me",
+    # Self-service kiosk session creation — no sid exists yet, so this can't
+    # be covered by the "/api/v25/kiosk/session/" prefix above.
+    "/api/v25/kiosk/session",
+    # Smart-substitution suggestions for an 86'd kiosk item — same unattended
+    # guest surface as the rest of the kiosk endpoints above.
+    "/api/v25/substitute",
+    # Payment provider callbacks — signed by the provider, not by a user.
+    # /api/webhook/stripe (POS/online-order Stripe checkout, integrations.py)
+    # and /api/license/stripe/webhook (billing/subscription events,
+    # licensing.py — that router is mounted with prefix "/license", so its
+    # webhook is NOT at the bare /api/stripe/webhook this list previously
+    # had; that entry matched nothing real — the actual path 401'd every
+    # delivery Stripe ever sent for a billing event before it could even
+    # reach signature verification, the same class of bug as the kiosk
+    # path above).
+    "/api/webhook/stripe", "/api/license/stripe/webhook",
     # Square Connect webhook — authenticated by its own HMAC signature
     # (services/connect/connectors/square.py verify_webhook), not a user token.
     "/api/webhooks/square",
+    # A browser reporting its own crash — has to work from the login screen
+    # and the guest ordering pages, neither of which carries a token.
+    "/api/ops/client-errors",
 }
 
 
@@ -266,7 +307,39 @@ class RequireAuthMiddleware(BaseHTTPMiddleware):
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """120 req/min per (tenant, identity). Excludes static & public booking."""
+    """120 req/min per (tenant, identity). Excludes static & public booking.
+
+    A handful of paths get a stricter, IP-only override instead of the
+    default — specifically ones that are unauthenticated by design and
+    where the normal per-(tenant, identity) bucket is too generous. An
+    anonymous caller hammering /vouchers/public-check to brute-force valid
+    voucher codes has no `identity` beyond "unauthenticated", so without
+    this override every guessed code would share the same generous 120/min
+    room as every other anonymous request across the whole API.
+    """
+    PATH_OVERRIDES = {
+        "/api/vouchers/public-check": (10, 60),  # 10 req/min per IP
+        # Same rationale as vouchers/public-check — an unauthenticated
+        # caller with no identity beyond "some IP" shouldn't get the
+        # generous default room to enumerate phone numbers.
+        "/api/loyalty/v2/guest-lookup": (10, 60),  # 10 req/min per IP
+        # Same tier — this one sends a real SMS per call, so it matters just
+        # as much that a single IP can't be used to spam a phone number or
+        # run up a Twilio bill.
+        "/api/loyalty/v2/guest-lookup/request-code": (10, 60),  # 10 req/min per IP
+        # Same posture, generalized guest identity (services/guest_session.py)
+        # rather than loyalty-specific — still unauthenticated-by-design and
+        # still sends a real SMS per request-code call.
+        "/api/guest/session/request-code": (10, 60),  # 10 req/min per IP
+        "/api/guest/session/verify": (10, 60),  # 10 req/min per IP
+        # Generous relative to the endpoints above — a genuine error storm
+        # (a bad deploy looping on render) can legitimately fire many reports
+        # per second from one browser, and losing those is exactly the
+        # moment this feature exists to cover. Still bounded so one runaway
+        # tab can't grow client_error_log unbounded.
+        "/api/ops/client-errors": (30, 60),  # 30 req/min per IP
+    }
+
     def __init__(self, app):
         super().__init__(app)
         self.buckets = defaultdict(list)
@@ -278,9 +351,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         if not path.startswith("/api/") or path.startswith("/api/public") or path.startswith("/api/table"):
             return await call_next(request)
-        tenant = request.headers.get("X-Tenant-Id", "default")
-        identity = _rate_limit_identity(request)
-        key = f"{tenant}:{identity}"
+        override = self.PATH_OVERRIDES.get(path)
+        if override:
+            limit, window = override
+            key = f"path:{path}:{request.client.host if request.client else 'unknown'}"
+        else:
+            limit, window = self.limit, self.window
+            tenant = request.headers.get("X-Tenant-Id", "default")
+            identity = _rate_limit_identity(request)
+            key = f"{tenant}:{identity}"
         now = time()
         # Evict idle clients every 5 min so the bucket dict can't grow unbounded
         if now - self._last_evict > 300:
@@ -288,9 +367,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             stale = [k for k, ts in self.buckets.items() if not ts or now - ts[-1] > self.window]
             for k in stale:
                 del self.buckets[k]
-        self.buckets[key] = [t for t in self.buckets[key] if now - t < self.window]
-        if len(self.buckets[key]) >= self.limit:
-            return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded — 120 req/min per tenant"})
+        self.buckets[key] = [t for t in self.buckets[key] if now - t < window]
+        if len(self.buckets[key]) >= limit:
+            return JSONResponse(status_code=429, content={"detail": f"Rate limit exceeded — {limit} req/{window}s"})
         self.buckets[key].append(now)
         return await call_next(request)
 
@@ -364,6 +443,14 @@ async def startup():
             logger.info("Seeded %s demo customers", result.get("count"))
     except Exception as exc:
         logger.warning("Customer seed skipped: %s", exc)
+    # Seed the What's New feed (idempotent).
+    try:
+        from seeds.seed_changelog import seed_changelog
+        cl_result = await seed_changelog()
+        if cl_result.get("seeded"):
+            logger.info("Seeded %s changelog entries", cl_result.get("count"))
+    except Exception as exc:
+        logger.warning("Changelog seed skipped: %s", exc)
     logger.info("Admin seeded, default business created")
     # Preload persisted wallet credentials into process env
     try:

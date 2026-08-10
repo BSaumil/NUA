@@ -7,7 +7,6 @@ from database import db
 import bcrypt
 import jwt
 import os
-import secrets
 
 router = APIRouter(prefix="/auth")
 
@@ -189,15 +188,17 @@ async def login(req: LoginRequest, request: Request, response: Response):
     return await _complete_login(user, response)
 
 
-def create_challenge_token(user_id: str, purpose: str = "2fa") -> str:
-    """A token that proves the password step passed and buys nothing else.
+def create_challenge_token(user_id: str, purpose: str = "2fa", expires_minutes: int = 5) -> str:
+    """A token that proves an earlier step passed and buys nothing else.
 
     Deliberately not type "access": the auth middleware and get_current_user
     both refuse anything that isn't an access token, so this cannot be used to
-    read a single row of data. Five minutes is long enough to find your phone.
+    read a single row of data. Five minutes is long enough to find your phone
+    for 2FA; password_reset uses a longer window (see forgot_password) since
+    it has to survive an email round-trip instead of an already-open app.
     """
     payload = {"sub": user_id, "type": "challenge", "purpose": purpose,
-               "exp": datetime.now(timezone.utc) + timedelta(minutes=5)}
+               "exp": datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)}
     return jwt.encode(payload, _secret(), algorithm=JWT_ALGORITHM)
 
 
@@ -325,6 +326,54 @@ async def logout(response: Response):
     response.delete_cookie("refresh_token", path="/")
     return {"message": "Logged out"}
 
+@router.post("/forgot-password")
+async def forgot_password(req: ForgotPasswordRequest, request: Request):
+    """Request a password-reset email. Always answers the same way whether
+    or not the email matches an account — a different response would let
+    anyone enumerate which emails have accounts on this deployment. Rate
+    limited by IP (not by email — an attacker fishing for valid accounts
+    would just rotate emails against one IP, not the other way around),
+    same lockout shape as the login/2FA brute-force guards above.
+    """
+    identifier = f"forgot-password:{request.client.host}"
+    attempts = await db.login_attempts.find_one({"identifier": identifier})
+    if attempts and attempts.get("count", 0) >= 5:
+        locked_until = attempts.get("locked_until")
+        if locked_until and locked_until.tzinfo is None:
+            locked_until = locked_until.replace(tzinfo=timezone.utc)
+        if locked_until and datetime.now(timezone.utc) < locked_until:
+            raise HTTPException(status_code=429, detail="Too many requests. Try again in 15 minutes.")
+        await db.login_attempts.delete_one({"identifier": identifier})
+    await db.login_attempts.update_one(
+        {"identifier": identifier},
+        {"$inc": {"count": 1}, "$set": {"locked_until": datetime.now(timezone.utc) + timedelta(minutes=15)}},
+        upsert=True,
+    )
+
+    user = await db.auth_users.find_one({"email": req.email.lower()})
+    if user:
+        from utils.notifications import send_email
+        token = create_challenge_token(user["id"], purpose="password_reset", expires_minutes=30)
+        reset_url = f"{os.environ.get('FRONTEND_URL', '').rstrip('/')}/reset-password?token={token}"
+        await send_email(
+            user["email"], "Reset your NUA password",
+            f"<p>Someone requested a password reset for your NUA account.</p>"
+            f"<p><a href=\"{reset_url}\">Reset your password</a> — this link expires in 30 minutes.</p>"
+            f"<p>If you didn't request this, you can ignore this email.</p>",
+        )
+    return {"message": "If that email has an account, a reset link has been sent."}
+
+@router.post("/reset-password")
+async def reset_password(req: ResetPasswordRequest):
+    user_id = read_challenge_token(req.token, purpose="password_reset")
+    if len(req.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    result = await db.auth_users.update_one(
+        {"id": user_id}, {"$set": {"password_hash": hash_password(req.password)}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return {"message": "Password updated — sign in with your new password"}
+
 @router.post("/refresh")
 async def refresh_token(request: Request, response: Response):
     token = request.cookies.get("refresh_token")
@@ -339,7 +388,15 @@ async def refresh_token(request: Request, response: Response):
             raise HTTPException(status_code=401, detail="User not found")
         access = create_access_token(user["id"], user["email"], user["role"], user.get("businessId"))
         response.set_cookie("access_token", access, httponly=True, secure=_cookie_secure(), samesite="lax", max_age=28800, path="/")
-        return {"message": "Token refreshed"}
+        # The frontend authenticates every API call with a Bearer header read
+        # from localStorage, not the httpOnly cookie above — this endpoint
+        # used to only ever set the cookie, which nothing actually reads for
+        # API calls, making it silently useless for the auth flow the app
+        # really uses. Returning the new token lets a caller update
+        # localStorage and keep working past the 8-hour access-token expiry
+        # instead of every long-running session (an unattended kiosk, an
+        # overnight shift) hitting 401s with no recovery but a full re-login.
+        return {"message": "Token refreshed", "token": access}
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 

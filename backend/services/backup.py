@@ -27,7 +27,7 @@ import logging
 import tarfile
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import List
 
 from bson import json_util
 

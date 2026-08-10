@@ -25,8 +25,9 @@ field so cashiers can scan OR key in by hand.
 from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request, Depends
 from deps import get_user, require_owner, require_owner_or_manager
+from middleware.actor_context import tenant_scope_filter
 from database import db
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from typing import Optional
 import uuid
 import os
@@ -39,9 +40,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v26")
 
 
-def _now(): return datetime.now(timezone.utc)
-def _iso(dt): return dt.isoformat()
-def _uid(prefix: str) -> str: return f"{prefix}-{uuid.uuid4().hex[:8].upper()}"
+from utils.ids import now_utc as _now, to_iso as _iso, gen_uid as _uid
 
 
 def _new_code(prefix: str = "NUA") -> dict:
@@ -239,7 +238,9 @@ async def record_redemption(vid: str, data: dict, user: dict = Depends(get_user)
 # AUTO-APPLY PROMOTIONS (the bug fix)
 # ============================================================================
 def _promotion_active_now(promo: dict) -> bool:
-    """Honour startDate/endDate, activeDays, and start/endTime."""
+    """Honour startDate/endDate, activeDays, and start/endTime — including an
+    overnight window (e.g. 22:00-02:00) where startTime > endTime and the
+    window spans midnight, active both before and after the rollover."""
     if not promo.get("active"): return False
     now = _now()
     today = now.date().isoformat()
@@ -247,14 +248,24 @@ def _promotion_active_now(promo: dict) -> bool:
     if promo.get("endDate") and today > promo["endDate"]: return False
     days = promo.get("activeDays") or []
     if days and now.strftime("%A") not in days: return False
+    start, end = promo.get("startTime"), promo.get("endTime")
     hhmm = now.strftime("%H:%M")
-    if promo.get("startTime") and hhmm < promo["startTime"]: return False
-    if promo.get("endTime") and hhmm > promo["endTime"]: return False
+    if start and end:
+        if start <= end:
+            if hhmm < start or hhmm > end: return False
+        else:
+            # Overnight: active from start through midnight, then from
+            # midnight through end — i.e. everywhere EXCEPT the daytime gap
+            # between end and start.
+            if hhmm < start and hhmm > end: return False
+    else:
+        if start and hhmm < start: return False
+        if end and hhmm > end: return False
     return True
 
 
 @router.post("/cart/apply-promos")
-async def apply_promos_to_cart(data: dict, _: dict = Depends(get_user)):
+async def apply_promos_to_cart(data: dict, user: dict = Depends(get_user)):
     """Given a cart, return every promotion that auto-fires *right now* plus the
     computed discount. Supports:
       • pricingMode="percentage" — subtotal × discount%
@@ -262,14 +273,24 @@ async def apply_promos_to_cart(data: dict, _: dict = Depends(get_user)):
       • matching by categories[] AND/OR products[]
     """
     cart = data.get("cart") or []
+    order_type = data.get("orderType")
     if not cart:
         return {"applied": [], "totalDiscount": 0}
 
-    promos = await db.promotions.find({"active": True}, {"_id": 0}).to_list(200)
+    query = {"active": True, **tenant_scope_filter(user.get("businessId"))}
+    promos = await db.promotions.find(query, {"_id": 0}).to_list(200)
     applied = []
     total = 0.0
     for p in promos:
         if not _promotion_active_now(p):
+            continue
+        # channels is an allow-list: a Happy Hour promo scoped to
+        # ["dine-in"] must not fire on a takeaway sale (or anything else
+        # this system doesn't even have a name for yet, e.g. functions) —
+        # an empty list means unrestricted, same as every promo created
+        # before this field existed.
+        channels = p.get("channels") or []
+        if channels and order_type not in channels:
             continue
 
         # Determine which cart lines this promo applies to.
@@ -337,11 +358,12 @@ async def apply_promos_to_cart(data: dict, _: dict = Depends(get_user)):
 
 
 @router.get("/promotions/active-now")
-async def list_active_promotions_now(_: dict = Depends(get_user)):
+async def list_active_promotions_now(user: dict = Depends(get_user)):
     """POS-facing: returns every promotion that is *currently* live based on
     today's date, weekday, and current time of day. Staff use this so they know
     exactly what's running without scrolling through inactive promos."""
-    promos = await db.promotions.find({"active": True}, {"_id": 0}).to_list(500)
+    query = {"active": True, **tenant_scope_filter(user.get("businessId"))}
+    promos = await db.promotions.find(query, {"_id": 0}).to_list(500)
     return [p for p in promos if _promotion_active_now(p)]
 
 
@@ -824,91 +846,6 @@ async def event_ai_preview(data: dict, _: dict = Depends(require_owner_or_manage
 
 
 # ============================================================================
-# AI MARKETING EMAILS — autonomous generator
-# ============================================================================
-@router.post("/marketing/email/generate")
-async def generate_marketing_email(data: dict, user: dict = Depends(require_owner_or_manager)):
-    """LLM drafts a full marketing email featuring upcoming events, active
-    vouchers, and tier-specific perks. Returns JSON the owner can edit + send.
-    Audience: 'all' | 'tier:Gold' | 'segment:lapsed' | etc."""
-    audience = data.get("audience", "all")
-    tone = data.get("tone", "friendly")
-    horizon_days = int(data.get("horizonDays", 14))
-    today_iso = _now().date().isoformat()
-    until_iso = (_now() + timedelta(days=horizon_days)).date().isoformat()
-    # Pull data once, in parallel where possible.
-    events = await db.events.find(
-        {"active": True, "date": {"$gte": today_iso, "$lte": until_iso}},
-        {"_id": 0}).sort("date", 1).to_list(20)
-    vouchers = await db.commerce_vouchers.find(
-        {"active": True, "kind": {"$in": ["discount", "freebie", "bundle", "marketing"]}},
-        {"_id": 0}).to_list(20)
-    tiers = await db.loyalty_tiers.find({}, {"_id": 0}).to_list(10)
-    if not events and not vouchers and not tiers:
-        raise HTTPException(status_code=400, detail="Nothing to promote — add events, vouchers or tiers first")
-
-    sys_msg = (
-        "You are NUA's autonomous marketing engine. Draft a single marketing email "
-        "for a restaurant. Include: catchy subject, preheader, warm opening, a section "
-        "highlighting upcoming events with dates, a section featuring 1-3 active "
-        "vouchers/codes the reader can use, and a callout for the audience's tier "
-        "perks (or generic if 'all'). Keep it under 320 words. Tone: {tone}. "
-        "Return STRICT JSON: "
-        '{"subject":"...","preheader":"...","emailBody":"...","sms":"...","cta":"...",'
-        '"featuredEventIds":["..."],"featuredVoucherIds":["..."],"highlights":["..."]}'
-    ).replace("{tone}", tone)
-    user_text = json.dumps({
-        "audience": audience,
-        "windowFrom": today_iso, "windowTo": until_iso,
-        "events": events[:10],
-        "vouchers": [{"id": v["id"], "name": v["name"], "code": v.get("manualCode"),
-                      "kind": v["kind"], "discountType": v["discountType"], "value": v["value"]}
-                     for v in vouchers],
-        "tiers": [{"name": t.get("name"), "perks": t.get("perks", [])} for t in tiers[:5]],
-    })
-    draft = await _llm_json(f"mkt-email-{uuid.uuid4().hex[:6]}", sys_msg, user_text) or {}
-
-    # Persist as a draft so it appears in the marketing inbox / can be sent later.
-    row = {
-        "id": _uid("MKT"),
-        "audience": audience, "tone": tone, "horizonDays": horizon_days,
-        "subject": draft.get("subject", ""), "preheader": draft.get("preheader", ""),
-        "emailBody": draft.get("emailBody", ""), "sms": draft.get("sms", ""),
-        "cta": draft.get("cta", ""),
-        "featuredEventIds": draft.get("featuredEventIds", []),
-        "featuredVoucherIds": draft.get("featuredVoucherIds", []),
-        "highlights": draft.get("highlights", []),
-        "status": "draft",
-        "createdAt": _iso(_now()), "createdBy": user["id"],
-    }
-    await db.marketing_emails.insert_one(row); row.pop("_id", None)
-    return row
-
-
-@router.get("/marketing/emails")
-async def list_marketing_emails(_: dict = Depends(get_user)):
-    rows = await db.marketing_emails.find({}, {"_id": 0}).sort("createdAt", -1).to_list(100)
-    return rows
-
-
-@router.patch("/marketing/emails/{mid}")
-async def update_marketing_email(mid: str, data: dict, _: dict = Depends(require_owner_or_manager)):
-    update = {k: v for k, v in data.items() if k not in {"id", "createdAt"}}
-    update["updatedAt"] = _iso(_now())
-    r = await db.marketing_emails.update_one({"id": mid}, {"$set": update})
-    if r.matched_count == 0: raise HTTPException(status_code=404, detail="Email not found")
-    return {"updated": True}
-
-
-@router.delete("/marketing/emails/{mid}")
-async def delete_marketing_email(mid: str, user: dict = Depends(get_user)):
-    if user["role"] != "owner": raise HTTPException(status_code=403, detail="Owner only")
-    r = await db.marketing_emails.delete_one({"id": mid})
-    if r.deleted_count == 0: raise HTTPException(status_code=404, detail="Not found")
-    return {"deleted": True}
-
-
-# ============================================================================
 # STAFF AVAILABILITY (normal days + blackout periods)
 # ============================================================================
 @router.get("/staff/{staff_id}/availability")
@@ -980,25 +917,55 @@ async def cfd_push(data: dict, user: dict = Depends(get_user)):
         "selectedCustomer": data.get("selectedCustomer"),
         "tableNumber": data.get("tableNumber"),
         "walkInName": data.get("walkInName"),
+        "orderType": data.get("orderType"),
         "splitInProgress": bool(data.get("splitInProgress")),
         "splitParts": data.get("splitParts") or [],
         "updatedAt": _iso(_now()),
         "cashier": user.get("name"),
+        "businessId": user.get("businessId"),
     }
     await db.cfd_live.update_one({"terminalId": terminal_id}, {"$set": doc}, upsert=True)
     return {"pushed": True}
 
 
+def _promo_ends_in_minutes(promo: dict) -> Optional[int]:
+    """Minutes until this promo's daily window closes, or None if it has no
+    endTime (an all-day / date-range-only promo has nothing to count down to)
+    or the window has genuinely finished for today.
+
+    For an overnight window (startTime > endTime, e.g. 22:00-02:00), naively
+    computing end_dt as *today's* date at endTime is wrong for the
+    before-midnight half of the window — at 23:30 that lands hours in the
+    past. Roll end_dt to tomorrow specifically when we're still in that
+    evening half (now is at/after startTime)."""
+    if not promo.get("endTime"):
+        return None
+    try:
+        end_h, end_m = (int(x) for x in promo["endTime"].split(":"))
+    except (ValueError, AttributeError):
+        return None
+    now = _now()
+    end_dt = now.replace(hour=end_h, minute=end_m, second=0, microsecond=0)
+    start = promo.get("startTime")
+    if end_dt <= now:
+        if start and start > promo["endTime"] and now.strftime("%H:%M") >= start:
+            end_dt += timedelta(days=1)
+        else:
+            return None
+    return int((end_dt - now).total_seconds() // 60)
+
+
 @router.get("/cfd/enriched")
-async def cfd_enriched(request: Request, terminalId: Optional[str] = None):
+async def cfd_enriched(request: Request, terminalId: Optional[str] = None, user: dict = Depends(get_user)):
     """Live cart + customer name OR walk-in booking name, table number, and
     points earned/missed this visit. Prefers a live pushed feed; falls back to
     pos_tabs for legacy callers."""
+    tenant_filter = tenant_scope_filter(user.get("businessId"))
     live = None
     if terminalId:
-        live = await db.cfd_live.find_one({"terminalId": terminalId}, {"_id": 0})
+        live = await db.cfd_live.find_one({"terminalId": terminalId, **tenant_filter}, {"_id": 0})
     if not live:
-        live = await db.cfd_live.find_one({}, {"_id": 0}, sort=[("updatedAt", -1)])
+        live = await db.cfd_live.find_one(tenant_filter, {"_id": 0}, sort=[("updatedAt", -1)])
     if not live:
         tab = await db.pos_tabs.find_one({"status": {"$in": ["open", "active", None]}}, {"_id": 0}, sort=[("createdAt", -1)])
         live = {
@@ -1015,6 +982,25 @@ async def cfd_enriched(request: Request, terminalId: Optional[str] = None):
     points_earned = int(subtotal * earn_rate) if customer else 0
     points_missed = 0 if customer else int(subtotal * earn_rate)
     name_display = (customer or {}).get("name") if customer else live.get("walkInName")
+
+    # Active promotions for the CURRENT order type only — a takeaway sale on
+    # the customer display shouldn't advertise a dine-in-only Happy Hour it
+    # will never actually get.
+    order_type = live.get("orderType")
+    promos = await db.promotions.find({"active": True, **tenant_filter}, {"_id": 0}).to_list(200)
+    active_promos = []
+    for p in promos:
+        if not _promotion_active_now(p):
+            continue
+        channels = p.get("channels") or []
+        if channels and order_type not in channels:
+            continue
+        active_promos.append({
+            "id": p["id"], "name": p["name"],
+            "discount": p.get("discount"), "pricingMode": p.get("pricingMode"),
+            "endsInMinutes": _promo_ends_in_minutes(p),
+        })
+
     return {
         "cart": cart, "subtotal": round(subtotal, 2),
         "customerName": name_display,
@@ -1025,6 +1011,7 @@ async def cfd_enriched(request: Request, terminalId: Optional[str] = None):
         "pointsMissed": points_missed,
         "splitInProgress": bool(live.get("splitInProgress")),
         "splitParts": live.get("splitParts") or [],
+        "activePromotions": active_promos,
         "updatedAt": _iso(_now()),
     }
 

@@ -7,37 +7,45 @@ from models.promotion import Promotion, PromotionCreate
 from models.transaction import Transaction, TransactionCreate
 from models.refund import Refund, RefundCreate
 from middleware.actor_context import tenant_scope_filter, tenant_owns
+from utils.errors import log_and_continue
+from utils.dates import date_range_filter
+import logging
 import uuid
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # ============ PROMOTIONS API ============
 @router.get("/promotions")
-async def get_promotions():
+async def get_promotions(user: dict = Depends(get_user)):
     from utils.mongo_safe import safe_parse_list
-    promotions = await db.promotions.find({}, {"_id": 0}).to_list(1000)
+    promotions = await db.promotions.find(tenant_scope_filter(user.get("businessId")), {"_id": 0}).to_list(1000)
     return safe_parse_list(promotions, Promotion, where="promotions")
 
 @router.get("/promotions/active")
-async def get_active_promotions():
+async def get_active_promotions(user: dict = Depends(get_user)):
     from utils.mongo_safe import safe_parse_list
-    promotions = await db.promotions.find({"active": True}, {"_id": 0}).to_list(1000)
+    query = {"active": True, **tenant_scope_filter(user.get("businessId"))}
+    promotions = await db.promotions.find(query, {"_id": 0}).to_list(1000)
     return safe_parse_list(promotions, Promotion, where="promotions")
 
 @router.post("/promotions", response_model=Promotion)
-async def create_promotion(promotion: PromotionCreate, _user: dict = Depends(require_owner_or_manager)):
-    promo_obj = Promotion(**promotion.dict())
+async def create_promotion(promotion: PromotionCreate, user: dict = Depends(require_owner_or_manager)):
+    promo_obj = Promotion(**promotion.dict(), businessId=user.get("businessId"))
     await db.promotions.insert_one(promo_obj.dict())
     return promo_obj
 
 @router.put("/promotions/{promo_id}")
-async def update_promotion(promo_id: str, data: dict, _user: dict = Depends(require_owner_or_manager)):
+async def update_promotion(promo_id: str, data: dict, user: dict = Depends(require_owner_or_manager)):
+    existing = await db.promotions.find_one({"id": promo_id}, {"_id": 0, "businessId": 1})
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Promotion not found")
     allowed = {"name", "type", "discount", "active", "schedule",
                "products", "category", "categories",
                "pricingMode", "bundlePrice",
                "originalPrice", "discountedPrice",
                "minQuantity", "maxQuantity", "stackable",
-               "startDate", "endDate", "activeDays", "startTime", "endTime"}
+               "startDate", "endDate", "activeDays", "startTime", "endTime", "channels"}
     update_data = {k: v for k, v in data.items() if k in allowed}
     result = await db.promotions.find_one_and_update({"id": promo_id}, {"$set": update_data}, return_document=True)
     if not result:
@@ -46,7 +54,10 @@ async def update_promotion(promo_id: str, data: dict, _user: dict = Depends(requ
     return result
 
 @router.delete("/promotions/{promo_id}")
-async def delete_promotion(promo_id: str, _user: dict = Depends(require_owner_or_manager)):
+async def delete_promotion(promo_id: str, user: dict = Depends(require_owner_or_manager)):
+    existing = await db.promotions.find_one({"id": promo_id}, {"_id": 0, "businessId": 1})
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Promotion not found")
     result = await db.promotions.delete_one({"id": promo_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Promotion not found")
@@ -67,10 +78,7 @@ async def get_transactions(
     if location:
         query["location"] = location
     if start_date and end_date:
-        query["timestamp"] = {
-            "$gte": datetime.fromisoformat(start_date),
-            "$lte": datetime.fromisoformat(end_date)
-        }
+        query.update(date_range_filter("timestamp", start_date, end_date))
     transactions = await db.transactions.find(query, {"_id": 0}).sort("timestamp", -1).to_list(1000)
     from utils.mongo_safe import safe_parse_list
     return safe_parse_list(transactions, Transaction, where="transactions")
@@ -122,6 +130,21 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
     applied_discounts = [d.dict() for d in transaction.appliedDiscounts]
     for d in applied_discounts:
         d["amount"] = max(float(d.get("amount") or 0), 0)
+    # Voucher-linked discounts also get capped to what the voucher is
+    # actually worth — the client-supplied amount is a display hint only.
+    # Without this, any logged-in POS user could attach a real voucherId to
+    # an inflated amount and the bill would honour it at face value; the
+    # voucher only ever got checked for value once it was (separately)
+    # marked consumed after the sale had already been priced and saved.
+    for d in applied_discounts:
+        if not d.get("voucherId"):
+            continue
+        v = await db.vouchers.find_one({"id": d["voucherId"]}, {"_id": 0})
+        if not v or v.get("status") not in ("active", "partial"):
+            d["amount"] = 0.0
+        elif v.get("valueType") != "percentage":
+            cap = float(v.get("residualValue")) if v.get("partialRedeemable") else float(v.get("value", 0) or 0)
+            d["amount"] = min(d["amount"], max(cap, 0.0))
     voucher_discount = sum(d["amount"] for d in applied_discounts)
 
     # Loyalty config — used for both the redeem check below and the earn
@@ -285,7 +308,7 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
         from services.wallet_service import redeem_wallet_voucher
         for d in applied_discounts:
             if d.get("voucherId"):
-                await redeem_wallet_voucher(d["voucherId"], txn_dict["id"])
+                await redeem_wallet_voucher(d["voucherId"], txn_dict["id"], d["amount"])
     except Exception:
         pass
     # Audit trail + GL auto-post + rules-engine emit — shared with any
@@ -311,16 +334,29 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
     from routes.inventory_accounting import deduct_recipe_stock
     from services import measured_inventory_service as _mi
     _actor = getattr(transaction, "cashier", None) or "pos"
+
+    # Base stock decrement is independent per item, so it's one bulk
+    # round trip instead of N sequential ones — recipe/measured-stock
+    # deduction and event emission below stay per-item since they carry
+    # real per-item side effects (container tracking, rules-engine emits)
+    # that don't reduce to a single batched write.
+    if transaction.items:
+        from pymongo import UpdateOne
+        await db.products.bulk_write([
+            UpdateOne({"id": item.productId}, {"$inc": {"stock": -item.quantity}})
+            for item in transaction.items
+        ])
+
     for item in transaction.items:
-        await db.products.update_one(
-            {"id": item.productId},
-            {"$inc": {"stock": -item.quantity}}
-        )
-        try: await deduct_recipe_stock(item.productId, item.quantity)
-        except Exception: pass
+        try:
+            await deduct_recipe_stock(item.productId, item.quantity)
+        except Exception as e:
+            log_and_continue(logger, f"Recipe stock deduction failed for {item.productId}", e)
         # Measured-stock deduction — silent no-op for whole-unit products.
-        try: await _mi.deduct_on_sale(item.productId, item.quantity, _actor)
-        except Exception: pass
+        try:
+            await _mi.deduct_on_sale(item.productId, item.quantity, _actor)
+        except Exception as e:
+            log_and_continue(logger, f"Measured-stock deduction failed for {item.productId}", e)
         # Emit inventory events for rules engine
         try:
             p = await db.products.find_one({"id": item.productId}, {"_id": 0})
@@ -373,7 +409,8 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
             await db.customers.update_one(
                 {"id": part.customerId},
                 {"$inc": {"totalSpent": part.amount, "visits": 1, "points": part_points},
-                 "$set": {"lastVisit": datetime.utcnow().isoformat()}},
+                 "$set": {"lastVisit": datetime.utcnow().isoformat(),
+                          "lastVisitDate": datetime.utcnow().date().isoformat()}},
             )
             if part_points > 0:
                 try:
@@ -505,8 +542,7 @@ async def create_refund(refund: RefundCreate, _user: dict = Depends(require_owne
         from services.accounting_service import auto_post_refund
         await auto_post_refund({**refund_obj.dict(), "timestamp": datetime.utcnow().isoformat()})
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(f"Refund ledger auto-post skipped: {e}")
+        log_and_continue(logger, "Refund ledger auto-post skipped", e)
     # Fire rules-engine event: pos.refund.issued
     try:
         from services.rules_engine import safe_emit
@@ -536,13 +572,11 @@ async def create_refund(refund: RefundCreate, _user: dict = Depends(require_owne
             {"id": refund_obj_dict["id"]},
             {"$set": {"kitchenEffects": refund_obj_dict["kitchenEffects"]}})
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(f"Refund kitchen/stock reversal skipped: {e}")
+        log_and_continue(logger, "Refund kitchen/stock reversal skipped", e)
 
     try:
         await _reverse_loyalty_for_refund(original_txn, refund.amount)
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(f"Refund loyalty reversal skipped: {e}")
+        log_and_continue(logger, "Refund loyalty reversal skipped", e)
 
     return refund_obj

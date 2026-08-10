@@ -120,7 +120,7 @@ export default function CustomerWalletPanel({ customer, theme, onRefresh }) {
           <div className="rounded-lg bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-100 p-3" data-testid="loyalty-progress">
             <div className="flex items-center justify-between text-xs mb-1">
               <span className="font-medium">Next tier: <strong>{loyalty.nextTier}</strong></span>
-              <span className="text-gray-500">${loyalty.totalSpend?.toFixed(0)} / ${loyalty.nextTierAt}</span>
+              <span className="text-gray-500">{loyalty.points ?? 0} / {loyalty.nextTierAt} pts</span>
             </div>
             <div className="h-1.5 rounded-full bg-purple-100 overflow-hidden">
               <div className="h-full rounded-full bg-gradient-to-r from-purple-500 to-pink-500" style={{ width: `${Math.min(100, loyalty.tierProgressPct)}%` }} />
