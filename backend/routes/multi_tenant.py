@@ -230,3 +230,34 @@ async def backfill_tenant(user: dict = Depends(require_owner)):
         slugged += 1
     results["businesses.slug"] = slugged
     return {"backfilled": results, "total": sum(results.values())}
+
+
+# Every collection that can hold rows written by the startup seeders
+# (seed_demo_customers, seed_alcohol_catalog) tagged isDemo=True at insert
+# time. Anything a real venue enters themselves never gets this flag, so
+# purging is a precise delete-where-isDemo, not a name/email guess.
+_DEMO_TAGGED_COLLECTIONS = ["customers", "reservations", "transactions", "feedback",
+                            "categories", "products", "stock_units", "sell_variants"]
+
+
+@router.post("/purge-demo-data")
+async def purge_demo_data(data: dict, user: dict = Depends(require_owner)):
+    """Delete every row the startup seeders created for demo purposes
+    (the 5 sample guests + their reservation/transaction/feedback history,
+    and the starter alcohol catalog's categories/products/stock units/sell
+    variants), so a pilot venue's database starts from zero before go-live.
+
+    Never touches businesses, auth_users (admin/staff), changelog, or
+    chart-of-accounts — none of the seeders that write those tag isDemo,
+    and this only ever deletes on isDemo=True, so it can't reach them.
+
+    Destructive and irreversible, so it requires an explicit
+    {"confirm": "PURGE"} in the body rather than firing on a bare POST."""
+    if data.get("confirm") != "PURGE":
+        raise HTTPException(status_code=400, detail='Send {"confirm": "PURGE"} to purge demo data')
+
+    results = {}
+    for name in _DEMO_TAGGED_COLLECTIONS:
+        r = await db[name].delete_many({"isDemo": True})
+        results[name] = r.deleted_count
+    return {"purged": results, "total": sum(results.values())}
