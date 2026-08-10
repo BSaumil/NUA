@@ -212,6 +212,7 @@ PUBLIC_API_PREFIXES = (
 
 PUBLIC_API_PATHS = {
     "/api/", "/api/health", "/api/healthz",
+    "/api/ops/device-status",     # login-screen peripheral status — counts/booleans only
     # Auth itself, plus the endpoints the login screen needs before there is a user.
     "/api/auth/login", "/api/auth/register", "/api/auth/logout", "/api/auth/refresh",
     "/api/auth/me",
