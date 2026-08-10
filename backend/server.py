@@ -223,6 +223,11 @@ PUBLIC_API_PATHS = {
     # token, which this middleware doesn't know how to read — the endpoint
     # verifies that token itself.
     "/api/auth/2fa/challenge",
+    # Staff PIN login — same "no token yet" story as /api/auth/login. This
+    # was missing before and silently made PIN login unreachable in
+    # production (every call 401'd here before the route's own PIN check
+    # ever ran) — there was no test hitting it end-to-end to catch that.
+    "/api/auth/pin-login", "/api/auth/pin-login/approve",
     "/api/business/theme",       # login-screen branding
     # The menu, as guests see it. /products strips cost/stock/sku for guests.
     "/api/products", "/api/categories", "/api/modifiers",
