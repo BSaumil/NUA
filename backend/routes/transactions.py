@@ -226,13 +226,8 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
     # (customers.loyaltyPoints vs. customers.points) — so a sale could earn
     # into a balance no redemption or receipt ever read from. Folding it all
     # into one calculation, on one field, here.
-    earn_rate = float(loyalty_cfg.get("earnRate", 1.0))
-    category_mults = loyalty_cfg.get("categoryMultipliers", {}) if loyalty_cfg.get("active", True) else {}
-    if loyalty_cfg.get("active", True) and subtotal > 0 and category_mults:
-        category_mult = sum(line_total * float(category_mults.get(cat, 1.0)) for cat, line_total in earn_lines) / subtotal
-    else:
-        category_mult = 1.0
-    points_earned = int(total * loyalty_multiplier * earn_rate * category_mult) if loyalty_cfg.get("active", True) else 0
+    from services.sale_recorder import compute_points_earned
+    points_earned = compute_points_earned(subtotal, total, loyalty_multiplier, earn_lines, loyalty_cfg)
 
     txn_dict = {
         # 8 hex chars ≈ 4 billion combos/day; 3 chars collided within ~75 sales
@@ -293,36 +288,12 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
                 await redeem_wallet_voucher(d["voucherId"], txn_dict["id"])
     except Exception:
         pass
-    # Audit trail — POS transactions are ledger-grade, always logged
-    try:
-        from services.audit_service import log_event
-        await log_event(entity_type="transaction", entity_id=txn_dict["id"],
-                        action="created", after=txn_dict,
-                        memo=f"POS sale {txn_dict['paymentMethod']} ${txn_dict['total']}")
-    except Exception:
-        pass
-
-    # Auto-post to double-entry ledger
-    try:
-        from services.accounting_service import auto_post_pos_sale
-        # coerce timestamp to iso
-        auto_txn = {**txn_dict, "timestamp": txn_dict["timestamp"].isoformat() if hasattr(txn_dict["timestamp"], "isoformat") else txn_dict["timestamp"]}
-        await auto_post_pos_sale(auto_txn)
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(f"POS ledger auto-post skipped: {e}")
-
-    # Fire rules-engine event: pos.sale.completed
-    try:
-        from services.rules_engine import safe_emit
-        safe_emit("pos.sale.completed", {
-            "id": txn_dict["id"], "total": txn_dict["total"],
-            "customerId": txn_dict.get("customerId"),
-            "items": [i.get("productId") for i in items_list],
-            "paymentMethod": txn_dict["paymentMethod"],
-        }, entity_id=txn_dict["id"])
-    except Exception:
-        pass
+    # Audit trail + GL auto-post + rules-engine emit — shared with any
+    # externally-sourced sale (e.g. a synced Square order) via sale_recorder,
+    # so a POS sale and a Connect-synced sale trigger identical downstream
+    # effects instead of two independently-maintained copies of this logic.
+    from services.sale_recorder import record_sale_side_effects
+    await record_sale_side_effects(txn_dict, memo=f"POS sale {txn_dict['paymentMethod']} ${txn_dict['total']}")
 
     # Live-sync: push the sale to any connected Dashboard app instantly.
     # Best-effort only — the Dashboard's own polling is the real source of
@@ -366,29 +337,8 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
 
     # Update customer stats
     if transaction.customerId:
-        await db.customers.update_one(
-            {"id": transaction.customerId},
-            {
-                "$inc": {
-                    "totalSpent": total,
-                    "visits": 1,
-                    "points": points_earned,
-                },
-                "$set": {"lastVisit": datetime.utcnow().isoformat()}
-            }
-        )
-        if points_earned > 0:
-            try:
-                await db.loyalty_ledger.insert_one({
-                    "id": f"LP-{str(uuid.uuid4())[:8].upper()}",
-                    "customerId": transaction.customerId,
-                    "transactionId": txn_dict["id"],
-                    "type": "earn",
-                    "points": points_earned,
-                    "createdAt": datetime.utcnow().isoformat(),
-                })
-            except Exception:
-                pass
+        from services.sale_recorder import credit_loyalty_points
+        await credit_loyalty_points(transaction.customerId, points_earned, total, txn_dict["id"])
         # Free base identity layer — a repeat contact match at POS checkout is
         # an identity touchpoint (skipped automatically for base-only venues).
         try:

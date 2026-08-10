@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Plug, Search, ExternalLink, Check, X, RefreshCw,
+  Plug, Search, ExternalLink, Check, X, RefreshCw, AlertTriangle, Clock, ShieldAlert,
   Truck, CreditCard, Calculator, Users, CalendarDays, UtensilsCrossed, Award, Layers,
-  Building2, Wallet
+  Building2, Wallet, History, ChevronDown, ChevronRight
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -28,14 +28,50 @@ const CATEGORY_ICONS = {
   'Loyalty & Marketing': Award,
 };
 
+// Friendly labels for the multi-field connectors (Square today). Anything
+// not listed here falls back to the field name itself.
+const FIELD_LABELS = {
+  accessToken: 'Access Token',
+  locationId: 'Location ID',
+  environment: 'Environment (sandbox / production)',
+  webhookSignatureKey: 'Webhook Signature Key',
+  webhookNotificationUrl: 'Webhook Notification URL',
+  cdrClientId: 'CDR Client ID',
+  cdrClientSecret: 'CDR Client Secret',
+  apiKey: 'API Key',
+};
+
+const STATUS_META = {
+  connected: { label: 'Connected', badge: 'bg-emerald-100 text-emerald-700 border-emerald-300', icon: Check },
+  preconfigured: { label: 'Pre-configured', badge: 'bg-blue-100 text-blue-700 border-blue-300', icon: Check },
+  needs_credentials: { label: 'Not Connected', badge: 'bg-gray-100 text-gray-500 border-gray-200', icon: Plug },
+  error: { label: 'Connection Error', badge: 'bg-red-100 text-red-700 border-red-300', icon: AlertTriangle },
+  pending_accreditation: { label: 'Pending CDR Accreditation', badge: 'bg-amber-100 text-amber-700 border-amber-300', icon: ShieldAlert },
+  not_implemented: { label: 'Not Available Yet', badge: 'bg-gray-100 text-gray-400 border-gray-200', icon: Clock },
+};
+
+function StatusBadge({ status }) {
+  const meta = STATUS_META[status] || STATUS_META.needs_credentials;
+  const Icon = meta.icon;
+  return (
+    <Badge className={`${meta.badge} text-[10px]`}>
+      <Icon size={10} className="mr-0.5" /> {meta.label}
+    </Badge>
+  );
+}
+
 export default function Integrations() {
   const { theme } = useTheme();
   const [integrations, setIntegrations] = useState([]);
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
   const [connectDialog, setConnectDialog] = useState(null);
-  const [apiKey, setApiKey] = useState('');
+  const [fieldValues, setFieldValues] = useState({});
   const [loading, setLoading] = useState(false);
+  const [historyDialog, setHistoryDialog] = useState(null);
+  const [historyRuns, setHistoryRuns] = useState([]);
+  const [expandedRun, setExpandedRun] = useState(null);
+  const [runDetail, setRunDetail] = useState(null);
 
   useEffect(() => { fetchIntegrations(); }, []);
 
@@ -53,17 +89,30 @@ export default function Integrations() {
     (i.name.toLowerCase().includes(search.toLowerCase()) || i.category.toLowerCase().includes(search.toLowerCase()))
   );
 
+  const openConnect = (integration) => {
+    setConnectDialog(integration);
+    const initial = {};
+    (integration.credentialFields || ['apiKey']).forEach(f => { initial[f] = ''; });
+    setFieldValues(initial);
+  };
+
   const handleConnect = async () => {
-    if (!apiKey.trim()) return;
+    const fields = connectDialog.credentialFields || ['apiKey'];
+    if (fields.some(f => !fieldValues[f]?.trim())) return;
     setLoading(true);
     try {
-      await integrationsAPI.connect(connectDialog.slug, { apiKey });
-      toast.success(`${connectDialog.name} connected!`);
+      const res = await integrationsAPI.connect(connectDialog.slug, fieldValues);
+      if (res.data.status === 'pending_accreditation') {
+        toast.info(`${connectDialog.name}: credentials saved, pending CDR accreditation`);
+      } else {
+        toast.success(`${connectDialog.name} connected!`);
+      }
       setConnectDialog(null);
-      setApiKey('');
+      setFieldValues({});
       fetchIntegrations();
-    } catch { toast.error('Connection failed'); }
-    finally { setLoading(false); }
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Connection failed');
+    } finally { setLoading(false); }
   };
 
   const handleDisconnect = async (slug, name) => {
@@ -74,22 +123,42 @@ export default function Integrations() {
     } catch { toast.error('Failed to disconnect'); }
   };
 
-  const handleSync = async (slug, name) => {
+  const handleSync = async (slug, name, syncType) => {
     try {
-      await integrationsAPI.sync(slug);
-      toast.success(`${name} sync triggered`);
+      const res = await integrationsAPI.sync(slug, syncType);
+      const c = res.data.counts || {};
+      toast.success(`${name} ${syncType} sync: ${c.fetched || 0} fetched, ${c.created || 0} created, ${c.updated || 0} updated`);
       fetchIntegrations();
-    } catch { toast.error('Sync failed'); }
+    } catch (e) { toast.error(e?.response?.data?.detail || 'Sync failed'); }
   };
 
-  const connectedCount = integrations.filter(i => i.status === 'connected').length;
+  const openHistory = async (integration) => {
+    setHistoryDialog(integration);
+    setExpandedRun(null);
+    setRunDetail(null);
+    try {
+      const res = await integrationsAPI.getSyncHistory(integration.slug);
+      setHistoryRuns(res.data);
+    } catch { toast.error('Failed to load sync history'); }
+  };
+
+  const toggleRunDetail = async (runId) => {
+    if (expandedRun === runId) { setExpandedRun(null); setRunDetail(null); return; }
+    setExpandedRun(runId);
+    try {
+      const res = await integrationsAPI.getSyncRunDetail(runId);
+      setRunDetail(res.data);
+    } catch { toast.error('Failed to load run detail'); }
+  };
+
+  const connectedCount = integrations.filter(i => i.status === 'connected' || i.status === 'preconfigured').length;
 
   return (
     <div data-testid="integrations-page">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-3xl font-bold" style={{ color: theme.text }}>Integrations Hub</h1>
-          <p className="text-gray-500 mt-1">{connectedCount} connected &middot; {integrations.length} available</p>
+          <h1 className="text-3xl font-bold" style={{ color: theme.text }}>NUA Connect — Integrations Hub</h1>
+          <p className="text-gray-500 mt-1">{connectedCount} connected &middot; {integrations.length} providers &middot; real, honest status — never faked</p>
         </div>
         <Badge className="bg-emerald-100 text-emerald-700 border-emerald-300 text-sm px-3 py-1">
           <Plug size={14} className="mr-1" /> {connectedCount} Active
@@ -122,6 +191,7 @@ export default function Integrations() {
         {filtered.map(integration => {
           const CatIcon = CATEGORY_ICONS[integration.category] || Plug;
           const connected = integration.status === 'connected';
+          const capabilities = integration.capabilities || [];
           return (
             <Card key={integration.slug} className={`transition-all hover:shadow-md ${connected ? 'border-emerald-200 bg-emerald-50/30' : ''}`}
               data-testid={`integration-${integration.slug}`}>
@@ -136,22 +206,30 @@ export default function Integrations() {
                       <p className="text-xs text-gray-500">{integration.category}</p>
                     </div>
                   </div>
-                  {connected ? (
-                    <Badge className="bg-emerald-100 text-emerald-700 border-emerald-300 text-[10px]">
-                      <Check size={10} className="mr-0.5" /> Connected
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-gray-400 text-[10px]">Inactive</Badge>
-                  )}
+                  <StatusBadge status={integration.status} />
                 </div>
-                <p className="text-sm text-gray-500 mb-4 line-clamp-2">{integration.description}</p>
-                <div className="flex gap-2">
+                <p className="text-sm text-gray-500 mb-2 line-clamp-2">{integration.description}</p>
+                {integration.note && (
+                  <p className="text-xs text-amber-600 mb-2 flex items-start gap-1">
+                    <ShieldAlert size={12} className="mt-0.5 shrink-0" /> {integration.note}
+                  </p>
+                )}
+                {integration.lastError && (
+                  <p className="text-xs text-red-500 mb-2">{integration.lastError}</p>
+                )}
+                <div className="flex flex-wrap gap-2">
                   {connected ? (
                     <>
-                      <Button size="sm" variant="outline" className="flex-1 text-xs"
-                        onClick={() => handleSync(integration.slug, integration.name)}
-                        data-testid={`sync-${integration.slug}`}>
-                        <RefreshCw size={12} className="mr-1" /> Sync
+                      {capabilities.filter(c => ['catalog', 'sales', 'customers'].includes(c)).map(cap => (
+                        <Button key={cap} size="sm" variant="outline" className="text-xs"
+                          onClick={() => handleSync(integration.slug, integration.name, cap)}
+                          data-testid={`sync-${integration.slug}-${cap}`}>
+                          <RefreshCw size={12} className="mr-1" /> Sync {cap}
+                        </Button>
+                      ))}
+                      <Button size="sm" variant="outline" className="text-xs"
+                        onClick={() => openHistory(integration)} data-testid={`history-${integration.slug}`}>
+                        <History size={12} className="mr-1" /> History
                       </Button>
                       <Button size="sm" variant="outline" className="text-xs text-red-500 border-red-200 hover:bg-red-50"
                         onClick={() => handleDisconnect(integration.slug, integration.name)}
@@ -159,16 +237,26 @@ export default function Integrations() {
                         <X size={12} className="mr-1" /> Disconnect
                       </Button>
                     </>
-                  ) : integration.preconfigured ? (
+                  ) : integration.status === 'preconfigured' ? (
                     <Badge className="bg-blue-100 text-blue-700 border-blue-300 text-xs">
                       <Check size={12} className="mr-1" /> Pre-configured
                     </Badge>
+                  ) : integration.status === 'not_implemented' ? (
+                    <Badge variant="outline" className="text-gray-400 text-xs">No connector built yet</Badge>
                   ) : (
-                    <Button size="sm" className="flex-1 text-xs" style={{ backgroundColor: theme.primary }}
-                      onClick={() => setConnectDialog(integration)}
-                      data-testid={`connect-${integration.slug}`}>
-                      <Plug size={12} className="mr-1" /> Connect
-                    </Button>
+                    <>
+                      <Button size="sm" className="flex-1 text-xs" style={{ backgroundColor: theme.primary }}
+                        onClick={() => openConnect(integration)}
+                        data-testid={`connect-${integration.slug}`}>
+                        <Plug size={12} className="mr-1" /> Connect
+                      </Button>
+                      {integration.status === 'error' && (
+                        <Button size="sm" variant="outline" className="text-xs" onClick={() => openHistory(integration)}
+                          data-testid={`history-${integration.slug}`}>
+                          <History size={12} className="mr-1" /> History
+                        </Button>
+                      )}
+                    </>
                   )}
                   {integration.website && (
                     <a href={integration.website} target="_blank" rel="noopener noreferrer"
@@ -191,26 +279,72 @@ export default function Integrations() {
           </DialogHeader>
           <div className="space-y-4 py-2">
             <p className="text-sm text-gray-500">{connectDialog?.description}</p>
-            <div>
-              <label className="text-sm font-medium mb-1 block">{connectDialog?.keyLabel || 'API Key'}</label>
-              <Input placeholder={`Enter your ${connectDialog?.keyLabel || 'API Key'}...`}
-                value={apiKey} onChange={e => setApiKey(e.target.value)}
-                type="password" data-testid="api-key-input" />
-            </div>
+            {(connectDialog?.credentialFields || ['apiKey']).map(field => (
+              <div key={field}>
+                <label className="text-sm font-medium mb-1 block">
+                  {FIELD_LABELS[field] || field}
+                </label>
+                <Input placeholder={`Enter ${FIELD_LABELS[field] || field}...`}
+                  value={fieldValues[field] || ''}
+                  onChange={e => setFieldValues(v => ({ ...v, [field]: e.target.value }))}
+                  type={field.toLowerCase().includes('secret') || field.toLowerCase().includes('token') || field.toLowerCase().includes('key') ? 'password' : 'text'}
+                  data-testid={`field-${field}`} />
+              </div>
+            ))}
             {connectDialog?.website && (
               <p className="text-xs text-gray-400">
-                Get your key from <a href={connectDialog.website} target="_blank" rel="noopener noreferrer"
+                Get your credentials from <a href={connectDialog.website} target="_blank" rel="noopener noreferrer"
                   className="text-blue-500 hover:underline">{connectDialog.website}</a>
               </p>
             )}
             <div className="flex gap-2">
               <Button className="flex-1" style={{ backgroundColor: theme.primary }}
-                onClick={handleConnect} disabled={loading || !apiKey.trim()}
+                onClick={handleConnect} disabled={loading}
                 data-testid="confirm-connect-btn">
                 {loading ? 'Connecting...' : 'Connect'}
               </Button>
               <Button variant="outline" onClick={() => setConnectDialog(null)}>Cancel</Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Sync History / Raw Data Dialog */}
+      <Dialog open={!!historyDialog} onOpenChange={open => { if (!open) setHistoryDialog(null); }}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto" data-testid="history-dialog">
+          <DialogHeader>
+            <DialogTitle>{historyDialog?.name} — Sync History</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            {historyRuns.length === 0 && <p className="text-sm text-gray-400">No syncs yet.</p>}
+            {historyRuns.map(run => (
+              <div key={run.id} className="border rounded-lg overflow-hidden">
+                <button
+                  className="w-full flex items-center justify-between p-3 text-left hover:bg-gray-50"
+                  onClick={() => toggleRunDetail(run.id)} data-testid={`run-${run.id}`}>
+                  <div className="flex items-center gap-2">
+                    {expandedRun === run.id ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    <Badge className={run.status === 'success' ? 'bg-emerald-100 text-emerald-700' : run.status === 'running' ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}>
+                      {run.status}
+                    </Badge>
+                    <span className="text-sm font-medium">{run.syncType}</span>
+                    <span className="text-xs text-gray-400">{new Date(run.startedAt).toLocaleString()}</span>
+                  </div>
+                  <span className="text-xs text-gray-500">
+                    {run.counts?.fetched || 0} fetched &middot; {run.counts?.created || 0} created &middot; {run.counts?.updated || 0} updated
+                  </span>
+                </button>
+                {expandedRun === run.id && runDetail && (
+                  <div className="p-3 bg-gray-50 border-t text-xs">
+                    {runDetail.errorMessage && <p className="text-red-500 mb-2">{runDetail.errorMessage}</p>}
+                    <p className="font-medium mb-1">Raw payload samples ({(runDetail.rawSamples || []).length}):</p>
+                    <pre className="bg-white border rounded p-2 overflow-x-auto max-h-64 overflow-y-auto">
+{JSON.stringify(runDetail.rawSamples, null, 2)}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         </DialogContent>
       </Dialog>

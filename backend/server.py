@@ -221,6 +221,9 @@ PUBLIC_API_PATHS = {
     "/api/members/login", "/api/members/signup",
     # Payment provider callbacks — signed by the provider, not by a user
     "/api/webhook/stripe", "/api/stripe/webhook",
+    # Square Connect webhook — authenticated by its own HMAC signature
+    # (services/connect/connectors/square.py verify_webhook), not a user token.
+    "/api/webhooks/square",
 }
 
 

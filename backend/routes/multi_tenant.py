@@ -92,10 +92,17 @@ async def export_business_data(business_id: str, collection: Optional[str] = Non
 async def get_business_summary(business_id: str, _: dict = Depends(require_owner)):
     """Quick summary stats for a business"""
 
-    txns = await db.transactions.find({}, {"_id": 0}).to_list(10000)
+    # Scoped to this business_id specifically (not the caller's own token
+    # businessId — an owner with multiple businesses needs to pull summaries
+    # for businesses other than the one they're currently acting as), with
+    # the same fail-open-to-untagged-legacy-data semantics as
+    # tenant_scope_filter so a not-yet-backfilled deployment still shows
+    # its (single, real) numbers instead of zero.
+    biz_or_untagged = {"$or": [{"businessId": business_id}, {"businessId": None}, {"businessId": {"$exists": False}}]}
+    txns = await db.transactions.find(biz_or_untagged, {"_id": 0}).to_list(10000)
     products = await db.products.find({}, {"_id": 0}).to_list(1000)
-    customers = await db.customers.find({}, {"_id": 0}).to_list(10000)
-    members = await db.members.find({}, {"_id": 0}).to_list(10000)
+    customers = await db.customers.find(biz_or_untagged, {"_id": 0}).to_list(10000)
+    members = await db.members.find(biz_or_untagged, {"_id": 0}).to_list(10000)
     staff = await db.auth_users.find({"businessId": business_id}, {"_id": 0, "password_hash": 0}).to_list(100)
 
     return {
@@ -138,7 +145,8 @@ async def seed_default_business():
 # "default" is the prerequisite for turning on any read-side tenant
 # filtering: filtering today, before this runs, would make untagged data
 # disappear rather than isolate it.
-_BACKFILL_COLLECTIONS = ["customers", "vouchers", "wallet_ledger", "loyalty_ledger", "members"]
+_BACKFILL_COLLECTIONS = ["customers", "vouchers", "wallet_ledger", "loyalty_ledger", "members",
+                          "transactions", "refunds"]
 
 
 @router.post("/backfill-tenant")

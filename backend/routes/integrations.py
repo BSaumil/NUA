@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from typing import Optional
 from datetime import datetime
 from database import db
+from deps import get_user, require_owner_or_manager
 import os
 import uuid
 
@@ -123,110 +124,135 @@ async def stripe_webhook(request: Request):
     except Exception as e:
         return {"received": True, "note": str(e)}
 
-# ============ INTEGRATIONS HUB API ============
+# ============ NUA CONNECT — INTEGRATIONS HUB API ============
+# Real registry-driven integration hub. Status is never faked: a provider is
+# "connected" only once its connector's test_connection has actually
+# succeeded against that provider's real API, "pending_accreditation" for
+# the 11 CDR banks always (regardless of credentials), and
+# "not_implemented" for every provider that doesn't have connector code yet
+# — never silently presented as available. See services/connect/.
+from services.connect.registry import all_providers, get_provider
+from services.connect import manager
+from services.connect.base import ConnectorError
+
+
 @router.get("/integrations")
-async def get_integrations():
-    """Get all available integrations and their status"""
-    saved = await db.integrations.find({}, {"_id": 0}).to_list(100)
-    saved_map = {s["slug"]: s for s in saved}
+async def get_integrations(user: dict = Depends(get_user)):
+    """Every provider NUA Connect knows about, with this business's real,
+    live status for each — not a hardcoded flag."""
+    business_id = user.get("businessId")
+    return [await manager.describe_provider(business_id, meta) for meta in all_providers()]
 
-    integrations = [
-        # Delivery
-        {"slug": "uber-eats", "name": "Uber Eats", "category": "Delivery", "description": "Receive and manage Uber Eats orders directly in your POS", "status": saved_map.get("uber-eats", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "API Key", "website": "https://merchants.ubereats.com"},
-        {"slug": "doordash", "name": "DoorDash", "category": "Delivery", "description": "Sync DoorDash orders into your kitchen display", "status": saved_map.get("doordash", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "API Key", "website": "https://merchants.doordash.com"},
-        {"slug": "menulog", "name": "Menulog", "category": "Delivery", "description": "Manage Menulog orders and menu sync", "status": saved_map.get("menulog", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "API Key", "website": "https://www.menulog.com.au/restaurants"},
-        # Middleware
-        {"slug": "doshii", "name": "Doshii", "category": "Middleware", "description": "Connect 20+ hospitality apps via one integration. Powers Uber Eats, DoorDash, Deputy, and more.", "status": saved_map.get("doshii", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "Location Token", "website": "https://doshii.com"},
-        # Payments
-        {"slug": "stripe", "name": "Stripe", "category": "Payments", "description": "Accept card payments with Stripe Checkout", "status": "connected" if os.environ.get("STRIPE_API_KEY") else "disconnected", "requiresKey": False, "preconfigured": True},
-        {"slug": "square", "name": "Square", "category": "Payments", "description": "Process payments via Square terminals", "status": saved_map.get("square", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "Access Token", "website": "https://developer.squareup.com"},
-        {"slug": "commbank", "name": "CommBank Smart", "category": "Payments", "description": "CommBank EFTPOS and pay-at-table via Doshii", "status": saved_map.get("commbank", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "Merchant ID", "website": "https://www.commbank.com.au/business/payments/hospitality.html"},
-        # Accounting
-        {"slug": "xero", "name": "Xero", "category": "Accounting", "description": "Auto-sync daily sales, expenses, and GST to Xero", "status": saved_map.get("xero", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "OAuth Client ID", "website": "https://www.xero.com/au/"},
-        {"slug": "myob", "name": "MYOB", "category": "Accounting", "description": "Push transactions and BAS data to MYOB", "status": saved_map.get("myob", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "API Key", "website": "https://www.myob.com/au"},
-        {"slug": "quickbooks", "name": "QuickBooks", "category": "Accounting", "description": "Sync sales data with QuickBooks Online", "status": saved_map.get("quickbooks", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "Client ID", "website": "https://quickbooks.intuit.com/au/"},
-        # Rostering
-        {"slug": "deputy", "name": "Deputy", "category": "Rostering", "description": "Auto-sync sales data for smart rostering and compliance", "status": saved_map.get("deputy", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "API Token", "website": "https://www.deputy.com"},
-        {"slug": "tanda", "name": "Tanda", "category": "Rostering", "description": "Workforce management with live POS data", "status": saved_map.get("tanda", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "API Token", "website": "https://www.tanda.co"},
-        # Reservations
-        {"slug": "opentable", "name": "OpenTable", "category": "Reservations", "description": "Sync OpenTable bookings with your floor plan", "status": saved_map.get("opentable", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "Restaurant ID", "website": "https://restaurant.opentable.com"},
-        {"slug": "resdiary", "name": "ResDiary", "category": "Reservations", "description": "Manage ResDiary reservations in NUA", "status": saved_map.get("resdiary", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "API Key", "website": "https://www.resdiary.com"},
-        # In-Venue
-        {"slug": "mryum", "name": "Mr Yum", "category": "In-Venue Ordering", "description": "In-venue mobile ordering synced to kitchen", "status": saved_map.get("mryum", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "Venue Token", "website": "https://www.mryum.com"},
-        {"slug": "hungryhungry", "name": "HungryHungry", "category": "In-Venue Ordering", "description": "Order & pay at table integration", "status": saved_map.get("hungryhungry", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "API Key", "website": "https://www.hungryhungry.com"},
-        # Loyalty
-        {"slug": "marsello", "name": "Marsello", "category": "Loyalty & Marketing", "description": "Loyalty program and email marketing automation", "status": saved_map.get("marsello", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "API Key", "website": "https://www.marsello.com"},
-        {"slug": "stampme", "name": "Stamp Me", "category": "Loyalty & Marketing", "description": "Digital stamp cards and rewards", "status": saved_map.get("stampme", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "API Key", "website": "https://stampme.com"},
 
-        # ============ AUSTRALIAN BANKS ============
-        {"slug": "cba", "name": "Commonwealth Bank (CBA)", "category": "Banks (AU)", "description": "Reconcile NUA sales with CBA business accounts via Open Banking (CDR).", "status": saved_map.get("cba", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "CDR Client Token", "website": "https://www.commbank.com.au/business.html"},
-        {"slug": "westpac", "name": "Westpac", "category": "Banks (AU)", "description": "Westpac business banking reconciliation + EFTPOS settlements.", "status": saved_map.get("westpac", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "CDR Client Token", "website": "https://www.westpac.com.au/business-banking/"},
-        {"slug": "anz", "name": "ANZ", "category": "Banks (AU)", "description": "ANZ Plus Business reconciliation + Worldline EFTPOS pairing.", "status": saved_map.get("anz", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "CDR Client Token", "website": "https://www.anz.com.au/business/"},
-        {"slug": "nab", "name": "NAB", "category": "Banks (AU)", "description": "NAB Business Everyday + EasyTap on iPhone reconciliation.", "status": saved_map.get("nab", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "CDR Client Token", "website": "https://www.nab.com.au/business"},
-        {"slug": "macquarie", "name": "Macquarie Bank", "category": "Banks (AU)", "description": "Macquarie Business Banking — daily settlement feed.", "status": saved_map.get("macquarie", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "CDR Client Token", "website": "https://www.macquarie.com.au/business-banking.html"},
-        {"slug": "bendigo", "name": "Bendigo Bank", "category": "Banks (AU)", "description": "Bendigo Business account feed via CDR.", "status": saved_map.get("bendigo", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "CDR Client Token", "website": "https://www.bendigobank.com.au/business/"},
-        {"slug": "bankwest", "name": "Bankwest", "category": "Banks (AU)", "description": "Bankwest business feed + EFTPOS reconciliation.", "status": saved_map.get("bankwest", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "CDR Client Token", "website": "https://www.bankwest.com.au/business"},
-        {"slug": "suncorp", "name": "Suncorp Bank", "category": "Banks (AU)", "description": "Suncorp business banking reconciliation.", "status": saved_map.get("suncorp", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "CDR Client Token", "website": "https://www.suncorpbank.com.au/business"},
-        {"slug": "hsbc-au", "name": "HSBC Australia", "category": "Banks (AU)", "description": "HSBC business banking + cross-border settlement.", "status": saved_map.get("hsbc-au", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "CDR Client Token", "website": "https://www.business.hsbc.com.au/"},
-        {"slug": "ing-au", "name": "ING Direct", "category": "Banks (AU)", "description": "ING business everyday account feed.", "status": saved_map.get("ing-au", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "CDR Client Token", "website": "https://www.ing.com.au/business.html"},
-        {"slug": "boq", "name": "Bank of Queensland", "category": "Banks (AU)", "description": "BOQ Business banking reconciliation.", "status": saved_map.get("boq", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "CDR Client Token", "website": "https://www.boq.com.au/business"},
-        {"slug": "judo", "name": "Judo Bank", "category": "Banks (AU)", "description": "Judo SME term deposits + business loans visibility.", "status": saved_map.get("judo", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "API Token", "website": "https://www.judo.bank/"},
+@router.get("/integrations/{slug}")
+async def get_integration_detail(slug: str, user: dict = Depends(get_user)):
+    meta = get_provider(slug)
+    if not meta:
+        raise HTTPException(status_code=404, detail="Unknown provider")
+    return await manager.describe_provider(user.get("businessId"), meta)
 
-        # ============ PAYMENT TERMINALS / EFTPOS ============
-        {"slug": "tyro", "name": "Tyro EFTPOS", "category": "Payment Terminals", "description": "Tyro integrated EFTPOS — auto-print receipt + tip prompt + surcharging.", "status": saved_map.get("tyro", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "Merchant ID", "website": "https://www.tyro.com"},
-        {"slug": "smartpay", "name": "Smartpay", "category": "Payment Terminals", "description": "Smartpay integrated EFTPOS terminals + cloud reporting.", "status": saved_map.get("smartpay", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "Merchant ID", "website": "https://www.smartpay.com.au"},
-        {"slug": "qiki", "name": "QIKI", "category": "Payment Terminals", "description": "QIKI BYO terminal + surcharging across all card schemes.", "status": saved_map.get("qiki", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "Merchant ID", "website": "https://qiki.com.au"},
-        {"slug": "westpac-eftpos", "name": "Westpac EFTPOS Air", "category": "Payment Terminals", "description": "Westpac Air all-in-one Android terminal.", "status": saved_map.get("westpac-eftpos", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "Merchant ID", "website": "https://www.westpac.com.au/business-banking/merchant-services/"},
-        {"slug": "anz-worldline", "name": "ANZ Worldline", "category": "Payment Terminals", "description": "ANZ Worldline integrated payments + reporting.", "status": saved_map.get("anz-worldline", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "Merchant ID", "website": "https://www.anzworldline.com.au"},
-        {"slug": "nab-easytap", "name": "NAB Easy Tap (Tap to Pay)", "category": "Payment Terminals", "description": "NAB tap-on-iPhone — no terminal needed.", "status": saved_map.get("nab-easytap", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "Merchant ID", "website": "https://www.nab.com.au/business/payments-and-merchants/easy-tap"},
-        {"slug": "square-terminal", "name": "Square Terminal", "category": "Payment Terminals", "description": "Square's all-in-one card reader + register.", "status": saved_map.get("square-terminal", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "Access Token", "website": "https://squareup.com/au/en/hardware/terminal"},
-        {"slug": "zeller", "name": "Zeller", "category": "Payment Terminals", "description": "Zeller smart terminal + business banking.", "status": saved_map.get("zeller", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "API Key", "website": "https://www.myzeller.com"},
-        {"slug": "mx51", "name": "mx51 / Linkly", "category": "Payment Terminals", "description": "Multi-bank EFTPOS broker — connect any major AU terminal.", "status": saved_map.get("mx51", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "Merchant ID", "website": "https://mx51.io"},
-        {"slug": "verifone", "name": "Verifone", "category": "Payment Terminals", "description": "Verifone V200c / V400m terminals (global).", "status": saved_map.get("verifone", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "Terminal ID", "website": "https://www.verifone.com"},
-        {"slug": "ingenico", "name": "Ingenico", "category": "Payment Terminals", "description": "Ingenico Lane and Move series terminals.", "status": saved_map.get("ingenico", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "Terminal ID", "website": "https://www.ingenico.com"},
-        {"slug": "pax", "name": "PAX Technology", "category": "Payment Terminals", "description": "PAX A920 / A77 Android smart terminals.", "status": saved_map.get("pax", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "Terminal ID", "website": "https://www.pax.com"},
-        {"slug": "adyen", "name": "Adyen", "category": "Payment Terminals", "description": "Adyen omnichannel terminals — global enterprise.", "status": saved_map.get("adyen", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "API Key", "website": "https://www.adyen.com"},
-        {"slug": "razorpay", "name": "Razorpay", "category": "Payment Terminals", "description": "Razorpay POS terminals + payment links (IN / SE Asia).", "status": saved_map.get("razorpay", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "API Key", "website": "https://razorpay.com"},
-        {"slug": "paypal-zettle", "name": "PayPal Zettle", "category": "Payment Terminals", "description": "PayPal Zettle card readers + business accounts.", "status": saved_map.get("paypal-zettle", {}).get("status", "disconnected"), "requiresKey": True, "keyLabel": "API Key", "website": "https://www.zettle.com"},
-    ]
-
-    return integrations
 
 @router.post("/integrations/{slug}/connect")
-async def connect_integration(slug: str, data: dict):
-    """Connect/configure an integration"""
-    api_key = data.get("apiKey", "")
-    if not api_key:
-        raise HTTPException(status_code=400, detail="API key required")
+async def connect_integration(slug: str, data: dict, user: dict = Depends(require_owner_or_manager)):
+    """Store credentials and (for providers with a real connector) actually
+    test them against the provider before ever reporting 'connected'."""
+    meta = get_provider(slug)
+    if not meta:
+        raise HTTPException(status_code=404, detail="Unknown provider")
+    if not data:
+        raise HTTPException(status_code=400, detail="Credentials required")
+    try:
+        result = await manager.connect_provider(user.get("businessId"), slug, data)
+    except manager.NotImplementedProvider:
+        raise HTTPException(status_code=501, detail=f"{meta.name} does not have a working connector yet")
+    if result.get("status") == "error":
+        raise HTTPException(status_code=502, detail=f"Could not verify {meta.name} credentials: {result.get('error')}")
+    return result
 
-    doc = {
-        "slug": slug,
-        "apiKey": api_key,
-        "status": "connected",
-        "connectedAt": datetime.utcnow().isoformat(),
-        "lastSync": None,
-    }
-    await db.integrations.update_one({"slug": slug}, {"$set": doc}, upsert=True)
-    return {"status": "connected", "message": f"{slug} connected successfully"}
 
 @router.post("/integrations/{slug}/disconnect")
-async def disconnect_integration(slug: str):
-    """Disconnect an integration"""
-    await db.integrations.update_one(
-        {"slug": slug},
-        {"$set": {"status": "disconnected", "disconnectedAt": datetime.utcnow().isoformat()}}
-    )
+async def disconnect_integration(slug: str, user: dict = Depends(require_owner_or_manager)):
+    meta = get_provider(slug)
+    if not meta:
+        raise HTTPException(status_code=404, detail="Unknown provider")
+    await manager.disconnect_provider(user.get("businessId"), slug)
     return {"status": "disconnected"}
 
-@router.post("/integrations/{slug}/sync")
-async def sync_integration(slug: str):
-    """Trigger a manual sync for an integration"""
-    integration = await db.integrations.find_one({"slug": slug}, {"_id": 0})
-    if not integration or integration.get("status") != "connected":
-        raise HTTPException(status_code=400, detail="Integration not connected")
 
-    await db.integrations.update_one(
-        {"slug": slug},
-        {"$set": {"lastSync": datetime.utcnow().isoformat()}}
-    )
-    return {"message": f"Sync triggered for {slug}", "lastSync": datetime.utcnow().isoformat()}
+@router.post("/integrations/{slug}/sync")
+async def sync_integration(slug: str, sync_type: str = "sales", user: dict = Depends(require_owner_or_manager)):
+    """Trigger a real inbound sync. sync_type is one of catalog | sales | customers
+    (whichever the provider's connector supports — see its `capabilities`)."""
+    meta = get_provider(slug)
+    if not meta:
+        raise HTTPException(status_code=404, detail="Unknown provider")
+    try:
+        result = await manager.run_sync(user.get("businessId"), slug, sync_type)
+    except manager.NotImplementedProvider:
+        raise HTTPException(status_code=501, detail=f"{meta.name} does not have a working connector yet")
+    except ConnectorError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return result
+
+
+@router.get("/integrations/{slug}/credentials")
+async def get_integration_credentials(slug: str, user: dict = Depends(require_owner_or_manager)):
+    """Masked (last-4-only) view of stored credential field values — never
+    the raw secret, which is only ever decrypted in-process for a call."""
+    from services.connect.credentials import get_credentials_masked
+    masked = await get_credentials_masked(user.get("businessId"), slug)
+    if masked is None:
+        raise HTTPException(status_code=404, detail="No credentials on file")
+    return masked
+
+
+# ---- Reporting / audit surface — the raw sync-run data end to end ----
+
+@router.get("/integrations/sync-runs/history")
+async def get_sync_history(provider: Optional[str] = None, limit: int = 50, user: dict = Depends(get_user)):
+    return await manager.sync_history(user.get("businessId"), provider, limit)
+
+
+@router.get("/integrations/sync-runs/{run_id}")
+async def get_sync_run_detail(run_id: str, user: dict = Depends(get_user)):
+    from services.connect.sync_log import get_sync_run
+    run = await get_sync_run(user.get("businessId"), run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Sync run not found")
+    return run
+
+
+# ---- Inbound webhook — real-time push instead of waiting for the next poll ----
+
+@router.post("/webhooks/square")
+async def square_webhook(request: Request):
+    """Square pushes order/customer/catalog change events here in real time.
+    Square doesn't include NUA's businessId in the payload, so the owning
+    business is identified the same way the signature itself is verified:
+    by finding whose stored webhook signing key actually validates this
+    request. That also means an unrecognized/forged request never touches
+    any business's data — it's rejected before a business is even resolved.
+    """
+    from services.connect.connectors.square import SquareConnector
+    from services.connect.credentials import get_credentials
+    from services.connect.sync_log import SyncRun
+
+    body = await request.body()
+    headers = {k.lower(): v for k, v in request.headers.items()}
+    connector = SquareConnector()
+
+    candidates = await db.integration_credentials.find(
+        {"provider": "square"}, {"_id": 0, "businessId": 1}
+    ).to_list(1000)
+
+    for cand in candidates:
+        business_id = cand["businessId"]
+        creds = await get_credentials(business_id, "square")
+        if creds and connector.verify_webhook(body, headers, creds):
+            import json
+            event = json.loads(body)
+            async with SyncRun(business_id, "square", "webhook", direction="inbound") as run:
+                await connector.handle_webhook_event(event, business_id, run)
+            return {"received": True}
+
+    raise HTTPException(status_code=401, detail="Signature verification failed")

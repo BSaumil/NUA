@@ -417,9 +417,13 @@ export const stripeAPI = {
 // Integrations Hub
 export const integrationsAPI = {
   getAll: () => api.get('/integrations'),
+  getDetail: (slug) => api.get(`/integrations/${slug}`),
   connect: (slug, data) => api.post(`/integrations/${slug}/connect`, data),
   disconnect: (slug) => api.post(`/integrations/${slug}/disconnect`),
-  sync: (slug) => api.post(`/integrations/${slug}/sync`),
+  sync: (slug, syncType = 'sales') => api.post(`/integrations/${slug}/sync`, null, { params: { sync_type: syncType } }),
+  getCredentials: (slug) => api.get(`/integrations/${slug}/credentials`),
+  getSyncHistory: (provider) => api.get('/integrations/sync-runs/history', { params: provider ? { provider } : {} }),
+  getSyncRunDetail: (runId) => api.get(`/integrations/sync-runs/${runId}`),
 };
 
 // Advanced Features — Tips, Training Mode, EOD Reports, Email Marketing, AI Insights
