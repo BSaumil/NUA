@@ -259,6 +259,9 @@ PUBLIC_API_PATHS = {
     # reach signature verification, the same class of bug as the kiosk
     # path above).
     "/api/webhook/stripe", "/api/license/stripe/webhook",
+    # Square Connect webhook — authenticated by its own HMAC signature
+    # (services/connect/connectors/square.py verify_webhook), not a user token.
+    "/api/webhooks/square",
     # A browser reporting its own crash — has to work from the login screen
     # and the guest ordering pages, neither of which carries a token.
     "/api/ops/client-errors",
