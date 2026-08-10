@@ -1,16 +1,16 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  RefreshCw, Sparkles, AlertTriangle, AlertOctagon, Info, CheckCircle2,
+  RefreshCw, Sparkles, AlertTriangle, AlertOctagon, Info, CheckCircle2, Circle,
   TrendingUp, CalendarClock, Users2, ShoppingCart, ArrowRight, Activity,
-  Moon, Sun, LogOut as SignOutIcon, Brain, ClipboardCheck,
+  Moon, Sun, LogOut as SignOutIcon, Brain, ClipboardCheck, Rocket,
 } from 'lucide-react';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
-import { analyticsAPI, nuaAPI } from '../services/api';
+import { analyticsAPI, nuaAPI, businessAPI } from '../services/api';
 import { toast } from 'sonner';
 import useLiveFeed from '../hooks/useLiveFeed';
 
@@ -45,6 +45,7 @@ export default function OwnerDashboardApp() {
   const [briefing, setBriefing] = useState(null);
   const [insights, setInsights] = useState([]);
   const [health, setHealth] = useState(null);
+  const [setupStatus, setSetupStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
 
@@ -62,6 +63,15 @@ export default function OwnerDashboardApp() {
       if (h.status === 'fulfilled') setHealth(h.value.data);
     } finally { setLoading(false); }
   }, []);
+
+  // Launch readiness checklist — owner-only, and only worth asking for
+  // while something's still incomplete (once ready it never shows again).
+  useEffect(() => {
+    if (user?.role !== 'owner') return;
+    businessAPI.setupStatus(user?.businessId || 'default')
+      .then(r => { if (!r.data.ready) setSetupStatus(r.data); })
+      .catch(() => {});
+  }, [user]);
 
   useEffect(() => {
     load();
@@ -127,6 +137,35 @@ export default function OwnerDashboardApp() {
           <h1 className="text-xl font-bold" style={{ color: darkMode ? '#eaeaea' : '#111827' }}>Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'}, {user?.name?.split(' ')[0]}</h1>
           <p className="text-sm text-gray-400">{new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</p>
         </div>
+
+        {/* Launch readiness checklist — disappears on its own once every
+            item is true, so nothing to dismiss and nothing left behind. */}
+        {setupStatus && (
+          <Card className="border-0" style={{ background: darkMode ? '#1c1508' : '#fff7ed', borderLeft: `3px solid ${theme.primary}` }} data-testid="owner-dashboard-setup-checklist">
+            <CardContent className="p-4">
+              <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide mb-3" style={{ color: theme.primary }}>
+                <Rocket size={13} /> Launch readiness
+              </span>
+              <div className="space-y-1.5">
+                {[
+                  { key: 'hasMenu', label: 'Menu items added' },
+                  { key: 'hasStaff', label: 'Staff accounts created' },
+                  { key: 'backfillComplete', label: 'Multi-tenant backfill run' },
+                  { key: 'demoDataPurged', label: 'Demo data purged' },
+                ].map(({ key, label }) => (
+                  <div key={key} className="flex items-center gap-2 text-sm" data-testid={`setup-check-${key}`}>
+                    {setupStatus[key]
+                      ? <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
+                      : <Circle size={15} className="text-gray-300 shrink-0" />}
+                    <span style={{ color: setupStatus[key] ? (darkMode ? '#9ca3af' : '#6b7280') : (darkMode ? '#eaeaea' : '#111827'), textDecoration: setupStatus[key] ? 'line-through' : 'none' }}>
+                      {label}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* AI briefing — the AI-at-fingertips centerpiece of this app */}
         <Card className="border-0" style={{ background: darkMode ? '#15151d' : 'linear-gradient(135deg,#f5f3ff,#fdf4ff)' }} data-testid="owner-dashboard-briefing">

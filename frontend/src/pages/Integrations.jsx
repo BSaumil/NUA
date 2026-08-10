@@ -232,6 +232,14 @@ export default function Integrations() {
                 {integration.lastError && (
                   <p className="text-xs text-red-500 mb-2">{integration.lastError}</p>
                 )}
+                {connected && (
+                  <p className="text-xs text-gray-400 mb-2 flex items-center gap-1" data-testid={`${integration.slug}-last-sync`}>
+                    <Clock size={11} />
+                    {integration.lastSyncAt
+                      ? `Last synced ${new Date(integration.lastSyncAt).toLocaleString()}${integration.lastSyncStatus === 'error' ? ' — failed' : ''}`
+                      : 'Never synced yet'}
+                  </p>
+                )}
                 <div className="flex flex-wrap gap-2">
                   {connected ? (
                     <>

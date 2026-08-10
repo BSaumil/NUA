@@ -118,3 +118,11 @@ async def restore_drill(_: dict = Depends(require_owner)):
     end, against a disposable scratch database, never the live one. This is
     the thing an untested backup skips."""
     return await backup.run_restore_drill()
+
+
+@router.get("/ops/backup/drill-status")
+async def backup_drill_status(_: dict = Depends(require_owner)):
+    """Last automatic daily drill result (services/backup_scheduler.py) —
+    so 'is our backup still good' is something you look up, not assume."""
+    from services import backup_scheduler
+    return await backup_scheduler.drill_status()

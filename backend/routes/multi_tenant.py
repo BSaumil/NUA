@@ -261,3 +261,31 @@ async def purge_demo_data(data: dict, user: dict = Depends(require_owner)):
         r = await db[name].delete_many({"isDemo": True})
         results[name] = r.deleted_count
     return {"purged": results, "total": sum(results.values())}
+
+
+@router.get("/{business_id}/setup-status")
+async def get_setup_status(business_id: str, _: dict = Depends(require_owner)):
+    """Live view of the three Foundation Day runbook steps
+    (docs/LAUNCH_FOUNDATION_RUNBOOK.md), so an owner can see launch
+    readiness on the Pulse dashboard instead of running curl commands.
+    Read-only — never modifies anything."""
+    untagged_query = {"$or": [{"businessId": {"$exists": False}}, {"businessId": None}]}
+    untagged_total = 0
+    for name in _BACKFILL_COLLECTIONS:
+        untagged_total += await db[name].count_documents(untagged_query)
+
+    demo_total = 0
+    for name in _DEMO_TAGGED_COLLECTIONS:
+        demo_total += await db[name].count_documents({"isDemo": True})
+
+    has_menu = await db.products.count_documents({"isDemo": {"$ne": True}}) > 0
+    has_staff = await db.auth_users.count_documents({"businessId": business_id}) > 1
+
+    checklist = {
+        "backfillComplete": untagged_total == 0,
+        "demoDataPurged": demo_total == 0,
+        "hasMenu": has_menu,
+        "hasStaff": has_staff,
+    }
+    return {**checklist, "ready": all(checklist.values()),
+            "untaggedRowsRemaining": untagged_total, "demoRowsRemaining": demo_total}

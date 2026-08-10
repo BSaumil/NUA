@@ -187,6 +187,12 @@ def test_sync_catalog_creates_products_from_square_items(client, owner_headers, 
     run_detail = req(client, "GET", f"/api/integrations/sync-runs/{catalog_run['id']}", headers=owner_headers).json()
     assert run_detail["rawSamples"][0]["item_data"]["name"] == "ZZZ Square Sync Test Item"
 
+    # The integration card shows "last synced" at a glance — no need to open
+    # the history dialog just to see whether a sync ever ran.
+    detail = req(client, "GET", "/api/integrations/square", headers=owner_headers).json()
+    assert detail["lastSyncAt"] == catalog_run["finishedAt"]
+    assert detail["lastSyncStatus"] == "success"
+
 
 # ----------------------------------------------------------------- sale sync
 
