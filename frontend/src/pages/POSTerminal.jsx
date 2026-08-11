@@ -2152,7 +2152,15 @@ const POSTerminal = () => {
                     {[...availableVouchers, ...universalVouchers].filter(v => v.active).map(v => (
                       <button key={`${v._source}-${v.id}`} onClick={() => applyAvailableVoucher(v)}
                         className="w-full text-left p-2 border rounded text-xs hover:bg-amber-50 hover:border-amber-300 transition" data-testid={`voucher-${v.id}`}>
-                        <div className="flex justify-between font-semibold"><span>{v.name}</span><span className="text-amber-700">{v.discountType === 'percent' ? `${v.value}%` : `$${v.value}`} off</span></div>
+                        <div className="flex justify-between items-center font-semibold">
+                          <span className="flex items-center gap-1.5">
+                            <span className={`text-[9px] uppercase tracking-wide px-1 py-0.5 rounded font-bold ${v._source === 'v29' ? 'bg-violet-100 text-violet-600' : 'bg-blue-100 text-blue-600'}`}>
+                              {v._source === 'v29' ? 'Voucher' : 'Coupon'}
+                            </span>
+                            {v.name}
+                          </span>
+                          <span className="text-amber-700">{v.discountType === 'percent' ? `${v.value}%` : `$${v.value}`} off</span>
+                        </div>
                         <div className="text-[10px] text-gray-500 font-mono">{v.manualCode}</div>
                       </button>
                     ))}

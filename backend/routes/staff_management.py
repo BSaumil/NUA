@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
 from typing import Optional
 from deps import get_user, require_owner, require_owner_or_manager
@@ -50,10 +50,78 @@ async def _blackout_conflict(staff_id: Optional[str], day_name: Optional[str], w
     return None
 
 # ============ STAFF PIN LOGIN ============
+_ROSTER_GRACE_MINUTES = 30  # early-arrival / running-over tolerance either side of a shift
+
+
+async def _is_rostered_now(staff_id: str, now: Optional[datetime] = None) -> bool:
+    """True if staff_id has a roster_shifts entry covering the current
+    moment, with a grace window either side so an early arrival or a shift
+    running slightly over isn't treated as unrostered. Same UTC-wall-clock
+    convention the rest of this file (and analytics.py's labor-cost calc)
+    already uses for startTime/endTime — not truly timezone-aware, but
+    consistent with how shifts are compared everywhere else today.
+
+    Handles overnight shifts (e.g. 20:00-01:00, ordinary for a bar): a shift
+    where endTime <= startTime is treated as running past midnight, and a
+    shift dated *yesterday* is still checked — its post-midnight portion
+    falls on today's clock but the shift itself is dated the day it started.
+
+    `now` is only ever passed explicitly by tests; every real call uses the
+    actual current time."""
+    if not staff_id:
+        return False
+    now = now or datetime.now(timezone.utc)
+    today_iso = now.date().isoformat()
+    yesterday_iso = (now.date() - timedelta(days=1)).isoformat()
+    now_minutes = now.hour * 60 + now.minute
+    shifts = await db.roster_shifts.find(
+        {"staffId": staff_id, "date": {"$in": [today_iso, yesterday_iso]}}, {"_id": 0}
+    ).to_list(50)
+    for sh in shifts:
+        try:
+            start_h, start_m = (int(x) for x in sh.get("startTime", "09:00").split(":"))
+            end_h, end_m = (int(x) for x in sh.get("endTime", "17:00").split(":"))
+        except Exception:
+            continue
+        start_total = start_h * 60 + start_m
+        end_total = end_h * 60 + end_m
+        if end_total <= start_total:  # crosses midnight
+            end_total += 24 * 60
+        lo = start_total - _ROSTER_GRACE_MINUTES
+        hi = end_total + _ROSTER_GRACE_MINUTES
+        # A shift dated today is checked directly; one dated yesterday only
+        # matters if it runs past midnight, so shift now_minutes forward a
+        # day to line up with the extended end_total computed above.
+        candidate = now_minutes if sh["date"] == today_iso else now_minutes + 24 * 60
+        if lo <= candidate <= hi:
+            return True
+    return False
+
+
+async def _has_roster_override_today(staff_id: str) -> bool:
+    today_iso = datetime.now(timezone.utc).date().isoformat()
+    return await db.roster_overrides.find_one({"staffId": staff_id, "date": today_iso}, {"_id": 1}) is not None
+
+
+def _issue_staff_token(user: dict) -> str:
+    import jwt, os
+    return jwt.encode(
+        {"sub": user["id"], "email": user["email"], "role": user["role"], "businessId": user.get("businessId"),
+         "exp": datetime.now(timezone.utc) + timedelta(hours=8), "type": "access"},
+        os.environ["JWT_SECRET"], algorithm="HS256"
+    )
+
+
 @router.post("/auth/pin-login")
 async def pin_login(data: dict):
-    """Login with 2-4 digit PIN code"""
-    import jwt, os
+    """Login with 2-4 digit PIN code.
+
+    Owners/managers can always sign in — they're the ones who approve
+    everyone else. Everyone else needs a roster_shifts entry covering right
+    now (see _is_rostered_now), or an existing approval for today. Without
+    either, this returns needsApproval instead of a token — the terminal
+    then prompts for a manager/owner PIN via POST /auth/pin-login/approve,
+    which is the only way in (never a hard lock-out, see that endpoint)."""
     pin = str(data.get("pin", ""))
     if not pin or len(pin) < 2 or len(pin) > 4:
         raise HTTPException(status_code=400, detail="PIN must be 2-4 digits")
@@ -62,12 +130,58 @@ async def pin_login(data: dict):
         raise HTTPException(status_code=401, detail="Invalid PIN")
     user.pop("_id", None)
     user.pop("password_hash", None)
-    token = jwt.encode(
-        {"sub": user["id"], "email": user["email"], "role": user["role"], "businessId": user.get("businessId"),
-         "exp": datetime.now(timezone.utc) + timedelta(hours=8), "type": "access"},
-        os.environ["JWT_SECRET"], algorithm="HS256"
-    )
+
+    if user["role"] not in ("owner", "manager"):
+        if not await _is_rostered_now(user["id"]) and not await _has_roster_override_today(user["id"]):
+            return {"needsApproval": True, "staffId": user["id"], "staffName": user["name"]}
+
+    token = _issue_staff_token(user)
     return {"user": user, "token": token}
+
+
+@router.post("/auth/pin-login/approve")
+async def approve_pin_login(data: dict):
+    """A manager/owner authorizes a non-rostered staff member's login right
+    there at the terminal, by entering their own PIN alongside the staff
+    member's. Records a roster_overrides row for today (audit trail, and
+    lets clock-in skip re-asking for the rest of the day) and returns the
+    staff member's token — same shape as a normal PIN login success."""
+    staff_pin = str(data.get("staffPin", ""))
+    manager_pin = str(data.get("managerPin", ""))
+    if not staff_pin or not manager_pin:
+        raise HTTPException(status_code=400, detail="Staff PIN and manager/owner PIN are both required")
+
+    staff = await db.auth_users.find_one({"pin": staff_pin, "status": "active"})
+    if not staff:
+        raise HTTPException(status_code=401, detail="Invalid staff PIN")
+    manager = await db.auth_users.find_one(
+        {"pin": manager_pin, "status": "active", "role": {"$in": ["owner", "manager"]}})
+    if not manager:
+        raise HTTPException(status_code=401, detail="Invalid manager/owner PIN")
+
+    today_iso = datetime.now(timezone.utc).date().isoformat()
+    await db.roster_overrides.update_one(
+        {"staffId": staff["id"], "date": today_iso},
+        {"$set": {"staffId": staff["id"], "staffName": staff["name"], "date": today_iso,
+                   "approvedBy": manager["id"], "approvedByName": manager["name"],
+                   "approvedAt": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    try:
+        from services import audit_service
+        await audit_service.log_event(
+            entity_type="roster_override", entity_id=staff["id"], action="created",
+            after={"staffId": staff["id"], "staffName": staff["name"], "date": today_iso,
+                   "approvedBy": manager["id"], "approvedByName": manager["name"]},
+            memo=f"{manager['name']} approved an off-roster login for {staff['name']}",
+        )
+    except Exception:
+        pass
+
+    staff.pop("_id", None)
+    staff.pop("password_hash", None)
+    token = _issue_staff_token(staff)
+    return {"user": staff, "token": token}
 
 @router.post("/auth/staff/{staff_id}/set-pin")
 async def set_staff_pin(staff_id: str, data: dict, _: dict = Depends(require_owner)):
@@ -84,6 +198,10 @@ async def set_staff_pin(staff_id: str, data: dict, _: dict = Depends(require_own
 # ============ TIMECARDS — CLOCK IN/OUT ============
 @router.post("/staff/clock-in")
 async def clock_in(user: dict = Depends(get_user)):
+    if user["role"] not in ("owner", "manager"):
+        if not await _is_rostered_now(user["id"]) and not await _has_roster_override_today(user["id"]):
+            raise HTTPException(status_code=403,
+                                 detail="Not rostered right now — ask a manager or owner to approve at login")
     active = await db.timecards.find_one({"staffId": user["id"], "clockOut": None}, {"_id": 0})
     if active:
         raise HTTPException(status_code=400, detail="Already clocked in")
@@ -124,6 +242,35 @@ async def clock_out(data: dict, user: dict = Depends(get_user)):
 async def my_clock_status(user: dict = Depends(get_user)):
     active = await db.timecards.find_one({"staffId": user["id"], "clockOut": None}, {"_id": 0})
     return {"clockedIn": active is not None, "currentShift": active}
+
+
+# ============ POS SESSION TIMEOUT (owner-configurable auto-logout) ============
+POS_SESSION_DEFAULTS = {"timeoutMinutes": 0}  # 0 = stay logged in
+_POS_SESSION_ALLOWED_MINUTES = {0, 2, 5, 10}
+
+
+@router.get("/settings/pos-session")
+async def get_pos_session_settings(_: dict = Depends(get_user)):
+    s = await db.settings.find_one({"key": "pos_session"}, {"_id": 0})
+    cfg = dict(POS_SESSION_DEFAULTS)
+    if s and isinstance(s.get("value"), dict):
+        cfg.update({k: v for k, v in s["value"].items() if v is not None})
+    return cfg
+
+
+@router.post("/settings/pos-session")
+async def save_pos_session_settings(data: dict, _: dict = Depends(require_owner)):
+    try:
+        timeout = int(data.get("timeoutMinutes", 0))
+    except (TypeError, ValueError):
+        timeout = -1
+    if timeout not in _POS_SESSION_ALLOWED_MINUTES:
+        raise HTTPException(status_code=400, detail="timeoutMinutes must be one of 0 (stay logged in), 2, 5, 10")
+    cfg = {"timeoutMinutes": timeout}
+    await db.settings.update_one(
+        {"key": "pos_session"}, {"$set": {"key": "pos_session", "value": cfg}}, upsert=True
+    )
+    return cfg
 
 @router.get("/staff/timecards")
 async def get_timecards( staff_id: str = None, period: str = "week", user: dict = Depends(get_user)):

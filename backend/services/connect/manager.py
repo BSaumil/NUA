@@ -44,10 +44,21 @@ async def describe_provider(business_id: str, meta: ProviderMeta) -> Dict[str, A
     status_doc = await creds_store.get_status_doc(business_id, meta.slug)
     if not status_doc:
         return {**base, "status": "needs_credentials", "requiresKey": True}
+    last_sync = await _last_sync_run(business_id, meta.slug)
     return {
         **base, "status": status_doc.get("status", "needs_credentials"), "requiresKey": True,
         "lastError": status_doc.get("lastError"), "lastCheckedAt": status_doc.get("lastCheckedAt"),
+        "lastSyncAt": last_sync.get("finishedAt") if last_sync else None,
+        "lastSyncStatus": last_sync.get("status") if last_sync else None,
     }
+
+
+async def _last_sync_run(business_id: str, slug: str) -> Optional[Dict[str, Any]]:
+    """Most recent sync-run for this provider, for the at-a-glance 'last
+    synced' line on the integration card — without making the caller open
+    the full history dialog just to see whether a sync ever ran."""
+    runs = await list_sync_runs(business_id, provider=slug, limit=1)
+    return runs[0] if runs else None
 
 
 def os_env_has_stripe() -> bool:

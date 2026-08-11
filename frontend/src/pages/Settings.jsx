@@ -67,6 +67,7 @@ const Settings = () => {
 
   // Today home-screen targets + wallet occasion offers
   const [todayTargets, setTodayTargets] = useState({ dailySalesTarget: 0, laborPctThreshold: 32, refundRateThreshold: 5 });
+  const [posSession, setPosSession] = useState({ timeoutMinutes: 0 });
   const [walletOffers, setWalletOffers] = useState({ birthdayEnabled: true, birthdayAmount: 10 });
 
   useEffect(() => {
@@ -99,6 +100,7 @@ const Settings = () => {
     }).catch(() => {});
     analyticsAPI.getTodayTargets().then(r => { if (r.data) setTodayTargets(r.data); }).catch(() => {});
     customersAPI.getWalletOffers().then(r => { if (r.data) setWalletOffers(r.data); }).catch(() => {});
+    staffMgmtAPI.getPosSessionSettings().then(r => { if (r.data) setPosSession(r.data); }).catch(() => {});
   }, []);
 
   const fetchLocations = async () => {
@@ -400,6 +402,29 @@ const Settings = () => {
               try { await customersAPI.saveWalletOffers(walletOffers); toast.success('Wallet offers saved'); }
               catch { toast.error('Failed to save'); }
             }} data-testid="save-wallet-offers-btn"><Save size={16} className="mr-1" /> Save Offers</Button>
+          </CardContent></Card>
+
+          <Card><CardHeader><CardTitle className="flex items-center gap-2"><Clock size={18} /> POS Session</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-gray-500">
+              How long a POS screen stays signed in after a PIN login or after finishing an order,
+              before it auto-logs-out and waits for the next PIN. Any interaction resets the clock —
+              this only fires on real inactivity.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {[{ v: 0, label: 'Stay logged in' }, { v: 2, label: '2 min' }, { v: 5, label: '5 min' }, { v: 10, label: '10 min' }].map(opt => (
+                <button key={opt.v} onClick={() => setPosSession({ timeoutMinutes: opt.v })}
+                  data-testid={`pos-session-${opt.v}`}
+                  className={`px-4 py-2 text-sm rounded-lg font-medium border transition-colors ${posSession.timeoutMinutes === opt.v ? 'text-white border-transparent' : 'text-gray-600 border-gray-200 hover:border-gray-300'}`}
+                  style={posSession.timeoutMinutes === opt.v ? { backgroundColor: theme.primary } : {}}>
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <Button style={{ backgroundColor: theme.primary }} onClick={async () => {
+              try { await staffMgmtAPI.savePosSessionSettings(posSession); toast.success('POS session setting saved'); }
+              catch { toast.error('Failed to save'); }
+            }} data-testid="save-pos-session-btn"><Save size={16} className="mr-1" /> Save</Button>
           </CardContent></Card>
         </div>
       )}

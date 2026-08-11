@@ -1,16 +1,16 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  RefreshCw, Sparkles, AlertTriangle, AlertOctagon, Info, CheckCircle2,
+  RefreshCw, Sparkles, AlertTriangle, AlertOctagon, Info, CheckCircle2, Circle,
   TrendingUp, CalendarClock, Users2, ShoppingCart, ArrowRight, Activity,
-  Moon, Sun, LogOut as SignOutIcon, Brain, ClipboardCheck,
+  Moon, Sun, LogOut as SignOutIcon, Brain, ClipboardCheck, Rocket,
 } from 'lucide-react';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
-import { analyticsAPI, nuaAPI } from '../services/api';
+import { analyticsAPI, nuaAPI, businessAPI } from '../services/api';
 import { toast } from 'sonner';
 import useLiveFeed from '../hooks/useLiveFeed';
 
@@ -45,6 +45,7 @@ export default function OwnerDashboardApp() {
   const [briefing, setBriefing] = useState(null);
   const [insights, setInsights] = useState([]);
   const [health, setHealth] = useState(null);
+  const [setupStatus, setSetupStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
 
@@ -62,6 +63,15 @@ export default function OwnerDashboardApp() {
       if (h.status === 'fulfilled') setHealth(h.value.data);
     } finally { setLoading(false); }
   }, []);
+
+  // Launch readiness checklist — owner-only, and only worth asking for
+  // while something's still incomplete (once ready it never shows again).
+  useEffect(() => {
+    if (user?.role !== 'owner') return;
+    businessAPI.setupStatus(user?.businessId || 'default')
+      .then(r => { if (!r.data.ready) setSetupStatus(r.data); })
+      .catch(() => {});
+  }, [user]);
 
   useEffect(() => {
     load();
@@ -86,7 +96,20 @@ export default function OwnerDashboardApp() {
   const labor = pulse?.labor || {};
   const service = pulse?.service || {};
   const alerts = pulse?.alerts || [];
+  const trend = pulse?.trend || [];
   const laborOver = labor.pct != null && labor.pct > (labor.threshold || 32);
+
+  if (loading && !pulse) {
+    return (
+      <div className="min-h-screen pb-10" style={{ background: darkMode ? '#0b0b0f' : '#f6f7fb' }} data-testid="owner-dashboard-app-page">
+        <div className="max-w-2xl mx-auto px-4 pt-8 space-y-5">
+          {[88, 140, 96, 220, 120].map((h, i) => (
+            <div key={i} className="rounded-xl animate-pulse" style={{ height: h, background: darkMode ? '#15151d' : '#e9eaf0' }} data-testid={`owner-dashboard-skeleton-${i}`} />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen pb-10" style={{ background: darkMode ? '#0b0b0f' : '#f6f7fb' }} data-testid="owner-dashboard-app-page">
@@ -114,6 +137,35 @@ export default function OwnerDashboardApp() {
           <h1 className="text-xl font-bold" style={{ color: darkMode ? '#eaeaea' : '#111827' }}>Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'}, {user?.name?.split(' ')[0]}</h1>
           <p className="text-sm text-gray-400">{new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</p>
         </div>
+
+        {/* Launch readiness checklist — disappears on its own once every
+            item is true, so nothing to dismiss and nothing left behind. */}
+        {setupStatus && (
+          <Card className="border-0" style={{ background: darkMode ? '#1c1508' : '#fff7ed', borderLeft: `3px solid ${theme.primary}` }} data-testid="owner-dashboard-setup-checklist">
+            <CardContent className="p-4">
+              <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide mb-3" style={{ color: theme.primary }}>
+                <Rocket size={13} /> Launch readiness
+              </span>
+              <div className="space-y-1.5">
+                {[
+                  { key: 'hasMenu', label: 'Menu items added' },
+                  { key: 'hasStaff', label: 'Staff accounts created' },
+                  { key: 'backfillComplete', label: 'Multi-tenant backfill run' },
+                  { key: 'demoDataPurged', label: 'Demo data purged' },
+                ].map(({ key, label }) => (
+                  <div key={key} className="flex items-center gap-2 text-sm" data-testid={`setup-check-${key}`}>
+                    {setupStatus[key]
+                      ? <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
+                      : <Circle size={15} className="text-gray-300 shrink-0" />}
+                    <span style={{ color: setupStatus[key] ? (darkMode ? '#9ca3af' : '#6b7280') : (darkMode ? '#eaeaea' : '#111827'), textDecoration: setupStatus[key] ? 'line-through' : 'none' }}>
+                      {label}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* AI briefing — the AI-at-fingertips centerpiece of this app */}
         <Card className="border-0" style={{ background: darkMode ? '#15151d' : 'linear-gradient(135deg,#f5f3ff,#fdf4ff)' }} data-testid="owner-dashboard-briefing">
@@ -153,6 +205,16 @@ export default function OwnerDashboardApp() {
             <p className="text-[11px] text-gray-400 mt-1">{service.openKitchenTickets || 0} open tickets</p>
           </CardContent></Card>
         </div>
+
+        {/* 7-day sales trend */}
+        {trend.length > 0 && (
+          <Card data-testid="owner-dashboard-trend">
+            <CardContent className="p-4">
+              <h2 className="font-semibold text-sm mb-3" style={{ color: darkMode ? '#eaeaea' : '#111827' }}>Last 7 days</h2>
+              <SalesTrendChart trend={trend} color={theme.primary} darkMode={darkMode} />
+            </CardContent>
+          </Card>
+        )}
 
         {/* Exceptions */}
         <Card data-testid="owner-dashboard-alerts">
@@ -226,5 +288,41 @@ export default function OwnerDashboardApp() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Plain inline-SVG bar chart — no chart library dependency for one sparkline.
+// Each bar carries its own $ label (not color alone) since a single-hue bar
+// against a light background doesn't pass a contrast-only encoding check.
+function SalesTrendChart({ trend, color, darkMode }) {
+  const max = Math.max(...trend.map(t => t.total), 1);
+  const barW = 28;
+  const gap = 14;
+  const chartH = 90;
+  const width = trend.length * (barW + gap);
+  return (
+    <svg viewBox={`0 0 ${width} ${chartH + 34}`} width="100%" height={chartH + 34} role="img"
+      aria-label="Sales total for each of the last 7 days" data-testid="owner-dashboard-trend-chart">
+      {trend.map((t, i) => {
+        const h = Math.max((t.total / max) * chartH, t.total > 0 ? 4 : 1);
+        const x = i * (barW + gap);
+        const isToday = i === trend.length - 1;
+        const day = new Date(t.date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short' })[0];
+        return (
+          <g key={t.date}>
+            <rect x={x} y={chartH - h} width={barW} height={h} rx={4}
+              fill={color} opacity={isToday ? 1 : 0.45} />
+            <text x={x + barW / 2} y={chartH - h - 6} textAnchor="middle" fontSize="9"
+              fill={darkMode ? '#9ca3af' : '#6b7280'}>
+              {t.total >= 1000 ? `${(t.total / 1000).toFixed(1)}k` : Math.round(t.total)}
+            </text>
+            <text x={x + barW / 2} y={chartH + 16} textAnchor="middle" fontSize="10" fontWeight={isToday ? 700 : 400}
+              fill={isToday ? color : (darkMode ? '#9ca3af' : '#6b7280')}>
+              {day}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
   );
 }

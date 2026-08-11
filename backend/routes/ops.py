@@ -23,6 +23,22 @@ async def health():
     return await check_health()
 
 
+@router.get("/ops/device-status")
+async def device_status():
+    """Aggregate, non-sensitive hardware-readiness signal for the login
+    screen — deliberately public (no token yet at that point) and
+    deliberately thin: counts and booleans only, never terminal IDs,
+    IPs, or API keys (those stay behind GET /eftpos/terminals's auth)."""
+    eftpos_active = await db.eftpos_terminals.count_documents({"status": "active"})
+    eftpos_total = await db.eftpos_terminals.count_documents({})
+    receipt_cfg = await db.settings.find_one({"key": "receipt_config"}, {"_id": 0})
+    return {
+        "cardReaderConnected": eftpos_active > 0,
+        "cardReaderCount": eftpos_active,
+        "receiptTemplateConfigured": receipt_cfg is not None,
+    }
+
+
 @router.post("/ops/client-errors")
 async def report_client_error(payload: dict, request: Request):
     """A browser reports its own crash — window.onerror / unhandledrejection,
@@ -118,3 +134,11 @@ async def restore_drill(_: dict = Depends(require_owner)):
     end, against a disposable scratch database, never the live one. This is
     the thing an untested backup skips."""
     return await backup.run_restore_drill()
+
+
+@router.get("/ops/backup/drill-status")
+async def backup_drill_status(_: dict = Depends(require_owner)):
+    """Last automatic daily drill result (services/backup_scheduler.py) —
+    so 'is our backup still good' is something you look up, not assume."""
+    from services import backup_scheduler
+    return await backup_scheduler.drill_status()

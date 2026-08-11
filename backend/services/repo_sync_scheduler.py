@@ -1,17 +1,18 @@
 """
 Daily GitHub auto-sync.
 
-Once per day at REPO_SYNC_HOUR (default 0 = midnight UTC), runs:
-    git fetch <REPO_SYNC_REMOTE> <REPO_SYNC_BRANCH>
+Once per day at REPO_SYNC_HOUR in REPO_SYNC_TZ (default 04:00 Australia/Sydney),
+runs:
+    git fetch <REPO_SYNC_URL> <REPO_SYNC_BRANCH>
     git merge FETCH_HEAD --no-edit
 
 Design constraints:
 - Read-only-safe: fails loudly (logs + records) on any conflict, never force-resets.
-- Idempotent: guards against double-firing on the same date via db.repo_sync_log.
+- Idempotent: guards against double-firing on the same local date via db.repo_sync_log.
 - Best-effort: any failure is logged and the loop continues — never crashes the app.
 - Container-scoped: only runs while the backend process is up. If preview sleeps
-  through midnight the sync will happen when the app next wakes and the current
-  UTC date hasn't been synced yet.
+  through the target hour the sync will happen when the app next wakes and the
+  current local date hasn't been synced yet.
 """
 from __future__ import annotations
 import asyncio
@@ -47,7 +48,8 @@ def _run_git(*args: str, timeout: int = 90) -> tuple[int, str, str]:
 
 async def _do_sync(*, force: bool = False) -> dict:
     """Perform one fetch+merge cycle. Returns a status dict."""
-    today = datetime.now(timezone.utc).date().isoformat()
+    tz = _local_tz()
+    today = datetime.now(tz).date().isoformat()   # date in local zone (e.g. AEST)
     if not force:
         existing = await db.repo_sync_log.find_one({"date": today, "status": "ok"})
         if existing:
@@ -103,15 +105,18 @@ async def _do_sync(*, force: bool = False) -> dict:
 
 
 async def _loop() -> None:
+    tz = _local_tz()
     logger.info(
         f"[repo-sync] scheduler starting — {REPO_URL}#{REPO_BRANCH} "
-        f"at hour {REPO_HOUR:02d} UTC, poll every {REPO_INTERVAL}s"
+        f"at hour {REPO_HOUR:02d} {REPO_TZ_NAME}, poll every {REPO_INTERVAL}s"
     )
     while True:
         try:
-            now = datetime.now(timezone.utc)
-            # Only sync when we're inside the target hour (0..1 covers all of midnight UTC).
-            if now.hour == REPO_HOUR:
+            now_local = datetime.now(tz)
+            # Only sync when the local-time hour matches. With a 30-min poll interval
+            # we'll get exactly one attempt during the target hour; subsequent ones
+            # are no-ops thanks to the daily idempotency guard.
+            if now_local.hour == REPO_HOUR:
                 await _do_sync()
         except Exception as exc:
             logger.warning(f"[repo-sync] tick error: {exc}")
@@ -141,6 +146,17 @@ async def force_sync_now() -> dict:
 
 
 async def sync_status(limit: int = 10) -> dict:
+    rows = await db.repo_sync_log.find({}, {"_id": 0}).sort("date", -1).limit(limit).to_list(limit)
+    return {
+        "enabled": ENABLED,
+        "url": REPO_URL,
+        "branch": REPO_BRANCH,
+        "hourLocal": REPO_HOUR,
+        "timezone": REPO_TZ_NAME,
+        "pollIntervalSeconds": REPO_INTERVAL,
+        "recent": rows,
+    }
+-> dict:
     rows = await db.repo_sync_log.find({}, {"_id": 0}).sort("date", -1).limit(limit).to_list(limit)
     return {
         "enabled": ENABLED,

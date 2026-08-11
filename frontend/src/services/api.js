@@ -456,10 +456,13 @@ export const advancedAPI = {
 // Staff Management — PIN, Timecards, Roster, Payrun
 export const staffMgmtAPI = {
   pinLogin: (pin) => api.post('/auth/pin-login', { pin }),
+  approvePinLogin: (staffPin, managerPin) => api.post('/auth/pin-login/approve', { staffPin, managerPin }),
   setPin: (staffId, pin) => api.post(`/auth/staff/${staffId}/set-pin`, { pin }),
   clockIn: () => api.post('/staff/clock-in'),
   clockOut: (data) => api.post('/staff/clock-out', data || {}),
   myStatus: () => api.get('/staff/my-status'),
+  getPosSessionSettings: () => api.get('/settings/pos-session'),
+  savePosSessionSettings: (data) => api.post('/settings/pos-session', data),
   getTimecards: (params) => api.get('/staff/timecards', { params }),
   getRoster: (params) => api.get('/staff/roster', { params }),
   createRosterShift: (data) => api.post('/staff/roster', data),
@@ -963,6 +966,8 @@ export const businessAPI = {
   summary: (id) => api.get(`/business/${id}/summary`),
   exportData: (id, collection) => api.get(`/business/${id}/export`, { params: collection ? { collection } : {} }),
   backfillTenant: () => api.post('/business/backfill-tenant'),
+  purgeDemoData: () => api.post('/business/purge-demo-data', { confirm: 'PURGE' }),
+  setupStatus: (id) => api.get(`/business/${id}/setup-status`),
 };
 
 // Customer Identity — the free base layer + per-add-on entitlements

@@ -214,6 +214,7 @@ PUBLIC_API_PREFIXES = (
 
 PUBLIC_API_PATHS = {
     "/api/", "/api/health", "/api/healthz",
+    "/api/ops/device-status",     # login-screen peripheral status — counts/booleans only
     # Auth itself, plus the endpoints the login screen needs before there is a user.
     "/api/auth/login", "/api/auth/register", "/api/auth/logout", "/api/auth/refresh",
     "/api/auth/me",
@@ -225,6 +226,11 @@ PUBLIC_API_PATHS = {
     # token, which this middleware doesn't know how to read — the endpoint
     # verifies that token itself.
     "/api/auth/2fa/challenge",
+    # Staff PIN login — same "no token yet" story as /api/auth/login. This
+    # was missing before and silently made PIN login unreachable in
+    # production (every call 401'd here before the route's own PIN check
+    # ever ran) — there was no test hitting it end-to-end to catch that.
+    "/api/auth/pin-login", "/api/auth/pin-login/approve",
     "/api/business/theme",       # login-screen branding
     # The menu, as guests see it. /products strips cost/stock/sku for guests.
     "/api/products", "/api/categories", "/api/modifiers",
@@ -497,13 +503,21 @@ async def startup():
     except Exception as exc:
         logger.warning("Coursing scheduler failed to start: %s", exc)
     # Daily GitHub auto-sync — see services/repo_sync_scheduler.py.
-    # Polls every 30 min; performs one fetch+merge inside the target UTC hour
-    # (default 0 = midnight). Disabled by REPO_SYNC_ENABLED=false.
+    # Polls every 30 min; performs one fetch+merge inside the target hour in
+    # the configured timezone (default: 04:00 Australia/Sydney).
+    # Disable with REPO_SYNC_ENABLED=false.
     try:
         from services.repo_sync_scheduler import start_scheduler as start_repo_sync
         start_repo_sync()
     except Exception as exc:
         logger.warning("Repo-sync scheduler failed to start: %s", exc)
+    # Daily automatic backup restore-drill — catches a silently-broken
+    # backup before the day it's actually needed.
+    try:
+        from services.backup_scheduler import start_scheduler as start_backup_drills
+        start_backup_drills()
+    except Exception as exc:
+        logger.warning("Backup drill scheduler failed to start: %s", exc)
     # Burned TOTP codes and trusted devices both expire on their own.
     try:
         from services.two_factor import ensure_indexes as ensure_2fa_indexes
@@ -548,6 +562,11 @@ async def shutdown_db_client():
     try:
         from services.repo_sync_scheduler import stop_scheduler as stop_repo_sync
         stop_repo_sync()
+    except Exception:
+        pass
+    try:
+        from services.backup_scheduler import stop_scheduler as stop_backup_drills
+        stop_backup_drills()
     except Exception:
         pass
     client.close()
