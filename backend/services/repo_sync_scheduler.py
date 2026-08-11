@@ -20,6 +20,7 @@ import logging
 import os
 import subprocess
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from database import db
 
 logger = logging.getLogger(__name__)
@@ -28,10 +29,19 @@ _task: asyncio.Task | None = None
 
 REPO_URL = os.environ.get("REPO_SYNC_URL", "https://github.com/BSaumil/NUA.git")
 REPO_BRANCH = os.environ.get("REPO_SYNC_BRANCH", "main")
-REPO_HOUR = int(os.environ.get("REPO_SYNC_HOUR", "0"))       # 0 = midnight UTC
+REPO_HOUR = int(os.environ.get("REPO_SYNC_HOUR", "4"))       # local-time hour in REPO_SYNC_TZ
+REPO_TZ_NAME = os.environ.get("REPO_SYNC_TZ", "Australia/Sydney")
 REPO_INTERVAL = int(os.environ.get("REPO_SYNC_INTERVAL", "1800"))  # check every 30 min
 REPO_ROOT = os.environ.get("REPO_SYNC_ROOT", "/app")
 ENABLED = os.environ.get("REPO_SYNC_ENABLED", "true").lower() in ("1", "true", "yes")
+
+
+def _local_tz():
+    try:
+        return ZoneInfo(REPO_TZ_NAME)
+    except ZoneInfoNotFoundError:
+        logger.warning(f"[repo-sync] timezone {REPO_TZ_NAME!r} not found, falling back to UTC")
+        return timezone.utc
 
 
 def _run_git(*args: str, timeout: int = 90) -> tuple[int, str, str]:
@@ -153,16 +163,6 @@ async def sync_status(limit: int = 10) -> dict:
         "branch": REPO_BRANCH,
         "hourLocal": REPO_HOUR,
         "timezone": REPO_TZ_NAME,
-        "pollIntervalSeconds": REPO_INTERVAL,
-        "recent": rows,
-    }
--> dict:
-    rows = await db.repo_sync_log.find({}, {"_id": 0}).sort("date", -1).limit(limit).to_list(limit)
-    return {
-        "enabled": ENABLED,
-        "url": REPO_URL,
-        "branch": REPO_BRANCH,
-        "hourUtc": REPO_HOUR,
         "pollIntervalSeconds": REPO_INTERVAL,
         "recent": rows,
     }
