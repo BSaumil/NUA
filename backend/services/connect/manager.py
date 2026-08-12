@@ -3,6 +3,7 @@ slug + registry entry into an actual connect/sync/status action, and is the
 one place that decides what "connected" is allowed to mean for a given
 provider (a CDR bank can never report it, no matter what).
 """
+import os
 from typing import Any, Dict, Optional
 
 from services.connect import credentials as creds_store
@@ -28,7 +29,8 @@ async def describe_provider(business_id: str, meta: ProviderMeta) -> Dict[str, A
         "capabilities": sorted(meta.connector.capabilities) if meta.connector else [],
     }
     if meta.preconfigured:
-        return {**base, "status": "preconfigured" if os_env_has_stripe() else "not_implemented", "requiresKey": False}
+        configured = bool(meta.preconfigured_env_var and os.environ.get(meta.preconfigured_env_var))
+        return {**base, "status": "preconfigured" if configured else "not_implemented", "requiresKey": False}
     if meta.is_cdr_bank:
         status_doc = await creds_store.get_status_doc(business_id, meta.slug)
         return {
@@ -59,11 +61,6 @@ async def _last_sync_run(business_id: str, slug: str) -> Optional[Dict[str, Any]
     the full history dialog just to see whether a sync ever ran."""
     runs = await list_sync_runs(business_id, provider=slug, limit=1)
     return runs[0] if runs else None
-
-
-def os_env_has_stripe() -> bool:
-    import os
-    return bool(os.environ.get("STRIPE_API_KEY"))
 
 
 async def connect_provider(business_id: str, slug: str, creds: Dict[str, Any]) -> Dict[str, Any]:

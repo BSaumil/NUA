@@ -413,6 +413,17 @@ export const stripeAPI = {
   checkStatus: (sessionId) => api.get(`/stripe/checkout/status/${sessionId}`),
 };
 
+// Crypto checkout (Bitcoin + USDC via Coinbase Commerce) — same shape as
+// stripeAPI above, real hosted-checkout redirect + status poll. Coinbase's
+// redirect doesn't echo the charge code back, so the post-redirect page
+// polls by orderId instead (checkStatusByOrder) — checkStatus(chargeCode)
+// is for callers that already have the charge code some other way.
+export const cryptoAPI = {
+  createCheckout: (data) => api.post('/crypto/checkout', data),
+  checkStatus: (chargeCode) => api.get(`/crypto/checkout/status/${chargeCode}`),
+  checkStatusByOrder: (orderId) => api.get(`/crypto/checkout/status-by-order/${orderId}`),
+};
+
 // Integrations Hub
 export const integrationsAPI = {
   getAll: () => api.get('/integrations'),

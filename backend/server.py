@@ -64,6 +64,7 @@ from routes.nua import router as nua_router
 from routes.hq import router as hq_router
 from routes.ops import router as ops_router
 from routes.changelog import router as changelog_router
+from routes.crypto_payments import router as crypto_payments_router
 from middleware.license_middleware import LicenseEnforcementMiddleware
 from middleware.actor_context import ActorContextMiddleware
 
@@ -127,6 +128,7 @@ api_router.include_router(hq_router)
 api_router.include_router(multi_tenant_router)
 api_router.include_router(ops_router)
 api_router.include_router(changelog_router)
+api_router.include_router(crypto_payments_router)
 
 @api_router.get("/")
 async def root():
@@ -198,6 +200,11 @@ PUBLIC_API_PREFIXES = (
     "/api/online/orders/track/", # order tracking by code, from the SMS link
     "/api/waitlist/track/",      # waitlist position tracking by code, same access model
     "/api/stripe/checkout/status/",
+    # same "browser away and back" story as Stripe checkout status — two
+    # prefixes because Coinbase Commerce doesn't echo the charge code back
+    # on redirect, so the by-order lookup is a distinct path, not a suffix
+    # of the by-charge-code one.
+    "/api/crypto/checkout/status/", "/api/crypto/checkout/status-by-order/",
     # Self-service kiosk: add-to-cart, course, checkout, upsell — no staff
     # login exists on a kiosk terminal. Deliberately "session/" (trailing
     # slash) so this never matches GET /api/v25/kiosk/sessions (plural, no
@@ -268,6 +275,9 @@ PUBLIC_API_PATHS = {
     # Square Connect webhook — authenticated by its own HMAC signature
     # (services/connect/connectors/square.py verify_webhook), not a user token.
     "/api/webhooks/square",
+    # Coinbase Commerce webhook — authenticated by its own HMAC signature
+    # (services/coinbase_commerce.py verify_webhook_signature), not a user token.
+    "/api/webhook/coinbase",
     # A browser reporting its own crash — has to work from the login screen
     # and the guest ordering pages, neither of which carries a token.
     "/api/ops/client-errors",

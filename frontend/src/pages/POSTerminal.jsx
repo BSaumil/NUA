@@ -13,7 +13,7 @@ import {
 } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { usePOS } from '../contexts/POSContext';
-import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API, v26API, floorPlansAPI, itemsSystemAPI, kitchenAPI, coursingAPI, posLayoutAPI, finalizeAPI } from '../services/api';
+import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, cryptoAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API, v26API, floorPlansAPI, itemsSystemAPI, kitchenAPI, coursingAPI, posLayoutAPI, finalizeAPI } from '../services/api';
 import { useToast } from '../hooks/use-toast';
 import { useAuth } from '../contexts/AuthContext';
 import VoiceOrderButton from '../components/VoiceOrderButton';
@@ -1024,6 +1024,34 @@ const POSTerminal = () => {
       if (res.data.url) window.location.href = res.data.url;
     } catch {
       toast({ title: "Error", description: "Failed to initiate Stripe checkout.", variant: "destructive" });
+    } finally { setLoading(false); }
+  };
+
+  // ---- Crypto Checkout (Bitcoin + USDC via Coinbase Commerce) ----
+  // Same "redirect away, redirect back" shape as Stripe above — the sale
+  // payload travels with the checkout charge and gets rung up server-side
+  // once Coinbase confirms payment, not by this tab still being open.
+  const handleCryptoCheckout = async () => {
+    if (tableBlocked) {
+      toast({ title: 'Unknown table', description: tableCheck.message, variant: 'destructive' });
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await cryptoAPI.createCheckout({
+        originUrl: window.location.origin,
+        amount: totalNum,
+        sale: {
+          items: cart.map(item => toTxItem(item, true)),
+          paymentMethod: 'Crypto',
+          customerId: selectedCustomer?.id || null, location: currentLocation, cashier: currentUser.name,
+          orderType, tableNumber: orderType === 'dine-in' ? tableNumber : null,
+          ...buildDiscountPayload(),
+        },
+      });
+      if (res.data.url) window.location.href = res.data.url;
+    } catch (err) {
+      toast({ title: "Error", description: err.response?.data?.detail || "Failed to initiate crypto checkout.", variant: "destructive" });
     } finally { setLoading(false); }
   };
 
@@ -2245,13 +2273,13 @@ const POSTerminal = () => {
               onClick={handleStripeCheckout} disabled={loading} data-testid="pay-stripe">
               <CreditCard size={18} className="mr-2" /> Pay with Stripe
             </Button>
-            <Button className="w-full h-12 bg-emerald-700 hover:bg-emerald-800 text-white font-medium"
-              onClick={() => { toast({ title: 'BNPL', description: 'Afterpay / Klarna — opening provider redirect (configure keys in Integrations)' }); }} data-testid="pay-bnpl">
-              <CreditCard size={18} className="mr-2" /> Pay Later (Afterpay / Klarna)
+            <Button className="w-full h-12 bg-gray-200 text-gray-500 font-medium cursor-not-allowed" disabled
+              title="Afterpay / Klarna isn't connected yet" data-testid="pay-bnpl">
+              <CreditCard size={18} className="mr-2" /> Pay Later (Afterpay / Klarna) — Coming soon
             </Button>
             <Button className="w-full h-12 bg-orange-500 hover:bg-orange-600 text-white font-medium"
-              onClick={() => { toast({ title: 'Crypto', description: 'USDC tap-to-pay via Stripe Crypto — configure keys in Integrations' }); }} data-testid="pay-crypto">
-              ₿ Pay with Crypto (USDC)
+              onClick={handleCryptoCheckout} disabled={loading} data-testid="pay-crypto">
+              ₿ Pay with Crypto (BTC / USDC)
             </Button>
             <Button className="w-full h-14 bg-indigo-600 hover:bg-indigo-700 text-white font-medium"
               onClick={handleStartSplit} data-testid="pay-split">

@@ -2,22 +2,34 @@ import React, { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Check, Loader2, X } from 'lucide-react';
 import { Button } from '../components/ui/button';
-import { stripeAPI } from '../services/api';
+import { stripeAPI, cryptoAPI } from '../services/api';
+
+// Stripe templates {CHECKOUT_SESSION_ID} into the redirect URL itself, so
+// this page gets the session id back as ?session_id=. Coinbase Commerce
+// has no equivalent templating — it just redirects to the bare URL with
+// nothing appended — so the crypto checkout route puts the one thing it
+// does know ahead of time, order_id, into the URL instead, and this page
+// resolves that to the actual charge via checkStatusByOrder.
 
 export default function PaymentSuccess() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [status, setStatus] = useState('checking'); // checking | paid | failed
+  const provider = searchParams.get('provider') === 'crypto' ? 'crypto' : 'stripe';
   const sessionId = searchParams.get('session_id');
+  const orderId = searchParams.get('order_id');
 
   useEffect(() => {
-    if (!sessionId) { setStatus('failed'); return; }
+    const pollKey = provider === 'crypto' ? orderId : sessionId;
+    if (!pollKey) { setStatus('failed'); return; }
     let attempts = 0;
     const poll = async () => {
       if (attempts >= 5) { setStatus('failed'); return; }
       attempts++;
       try {
-        const res = await stripeAPI.checkStatus(sessionId);
+        const res = provider === 'crypto'
+          ? await cryptoAPI.checkStatusByOrder(orderId)
+          : await stripeAPI.checkStatus(sessionId);
         if (res.data.configured === false) { setStatus('failed'); return; }
         if (res.data.paymentStatus === 'paid') { setStatus('paid'); return; }
         if (res.data.status === 'expired') { setStatus('failed'); return; }
@@ -25,7 +37,7 @@ export default function PaymentSuccess() {
       } catch { setTimeout(poll, 2000); }
     };
     poll();
-  }, [sessionId]);
+  }, [sessionId, orderId, provider]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50" data-testid="payment-success-page">
