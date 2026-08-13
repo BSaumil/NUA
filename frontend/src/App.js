@@ -43,6 +43,7 @@ const Forecasting = lazy(() => import('./pages/Forecasting'));
 const WhatIfSimulator = lazy(() => import('./pages/WhatIfSimulator'));
 const BookingPortal = lazy(() => import('./pages/BookingPortal'));
 const TableOrder = lazy(() => import('./pages/TableOrder'));
+const SplitBillGuest = lazy(() => import('./pages/SplitBillGuest'));
 const PaymentSuccess = lazy(() => import('./pages/PaymentSuccess'));
 const Integrations = lazy(() => import('./pages/Integrations'));
 const WhatsNew = lazy(() => import('./pages/WhatsNew'));
@@ -363,6 +364,8 @@ function App() {
                   {/* Public routes — no sidebar, no auth */}
                   <Route path="/booking" element={<BookingPortal />} />
                   <Route path="/table/:tableId" element={<TableOrder />} />
+                  <Route path="/split/:tableNumber" element={<SplitBillGuest />} />
+                  <Route path="/split-bill" element={<SplitBillGuest />} />
                   <Route path="/join" element={<MemberPortal />} />
                   <Route path="/payment-success" element={<PaymentSuccess />} />
                   <Route path="/order-online" element={<OrderOnline />} />

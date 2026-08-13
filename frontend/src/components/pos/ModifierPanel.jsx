@@ -34,9 +34,14 @@ export default function ModifierPanel({ product, modifiers, open, onClose, onCon
   const productModifiers = useMemo(() => {
     if (!product) return [];
     const ids = product.modifierIds || [];
-    return ids
+    const found = ids
       .map(id => modifiers.find(m => m.id === id))
       .filter(Boolean);
+    // Required groups first, then optional — a cashier answering mandatory
+    // choices before the "would you likes" matches how the confirm-button
+    // validation blocks on required groups anyway, so the one thing
+    // standing between this item and the cart is always at the top.
+    return [...found].sort((a, b) => (b.mandatory ? 1 : 0) - (a.mandatory ? 1 : 0));
   }, [product, modifiers]);
 
   // selected: { [modifierId]: Set<optionName> }

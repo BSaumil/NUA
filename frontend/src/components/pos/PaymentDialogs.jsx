@@ -1,5 +1,5 @@
 import React from 'react';
-import { Check, ChevronLeft, Copy } from 'lucide-react';
+import { Check, ChevronLeft, Copy, Smartphone } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Button } from '../ui/button';
@@ -255,6 +255,44 @@ export function SplitPaymentDialog({
               </Card>
             ))}
           </div>
+          <Button variant="ghost" className="w-full" onClick={onClose}>
+            <ChevronLeft size={16} className="mr-1" /> Back to Methods
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** One QR / link per table, for guests to split and pay from their own
+ * phones (pages/SplitBillGuest.jsx) — each guest verifies their own phone
+ * and pays only their share, rather than one card at the counter for the
+ * whole table. */
+export function SplitBillLinkDialog({ open, onClose, tableNumber }) {
+  const url = `${window.location.origin}/split/${encodeURIComponent(tableNumber || '')}`;
+  const copyLink = () => {
+    navigator.clipboard?.writeText(url).catch(() => {});
+  };
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-sm" data-testid="split-link-dialog">
+        <DialogHeader><DialogTitle>Split via Guest Link</DialogTitle></DialogHeader>
+        <div className="flex flex-col items-center py-4 space-y-4">
+          <div className="bg-white p-4 rounded-xl shadow-inner border">
+            <QRCodeSVG value={url} size={200} level="M" includeMargin />
+          </div>
+          <p className="text-sm text-gray-500 text-center">
+            Table {tableNumber} — guests scan this to pick their items, verify their number by text, and pay their own share.
+          </p>
+          <div className="flex items-center gap-2 w-full">
+            <Input readOnly value={url} className="text-xs font-mono" data-testid="split-link-url" />
+            <Button size="icon" variant="outline" onClick={copyLink} data-testid="split-link-copy">
+              <Copy size={14} />
+            </Button>
+          </div>
+          <Badge variant="outline" className="text-orange-600 border-orange-300 bg-orange-50">
+            <Smartphone size={12} className="mr-1" /> Each guest pays their own share
+          </Badge>
           <Button variant="ghost" className="w-full" onClick={onClose}>
             <ChevronLeft size={16} className="mr-1" /> Back to Methods
           </Button>

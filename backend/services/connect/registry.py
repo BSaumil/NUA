@@ -36,6 +36,12 @@ class ProviderMeta:
     connector: Optional[BaseConnector] = None
     is_cdr_bank: bool = False
     preconfigured: bool = False
+    # Which deploy-time env var proves this preconfigured provider is
+    # actually set up. Required whenever preconfigured=True — checked
+    # generically in manager.describe_provider() rather than one hardcoded
+    # Stripe-only check, so a second preconfigured provider (crypto) can't
+    # silently report Stripe's env var status instead of its own.
+    preconfigured_env_var: str = ""
 
 
 def _connectors():
@@ -70,7 +76,11 @@ def _build_registry() -> list:
         ProviderMeta("doshii", "Doshii", "Middleware", "Connect 20+ hospitality apps via one integration. Powers Uber Eats, DoorDash, Deputy, and more.", "https://doshii.com", "Location Token"),
 
         # ============ Payments ============
-        ProviderMeta("stripe", "Stripe", "Payments", "Accept card payments with Stripe Checkout", "https://stripe.com", preconfigured=True),
+        ProviderMeta("stripe", "Stripe", "Payments", "Accept card payments with Stripe Checkout", "https://stripe.com",
+                     preconfigured=True, preconfigured_env_var="STRIPE_API_KEY"),
+        ProviderMeta("crypto-coinbase", "Crypto (Bitcoin / USDC)", "Payments",
+                     "Accept Bitcoin (on-chain or Lightning) and USDC via Coinbase Commerce hosted checkout.",
+                     "https://commerce.coinbase.com", preconfigured=True, preconfigured_env_var="COINBASE_COMMERCE_API_KEY"),
         ProviderMeta("commbank", "CommBank Smart", "Payments", "CommBank EFTPOS and pay-at-table via Doshii", "https://www.commbank.com.au/business/payments/hospitality.html", "Merchant ID"),
 
         # ============ Accounting ============
