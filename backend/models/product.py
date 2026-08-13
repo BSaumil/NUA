@@ -26,6 +26,16 @@ class Product(BaseModel):
     cost: float = 0.0
     stock: int = 0
     sku: str = ""
+    barcode: str = ""
+    # A product with variants (e.g. a T-shirt sold in several sizes/colors)
+    # isn't sold directly — each combination is its own Product row (own
+    # sku, barcode, price, stock) with `parentId` pointing back here and
+    # `variantAttributes` holding what makes it distinct, e.g.
+    # {"Size": "M", "Color": "Red"}. hasVariants just flags the parent row
+    # as a non-sellable "grouping" row so POS search/checkout can skip it.
+    hasVariants: bool = False
+    parentId: Optional[str] = None
+    variantAttributes: Dict[str, str] = {}
     image: str = ""
     gstRate: float = 10.0
     modifiers: List[ProductModifier] = []
@@ -69,6 +79,10 @@ class ProductCreate(BaseModel):
     cost: float
     stock: int
     sku: str
+    barcode: str = ""
+    hasVariants: bool = False
+    parentId: Optional[str] = None
+    variantAttributes: Dict[str, str] = {}
     image: Optional[str] = ""
     gstRate: float = 10.0
     modifiers: List[ProductModifier] = []
@@ -90,6 +104,10 @@ class ProductUpdate(BaseModel):
     cost: Optional[float] = None
     stock: Optional[int] = None
     sku: Optional[str] = None
+    barcode: Optional[str] = None
+    hasVariants: Optional[bool] = None
+    parentId: Optional[str] = None
+    variantAttributes: Optional[Dict[str, str]] = None
     image: Optional[str] = None
     gstRate: Optional[float] = None
     modifiers: Optional[List[ProductModifier]] = None

@@ -77,6 +77,7 @@ export const productsAPI = {
   update: (id, data) => api.put(`/products/${id}`, data),
   delete: (id) => api.delete(`/products/${id}`),
   adjustStock: (id, data) => api.post(`/products/${id}/adjust-stock`, data),
+  variants: (id) => api.get(`/products/${id}/variants`),
   autoTranslate: (id) => api.post(`/products/${id}/auto-translate`),
   bulkAutoTranslate: (onlyMissing = true) => api.post('/products/bulk-auto-translate', null, { params: { only_missing: onlyMissing } }),
 };
