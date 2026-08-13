@@ -53,6 +53,11 @@ async def create_business(data: dict, user: dict = Depends(require_owner)):
         "ownerId": user["id"],
         "status": "active",
         "createdAt": datetime.now(timezone.utc).isoformat(),
+        # False until the first-login setup wizard finishes (name/ABN/
+        # vertical) — see frontend/src/pages/OnboardingWizard.jsx. Never
+        # flips back to False once true; changing vertical afterward goes
+        # through the ordinary Multi-Business settings, not the wizard.
+        "onboardingComplete": False,
         "settings": {
             "autoGratuity": data.get("autoGratuity", 0),
             "serviceCharge": data.get("serviceCharge", 0),
@@ -83,7 +88,7 @@ async def get_business(business_id: str, _: dict = Depends(get_user)):
 
 @router.put("/{business_id}")
 async def update_business(business_id: str, data: dict, _: dict = Depends(require_owner)):
-    allowed = {"name", "type", "abn", "address", "phone", "email", "timezone", "currency", "taxRate", "settings", "slug"}
+    allowed = {"name", "type", "abn", "address", "phone", "email", "timezone", "currency", "taxRate", "settings", "slug", "onboardingComplete"}
     update_data = {k: v for k, v in data.items() if k in allowed}
 
     slug_adjusted = False
@@ -192,6 +197,11 @@ async def seed_default_business():
             "ownerId": "system",
             "status": "active",
             "createdAt": datetime.now(timezone.utc).isoformat(),
+            # Grandfathered in as already-set-up — the wizard is for NEW
+            # businesses created going forward (see create_business above),
+            # not retroactively imposed on the seeded demo/default tenant
+            # every existing deployment already depends on.
+            "onboardingComplete": True,
             "settings": {"autoGratuity": 0, "serviceCharge": 0, "bookingEnabled": True, "tableOrderingEnabled": True}
         })
 
