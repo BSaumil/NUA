@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useBusiness } from '../contexts/BusinessContext';
+import { getMenuLabels } from '../lib/businessVertical';
 import { v15API } from '../services/api';
 import {
   LayoutDashboard, ShoppingCart, Package, Users, Warehouse, Calculator,
@@ -14,7 +16,10 @@ import {
 import Logo from './brand/Logo';
 
 // Role-default quick actions (left → right) on the bottom dock.
-// 4 most-common items per role, then "More" splash button.
+// 4 most-common items per role, then "More" splash button. `kitchen` and
+// `barista` roles only exist at hospitality businesses in practice, so
+// their bars are left as-is; owner/manager/cashier exist at every
+// vertical and get a non-restaurant-specific bar swapped in below.
 export const QUICK_ACTIONS = {
   owner: [
     { path: '/today', label: 'Today', icon: Sunrise },
@@ -48,18 +53,54 @@ export const QUICK_ACTIONS = {
   ],
 };
 
-// Full feature catalog for the "More" splash modal — grouped by role access
+// Non-hospitality quick-bar overrides: today's Bookings/Kitchen pages are
+// restaurant-table and kitchen-docket specific (Phase 4 of the vertical
+// roadmap builds a real appointment/resource booking system) — until then,
+// swap those slots for something that works everywhere.
+const QUICK_ACTIONS_NON_HOSPITALITY = {
+  owner: [
+    { path: '/today', label: 'Today', icon: Sunrise },
+    { path: '/pos', label: 'POS', icon: ShoppingCart },
+    { path: '/customers', label: 'Customers', icon: Users },
+    { path: '/products', label: 'Items', icon: Package },
+  ],
+  manager: [
+    { path: '/today', label: 'Today', icon: Sunrise },
+    { path: '/pos', label: 'POS', icon: ShoppingCart },
+    { path: '/inventory', label: 'Inventory', icon: Warehouse },
+    { path: '/staff-roster', label: 'Roster', icon: ClipboardList },
+  ],
+  cashier: [
+    { path: '/pos', label: 'POS', icon: ShoppingCart },
+    { path: '/products', label: 'Items', icon: Package },
+    { path: '/customers', label: 'Customers', icon: Users },
+    { path: '/loyalty', label: 'Loyalty', icon: Award },
+  ],
+};
+
+const quickActionsFor = (role, vertical) => {
+  const table = vertical === 'hospitality' ? QUICK_ACTIONS : { ...QUICK_ACTIONS, ...QUICK_ACTIONS_NON_HOSPITALITY };
+  return table[role] || table.cashier;
+};
+
+// Full feature catalog for the "More" splash modal — grouped by role access.
+// `verticals` on a group or item narrows it to specific business verticals
+// (see frontend/src/lib/businessVertical.js); omitted means "every
+// vertical." Kitchen dockets, temp probes, and today's table-oriented
+// booking system are hospitality-specific — Phase 2/4 of the vertical
+// roadmap give retail and beauty/services their own equivalents instead of
+// showing them a restaurant's tools.
 const ALL_FEATURES = [
   { group: 'Operations', items: [
     { path: '/today', label: 'Today', icon: Sunrise, access: ['owner', 'manager'] },
     { path: '/pos', label: 'POS Terminal', icon: ShoppingCart, access: ['owner', 'manager', 'cashier', 'barista'] },
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, access: ['owner', 'manager'] },
-    { path: '/pre-shift', label: 'Pre-Shift', icon: Sunrise, access: ['owner', 'manager', 'kitchen'] },
+    { path: '/pre-shift', label: 'Pre-Shift', icon: Sunrise, access: ['owner', 'manager', 'kitchen'], verticals: ['hospitality'] },
     { path: '/command-center', label: 'Command Center', icon: Brain, access: ['owner', 'manager'] },
-    { path: '/kitchen', label: 'Kitchen Display', icon: ChefHat, access: ['owner', 'manager', 'kitchen'] },
-    { path: '/temperature', label: 'Temp Monitoring', icon: Flame, access: ['owner', 'manager', 'kitchen'] },
+    { path: '/kitchen', label: 'Kitchen Display', icon: ChefHat, access: ['owner', 'manager', 'kitchen'], verticals: ['hospitality'] },
+    { path: '/temperature', label: 'Temp Monitoring', icon: Flame, access: ['owner', 'manager', 'kitchen'], verticals: ['hospitality'] },
   ]},
-  { group: 'Reservations', items: [
+  { group: 'Reservations', verticals: ['hospitality'], items: [
     { path: '/reservations', label: 'Bookings', icon: Utensils, access: ['owner', 'manager', 'cashier'] },
     { path: '/bookings-inbox', label: 'AI Bookings Inbox', icon: Mail, access: ['owner', 'manager', 'cashier'] },
     { path: '/floor-plan', label: 'Floor Plan', icon: MapPin, access: ['owner', 'manager', 'cashier'] },
@@ -124,7 +165,7 @@ const ALL_FEATURES = [
     { path: '/digital-twin', label: 'Digital Twin', icon: Sparkles, access: ['owner', 'manager'] },
     { path: '/shift-manager', label: 'Shift Manager', icon: Zap, access: ['owner', 'manager'] },
     { path: '/auto-marketing', label: 'Auto Marketing', icon: Mail, access: ['owner', 'manager'] },
-    { path: '/recipe-costing', label: 'Recipe Costing', icon: ChefHat, access: ['owner', 'manager'] },
+    { path: '/recipe-costing', label: 'Recipe Costing', icon: ChefHat, access: ['owner', 'manager'], verticals: ['hospitality'] },
     { path: '/predictive-orders', label: 'Predictive Orders', icon: Package, access: ['owner', 'manager'] },
     { path: '/waste-tracking', label: 'Waste Tracking', icon: Ban, access: ['owner', 'manager', 'kitchen'] },
     { path: '/gift-cards', label: 'Gift Cards', icon: Tag, access: ['owner', 'manager', 'cashier'] },
@@ -139,7 +180,7 @@ const ALL_FEATURES = [
     { path: '/disputes', label: 'Chargebacks', icon: Shield, access: ['owner', 'manager'] },
     { path: '/supplier-marketplace', label: 'Supplier Market', icon: Package, access: ['owner', 'manager'] },
     { path: '/margin-guardrails', label: 'Margin Guardrails', icon: DollarSign, access: ['owner', 'manager'] },
-    { path: '/station-readiness', label: 'Station Readiness', icon: ClipboardList, access: ['owner', 'manager', 'kitchen'] },
+    { path: '/station-readiness', label: 'Station Readiness', icon: ClipboardList, access: ['owner', 'manager', 'kitchen'], verticals: ['hospitality'] },
     { path: '/kiosk', label: 'Kiosk Mode', icon: ShoppingCart, access: ['owner', 'manager'] },
     { path: '/cfd', label: 'Customer Display', icon: Sparkles, access: ['owner', 'manager', 'cashier'] },
     { path: '/churn-risk', label: 'Guest Recovery', icon: Users, access: ['owner', 'manager'] },
@@ -162,8 +203,8 @@ const ALL_FEATURES = [
     { path: '/labor-forecast', label: 'Labor Forecast', icon: Users2, access: ['owner', 'manager'] },
     { path: '/surge-pricing', label: 'Surge Pricing', icon: TrendingUp, access: ['owner'] },
     { path: '/price-tune', label: 'Price-Tune', icon: Tag, access: ['owner', 'manager'] },
-    { path: '/voice-recipe', label: 'Voice-to-Recipe', icon: BookOpen, access: ['owner', 'manager', 'kitchen'] },
-    { path: '/kitchen-load', label: 'Kitchen Load', icon: ChefHat, access: ['owner', 'manager', 'kitchen'] },
+    { path: '/voice-recipe', label: 'Voice-to-Recipe', icon: BookOpen, access: ['owner', 'manager', 'kitchen'], verticals: ['hospitality'] },
+    { path: '/kitchen-load', label: 'Kitchen Load', icon: ChefHat, access: ['owner', 'manager', 'kitchen'], verticals: ['hospitality'] },
     { path: '/audit-log', label: 'Audit Log', icon: ShieldAlert, access: ['owner', 'manager'] },
     { path: '/anomalies', label: 'Inventory Anomalies', icon: AlertTriangle, access: ['owner', 'manager'] },
     { path: '/booking-heatmap', label: 'Busy Heatmap', icon: Flame, access: ['owner', 'manager'] },
@@ -176,6 +217,7 @@ const ALL_FEATURES = [
 export default function BottomDock() {
   const { theme, darkMode, toggleDarkMode } = useTheme();
   const { user, logout } = useAuth();
+  const { vertical } = useBusiness();
   const navigate = useNavigate();
   const location = useLocation();
   const [showMore, setShowMore] = useState(false);
@@ -199,7 +241,14 @@ export default function BottomDock() {
   const customPerms = (user?.customPermissions?.length > 0) ? user.customPermissions : (user?.permissions || []);
   const hasCustomPerms = Array.isArray(customPerms) && customPerms.length > 0 && !customPerms.includes('*');
 
+  // Vertical gate applies ahead of (and independent from) role/permission
+  // checks below — an owner running a retail shop still shouldn't see
+  // "Kitchen Display" in their own splash just because owners see
+  // everything else access-wise.
+  const matchesVertical = (item) => !item.verticals || item.verticals.includes(vertical);
+
   const isAllowed = (item) => {
+    if (!matchesVertical(item)) return false;
     if (role === 'owner') return true;
     if (hasCustomPerms) {
       const key = item.path.replace('/', '') || 'dashboard';
@@ -209,7 +258,13 @@ export default function BottomDock() {
   };
 
   // Quick actions are role-based defaults — no permission filtering (use splash for granular access)
-  const quick = (QUICK_ACTIONS[role] || QUICK_ACTIONS.cashier).slice(0, 4);
+  const quick = quickActionsFor(role, vertical).slice(0, 4);
+  const menuLabels = getMenuLabels(vertical);
+  const visibleFeatureGroups = ALL_FEATURES
+    .filter(g => !g.verticals || g.verticals.includes(vertical))
+    .map(g => g.group === 'Items'
+      ? { ...g, group: menuLabels.group, items: g.items.map(it => it.path === '/products' ? { ...it, label: menuLabels.itemLabel } : it) }
+      : g);
 
   const handleLogout = async () => { setShowMore(false); await logout(); navigate('/'); };
 
@@ -302,7 +357,7 @@ export default function BottomDock() {
               <button onClick={() => setShowMore(false)} className="p-2 hover:bg-gray-100 rounded-lg" data-testid="close-more-btn"><X size={20} /></button>
             </div>
             <div className="px-6 py-5 space-y-6">
-              {ALL_FEATURES.map(group => {
+              {visibleFeatureGroups.map(group => {
                 const visible = group.items.filter(isAllowed);
                 if (visible.length === 0) return null;
                 return (

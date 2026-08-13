@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { POSProvider } from './contexts/POSContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { BusinessProvider } from './contexts/BusinessContext';
 import { LicenseProvider } from './contexts/LicenseContext';
 import { Toaster } from './components/ui/sonner';
 import BottomDock from './components/BottomDock';
@@ -350,6 +351,7 @@ function App() {
     <ThemeProvider>
       <POSProvider>
         <AuthProvider>
+        <BusinessProvider>
           <div className="App">
             <BrowserRouter>
               {/* Page components are lazy-loaded (see the const X = lazy(...)
@@ -382,6 +384,7 @@ function App() {
               <Toaster />
             </BrowserRouter>
           </div>
+        </BusinessProvider>
         </AuthProvider>
       </POSProvider>
     </ThemeProvider>

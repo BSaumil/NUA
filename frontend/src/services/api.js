@@ -988,6 +988,7 @@ export const nuaAPI = {
 export const businessAPI = {
   create: (data) => api.post('/business/create', data),
   list: () => api.get('/business/list'),
+  get: (id) => api.get(`/business/${id}`),
   update: (id, data) => api.put(`/business/${id}`, data),
   summary: (id) => api.get(`/business/${id}/summary`),
   exportData: (id, collection) => api.get(`/business/${id}/export`, { params: collection ? { collection } : {} }),
