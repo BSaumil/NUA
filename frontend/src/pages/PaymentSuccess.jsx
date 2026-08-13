@@ -15,6 +15,7 @@ export default function PaymentSuccess() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [status, setStatus] = useState('checking'); // checking | paid | failed
+  const [splitSessionId, setSplitSessionId] = useState(null);
   const provider = searchParams.get('provider') === 'crypto' ? 'crypto' : 'stripe';
   const sessionId = searchParams.get('session_id');
   const orderId = searchParams.get('order_id');
@@ -31,13 +32,25 @@ export default function PaymentSuccess() {
           ? await cryptoAPI.checkStatusByOrder(orderId)
           : await stripeAPI.checkStatus(sessionId);
         if (res.data.configured === false) { setStatus('failed'); return; }
-        if (res.data.paymentStatus === 'paid') { setStatus('paid'); return; }
+        if (res.data.paymentStatus === 'paid') {
+          // A split-bill guest checkout has no staff session — landing them
+          // on "Back to POS" would just dead-end at a login screen. This
+          // field is only ever present for a table-split payment.
+          if (res.data.splitSessionId) setSplitSessionId(res.data.splitSessionId);
+          setStatus('paid');
+          return;
+        }
         if (res.data.status === 'expired') { setStatus('failed'); return; }
         setTimeout(poll, 2000);
       } catch { setTimeout(poll, 2000); }
     };
     poll();
   }, [sessionId, orderId, provider]);
+
+  const primaryAction = () => {
+    if (splitSessionId) { navigate(`/split-bill?split=${splitSessionId}`); return; }
+    navigate('/pos');
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50" data-testid="payment-success-page">
@@ -55,10 +68,12 @@ export default function PaymentSuccess() {
               <Check size={32} className="text-green-600" />
             </div>
             <h1 className="text-2xl font-bold mb-2">Payment Successful!</h1>
-            <p className="text-gray-500 mb-6">Your payment has been processed.</p>
-            <Button onClick={() => navigate('/pos')} className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            <p className="text-gray-500 mb-6">
+              {splitSessionId ? "Your share is paid — thanks!" : 'Your payment has been processed.'}
+            </p>
+            <Button onClick={primaryAction} className="bg-emerald-600 hover:bg-emerald-700 text-white"
               data-testid="back-to-pos-btn">
-              Back to POS
+              {splitSessionId ? 'Back to the bill' : 'Back to POS'}
             </Button>
           </>
         )}
@@ -69,8 +84,8 @@ export default function PaymentSuccess() {
             </div>
             <h1 className="text-2xl font-bold mb-2">Payment Issue</h1>
             <p className="text-gray-500 mb-6">There was an issue with your payment. Please try again.</p>
-            <Button onClick={() => navigate('/pos')} variant="outline" data-testid="retry-btn">
-              Return to POS
+            <Button onClick={primaryAction} variant="outline" data-testid="retry-btn">
+              {splitSessionId ? 'Back to the bill' : 'Return to POS'}
             </Button>
           </>
         )}

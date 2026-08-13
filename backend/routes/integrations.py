@@ -122,6 +122,20 @@ async def _finalize_pos_sale_if_applicable(session_id: str):
         await db.payment_transactions.update_one(
             {"sessionId": session_id}, {"$set": {"transactionId": txn.id}}
         )
+        if claimed.get("splitSessionId"):
+            # Bookkeeping only — the sale itself already landed above. A
+            # failure here must never look like the payment failed, so it's
+            # logged and swallowed, not raised into this try block's except.
+            try:
+                from services import bill_split
+                await bill_split.mark_lines_paid(
+                    claimed["splitSessionId"], claimed.get("splitLineIds"),
+                    claimed.get("splitSlotIndex"), txn.id,
+                )
+            except Exception as split_e:
+                logging.getLogger(__name__).error(
+                    f"Split-bill bookkeeping failed for {session_id} (sale itself succeeded, txn {txn.id}): {split_e}"
+                )
     except Exception as e:
         logging.getLogger(__name__).error(
             f"Stripe payment {session_id} confirmed paid but sale creation failed — needs manual reconciliation: {e}"
@@ -134,22 +148,23 @@ async def _finalize_pos_sale_if_applicable(session_id: str):
 
 
 # ============ STRIPE CHECKOUT API ============
-@router.post("/stripe/checkout")
-async def create_stripe_checkout(data: dict, http_request: Request, user: dict = Depends(get_user)):
-    """Create a Stripe checkout session for a POS transaction.
-
-    An optional "sale" object — the same shape POST /transactions takes
-    (items, paymentMethod, customerId, location, cashier, orderType,
-    tableNumber, discounts, points…) — gets stashed against this session so
-    the sale can actually be rung up once Stripe confirms payment. Without
-    it (or for any other caller of this generic endpoint) this behaves
-    exactly as before: a payment session with nothing else attached.
-    """
-    from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
-
+async def _create_stripe_session(data: dict, http_request: Request, cashier: dict) -> dict:
+    """The actual session-creation logic, factored out so a non-staff
+    caller (routes/bill_split.py's guest checkout) can create a session
+    too without going through the staff-only route below — `cashier` is
+    whatever identity should be attributed on the resulting sale (the
+    logged-in staff member for a normal POS checkout, or a synthetic
+    "guest:<phone>" identity for a guest self-checkout), stored as-is on
+    the payment doc the same way either caller would want."""
     api_key = os.environ.get("STRIPE_API_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="Stripe not configured")
+
+    # Deliberately imported after the config check above, not before: an
+    # unconfigured venue (or a deploy where this optional SDK genuinely
+    # isn't installed) should see "Stripe not configured", not a raw
+    # ModuleNotFoundError surfacing as an unexplained 500.
+    from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
 
     origin_url = data.get("originUrl", str(http_request.base_url).rstrip("/"))
     order_id = data.get("orderId", f"ORD-{str(uuid.uuid4())[:8].upper()}")
@@ -191,11 +206,32 @@ async def create_stripe_checkout(data: dict, http_request: Request, user: dict =
     if sale_payload:
         payment_doc["kind"] = "pos_sale"
         payment_doc["salePayload"] = sale_payload
-        payment_doc["cashierUser"] = user
+        payment_doc["cashierUser"] = cashier
+        # Split-bill metadata rides alongside salePayload rather than inside
+        # it — TransactionCreate doesn't (and shouldn't) know about split
+        # sessions, so these live as sibling fields _finalize_pos_sale_
+        # if_applicable reads directly off the payment doc.
+        for k in ("splitSessionId", "splitLineIds", "splitSlotIndex"):
+            if k in data:
+                payment_doc[k] = data[k]
     await db.payment_transactions.insert_one(payment_doc)
     payment_doc.pop("_id", None)
 
     return {"url": session.url, "sessionId": session.session_id}
+
+
+@router.post("/stripe/checkout")
+async def create_stripe_checkout(data: dict, http_request: Request, user: dict = Depends(get_user)):
+    """Create a Stripe checkout session for a POS transaction.
+
+    An optional "sale" object — the same shape POST /transactions takes
+    (items, paymentMethod, customerId, location, cashier, orderType,
+    tableNumber, discounts, points…) — gets stashed against this session so
+    the sale can actually be rung up once Stripe confirms payment. Without
+    it (or for any other caller of this generic endpoint) this behaves
+    exactly as before: a payment session with nothing else attached.
+    """
+    return await _create_stripe_session(data, http_request, cashier=user)
 
 @router.get("/stripe/checkout/status/{session_id}")
 async def get_stripe_checkout_status(session_id: str, http_request: Request):
@@ -238,12 +274,20 @@ async def get_stripe_checkout_status(session_id: str, http_request: Request):
                 await _mark_online_order_paid_if_applicable(session_id)
                 await _finalize_pos_sale_if_applicable(session_id)
 
+    # Split-bill payments carry a splitSessionId on the payment doc — a
+    # guest's own PaymentSuccess screen uses this to route back to their
+    # table's bill instead of a staff-only "Back to POS" button, which
+    # would otherwise dead-end a guest with no login.
+    payment = existing or await db.payment_transactions.find_one({"sessionId": session_id}, {"_id": 0})
+    split_session_id = (payment or {}).get("splitSessionId")
+
     return {
         "configured": True,
         "status": status.status,
         "paymentStatus": status.payment_status,
         "amountTotal": status.amount_total,
         "currency": status.currency,
+        "splitSessionId": split_session_id,
     }
 
 @router.post("/webhook/stripe")

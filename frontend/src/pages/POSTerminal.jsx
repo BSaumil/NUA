@@ -19,7 +19,7 @@ import { useAuth } from '../contexts/AuthContext';
 import VoiceOrderButton from '../components/VoiceOrderButton';
 import SwipeableCartItem from '../components/pos/SwipeableCartItem';
 import CustomerCombobox from '../components/pos/CustomerCombobox';
-import { QrPaymentDialog, UpiPaymentDialog, SplitPaymentDialog } from '../components/pos/PaymentDialogs';
+import { QrPaymentDialog, UpiPaymentDialog, SplitPaymentDialog, SplitBillLinkDialog } from '../components/pos/PaymentDialogs';
 import ModifierPanel from '../components/pos/ModifierPanel';
 import POSHeaderBar from '../components/pos/POSHeaderBar';
 import ScanVoucherButton from '../components/pos/ScanVoucherButton';
@@ -71,6 +71,7 @@ const POSTerminal = () => {
 
   // Payment flow state
   const [paymentView, setPaymentView] = useState('methods'); // methods | qr | upi | split | processing
+  const [splitLinkOpen, setSplitLinkOpen] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
 
   // QR / UPI state
@@ -2285,6 +2286,11 @@ const POSTerminal = () => {
               onClick={handleStartSplit} data-testid="pay-split">
               <SplitSquareHorizontal size={20} className="mr-2" /> Split Payment
             </Button>
+            {orderType === 'dine-in' && tableNumber && (
+              <Button className="w-full h-12" variant="outline" onClick={() => setSplitLinkOpen(true)} data-testid="pay-split-link">
+                <QrCode size={18} className="mr-2" /> Split via Guest Link
+              </Button>
+            )}
             <Button className="w-full" variant="ghost" onClick={resetPayment} data-testid="pay-cancel">Cancel</Button>
           </div>
         )}
@@ -2383,6 +2389,11 @@ const POSTerminal = () => {
         onPayPart={handlePaySplit}
         splitRemaining={splitRemaining}
         loading={loading} activeSplitIndex={activeSplitIndex}
+      />
+
+      <SplitBillLinkDialog
+        open={splitLinkOpen} onClose={() => setSplitLinkOpen(false)}
+        tableNumber={tableNumber}
       />
 
       {/* QR / UPI scan dialog stacked on top of the split dialog. Nothing is

@@ -20,10 +20,11 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.post("/crypto/checkout")
-async def create_crypto_checkout(data: dict, http_request: Request, user: dict = Depends(get_user)):
-    """Create a Coinbase Commerce charge for a POS transaction. Same
-    optional "sale" payload shape as POST /stripe/checkout."""
+async def _create_crypto_session(data: dict, http_request: Request, cashier: dict) -> dict:
+    """The actual charge-creation logic, factored out so a non-staff caller
+    (routes/bill_split.py's guest checkout) can create a charge too without
+    going through the staff-only route below — see
+    routes/integrations.py's _create_stripe_session for why."""
     if not coinbase_commerce.is_configured():
         raise HTTPException(status_code=500,
                              detail="Crypto payments aren't set up yet — ask the owner to add a "
@@ -70,10 +71,20 @@ async def create_crypto_checkout(data: dict, http_request: Request, user: dict =
     if sale_payload:
         payment_doc["kind"] = "pos_sale"
         payment_doc["salePayload"] = sale_payload
-        payment_doc["cashierUser"] = user
+        payment_doc["cashierUser"] = cashier
+        for k in ("splitSessionId", "splitLineIds", "splitSlotIndex"):
+            if k in data:
+                payment_doc[k] = data[k]
     await db.payment_transactions.insert_one(payment_doc)
 
     return {"url": charge["hosted_url"], "sessionId": charge["code"]}
+
+
+@router.post("/crypto/checkout")
+async def create_crypto_checkout(data: dict, http_request: Request, user: dict = Depends(get_user)):
+    """Create a Coinbase Commerce charge for a POS transaction. Same
+    optional "sale" payload shape as POST /stripe/checkout."""
+    return await _create_crypto_session(data, http_request, cashier=user)
 
 
 async def _check_and_finalize(charge_code: str) -> dict:
@@ -97,7 +108,15 @@ async def _check_and_finalize(charge_code: str) -> dict:
             await _mark_online_order_paid_if_applicable(charge_code)
             await _finalize_pos_sale_if_applicable(charge_code)
 
-    return {"configured": True, "status": status, "paymentStatus": payment_status}
+    # Split-bill payments carry a splitSessionId on the payment doc — a
+    # guest's own PaymentSuccess screen uses this to route back to their
+    # table's bill instead of a staff-only "Back to POS" button, which
+    # would otherwise dead-end a guest with no login.
+    payment = existing or await db.payment_transactions.find_one({"sessionId": charge_code}, {"_id": 0})
+    split_session_id = (payment or {}).get("splitSessionId")
+
+    return {"configured": True, "status": status, "paymentStatus": payment_status,
+            "splitSessionId": split_session_id}
 
 
 @router.get("/crypto/checkout/status/{charge_code}")

@@ -143,7 +143,7 @@ def test_status_poll_finalizes_the_sale_once_the_charge_confirms(client, owner_h
     try:
         r = req(client, "GET", "/api/crypto/checkout/status/PAID9999", headers=owner_headers)
         assert r.status_code == 200, r.text
-        assert r.json() == {"configured": True, "status": "paid", "paymentStatus": "paid"}
+        assert r.json() == {"configured": True, "status": "paid", "paymentStatus": "paid", "splitSessionId": None}
         assert len(finalize_calls) == 1
 
         doc = loop.run_until_complete(db.payment_transactions.find_one({"sessionId": "PAID9999"}, {"_id": 0}))
@@ -196,7 +196,7 @@ def test_status_reports_expired(client, owner_headers, monkeypatch):
     monkeypatch.setattr(cc.httpx, "AsyncClient", _mock_client_factory(handler))
 
     r = req(client, "GET", "/api/crypto/checkout/status/EXP1", headers=owner_headers)
-    assert r.json() == {"configured": True, "status": "expired", "paymentStatus": "unpaid"}
+    assert r.json() == {"configured": True, "status": "expired", "paymentStatus": "unpaid", "splitSessionId": None}
 
 
 # ---------------------------------------------------------- status by order
@@ -226,7 +226,7 @@ def test_status_by_order_resolves_to_the_charge_code(client, owner_headers, monk
 
     r = req(client, "GET", "/api/crypto/checkout/status-by-order/ORD-LOOKUP-1", headers=owner_headers)
     assert r.status_code == 200, r.text
-    assert r.json() == {"configured": True, "status": "paid", "paymentStatus": "paid"}
+    assert r.json() == {"configured": True, "status": "paid", "paymentStatus": "paid", "splitSessionId": None}
 
 
 def test_status_by_order_404s_for_an_unknown_order(client, owner_headers, monkeypatch):

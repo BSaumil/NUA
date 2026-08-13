@@ -10,6 +10,8 @@ booking from the same guest would never get linked back to their profile.
 """
 from __future__ import annotations
 import re
+import uuid
+from datetime import datetime
 from typing import Optional
 from database import db
 
@@ -73,3 +75,35 @@ def guest_context(customer: dict) -> str:
     if customer.get("seatingPreference"):
         bits.append(f"prefers {customer['seatingPreference']} seating")
     return "; ".join(bits) if bits else "no notable history yet"
+
+
+async def find_or_create_customer_by_phone(phone: str, *, name: str = "Guest",
+                                             tag: str = "guest") -> dict:
+    """Resolves an existing db.customers record by phone, or creates a
+    minimal real one — used by guest self-checkout flows (bill splitting)
+    where a phone is all that's verified.
+
+    Bypasses the Customer/CustomerCreate Pydantic models directly: both
+    require an email, which a phone-only guest never has yet. The
+    resulting document is otherwise a fully normal db.customers record —
+    it earns loyalty points on this transaction and every one after, shows
+    up in the CRM, and can pick up an email later the same way any
+    phone-first identity already does elsewhere in this codebase. This is
+    deliberately db.customers, not services/customer_identity.py's
+    separate identity_customers collection — create_transaction's loyalty
+    math reads/writes db.customers, so that's the record that actually
+    needs to exist for a split-bill payment to earn points.
+    """
+    existing = await find_matching_customer(phone=phone)
+    if existing:
+        return existing
+    doc = {
+        "id": str(uuid.uuid4()), "name": name, "email": None, "phone": phone,
+        "membershipTier": "Bronze", "totalSpent": 0.0, "visits": 0, "points": 0,
+        "joinDate": datetime.utcnow().isoformat(), "tags": [tag],
+        "isVip": False, "notes": "", "noShowCount": 0, "avgSpendPerVisit": 0.0,
+        "storeCredit": 0.0,
+    }
+    await db.customers.insert_one(dict(doc))
+    doc.pop("_id", None)
+    return doc

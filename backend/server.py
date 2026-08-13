@@ -66,6 +66,7 @@ from routes.ops import router as ops_router
 from routes.changelog import router as changelog_router
 from routes.crypto_payments import router as crypto_payments_router
 from routes.voice_calls import router as voice_calls_router
+from routes.bill_split import router as bill_split_router
 from middleware.license_middleware import LicenseEnforcementMiddleware
 from middleware.actor_context import ActorContextMiddleware
 
@@ -131,6 +132,7 @@ api_router.include_router(ops_router)
 api_router.include_router(changelog_router)
 api_router.include_router(crypto_payments_router)
 api_router.include_router(voice_calls_router)
+api_router.include_router(bill_split_router)
 
 @api_router.get("/")
 async def root():
