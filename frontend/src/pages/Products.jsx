@@ -13,12 +13,13 @@ import { ProductsToolbar } from '../components/products/ProductsToolbar';
 import { ProductTable } from '../components/products/ProductTable';
 import { BulkEditDialog } from '../components/products/BulkEditDialog';
 import { RecentlyEditedSidebar } from '../components/products/RecentlyEditedSidebar';
+import { ProductVariants } from '../components/products/ProductVariants';
 import { PromotionDialog } from '../components/products/PromotionDialog';
 import { ItemsKpiStrip } from '../components/products/ItemsKpiStrip';
 import { toast } from 'sonner';
 
 const makeEmptyProduct = () => ({
-  name: '', category: '', categoryId: '', price: '', cost: '', stock: '', sku: '',
+  name: '', category: '', categoryId: '', price: '', cost: '', stock: '', sku: '', barcode: '',
   image: '', gstRate: 10, locations: ['Main'], onlineChannels: [],
   seoDescription: '', description: '', modifierIds: [],
 });
@@ -111,7 +112,7 @@ const Products = () => {
     setEditingProduct(null);
     setProductForm({
       name: '', category: firstCat?.name || '', categoryId: firstCat?.id || '',
-      price: '', cost: '', stock: '', sku: '', image: '', gstRate: 10,
+      price: '', cost: '', stock: '', sku: '', barcode: '', image: '', gstRate: 10,
       locations: ['Main'], onlineChannels: [], seoDescription: '', description: '',
       modifierIds: [],
     });
@@ -121,7 +122,7 @@ const Products = () => {
     setEditingProduct(p);
     setProductForm({
       name: p.name, category: p.category, categoryId: p.categoryId || '',
-      price: p.price, cost: p.cost, stock: p.stock, sku: p.sku, image: p.image,
+      price: p.price, cost: p.cost, stock: p.stock, sku: p.sku, barcode: p.barcode || '', image: p.image,
       gstRate: p.gstRate, locations: p.locations || ['Main'], onlineChannels: p.onlineChannels || [],
       seoDescription: p.seoDescription || '', description: p.description || '',
       modifierIds: p.modifierIds || [],
@@ -742,6 +743,10 @@ const Products = () => {
               <Input type="number" placeholder="Stock" value={productForm.stock} onChange={e => setProductForm({ ...productForm, stock: e.target.value })} data-testid="product-stock-input" />
               <Input placeholder="SKU" value={productForm.sku} onChange={e => setProductForm({ ...productForm, sku: e.target.value })} data-testid="product-sku-input" />
             </div>
+            <Input placeholder="Barcode (UPC/EAN) — scan or type" value={productForm.barcode} onChange={e => setProductForm({ ...productForm, barcode: e.target.value })} data-testid="product-barcode-input" />
+            {editingProduct && (
+              <ProductVariants product={editingProduct} onChanged={fetchData} />
+            )}
             <div>
               <label className="text-xs font-medium text-gray-500 mb-1 block">Image</label>
               {productForm.image && <img src={productForm.image} alt="" className="w-full h-32 object-cover rounded mb-2 border" />}

@@ -764,10 +764,29 @@ const POSTerminal = () => {
   };
 
   const filteredProducts = products.filter(p => {
+    // A variant-grouping row (e.g. "T-Shirt") isn't sold directly once it
+    // has real variants under it — only the variants themselves (their own
+    // Product rows, each with parentId set to this one) are sellable.
+    if (p.hasVariants) return false;
     const term = searchTerm.toLowerCase();
     return (selectedCategory === 'All' || p.category === selectedCategory) &&
-      (p.name.toLowerCase().includes(term) || (p.category || '').toLowerCase().includes(term));
+      (p.name.toLowerCase().includes(term) || (p.category || '').toLowerCase().includes(term) ||
+       (p.sku || '').toLowerCase().includes(term) || (p.barcode || '') === searchTerm);
   });
+
+  // A barcode scanner types the code then fires Enter — if what's in the
+  // search box exactly matches one product's barcode (or SKU), add it
+  // straight to cart instead of making staff hunt for it in the grid.
+  const handleSearchKeyDown = (e) => {
+    if (e.key !== 'Enter' || !searchTerm.trim()) return;
+    const code = searchTerm.trim();
+    const hit = products.find(p => !p.hasVariants && (p.barcode === code || p.sku === code));
+    if (hit) {
+      addToCart(hit);
+      setSearchTerm('');
+      toast({ title: 'Added', description: hit.name });
+    }
+  };
 
   // Group products by category for "All" view (category-wise display)
   const groupedByCategory = React.useMemo(() => {
@@ -1415,8 +1434,8 @@ const POSTerminal = () => {
           <div className="relative mb-3 flex gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={16} />
-              <Input placeholder="Search products..." className="pl-9 h-9" value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)} data-testid="pos-search" />
+              <Input placeholder="Search products or scan a barcode..." className="pl-9 h-9" value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)} onKeyDown={handleSearchKeyDown} data-testid="pos-search" />
             </div>
             <VoiceOrderButton
               onAddSuggestions={(suggestions) => {
