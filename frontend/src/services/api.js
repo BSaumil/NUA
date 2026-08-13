@@ -90,6 +90,28 @@ export const stockTransfersAPI = {
   cancel: (id) => api.post(`/stock-transfers/${id}/cancel`),
 };
 
+// Beauty/services: service catalog + staff-as-resource appointment booking
+export const servicesAPI = {
+  list: (activeOnly = true) => api.get('/services', { params: { active_only: activeOnly } }),
+  create: (data) => api.post('/services', data),
+  update: (id, data) => api.put(`/services/${id}`, data),
+  delete: (id) => api.delete(`/services/${id}`),
+};
+
+export const staffRosterAPI = {
+  list: () => api.get('/auth/staff'),
+};
+
+export const appointmentsAPI = {
+  list: (params) => api.get('/appointments', { params }),
+  availability: (params) => api.get('/appointments/availability', { params }),
+  create: (data) => api.post('/appointments', data),
+  update: (id, data) => api.put(`/appointments/${id}`, data),
+  complete: (id) => api.post(`/appointments/${id}/complete`),
+  cancel: (id) => api.post(`/appointments/${id}/cancel`),
+  noShow: (id) => api.post(`/appointments/${id}/no-show`),
+};
+
 // EFTPOS terminals
 export const eftposAPI = {
   listTerminals: () => api.get('/eftpos/terminals'),

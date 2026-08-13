@@ -78,8 +78,35 @@ const QUICK_ACTIONS_NON_HOSPITALITY = {
   ],
 };
 
+// Beauty/services gets its own quick bar rather than falling back to
+// QUICK_ACTIONS_NON_HOSPITALITY's generic "Customers" slot — a salon's
+// day revolves around who's booked in next, the same way a restaurant's
+// revolves around Bookings, so Appointments earns the same prominent spot.
+const QUICK_ACTIONS_BEAUTY_SERVICES = {
+  owner: [
+    { path: '/today', label: 'Today', icon: Sunrise },
+    { path: '/pos', label: 'POS', icon: ShoppingCart },
+    { path: '/appointments', label: 'Appointments', icon: Calendar },
+    { path: '/products', label: 'Items', icon: Package },
+  ],
+  manager: [
+    { path: '/today', label: 'Today', icon: Sunrise },
+    { path: '/pos', label: 'POS', icon: ShoppingCart },
+    { path: '/appointments', label: 'Appointments', icon: Calendar },
+    { path: '/staff-roster', label: 'Roster', icon: ClipboardList },
+  ],
+  cashier: [
+    { path: '/pos', label: 'POS', icon: ShoppingCart },
+    { path: '/appointments', label: 'Appointments', icon: Calendar },
+    { path: '/customers', label: 'Customers', icon: Users },
+    { path: '/loyalty', label: 'Loyalty', icon: Award },
+  ],
+};
+
 const quickActionsFor = (role, vertical) => {
-  const table = vertical === 'hospitality' ? QUICK_ACTIONS : { ...QUICK_ACTIONS, ...QUICK_ACTIONS_NON_HOSPITALITY };
+  const table = vertical === 'hospitality' ? QUICK_ACTIONS
+    : vertical === 'beauty' || vertical === 'services' ? { ...QUICK_ACTIONS, ...QUICK_ACTIONS_BEAUTY_SERVICES }
+    : { ...QUICK_ACTIONS, ...QUICK_ACTIONS_NON_HOSPITALITY };
   return table[role] || table.cashier;
 };
 
@@ -108,6 +135,9 @@ const ALL_FEATURES = [
     { path: '/table-layout', label: 'Table Layout', icon: MapPin, access: ['owner', 'manager'] },
     { path: '/booking-settings', label: 'Settings & Rules', icon: Settings, access: ['owner', 'manager'] },
     { path: '/booking-analytics', label: 'Analytics', icon: BarChart3, access: ['owner', 'manager'] },
+  ]},
+  { group: 'Appointments', verticals: ['beauty', 'services'], items: [
+    { path: '/appointments', label: 'Book Appointment', icon: Calendar, access: ['owner', 'manager', 'cashier'] },
   ]},
   { group: 'Social Media & Promotions', items: [
     { path: '/marketing?tab=social',      label: 'Social Media',    icon: Sparkles, access: ['owner', 'manager'] },

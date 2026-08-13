@@ -55,6 +55,7 @@ const buildNavStructure = (vertical) => {
       { path: '/booking-analytics', label: 'Booking Analytics', icon: BarChart3 },
     ],
   },
+  { path: '/appointments', icon: CalendarCheck, label: 'Appointments', access: ['owner', 'manager', 'cashier'], verticals: ['beauty', 'services'] },
   {
     icon: Package, label: menu.group, access: ['owner', 'manager', 'cashier'],
     children: [
