@@ -109,7 +109,12 @@ export const appointmentsAPI = {
   update: (id, data) => api.put(`/appointments/${id}`, data),
   complete: (id) => api.post(`/appointments/${id}/complete`),
   cancel: (id) => api.post(`/appointments/${id}/cancel`),
-  noShow: (id) => api.post(`/appointments/${id}/no-show`),
+  noShow: (id, fee = 0) => api.post(`/appointments/${id}/no-show`, null, { params: { fee } }),
+};
+
+export const clientIntakeAPI = {
+  list: (params) => api.get('/client-intake', { params }),
+  create: (data) => api.post('/client-intake', data),
 };
 
 // EFTPOS terminals

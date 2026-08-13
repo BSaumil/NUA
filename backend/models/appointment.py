@@ -13,6 +13,7 @@ class AppointmentCreate(BaseModel):
     date: str    # YYYY-MM-DD
     time: str    # HH:MM
     notes: Optional[str] = None
+    depositRequired: float = 0
 
 
 class AppointmentUpdate(BaseModel):
@@ -25,6 +26,8 @@ class AppointmentUpdate(BaseModel):
     time: Optional[str] = None
     notes: Optional[str] = None
     status: Optional[str] = None
+    depositRequired: Optional[float] = None
+    depositPaid: Optional[bool] = None
 
 
 class Appointment(BaseModel):
@@ -46,6 +49,13 @@ class Appointment(BaseModel):
     price: float = 0.0
     status: str = "confirmed"  # confirmed, completed, cancelled, no_show
     notes: Optional[str] = None
+    # Same record-keeping-only pattern as reservations.py's deposit/no-show
+    # fields — this doesn't move money itself (no payment integration
+    # here), it just tracks whether a deposit was collected and what a
+    # no-show cost the business, the way a front-desk ledger would.
+    depositRequired: float = 0
+    depositPaid: bool = False
+    noShowFee: float = 0
     createdAt: Optional[str] = None
     updatedAt: Optional[str] = None
     businessId: Optional[str] = None
