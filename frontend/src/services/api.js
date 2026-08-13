@@ -424,6 +424,14 @@ export const cryptoAPI = {
   checkStatusByOrder: (orderId) => api.get(`/crypto/checkout/status-by-order/${orderId}`),
 };
 
+// AI outbound voice calls (Twilio) — confirm a booking, remind a guest, or
+// read back a custom message over a real phone call.
+export const voiceAPI = {
+  call: (data) => api.post('/voice/calls', data),
+  list: () => api.get('/voice/calls'),
+  get: (callId) => api.get(`/voice/calls/${callId}`),
+};
+
 // Integrations Hub
 export const integrationsAPI = {
   getAll: () => api.get('/integrations'),

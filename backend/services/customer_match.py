@@ -1,0 +1,75 @@
+"""Shared customer lookup — used anywhere an AI flow (Concierge, Bookings
+Inbox, Ash tools) needs to check whether a booking request is coming from
+an existing customer before creating a reservation blind.
+
+Previously the AI Concierge and Bookings Inbox both parsed a guest message
+into a name/phone/reservation and inserted it straight into
+db.reservations with no lookup at all — a returning VIP with allergies on
+file would get treated exactly like a first-time walk-in, and a second
+booking from the same guest would never get linked back to their profile.
+"""
+from __future__ import annotations
+import re
+from typing import Optional
+from database import db
+
+
+def _digits(s: Optional[str]) -> str:
+    return re.sub(r"\D", "", s or "")
+
+
+async def find_matching_customer(*, name: Optional[str] = None, phone: Optional[str] = None,
+                                   email: Optional[str] = None) -> Optional[dict]:
+    """Best-effort match against db.customers, most-confident signal first.
+
+    Phone/email are checked before name because first names collide
+    constantly ("John") — matching on those first would misattribute a
+    stranger's booking to an existing customer's history.
+    """
+    if email:
+        row = await db.customers.find_one(
+            {"email": {"$regex": f"^{re.escape(email.strip())}$", "$options": "i"}}, {"_id": 0})
+        if row:
+            return row
+
+    phone_digits = _digits(phone)
+    if len(phone_digits) >= 6:
+        # Compare the last 8 digits so a guest reading their number aloud
+        # without a country code / leading 0 still matches how it was
+        # originally entered into the CRM.
+        tail = phone_digits[-8:]
+        candidates = await db.customers.find({}, {"_id": 0}).to_list(5000)
+        for row in candidates:
+            if _digits(row.get("phone")).endswith(tail):
+                return row
+
+    if name and name.strip():
+        row = await db.customers.find_one(
+            {"name": {"$regex": re.escape(name.strip()), "$options": "i"}}, {"_id": 0})
+        if row:
+            return row
+
+    return None
+
+
+def guest_context(customer: dict) -> str:
+    """A short natural-language brief so a returning guest's preferences
+    make it into the reservation notes / the AI's reply instead of being
+    silently dropped."""
+    bits = []
+    if customer.get("isVip"):
+        bits.append("VIP guest")
+    tier = customer.get("membershipTier")
+    if tier and tier != "Bronze":
+        bits.append(f"{tier} member")
+    if customer.get("visits"):
+        bits.append(f"{customer['visits']} past visit(s)")
+    allergies = customer.get("allergies") or []
+    if allergies:
+        bits.append(f"allergies: {', '.join(allergies)}")
+    dietary = customer.get("dietaryRestrictions") or []
+    if dietary:
+        bits.append(f"dietary: {', '.join(dietary)}")
+    if customer.get("seatingPreference"):
+        bits.append(f"prefers {customer['seatingPreference']} seating")
+    return "; ".join(bits) if bits else "no notable history yet"

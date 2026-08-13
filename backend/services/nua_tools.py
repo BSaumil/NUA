@@ -208,6 +208,28 @@ async def _tx_send_customer_sms(a):
         return {"sent": False, "mocked": True, "to": to, "text": text}
 
 
+async def _tx_call_customer(a):
+    """Places a real outbound phone call via Twilio Voice — NUA speaks the
+    opening line, gathers the guest's spoken reply, and hangs up once it
+    has a confirm/decline (or after a few turns). Requires Twilio
+    credentials; returns an error dict (never a fake 'call placed') when
+    they're absent, same honesty contract as send_customer_sms."""
+    import os
+    from routes.voice_calls import initiate_call
+    base_url = os.environ.get("TWILIO_WEBHOOK_BASE_URL") or os.environ.get("BACKEND_PUBLIC_URL")
+    if not base_url:
+        return {"error": "No public base URL configured for voice callbacks "
+                          "(set TWILIO_WEBHOOK_BASE_URL or BACKEND_PUBLIC_URL)"}
+    try:
+        return await initiate_call(
+            customer_id=a.get("customerId"), phone=a.get("phone"),
+            purpose=a.get("purpose", "custom"), context=a.get("context"),
+            base_url=base_url, actor={"name": "ash-agent"},
+        )
+    except Exception as e:
+        return {"error": str(e)}
+
+
 async def _tx_send_customer_email(a):
     to = a["email"]; subj = a["subject"]; body = a["body"]
     try:
@@ -465,6 +487,15 @@ _TOOL_DEFS: List[Dict[str, Any]] = [
                  "properties": {"phone": {"type": "string"}, "text": {"type": "string"}},
                  "required": ["text"]},
      "fn": _tx_send_customer_sms, "impact": "csat"},
+    {"n": "call_customer", "l": "Call a customer to confirm or follow up by voice", "m": "Marketing",
+     "r": "medium", "p": "approval",
+     "params": {"type": "object",
+                 "properties": {"customerId": {"type": "string"}, "phone": {"type": "string"},
+                                 "purpose": {"type": "string", "enum": ["confirm_booking", "reminder", "custom"]},
+                                 "context": {"type": "object",
+                                             "description": "e.g. {date, time, partySize} for confirm_booking, or {message} for custom"}},
+                 "required": ["purpose"]},
+     "fn": _tx_call_customer, "impact": "csat"},
     {"n": "send_customer_email", "l": "Send an email to a customer", "m": "Marketing", "r": "medium", "p": "approval",
      "params": {"type": "object",
                  "properties": {"email": {"type": "string"}, "subject": {"type": "string"},

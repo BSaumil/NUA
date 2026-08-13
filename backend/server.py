@@ -65,6 +65,7 @@ from routes.hq import router as hq_router
 from routes.ops import router as ops_router
 from routes.changelog import router as changelog_router
 from routes.crypto_payments import router as crypto_payments_router
+from routes.voice_calls import router as voice_calls_router
 from middleware.license_middleware import LicenseEnforcementMiddleware
 from middleware.actor_context import ActorContextMiddleware
 
@@ -129,6 +130,7 @@ api_router.include_router(multi_tenant_router)
 api_router.include_router(ops_router)
 api_router.include_router(changelog_router)
 api_router.include_router(crypto_payments_router)
+api_router.include_router(voice_calls_router)
 
 @api_router.get("/")
 async def root():
@@ -215,6 +217,11 @@ PUBLIC_API_PREFIXES = (
     # segment), meaning EVERY kiosk endpoint 401'd for the guest kiosk client
     # they're meant to serve, on a terminal with no way to log in.
     "/api/v25/kiosk/session/",
+    # Twilio voice webhooks — Twilio can't carry our JWT, so these are
+    # authenticated instead by request-signature validation inside
+    # routes/voice_calls.py (services/voice_calls.validate_signature), the
+    # same trust model as the Coinbase webhook below uses HMAC for.
+    "/api/voice/twiml/", "/api/voice/gather/", "/api/voice/status/",
 )
 
 PUBLIC_API_PATHS = {

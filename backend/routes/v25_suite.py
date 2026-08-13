@@ -1170,20 +1170,39 @@ async def concierge(data: dict, _: dict = Depends(get_user)):
         "You are a restaurant concierge at NUA. Given a guest request, classify and extract details. "
         "Return STRICT JSON: "
         '{"intent":"reservation|dietary|menu|other","date":"YYYY-MM-DD","time":"HH:MM",'
-        '"partySize":6,"name":"...","notes":"...","reply":"a friendly 1-2 sentence reply"}'
+        '"partySize":6,"name":"...","phone":"... or null","email":"... or null",'
+        '"notes":"...","reply":"a friendly 1-2 sentence reply"}'
     )
     out = await _llm_json(f"concierge-{uuid.uuid4().hex[:6]}", sys_msg,
                           f"Today: {datetime.now().date().isoformat()}. Guest: {msg}")
     if isinstance(out, dict) and out.get("intent") == "reservation" and out.get("date"):
+        from services.customer_match import find_matching_customer, guest_context
+        customer = await find_matching_customer(
+            name=out.get("name"), phone=out.get("phone"), email=out.get("email"))
+        notes = out.get("notes", msg)
+        reply = out.get("reply", "Booking confirmed.")
+        if customer:
+            # A returning guest was found — carry their history into the
+            # reservation instead of booking them as a stranger, and fold
+            # anything the profile knows (allergies, VIP status, seating)
+            # into the notes so front-of-house sees it without digging.
+            notes = f"{notes} [Returning guest — {guest_context(customer)}]".strip()
+            if customer.get("isVip"):
+                reply = f"Welcome back — {reply}"
         r = {
-            "id": _uid("RES"), "guestName": out.get("name") or "Concierge guest",
+            "id": _uid("RES"), "guestName": out.get("name") or (customer or {}).get("name") or "Concierge guest",
+            "guestPhone": out.get("phone") or (customer or {}).get("phone"),
+            "guestEmail": out.get("email") or (customer or {}).get("email"),
+            "customerId": (customer or {}).get("id"),
             "partySize": int(out.get("partySize", 2) or 2),
             "date": out["date"], "time": out.get("time", "19:00"),
-            "notes": out.get("notes", msg), "status": "confirmed", "source": "ai_concierge",
+            "notes": notes, "status": "confirmed", "source": "ai_concierge",
             "createdAt": _now(),
         }
         await db.reservations.insert_one(r)
-        return {"created": True, "reservationId": r["id"], "reply": out.get("reply", "Booking confirmed."), "intent": "reservation"}
+        return {"created": True, "reservationId": r["id"], "reply": reply, "intent": "reservation",
+                "matchedCustomer": {"id": customer["id"], "name": customer.get("name"),
+                                     "isVip": customer.get("isVip", False)} if customer else None}
     return {"created": False, "intent": (out or {}).get("intent", "other") if isinstance(out, dict) else "other",
             "reply": (out or {}).get("reply", "I'll pass that to a manager.") if isinstance(out, dict) else "Sorry, I couldn't process that."}
 
