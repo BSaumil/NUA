@@ -42,7 +42,7 @@ async def create_business(data: dict, user: dict = Depends(require_owner)):
         "id": f"BIZ-{str(uuid.uuid4())[:8].upper()}",
         "slug": slug,
         "name": data.get("name", ""),
-        "type": data.get("type", "restaurant"),  # restaurant, cafe, bar, catering
+        "type": data.get("type", "restaurant"),  # restaurant, cafe, bar, catering, retail, salon, services — see frontend/src/lib/businessVertical.js
         "abn": data.get("abn", ""),
         "address": data.get("address", ""),
         "phone": data.get("phone", ""),
