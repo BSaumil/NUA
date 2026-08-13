@@ -489,16 +489,30 @@ async def google_wallet_link(customer_id: str, _: dict = Depends(get_user)):
 # PDF exports — low-stock, AI Pantry
 # ═════════════════════════════════════════════════════════════════════════
 def _pdf_from_lines(title: str, lines: List[str], meta: Optional[dict] = None) -> bytes:
-    """Minimal PDF assembler — writes a single-page A4 with a title + line
-    list. No external dependency (avoids adding a 30MB reportlab install).
-    Good enough for order sheets + low-stock exports."""
-    content = []
-    y = 750
+    """Minimal PDF assembler — paginates an A4 title + line list onto as
+    many pages as needed. No external dependency (avoids adding a 30MB
+    reportlab install). Good enough for order sheets + low-stock exports.
+
+    Previously this silently truncated anything past the first page
+    ("… export CSV for full list") — fine for a short low-stock list, but a
+    genuine loss of data for a long purchase order or a busy venue's pantry
+    sheet. Callers are unchanged; every existing PDF export now just gets
+    real pagination instead of a mid-document cutoff.
+    """
+    TOP_Y = 750
+    BOTTOM_MARGIN = 50
+
+    pages: List[List[str]] = [[]]
+    y = TOP_Y
+
     def add(text, size=12):
         nonlocal y
+        if y < BOTTOM_MARGIN:
+            pages.append([])
+            y = TOP_Y
         # Escape parens & backslashes per PDF spec
         text = (text or "").replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-        content.append(f"BT /F1 {size} Tf 40 {y} Td ({text}) Tj ET")
+        pages[-1].append(f"BT /F1 {size} Tf 40 {y} Td ({text}) Tj ET")
         y -= size + 4
 
     add(title, size=18)
@@ -510,22 +524,27 @@ def _pdf_from_lines(title: str, lines: List[str], meta: Optional[dict] = None) -
             add(f"{k}: {v}", size=9)
         y -= 6
     for line in lines:
-        # Simple page-break if we run out of room. First page only, but at
-        # least prevents overflow-clipping.
-        if y < 50:
-            add("… (truncated — export CSV for full list)", size=9)
-            break
         add(line, size=10)
 
-    stream_body = "\n".join(content).encode("latin-1", errors="ignore")
-    length = len(stream_body)
     header = b"%PDF-1.4\n"
+    n_pages = len(pages)
+    # Object numbering: 1=Catalog, 2=Pages, then for each page a
+    # (Page, Contents) pair, then the shared Font last.
+    page_obj_nums = [3 + 2 * i for i in range(n_pages)]
+    font_obj_num = 3 + 2 * n_pages
+
     objs = []
     objs.append(b"<< /Type /Catalog /Pages 2 0 R >>")
-    objs.append(b"<< /Type /Pages /Count 1 /Kids [3 0 R] >>")
-    objs.append(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R "
-                 b"/Resources << /Font << /F1 5 0 R >> >> >>")
-    objs.append(f"<< /Length {length} >>\nstream\n".encode() + stream_body + b"\nendstream")
+    kids = " ".join(f"{n} 0 R" for n in page_obj_nums)
+    objs.append(f"<< /Type /Pages /Count {n_pages} /Kids [{kids}] >>".encode())
+    for i, page_lines in enumerate(pages):
+        stream_body = "\n".join(page_lines).encode("latin-1", errors="ignore")
+        content_obj_num = page_obj_nums[i] + 1
+        objs.append(
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents {content_obj_num} 0 R "
+            f"/Resources << /Font << /F1 {font_obj_num} 0 R >> >> >>".encode()
+        )
+        objs.append(f"<< /Length {len(stream_body)} >>\nstream\n".encode() + stream_body + b"\nendstream")
     objs.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
 
     body = bytearray()
