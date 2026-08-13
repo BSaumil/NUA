@@ -19,6 +19,7 @@ from deps import get_user, require_owner_or_manager
 from middleware.actor_context import tenant_scope_filter, tenant_owns
 from models.service_catalog import Service, ServiceCreate, ServiceUpdate
 from models.appointment import Appointment, AppointmentCreate, AppointmentUpdate
+from models.client_intake import IntakeNote, IntakeNoteCreate
 
 router = APIRouter()
 
@@ -231,5 +232,51 @@ async def cancel_appointment(appointment_id: str, user: dict = Depends(get_user)
 
 
 @router.post("/appointments/{appointment_id}/no-show", response_model=Appointment)
-async def no_show_appointment(appointment_id: str, user: dict = Depends(get_user)):
-    return await _set_status(appointment_id, "no_show", user)
+async def no_show_appointment(appointment_id: str, fee: float = 0, user: dict = Depends(get_user)):
+    """Same record-keeping pattern as reservations.py's mark_no_show — this
+    doesn't charge a card itself (no payment integration here), it records
+    what the no-show cost and tallies it against the client's history, the
+    way a front-desk ledger would."""
+    existing = await db.appointments.find_one({"id": appointment_id}, {"_id": 0})
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    now_iso = datetime.utcnow().isoformat()
+    result = await db.appointments.find_one_and_update(
+        {"id": appointment_id},
+        {"$set": {"status": "no_show", "noShowFee": fee, "updatedAt": now_iso}},
+        return_document=True,
+    )
+    if existing.get("customerId"):
+        await db.customers.update_one({"id": existing["customerId"]}, {"$inc": {"noShowCount": 1}})
+    return Appointment(**{k: v for k, v in result.items() if not k.startswith("_") and k != "_id"})
+
+
+# ============ CLIENT INTAKE / CONSULTATION NOTES ============
+# One record per visit (allergies/skin type/notes), not a single mutable
+# profile — a chart-style history a stylist or therapist can read back
+# through, the same way a medical intake form accumulates over time rather
+# than being overwritten each visit.
+
+@router.get("/client-intake", response_model=List[IntakeNote])
+async def list_intake_notes(customerPhone: Optional[str] = None, customerId: Optional[str] = None,
+                             user=Depends(get_user)):
+    if not customerPhone and not customerId:
+        raise HTTPException(status_code=400, detail="customerPhone or customerId is required")
+    and_clauses = []
+    tenant_filter = tenant_scope_filter(user.get("businessId"))
+    if tenant_filter:
+        and_clauses.append(tenant_filter)
+    if customerId:
+        and_clauses.append({"customerId": customerId})
+    elif customerPhone:
+        and_clauses.append({"customerPhone": customerPhone})
+    rows = await db.client_intake.find({"$and": and_clauses}).sort("createdAt", -1).to_list(200)
+    return [IntakeNote(**r) for r in rows]
+
+
+@router.post("/client-intake", response_model=IntakeNote)
+async def create_intake_note(data: IntakeNoteCreate, user: dict = Depends(get_user)):
+    note = IntakeNote(**data.dict(), staffId=user.get("id"), staffName=user.get("name", ""),
+                       businessId=user.get("businessId"))
+    await db.client_intake.insert_one(note.dict())
+    return note

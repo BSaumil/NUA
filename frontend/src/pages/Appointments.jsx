@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CalendarClock, Plus, Check, X, UserX, Scissors } from 'lucide-react';
+import { CalendarClock, Plus, Check, X, UserX, Scissors, NotebookPen, Search } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent } from '../components/ui/card';
@@ -8,13 +8,14 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '.
 import { Badge } from '../components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
 import { useTheme } from '../contexts/ThemeContext';
-import { appointmentsAPI, servicesAPI, staffRosterAPI } from '../services/api';
+import { appointmentsAPI, servicesAPI, staffRosterAPI, clientIntakeAPI } from '../services/api';
 import { toast } from 'sonner';
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
-const BLANK_APPT = { customerName: '', customerPhone: '', staffId: '', serviceId: '', date: todayISO(), time: '', notes: '' };
+const BLANK_APPT = { customerName: '', customerPhone: '', staffId: '', serviceId: '', date: todayISO(), time: '', notes: '', depositRequired: '' };
 const BLANK_SERVICE = { name: '', category: '', durationMinutes: 30, price: '' };
+const BLANK_INTAKE = { customerName: '', customerPhone: '', allergies: '', skinType: '', notes: '' };
 
 export default function Appointments() {
   const { theme } = useTheme();
@@ -68,7 +69,7 @@ export default function Appointments() {
     }
     setSaving(true);
     try {
-      await appointmentsAPI.create(form);
+      await appointmentsAPI.create({ ...form, depositRequired: parseFloat(form.depositRequired) || 0 });
       toast.success('Appointment booked');
       setShowBook(false);
       load();
@@ -78,13 +79,32 @@ export default function Appointments() {
   };
 
   const transition = async (appt, action) => {
+    if (action === 'no_show') {
+      const raw = window.prompt(`No-show fee for ${appt.customerName}? (leave blank for $0)`, appt.depositRequired || '');
+      if (raw === null) return; // cancelled the prompt
+      setBusyId(appt.id);
+      try {
+        await appointmentsAPI.noShow(appt.id, parseFloat(raw) || 0);
+        load();
+      } catch (e) { toast.error(e.response?.data?.detail || 'Failed to mark no-show'); }
+      finally { setBusyId(null); }
+      return;
+    }
     setBusyId(appt.id);
     try {
       if (action === 'complete') await appointmentsAPI.complete(appt.id);
-      else if (action === 'cancel') await appointmentsAPI.cancel(appt.id);
-      else await appointmentsAPI.noShow(appt.id);
+      else await appointmentsAPI.cancel(appt.id);
       load();
     } catch (e) { toast.error(e.response?.data?.detail || 'Failed to update appointment'); }
+    finally { setBusyId(null); }
+  };
+
+  const toggleDepositPaid = async (appt) => {
+    setBusyId(appt.id);
+    try {
+      await appointmentsAPI.update(appt.id, { depositPaid: !appt.depositPaid });
+      load();
+    } catch { toast.error('Failed to update deposit status'); }
     finally { setBusyId(null); }
   };
 
@@ -108,6 +128,37 @@ export default function Appointments() {
     if (!window.confirm(`Remove "${svc.name}" from the catalog?`)) return;
     try { await servicesAPI.delete(svc.id); toast.success('Service removed'); load(); }
     catch { toast.error('Failed to remove service'); }
+  };
+
+  // ---- Client intake / consultation notes ----
+  const [lookupPhone, setLookupPhone] = useState('');
+  const [intakeHistory, setIntakeHistory] = useState(null); // null = not searched yet
+  const [intakeLoading, setIntakeLoading] = useState(false);
+  const [intakeForm, setIntakeForm] = useState(BLANK_INTAKE);
+  const [savingIntake, setSavingIntake] = useState(false);
+
+  const searchIntake = async () => {
+    if (!lookupPhone.trim()) { toast.error('Enter a phone number to search'); return; }
+    setIntakeLoading(true);
+    try {
+      const r = await clientIntakeAPI.list({ customerPhone: lookupPhone.trim() });
+      setIntakeHistory(r.data || []);
+      setIntakeForm({ ...BLANK_INTAKE, customerPhone: lookupPhone.trim(), customerName: r.data?.[0]?.customerName || '' });
+    } catch { toast.error('Search failed'); }
+    finally { setIntakeLoading(false); }
+  };
+
+  const saveIntakeNote = async () => {
+    if (!intakeForm.customerName.trim() || !intakeForm.customerPhone.trim()) {
+      toast.error('Client name and phone are required'); return;
+    }
+    setSavingIntake(true);
+    try {
+      await clientIntakeAPI.create(intakeForm);
+      toast.success('Note saved');
+      searchIntake();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to save note'); }
+    finally { setSavingIntake(false); }
   };
 
   const statusBadge = (status) => {
@@ -138,6 +189,7 @@ export default function Appointments() {
         <TabsList>
           <TabsTrigger value="book" data-testid="tab-book">Book</TabsTrigger>
           <TabsTrigger value="services" data-testid="tab-services">Services</TabsTrigger>
+          <TabsTrigger value="notes" data-testid="tab-notes">Client Notes</TabsTrigger>
         </TabsList>
 
         <TabsContent value="book" className="space-y-4 pt-4">
@@ -161,6 +213,16 @@ export default function Appointments() {
                       <p className="font-medium text-sm">{a.time} · {a.serviceName} with {a.staffName}</p>
                       <p className="text-xs text-gray-500">{a.customerName}{a.customerPhone ? ` · ${a.customerPhone}` : ''} · {a.durationMinutes} min · ${Number(a.price).toFixed(2)}</p>
                       {a.notes && <p className="text-xs text-gray-400 italic mt-0.5">{a.notes}</p>}
+                      {a.depositRequired > 0 && (
+                        <button onClick={() => toggleDepositPaid(a)} disabled={busyId === a.id} className="mt-1" data-testid={`deposit-toggle-${a.id}`}>
+                          <Badge variant="outline" className={a.depositPaid ? 'text-emerald-600 border-emerald-300' : 'text-amber-600 border-amber-300'}>
+                            Deposit ${Number(a.depositRequired).toFixed(2)} {a.depositPaid ? '· paid' : '· unpaid, tap to mark paid'}
+                          </Badge>
+                        </button>
+                      )}
+                      {a.status === 'no_show' && a.noShowFee > 0 && (
+                        <p className="text-xs text-red-500 mt-1">No-show fee: ${Number(a.noShowFee).toFixed(2)}</p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       {statusBadge(a.status)}
@@ -215,6 +277,58 @@ export default function Appointments() {
             </div>
           )}
         </TabsContent>
+
+        <TabsContent value="notes" className="space-y-4 pt-4">
+          <div className="flex gap-2">
+            <Input placeholder="Search by client phone…" value={lookupPhone} onChange={e => setLookupPhone(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && searchIntake()} data-testid="intake-search-input" />
+            <Button variant="outline" onClick={searchIntake} disabled={intakeLoading} data-testid="intake-search-btn">
+              <Search size={14} className="mr-1.5" /> Search
+            </Button>
+          </div>
+
+          {intakeHistory !== null && (
+            <>
+              {intakeHistory.length === 0 ? (
+                <p className="text-xs text-gray-400">No notes on file for this number yet — add the first one below.</p>
+              ) : (
+                <div className="space-y-2">
+                  {intakeHistory.map(n => (
+                    <Card key={n.id} data-testid={`intake-note-${n.id}`}>
+                      <CardContent className="p-3 text-sm">
+                        <div className="flex items-center justify-between">
+                          <p className="font-medium">{n.customerName}</p>
+                          <span className="text-[11px] text-gray-400">{new Date(n.createdAt).toLocaleDateString()} · {n.staffName}</span>
+                        </div>
+                        {(n.allergies || n.skinType) && (
+                          <p className="text-xs text-amber-700 mt-1">
+                            {n.allergies && `Allergies: ${n.allergies}`}{n.allergies && n.skinType ? ' · ' : ''}{n.skinType && `Skin: ${n.skinType}`}
+                          </p>
+                        )}
+                        {n.notes && <p className="text-xs text-gray-600 mt-1">{n.notes}</p>}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+
+              <Card className="bg-gray-50">
+                <CardContent className="p-3 space-y-2">
+                  <p className="text-xs font-medium text-gray-500 flex items-center gap-1.5"><NotebookPen size={13} /> Add a note for this visit</p>
+                  <Input placeholder="Client name" value={intakeForm.customerName} onChange={e => setIntakeForm({ ...intakeForm, customerName: e.target.value })} data-testid="intake-name-input" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input placeholder="Allergies" value={intakeForm.allergies} onChange={e => setIntakeForm({ ...intakeForm, allergies: e.target.value })} data-testid="intake-allergies-input" />
+                    <Input placeholder="Skin/hair type" value={intakeForm.skinType} onChange={e => setIntakeForm({ ...intakeForm, skinType: e.target.value })} data-testid="intake-skintype-input" />
+                  </div>
+                  <Input placeholder="Consultation notes for this visit" value={intakeForm.notes} onChange={e => setIntakeForm({ ...intakeForm, notes: e.target.value })} data-testid="intake-notes-input" />
+                  <Button size="sm" className="w-full" onClick={saveIntakeNote} disabled={savingIntake} data-testid="save-intake-btn">
+                    {savingIntake ? 'Saving…' : 'Save Note'}
+                  </Button>
+                </CardContent>
+              </Card>
+            </>
+          )}
+        </TabsContent>
       </Tabs>
 
       <Dialog open={showBook} onOpenChange={setShowBook}>
@@ -263,6 +377,7 @@ export default function Appointments() {
                 )}
               </div>
             )}
+            <Input type="number" step="0.01" placeholder="Deposit required (optional)" value={form.depositRequired} onChange={e => setForm({ ...form, depositRequired: e.target.value })} data-testid="appt-deposit-input" />
             <Input placeholder="Notes (optional)" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} data-testid="appt-notes-input" />
           </div>
           <DialogFooter>
