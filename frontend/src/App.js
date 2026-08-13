@@ -22,6 +22,7 @@ import { getAppShell } from './lib/appShell';
 const Products = lazy(() => import('./pages/Products'));
 const Customers = lazy(() => import('./pages/Customers'));
 const Inventory = lazy(() => import('./pages/Inventory'));
+const StockTransfers = lazy(() => import('./pages/StockTransfers'));
 const InventoryAccounting = lazy(() => import('./pages/InventoryAccounting'));
 const BookingsInbox = lazy(() => import('./pages/BookingsInbox'));
 const ChannelMenus = lazy(() => import('./pages/ChannelMenus'));
@@ -250,6 +251,7 @@ function ProtectedRoutes() {
         <Route path="/customers" element={<Customers />} />
         <Route path="/loyalty" element={<Navigate to="/marketing?tab=loyalty" replace />} />
         <Route path="/inventory" element={<Inventory />} />
+        <Route path="/stock-transfers" element={<StockTransfers />} />
         <Route path="/inventory-accounting" element={<InventoryAccounting />} />
         <Route path="/forecasting" element={<Forecasting />} />
         <Route path="/automation" element={<Navigate to="/automation-triggers" replace />} />

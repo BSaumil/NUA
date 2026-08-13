@@ -44,6 +44,13 @@ class Product(BaseModel):
     modifierIds: List[str] = []
     # Enhanced fields
     locations: List[str] = ["Main"]
+    # Per-location stock count for multi-location retailers, e.g.
+    # {"Main": 40, "Warehouse": 15}. Additive to `stock` above, not a
+    # replacement — a single-location business never needs this, and
+    # `stock` stays the number POS checkout/purchase-orders/stockout
+    # prediction already read. Only stock_transfers.py writes to this map
+    # (moving units between locations); nothing else needs to touch it.
+    stockByLocation: Dict[str, int] = {}
     onlineChannels: List[str] = []  # uber_eats, doordash, website, etc.
     seoDescription: str = ""
     description: str = ""
@@ -88,6 +95,7 @@ class ProductCreate(BaseModel):
     modifiers: List[ProductModifier] = []
     modifierIds: List[str] = []
     locations: List[str] = ["Main"]
+    stockByLocation: Dict[str, int] = {}
     onlineChannels: List[str] = []
     seoDescription: str = ""
     description: str = ""

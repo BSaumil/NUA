@@ -133,6 +133,7 @@ const ALL_FEATURES = [
     { path: '/menu-engineering', label: 'Menu Matrix', icon: FlaskConical, access: ['owner', 'manager'] },
     { path: '/what-if', label: 'What-If', icon: TrendingUp, access: ['owner', 'manager'] },
     { path: '/inventory', label: 'Inventory', icon: Warehouse, access: ['owner', 'manager', 'kitchen'] },
+    { path: '/stock-transfers', label: 'Stock Transfers', icon: ArrowLeftRight, access: ['owner', 'manager'], verticals: ['hospitality', 'retail'] },
     { path: '/ai-pantry', label: 'AI Pantry', icon: Brain, access: ['owner', 'manager', 'kitchen'] },
     { path: '/forecasting', label: 'Forecasting', icon: BarChart3, access: ['owner', 'manager'] },
     { path: '/quarterly-review', label: 'Quarterly Review', icon: PieChart, access: ['owner', 'manager'] },

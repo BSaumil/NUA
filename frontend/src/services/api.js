@@ -82,6 +82,14 @@ export const productsAPI = {
   bulkAutoTranslate: (onlyMissing = true) => api.post('/products/bulk-auto-translate', null, { params: { only_missing: onlyMissing } }),
 };
 
+// Stock transfers between locations (retail multi-location)
+export const stockTransfersAPI = {
+  list: (params) => api.get('/stock-transfers', { params }),
+  create: (data) => api.post('/stock-transfers', data),
+  receive: (id) => api.post(`/stock-transfers/${id}/receive`),
+  cancel: (id) => api.post(`/stock-transfers/${id}/cancel`),
+};
+
 // EFTPOS terminals
 export const eftposAPI = {
   listTerminals: () => api.get('/eftpos/terminals'),
