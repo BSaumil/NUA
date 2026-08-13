@@ -612,11 +612,29 @@ async def print_job_escpos(job_id: str, body: dict = None, _: dict = Depends(get
     Returns `sent: False` with a reason when no device is configured or it
     can't be reached — the caller then falls back to the browser print path,
     so a station without an IP still prints exactly as it does today.
+
+    A job auto-prints once already (services/print_routing._auto_print) the
+    moment it's queued, so this is really the manual-retry path — a printer
+    was off, ran out of paper, whatever. It only fires for a job that's
+    still genuinely "queued" (never printed, or a previous attempt released
+    its claim after failing to reach the device); pass `force: true` for a
+    deliberate reprint of one that already went out. Either way this can
+    only ever send once per call, and staff clicking it from five different
+    terminals still only produces one ticket, or five deliberate reprints —
+    never five accidental ones.
     """
     from services import escpos
-    job = await db.print_jobs.find_one({"id": job_id}, {"_id": 0})
+    force = bool((body or {}).get("force"))
+    query = {"id": job_id} if force else {"id": job_id, "status": "queued"}
+    job = await db.print_jobs.find_one_and_update(
+        query, {"$set": {"status": "printing"}}, return_document=True)
     if not job:
-        raise HTTPException(status_code=404, detail="Print job not found")
+        existing = await db.print_jobs.find_one({"id": job_id}, {"_id": 0})
+        if not existing:
+            raise HTTPException(status_code=404, detail="Print job not found")
+        return {"sent": False, "reason": f"already {existing['status']} — pass force:true to reprint",
+                "status": existing["status"]}
+    job.pop("_id", None)
 
     target = await escpos.printer_target(job.get("printer"))
     payload = escpos.render(
@@ -629,6 +647,7 @@ async def print_job_escpos(job_id: str, body: dict = None, _: dict = Depends(get
         padding_lines=(target or {}).get("paddingLines", 3),
     )
     if not target or not target.get("enabled", True):
+        await db.print_jobs.update_one({"id": job_id}, {"$set": {"status": "queued"}})
         return {"sent": False, "reason": "no device configured for this printer",
                 "bytes": len(payload), "printer": job.get("printer")}
 
@@ -640,6 +659,7 @@ async def print_job_escpos(job_id: str, body: dict = None, _: dict = Depends(get
                       "printedVia": f"escpos://{target['host']}:{target.get('port', 9100)}"}},
         )
         return {"sent": True, **result}
+    await db.print_jobs.update_one({"id": job_id}, {"$set": {"status": "queued", "lastError": result.get("error")}})
     return {"sent": False, "reason": result.get("error"), "bytes": len(payload)}
 
 

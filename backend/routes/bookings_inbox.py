@@ -110,14 +110,21 @@ async def acknowledge_booking(item_id: str, body: dict, request: Request):
 
     if convert:
         parsed = row.get("parsed") or {}
+        from services.customer_match import find_matching_customer, guest_context
+        customer = await find_matching_customer(
+            name=parsed.get("name") or row.get("fromHandle"), phone=parsed.get("phone"))
+        notes = parsed.get("notes") or ""
+        if customer:
+            notes = f"{notes} [Returning guest — {guest_context(customer)}]".strip()
         res = {
             "id": f"res-{uuid.uuid4().hex[:8]}",
             "customerName": parsed.get("name") or row.get("fromHandle") or "Guest",
-            "customerPhone": parsed.get("phone") or "",
+            "customerPhone": parsed.get("phone") or (customer or {}).get("phone") or "",
+            "customerId": (customer or {}).get("id"),
             "date": parsed.get("date") or "",
             "time": parsed.get("time") or "",
             "partySize": int(parsed.get("partySize") or 2),
-            "notes": parsed.get("notes") or "",
+            "notes": notes,
             "source": f"ai-inbox/{row.get('channel', 'unknown')}",
             "status": "confirmed",
             "createdAt": now,

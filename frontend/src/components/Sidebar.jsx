@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useBusiness } from '../contexts/BusinessContext';
+import { getMenuLabels } from '../lib/businessVertical';
 import {
   LayoutDashboard, ShoppingCart, Package, Users, Warehouse,
   Calculator, FileText, Settings, Utensils, MapPin, Clock,
@@ -12,7 +14,7 @@ import {
   CalendarCheck, LayoutGrid, SlidersHorizontal, Boxes, Layers, Puzzle,
   Percent, XCircle, Grid3x3, Scale, Sparkles, Ticket, Megaphone, Receipt,
   FileBadge, Wallet, PiggyBank, Target, BookMarked, Cpu,
-  CreditCard, KeyRound, Building2, Rocket, Fingerprint
+  CreditCard, KeyRound, Building2, Rocket, Fingerprint, ArrowLeftRight
 } from 'lucide-react';
 
 // Progressive disclosure: the everyday screens live in a handful of merged
@@ -22,14 +24,27 @@ import {
 // text alone made scanning slower than it needed to be. Everything is still
 // reachable — nothing was removed, only regrouped and relabeled for clarity
 // (e.g. two different screens were both called "Command Center").
-const NAV_STRUCTURE = [
+//
+// Vertical-aware: a handful of entries only make sense for a restaurant
+// (kitchen dockets, course timing, table floor plans) and are hidden
+// outside the 'hospitality' vertical via `verticals`. Everything else is
+// generic enough to keep showing everywhere — an item library and a
+// customer list mean the same thing to a cafe, a retail shop, or a salon,
+// they just get relabeled per vertical so the words on screen match the
+// owner's business. No `verticals` on an entry means "show for everyone."
+// Retail (Phase 2) and beauty/services (Phase 4) get their own real
+// feature pages later; for now this only changes what's visible and what
+// it's called, not what it does.
+const buildNavStructure = (vertical) => {
+  const menu = getMenuLabels(vertical);
+  return [
   { path: '/today', icon: Sunrise, label: 'Today', access: ['owner', 'manager'] },
   { path: '/whats-new', icon: Rocket, label: "What's New", access: ['owner', 'manager'] },
   { path: '/pos', icon: ShoppingCart, label: 'POS Terminal', access: ['owner', 'manager', 'cashier'] },
-  { path: '/kitchen', icon: ChefHat, label: 'Kitchen', access: ['owner', 'manager', 'kitchen'] },
-  { path: '/coursing-analytics', icon: Timer, label: 'Coursing', access: ['owner', 'manager'] },
+  { path: '/kitchen', icon: ChefHat, label: 'Kitchen', access: ['owner', 'manager', 'kitchen'], verticals: ['hospitality'] },
+  { path: '/coursing-analytics', icon: Timer, label: 'Coursing', access: ['owner', 'manager'], verticals: ['hospitality'] },
   {
-    icon: Utensils, label: 'Bookings & Floor', access: ['owner', 'manager', 'cashier', 'kitchen'],
+    icon: Utensils, label: 'Bookings & Floor', access: ['owner', 'manager', 'cashier', 'kitchen'], verticals: ['hospitality'],
     children: [
       { path: '/reservations', label: 'Bookings', icon: CalendarCheck },
       { path: '/floor-plan', label: 'Floor Plan', icon: MapPin },
@@ -40,10 +55,11 @@ const NAV_STRUCTURE = [
       { path: '/booking-analytics', label: 'Booking Analytics', icon: BarChart3 },
     ],
   },
+  { path: '/appointments', icon: CalendarCheck, label: 'Appointments', access: ['owner', 'manager', 'cashier'], verticals: ['beauty', 'services'] },
   {
-    icon: Package, label: 'Menu & Items', access: ['owner', 'manager', 'cashier'],
+    icon: Package, label: menu.group, access: ['owner', 'manager', 'cashier'],
     children: [
-      { path: '/products', label: 'Item Library', icon: Boxes },
+      { path: '/products', label: menu.itemLabel, icon: Boxes },
       { path: '/categories', label: 'Categories', icon: Layers },
       { path: '/modifiers', label: 'Modifiers', icon: Puzzle },
       { path: '/discounts', label: 'Discounts & Offers', icon: Percent },
@@ -56,6 +72,7 @@ const NAV_STRUCTURE = [
     icon: Warehouse, label: 'Inventory', access: ['owner', 'manager'],
     children: [
       { path: '/inventory', label: 'Stock Levels', icon: Warehouse },
+      { path: '/stock-transfers', label: 'Stock Transfers', icon: ArrowLeftRight, verticals: ['hospitality', 'retail'] },
       { path: '/measured-stock', label: 'Measured Stock', icon: Scale },
       { path: '/ai-pantry', label: 'AI Smart Pantry', icon: Sparkles },
       { path: '/purchase-orders', label: 'Purchase Orders', icon: FileText },
@@ -148,11 +165,13 @@ const NAV_STRUCTURE = [
       { path: '/multi-business', label: 'Multi-Business', icon: Building2 },
     ],
   },
-];
+  ];
+};
 
 const Sidebar = () => {
   const { theme } = useTheme();
   const { user, logout } = useAuth();
+  const { vertical } = useBusiness();
   const navigate = useNavigate();
   const location = useLocation();
   const [openGroups, setOpenGroups] = useState({});
@@ -161,12 +180,19 @@ const Sidebar = () => {
   // Use customPermissions if non-empty, otherwise fall back to permissions
   const customPerms = (user?.customPermissions?.length > 0) ? user.customPermissions : (user?.permissions || []);
   const hasCustomPerms = Array.isArray(customPerms) && customPerms.length > 0 && !customPerms.includes('*');
+  const navStructure = buildNavStructure(vertical);
 
   const toggleGroup = (label) => {
     setOpenGroups(prev => ({ ...prev, [label]: !prev[label] }));
   };
 
+  // Vertical gate applies ahead of (and independent from) role/permission
+  // checks below — an owner running a retail shop still shouldn't see
+  // "Kitchen" in their own nav just because owners see everything else.
+  const matchesVertical = (item) => !item.verticals || item.verticals.includes(vertical);
+
   const isAllowed = (item) => {
+    if (!matchesVertical(item)) return false;
     if (role === 'owner') return true;
     if (hasCustomPerms) {
       if (item.path) {
@@ -202,7 +228,7 @@ const Sidebar = () => {
         )}
       </div>
       <nav className="flex-1 overflow-y-auto p-3 space-y-0.5">
-        {NAV_STRUCTURE.filter(isAllowed).map((item, idx) => {
+        {navStructure.filter(isAllowed).map((item, idx) => {
           // Grouped item with children (dropdown)
           if (item.children) {
             const isOpen = openGroups[item.label] || isGroupActive(item.children);

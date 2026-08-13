@@ -46,7 +46,15 @@ async def get_products(category: Optional[str] = None, search: Optional[str] = N
     if category:
         query["category"] = category
     if search:
-        query["name"] = {"$regex": search, "$options": "i"}
+        # Matches name OR sku OR barcode — a barcode scanner fires this
+        # exact same search endpoint with the scanned digits, so it has to
+        # hit on more than just the display name.
+        and_clauses.append({"$or": [
+            {"name": {"$regex": search, "$options": "i"}},
+            {"sku": {"$regex": search, "$options": "i"}},
+            {"barcode": search},
+        ]})
+        query["$and"] = and_clauses
     products = await db.products.find(query).to_list(1000)
     if not user:
         # Guests never see deleted rows either, whatever they ask for.
@@ -55,6 +63,18 @@ async def get_products(category: Optional[str] = None, search: Optional[str] = N
             for f in GUEST_HIDDEN_PRODUCT_FIELDS:
                 p.pop(f, None)
     return [Product(**p) for p in products]
+
+@router.get("/products/{product_id}/variants", response_model=List[Product])
+async def get_product_variants(product_id: str, user=Depends(optional_user)):
+    """Every sellable row under a variant-grouping product (e.g. a T-shirt's
+    Small/Red, Small/Blue, Medium/Red... rows) — the parent itself is never
+    sold, only listed here so POS/edit UI can render its variant matrix."""
+    tenant_filter = tenant_scope_filter(user.get("businessId") if user else None)
+    query = {"parentId": product_id, "$or": [{"deletedAt": None}, {"deletedAt": {"$exists": False}}]}
+    if tenant_filter:
+        query = {"$and": [query, tenant_filter]}
+    variants = await db.products.find(query).to_list(500)
+    return [Product(**v) for v in variants]
 
 @router.post("/products", response_model=Product)
 async def create_product(product: ProductCreate, _: dict = Depends(require_owner_or_manager)):
@@ -92,9 +112,31 @@ async def delete_product(product_id: str, user: dict = Depends(require_owner_or_
 async def adjust_stock(product_id: str, data: dict, user: dict = Depends(require_owner_or_manager)):
     adjustment = data.get("adjustment", 0)
     reason = data.get("reason", "Manual adjustment")
+    location = data.get("location")  # optional — see below
     product = await db.products.find_one({"id": product_id})
     if not product or not tenant_owns(product.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Product not found")
+
+    if location:
+        # Per-location count (e.g. a physical stocktake at one branch) —
+        # only touches that location's entry in stockByLocation, leaving
+        # the flat `stock` total (what checkout/purchase-orders read) alone.
+        # A business using per-location tracking is expected to also keep
+        # `stock` in sync itself via its own totals process; this endpoint
+        # doesn't guess at that for them.
+        current = (product.get("stockByLocation") or {}).get(location, 0)
+        new_location_stock = current + adjustment
+        if new_location_stock < 0:
+            raise HTTPException(status_code=400, detail="Stock cannot go below zero")
+        await db.products.update_one({"id": product_id}, {"$set": {f"stockByLocation.{location}": new_location_stock}})
+        await db.stock_adjustments.insert_one({
+            "productId": product_id, "productName": product.get("name", ""), "location": location,
+            "previousStock": current, "adjustment": adjustment,
+            "newStock": new_location_stock, "reason": reason,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        return {"message": "Stock adjusted", "newStock": new_location_stock, "location": location}
+
     new_stock = product.get("stock", 0) + adjustment
     if new_stock < 0:
         raise HTTPException(status_code=400, detail="Stock cannot go below zero")

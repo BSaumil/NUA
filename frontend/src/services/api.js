@@ -9,10 +9,15 @@ const api = axios.create({
   },
 });
 
-// Attach auth token to every request
+// Attach auth token to every request — unless the caller already set its
+// own Authorization header (guestSessionAPI/billSplitAPI do this: a guest
+// page has its own short-lived phone-verified token, never the staff
+// session, and a staff member testing the guest flow on a browser where
+// they're ALSO logged in as staff must not have that call silently
+// switched to their staff credential).
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('nua_token');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+  if (token && !config.headers.Authorization) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
@@ -72,8 +77,44 @@ export const productsAPI = {
   update: (id, data) => api.put(`/products/${id}`, data),
   delete: (id) => api.delete(`/products/${id}`),
   adjustStock: (id, data) => api.post(`/products/${id}/adjust-stock`, data),
+  variants: (id) => api.get(`/products/${id}/variants`),
   autoTranslate: (id) => api.post(`/products/${id}/auto-translate`),
   bulkAutoTranslate: (onlyMissing = true) => api.post('/products/bulk-auto-translate', null, { params: { only_missing: onlyMissing } }),
+};
+
+// Stock transfers between locations (retail multi-location)
+export const stockTransfersAPI = {
+  list: (params) => api.get('/stock-transfers', { params }),
+  create: (data) => api.post('/stock-transfers', data),
+  receive: (id) => api.post(`/stock-transfers/${id}/receive`),
+  cancel: (id) => api.post(`/stock-transfers/${id}/cancel`),
+};
+
+// Beauty/services: service catalog + staff-as-resource appointment booking
+export const servicesAPI = {
+  list: (activeOnly = true) => api.get('/services', { params: { active_only: activeOnly } }),
+  create: (data) => api.post('/services', data),
+  update: (id, data) => api.put(`/services/${id}`, data),
+  delete: (id) => api.delete(`/services/${id}`),
+};
+
+export const staffRosterAPI = {
+  list: () => api.get('/auth/staff'),
+};
+
+export const appointmentsAPI = {
+  list: (params) => api.get('/appointments', { params }),
+  availability: (params) => api.get('/appointments/availability', { params }),
+  create: (data) => api.post('/appointments', data),
+  update: (id, data) => api.put(`/appointments/${id}`, data),
+  complete: (id) => api.post(`/appointments/${id}/complete`),
+  cancel: (id) => api.post(`/appointments/${id}/cancel`),
+  noShow: (id, fee = 0) => api.post(`/appointments/${id}/no-show`, null, { params: { fee } }),
+};
+
+export const clientIntakeAPI = {
+  list: (params) => api.get('/client-intake', { params }),
+  create: (data) => api.post('/client-intake', data),
 };
 
 // EFTPOS terminals
@@ -413,6 +454,25 @@ export const stripeAPI = {
   checkStatus: (sessionId) => api.get(`/stripe/checkout/status/${sessionId}`),
 };
 
+// Crypto checkout (Bitcoin + USDC via Coinbase Commerce) — same shape as
+// stripeAPI above, real hosted-checkout redirect + status poll. Coinbase's
+// redirect doesn't echo the charge code back, so the post-redirect page
+// polls by orderId instead (checkStatusByOrder) — checkStatus(chargeCode)
+// is for callers that already have the charge code some other way.
+export const cryptoAPI = {
+  createCheckout: (data) => api.post('/crypto/checkout', data),
+  checkStatus: (chargeCode) => api.get(`/crypto/checkout/status/${chargeCode}`),
+  checkStatusByOrder: (orderId) => api.get(`/crypto/checkout/status-by-order/${orderId}`),
+};
+
+// AI outbound voice calls (Twilio) — confirm a booking, remind a guest, or
+// read back a custom message over a real phone call.
+export const voiceAPI = {
+  call: (data) => api.post('/voice/calls', data),
+  list: () => api.get('/voice/calls'),
+  get: (callId) => api.get(`/voice/calls/${callId}`),
+};
+
 // Integrations Hub
 export const integrationsAPI = {
   getAll: () => api.get('/integrations'),
@@ -657,6 +717,8 @@ export const phaseEFAPI = {
   getPOs: () => api.get('/purchase-orders'),
   generatePOs: () => api.post('/purchase-orders/generate'),
   updatePO: (id, action) => api.post(`/purchase-orders/${id}/${action}`),
+  editPO: (id, items) => api.patch(`/purchase-orders/${id}`, { items }),
+  poPdfUrl: (id) => `${process.env.REACT_APP_BACKEND_URL}/api/purchase-orders/${id}/pdf`,
   getABTests: () => api.get('/ab-tests'),
   createABTest: (data) => api.post('/ab-tests', data),
   concludeAB: (id) => api.post(`/ab-tests/${id}/conclude`),
@@ -962,6 +1024,7 @@ export const nuaAPI = {
 export const businessAPI = {
   create: (data) => api.post('/business/create', data),
   list: () => api.get('/business/list'),
+  get: (id) => api.get(`/business/${id}`),
   update: (id, data) => api.put(`/business/${id}`, data),
   summary: (id) => api.get(`/business/${id}/summary`),
   exportData: (id, collection) => api.get(`/business/${id}/export`, { params: collection ? { collection } : {} }),
@@ -988,6 +1051,27 @@ export const guestSessionAPI = {
   requestCode: (phone) => api.post('/guest/session/request-code', { phone }),
   verify: (phone, code) => api.post('/guest/session/verify', { phone, code }),
   me: (token) => api.get('/guest/session/me', { headers: { Authorization: `Bearer ${token}` } }),
+};
+
+// Guest-facing bill splitting — a table's open items become individually
+// claimable, paid by each guest on their own phone via guestSessionAPI's
+// phone-verified session. View/mode calls need no guest identity; claim/
+// release/checkout do, and take the guest token explicitly (never the
+// staff session) since this runs on a guest's own device.
+export const billSplitAPI = {
+  getSplit: (tableNumber) => api.get(`/table/${encodeURIComponent(tableNumber)}/split`),
+  chooseMode: (tableNumber, mode, equalCount) =>
+    api.post(`/table/${encodeURIComponent(tableNumber)}/split/mode`, { mode, equalCount }),
+  status: (splitId) => api.get(`/table/split/${splitId}/status`),
+  claim: (splitId, lineIds, token) =>
+    api.post(`/table/split/${splitId}/claim`, { lineIds }, { headers: { Authorization: `Bearer ${token}` } }),
+  claimEqual: (splitId, index, token) =>
+    api.post(`/table/split/${splitId}/claim-equal`, { index }, { headers: { Authorization: `Bearer ${token}` } }),
+  release: (splitId, { lineIds, slotIndex }, token) =>
+    api.post(`/table/split/${splitId}/release`, { lineIds, slotIndex }, { headers: { Authorization: `Bearer ${token}` } }),
+  checkout: (splitId, { provider, lineIds, slotIndex, originUrl }, token) =>
+    api.post(`/table/split/${splitId}/checkout`, { provider, lineIds, slotIndex, originUrl },
+      { headers: { Authorization: `Bearer ${token}` } }),
 };
 
 // What's New — release notes for owners/managers

@@ -4,7 +4,7 @@ E: auto-publish roster (within budget), auto-confirm SMS queue, auto-VIP tagging
 voice intents 'void last item' / 'raise espresso 50 cents'
 F: AI Phone Agent, auto-PO generation, live menu A/B testing, guest 'your usual'
 """
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Request, Response, Depends
 from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone
@@ -361,7 +361,10 @@ async def generate_po(user: dict = Depends(require_owner_or_manager)):
         # Reorder qty = (reorderLevel or 50) - stock
         target = int(p.get("reorderLevel", 50))
         qty = max(target - int(p.get("stock", 0)), 1)
-        by_supplier[sup].append({"productId": p["id"], "productName": p["name"], "currentStock": p.get("stock", 0), "orderQty": qty, "unitCost": p.get("cost", 0)})
+        by_supplier[sup].append({"productId": p["id"], "productName": p["name"],
+                                  "category": p.get("category") or "Uncategorised",
+                                  "currentStock": p.get("stock", 0), "orderQty": qty,
+                                  "unitCost": p.get("cost", 0)})
 
     pos_list = []
     for sup, items in by_supplier.items():
@@ -456,6 +459,91 @@ async def update_po(po_id: str, action: str, _: dict = Depends(require_owner_or_
             await db.products.update_one({"id": item["productId"]}, {"$inc": {"stock": item.get("orderQty", 0)}})
     po.pop("_id", None)
     return po
+
+
+@router.patch("/purchase-orders/{po_id}")
+async def edit_po(po_id: str, data: dict, user: dict = Depends(require_owner)):
+    """Owner-only edit of a PO's line items (quantities, unit costs, adding
+    or dropping a line) before it's gone out to the supplier — auto-generated
+    quantities are a starting point, not always what the owner actually
+    wants to order. Locked once the PO has been sent, received, or
+    cancelled: at that point the supplier (or the stock ledger, on receive)
+    has already acted on the original numbers, so editing in place would
+    silently disagree with what actually happened."""
+    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+    if not po:
+        raise HTTPException(status_code=404, detail="PO not found")
+    if po["status"] not in ("draft", "approved"):
+        raise HTTPException(status_code=409, detail=f"Can't edit a PO that's already {po['status']}")
+
+    items = data.get("items")
+    if not isinstance(items, list) or not items:
+        raise HTTPException(status_code=400, detail="items must be a non-empty list")
+
+    cleaned = []
+    for it in items:
+        qty = int(it.get("orderQty") or 0)
+        cost = float(it.get("unitCost") or 0)
+        if qty <= 0:
+            raise HTTPException(status_code=400, detail=f"orderQty must be positive for {it.get('productName', 'an item')}")
+        if cost < 0:
+            raise HTTPException(status_code=400, detail=f"unitCost can't be negative for {it.get('productName', 'an item')}")
+        cleaned.append({
+            "productId": it.get("productId"), "productName": it.get("productName") or "Item",
+            "category": it.get("category") or "Uncategorised",
+            "currentStock": it.get("currentStock", 0), "orderQty": qty, "unitCost": cost,
+        })
+    total = round(sum(i["orderQty"] * i["unitCost"] for i in cleaned), 2)
+
+    update = {"items": cleaned, "totalCost": total,
+              "editedAt": datetime.now(timezone.utc).isoformat(), "editedBy": user["id"]}
+    updated = await db.purchase_orders.find_one_and_update(
+        {"id": po_id}, {"$set": update}, return_document=True)
+    updated.pop("_id", None)
+    return updated
+
+
+@router.get("/purchase-orders/{po_id}/pdf")
+async def po_pdf(po_id: str, _: dict = Depends(require_owner_or_manager)):
+    """Category-grouped order sheet — a supplier rep (or whoever's packing
+    the van) works off one category at a time, not a flat alphabetical
+    dump, so items are grouped and subtotalled by category with the grand
+    total at the end. Tolerates both PO item shapes this collection holds
+    (see _resolve_supplier_email above) — auto-generated items use
+    orderQty/productName, the legacy analytics.py POST path uses
+    quantity/name."""
+    from routes.finalize import _pdf_from_lines
+    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+    if not po:
+        raise HTTPException(status_code=404, detail="PO not found")
+
+    by_category = defaultdict(list)
+    for it in po.get("items", []):
+        by_category[it.get("category") or "Uncategorised"].append(it)
+
+    lines = []
+    for cat in sorted(by_category.keys()):
+        items = by_category[cat]
+        lines.append(f"— {cat} —")
+        cat_total = 0.0
+        for it in items:
+            qty = it.get("orderQty") or it.get("quantity") or 0
+            name = it.get("productName") or it.get("name") or "Item"
+            cost = float(it.get("unitCost") or it.get("price") or 0)
+            line_total = qty * cost
+            cat_total += line_total
+            lines.append(f"   {name:<35s} {qty:>4}x @ ${cost:>7.2f}  =  ${line_total:>8.2f}")
+        lines.append(f"   Subtotal: ${cat_total:.2f}")
+        lines.append("")
+
+    supplier_label = po.get("supplier") or po.get("supplierName") or ""
+    pdf = _pdf_from_lines(
+        f"Purchase Order · {supplier_label}", lines,
+        meta={"PO #": po["id"], "Status": po.get("status", "draft"),
+              "Total": f"${po.get('totalCost', 0):.2f}"},
+    )
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{po["id"]}.pdf"'})
 
 
 # =============================================================================

@@ -13,13 +13,13 @@ import {
 } from '../components/ui/dialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { usePOS } from '../contexts/POSContext';
-import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API, v26API, floorPlansAPI, itemsSystemAPI, kitchenAPI, coursingAPI, posLayoutAPI, finalizeAPI } from '../services/api';
+import { productsAPI, promotionsAPI, customersAPI, transactionsAPI, paymentAPI, stripeAPI, cryptoAPI, advancedAPI, menuFeaturesAPI, gamificationAPI, v15API, loyaltyEngineAPI, phaseEFAPI, aiWave2API, v26API, floorPlansAPI, itemsSystemAPI, kitchenAPI, coursingAPI, posLayoutAPI, finalizeAPI } from '../services/api';
 import { useToast } from '../hooks/use-toast';
 import { useAuth } from '../contexts/AuthContext';
 import VoiceOrderButton from '../components/VoiceOrderButton';
 import SwipeableCartItem from '../components/pos/SwipeableCartItem';
 import CustomerCombobox from '../components/pos/CustomerCombobox';
-import { QrPaymentDialog, UpiPaymentDialog, SplitPaymentDialog } from '../components/pos/PaymentDialogs';
+import { QrPaymentDialog, UpiPaymentDialog, SplitPaymentDialog, SplitBillLinkDialog } from '../components/pos/PaymentDialogs';
 import ModifierPanel from '../components/pos/ModifierPanel';
 import POSHeaderBar from '../components/pos/POSHeaderBar';
 import ScanVoucherButton from '../components/pos/ScanVoucherButton';
@@ -71,6 +71,7 @@ const POSTerminal = () => {
 
   // Payment flow state
   const [paymentView, setPaymentView] = useState('methods'); // methods | qr | upi | split | processing
+  const [splitLinkOpen, setSplitLinkOpen] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
 
   // QR / UPI state
@@ -763,10 +764,29 @@ const POSTerminal = () => {
   };
 
   const filteredProducts = products.filter(p => {
+    // A variant-grouping row (e.g. "T-Shirt") isn't sold directly once it
+    // has real variants under it — only the variants themselves (their own
+    // Product rows, each with parentId set to this one) are sellable.
+    if (p.hasVariants) return false;
     const term = searchTerm.toLowerCase();
     return (selectedCategory === 'All' || p.category === selectedCategory) &&
-      (p.name.toLowerCase().includes(term) || (p.category || '').toLowerCase().includes(term));
+      (p.name.toLowerCase().includes(term) || (p.category || '').toLowerCase().includes(term) ||
+       (p.sku || '').toLowerCase().includes(term) || (p.barcode || '') === searchTerm);
   });
+
+  // A barcode scanner types the code then fires Enter — if what's in the
+  // search box exactly matches one product's barcode (or SKU), add it
+  // straight to cart instead of making staff hunt for it in the grid.
+  const handleSearchKeyDown = (e) => {
+    if (e.key !== 'Enter' || !searchTerm.trim()) return;
+    const code = searchTerm.trim();
+    const hit = products.find(p => !p.hasVariants && (p.barcode === code || p.sku === code));
+    if (hit) {
+      addToCart(hit);
+      setSearchTerm('');
+      toast({ title: 'Added', description: hit.name });
+    }
+  };
 
   // Group products by category for "All" view (category-wise display)
   const groupedByCategory = React.useMemo(() => {
@@ -1024,6 +1044,34 @@ const POSTerminal = () => {
       if (res.data.url) window.location.href = res.data.url;
     } catch {
       toast({ title: "Error", description: "Failed to initiate Stripe checkout.", variant: "destructive" });
+    } finally { setLoading(false); }
+  };
+
+  // ---- Crypto Checkout (Bitcoin + USDC via Coinbase Commerce) ----
+  // Same "redirect away, redirect back" shape as Stripe above — the sale
+  // payload travels with the checkout charge and gets rung up server-side
+  // once Coinbase confirms payment, not by this tab still being open.
+  const handleCryptoCheckout = async () => {
+    if (tableBlocked) {
+      toast({ title: 'Unknown table', description: tableCheck.message, variant: 'destructive' });
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await cryptoAPI.createCheckout({
+        originUrl: window.location.origin,
+        amount: totalNum,
+        sale: {
+          items: cart.map(item => toTxItem(item, true)),
+          paymentMethod: 'Crypto',
+          customerId: selectedCustomer?.id || null, location: currentLocation, cashier: currentUser.name,
+          orderType, tableNumber: orderType === 'dine-in' ? tableNumber : null,
+          ...buildDiscountPayload(),
+        },
+      });
+      if (res.data.url) window.location.href = res.data.url;
+    } catch (err) {
+      toast({ title: "Error", description: err.response?.data?.detail || "Failed to initiate crypto checkout.", variant: "destructive" });
     } finally { setLoading(false); }
   };
 
@@ -1386,8 +1434,8 @@ const POSTerminal = () => {
           <div className="relative mb-3 flex gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={16} />
-              <Input placeholder="Search products..." className="pl-9 h-9" value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)} data-testid="pos-search" />
+              <Input placeholder="Search products or scan a barcode..." className="pl-9 h-9" value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)} onKeyDown={handleSearchKeyDown} data-testid="pos-search" />
             </div>
             <VoiceOrderButton
               onAddSuggestions={(suggestions) => {
@@ -2245,18 +2293,23 @@ const POSTerminal = () => {
               onClick={handleStripeCheckout} disabled={loading} data-testid="pay-stripe">
               <CreditCard size={18} className="mr-2" /> Pay with Stripe
             </Button>
-            <Button className="w-full h-12 bg-emerald-700 hover:bg-emerald-800 text-white font-medium"
-              onClick={() => { toast({ title: 'BNPL', description: 'Afterpay / Klarna — opening provider redirect (configure keys in Integrations)' }); }} data-testid="pay-bnpl">
-              <CreditCard size={18} className="mr-2" /> Pay Later (Afterpay / Klarna)
+            <Button className="w-full h-12 bg-gray-200 text-gray-500 font-medium cursor-not-allowed" disabled
+              title="Afterpay / Klarna isn't connected yet" data-testid="pay-bnpl">
+              <CreditCard size={18} className="mr-2" /> Pay Later (Afterpay / Klarna) — Coming soon
             </Button>
             <Button className="w-full h-12 bg-orange-500 hover:bg-orange-600 text-white font-medium"
-              onClick={() => { toast({ title: 'Crypto', description: 'USDC tap-to-pay via Stripe Crypto — configure keys in Integrations' }); }} data-testid="pay-crypto">
-              ₿ Pay with Crypto (USDC)
+              onClick={handleCryptoCheckout} disabled={loading} data-testid="pay-crypto">
+              ₿ Pay with Crypto (BTC / USDC)
             </Button>
             <Button className="w-full h-14 bg-indigo-600 hover:bg-indigo-700 text-white font-medium"
               onClick={handleStartSplit} data-testid="pay-split">
               <SplitSquareHorizontal size={20} className="mr-2" /> Split Payment
             </Button>
+            {orderType === 'dine-in' && tableNumber && (
+              <Button className="w-full h-12" variant="outline" onClick={() => setSplitLinkOpen(true)} data-testid="pay-split-link">
+                <QrCode size={18} className="mr-2" /> Split via Guest Link
+              </Button>
+            )}
             <Button className="w-full" variant="ghost" onClick={resetPayment} data-testid="pay-cancel">Cancel</Button>
           </div>
         )}
@@ -2355,6 +2408,11 @@ const POSTerminal = () => {
         onPayPart={handlePaySplit}
         splitRemaining={splitRemaining}
         loading={loading} activeSplitIndex={activeSplitIndex}
+      />
+
+      <SplitBillLinkDialog
+        open={splitLinkOpen} onClose={() => setSplitLinkOpen(false)}
+        tableNumber={tableNumber}
       />
 
       {/* QR / UPI scan dialog stacked on top of the split dialog. Nothing is

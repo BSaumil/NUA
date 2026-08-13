@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { POSProvider } from './contexts/POSContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { BusinessProvider } from './contexts/BusinessContext';
 import { LicenseProvider } from './contexts/LicenseContext';
 import { Toaster } from './components/ui/sonner';
 import BottomDock from './components/BottomDock';
@@ -21,6 +22,8 @@ import { getAppShell } from './lib/appShell';
 const Products = lazy(() => import('./pages/Products'));
 const Customers = lazy(() => import('./pages/Customers'));
 const Inventory = lazy(() => import('./pages/Inventory'));
+const StockTransfers = lazy(() => import('./pages/StockTransfers'));
+const Appointments = lazy(() => import('./pages/Appointments'));
 const InventoryAccounting = lazy(() => import('./pages/InventoryAccounting'));
 const BookingsInbox = lazy(() => import('./pages/BookingsInbox'));
 const ChannelMenus = lazy(() => import('./pages/ChannelMenus'));
@@ -43,6 +46,7 @@ const Forecasting = lazy(() => import('./pages/Forecasting'));
 const WhatIfSimulator = lazy(() => import('./pages/WhatIfSimulator'));
 const BookingPortal = lazy(() => import('./pages/BookingPortal'));
 const TableOrder = lazy(() => import('./pages/TableOrder'));
+const SplitBillGuest = lazy(() => import('./pages/SplitBillGuest'));
 const PaymentSuccess = lazy(() => import('./pages/PaymentSuccess'));
 const Integrations = lazy(() => import('./pages/Integrations'));
 const WhatsNew = lazy(() => import('./pages/WhatsNew'));
@@ -248,6 +252,8 @@ function ProtectedRoutes() {
         <Route path="/customers" element={<Customers />} />
         <Route path="/loyalty" element={<Navigate to="/marketing?tab=loyalty" replace />} />
         <Route path="/inventory" element={<Inventory />} />
+        <Route path="/stock-transfers" element={<StockTransfers />} />
+        <Route path="/appointments" element={<Appointments />} />
         <Route path="/inventory-accounting" element={<InventoryAccounting />} />
         <Route path="/forecasting" element={<Forecasting />} />
         <Route path="/automation" element={<Navigate to="/automation-triggers" replace />} />
@@ -349,6 +355,7 @@ function App() {
     <ThemeProvider>
       <POSProvider>
         <AuthProvider>
+        <BusinessProvider>
           <div className="App">
             <BrowserRouter>
               {/* Page components are lazy-loaded (see the const X = lazy(...)
@@ -363,6 +370,8 @@ function App() {
                   {/* Public routes — no sidebar, no auth */}
                   <Route path="/booking" element={<BookingPortal />} />
                   <Route path="/table/:tableId" element={<TableOrder />} />
+                  <Route path="/split/:tableNumber" element={<SplitBillGuest />} />
+                  <Route path="/split-bill" element={<SplitBillGuest />} />
                   <Route path="/join" element={<MemberPortal />} />
                   <Route path="/payment-success" element={<PaymentSuccess />} />
                   <Route path="/order-online" element={<OrderOnline />} />
@@ -379,6 +388,7 @@ function App() {
               <Toaster />
             </BrowserRouter>
           </div>
+        </BusinessProvider>
         </AuthProvider>
       </POSProvider>
     </ThemeProvider>

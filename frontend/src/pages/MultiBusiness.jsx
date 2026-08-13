@@ -5,9 +5,12 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../components/ui/select';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useBusiness } from '../contexts/BusinessContext';
 import { businessAPI } from '../services/api';
+import { BUSINESS_TYPE_OPTIONS, VERTICAL_LABELS, getVertical } from '../lib/businessVertical';
 import { toast } from 'sonner';
 
 const BLANK_FORM = { name: '', type: 'restaurant', abn: '', address: '', phone: '', email: '', timezone: 'Australia/Sydney', currency: 'AUD', taxRate: 10 };
@@ -15,6 +18,7 @@ const BLANK_FORM = { name: '', type: 'restaurant', abn: '', address: '', phone: 
 export default function MultiBusiness() {
   const { theme } = useTheme();
   const { user } = useAuth();
+  const { refresh: refreshOwnBusiness } = useBusiness();
   const [businesses, setBusinesses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -25,6 +29,7 @@ export default function MultiBusiness() {
   const [editingSlugFor, setEditingSlugFor] = useState(null); // businessId
   const [editingSlugValue, setEditingSlugValue] = useState('');
   const [savingSlug, setSavingSlug] = useState(false);
+  const [savingTypeFor, setSavingTypeFor] = useState(null); // businessId
   const [exportingId, setExportingId] = useState(null);
   const [backfillResult, setBackfillResult] = useState(null); // { businesses.slug -> count } from the last run
 
@@ -85,6 +90,22 @@ export default function MultiBusiness() {
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Failed to update slug');
     } finally { setSavingSlug(false); }
+  };
+
+  const changeType = async (b, newType) => {
+    if (newType === b.type) return;
+    setSavingTypeFor(b.id);
+    try {
+      await businessAPI.update(b.id, { type: newType });
+      toast.success(`${b.name} is now ${VERTICAL_LABELS[getVertical(newType)]}`);
+      load();
+      // If this is the business the logged-in owner is currently acting as,
+      // the sidebar's cached vertical is now stale — pull the fresh one so
+      // the nav switches without a manual reload.
+      if (b.id === user?.businessId) refreshOwnBusiness();
+    } catch {
+      toast.error('Failed to update business type');
+    } finally { setSavingTypeFor(null); }
   };
 
   const exportBusiness = async (b) => {
@@ -189,8 +210,14 @@ export default function MultiBusiness() {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
-                    <span className="capitalize">{b.type}</span>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-gray-500">
+                    <Select value={b.type || 'restaurant'} disabled={savingTypeFor === b.id} onValueChange={(v) => changeType(b, v)}>
+                      <SelectTrigger className="h-6 w-auto min-w-[9rem] text-xs" data-testid={`business-type-select-${b.id}`}><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {BUSINESS_TYPE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <Badge variant="outline" className="text-[10px]">{VERTICAL_LABELS[getVertical(b.type)]}</Badge>
                     {b.email && <span>{b.email}</span>}
                     {b.phone && <span>{b.phone}</span>}
                     <span>{b.currency} · {b.taxRate}% tax</span>
@@ -277,7 +304,12 @@ export default function MultiBusiness() {
           <div className="space-y-3">
             <Input placeholder="Business name *" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} data-testid="business-name-input" />
             <div className="grid grid-cols-2 gap-3">
-              <Input placeholder="Type (restaurant, cafe, bar…)" value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} />
+              <Select value={form.type} onValueChange={v => setForm({ ...form, type: v })}>
+                <SelectTrigger data-testid="business-type-input"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {BUSINESS_TYPE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
               <Input placeholder="ABN" value={form.abn} onChange={e => setForm({ ...form, abn: e.target.value })} />
             </div>
             <Input placeholder="Address" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} />

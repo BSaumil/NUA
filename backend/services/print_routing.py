@@ -168,5 +168,58 @@ async def route_and_queue(items: List[dict], order_id: Optional[str] = None,
         }
         await db.print_jobs.insert_one(record)
         record.pop("_id", None)
+        await _auto_print(record)
         records.append(record)
     return records
+
+
+async def _auto_print(record: dict) -> None:
+    """Send a freshly-queued job straight to its configured network printer.
+
+    This is what keeps a docket to exactly one copy no matter how many
+    staff devices are logged into the business: the print happens here,
+    once, server-side, at the moment the job is created — not by every
+    connected device independently noticing a shared queue and racing to
+    send it. Print behavior is entirely a function of the printer_targets
+    document (the "printer profile") for this station: no target
+    configured, or disabled, means no auto-print — the job just stays
+    queued for a manual retry/browser-print fallback instead of guessing.
+
+    Atomically claims the job (status must still be "queued") before
+    rendering, so a concurrent manual reprint via the /escpos endpoint
+    can't double-send the same ticket.
+    """
+    from services import escpos
+    target = await escpos.printer_target(record["printer"])
+    if not target or not target.get("enabled", True):
+        return
+
+    claimed = await db.print_jobs.find_one_and_update(
+        {"id": record["id"], "status": "queued"},
+        {"$set": {"status": "printing"}}, return_document=True,
+    )
+    if not claimed:
+        return  # Already claimed/printed elsewhere between insert and here.
+
+    payload = escpos.render(
+        claimed,
+        width=target.get("width") or escpos.DEFAULT_WIDTH,
+        codepage=target.get("codepage") or escpos.DEFAULT_CODEPAGE,
+        cut=target.get("cut") or "partial",
+        footer_in_person=target.get("footerInPerson", True),
+        footer_online=target.get("footerOnline", True),
+        padding_lines=target.get("paddingLines", 3),
+    )
+    result = await escpos.send(target["host"], payload, port=target.get("port", 9100))
+    if result.get("ok"):
+        await db.print_jobs.update_one(
+            {"id": record["id"]},
+            {"$set": {"status": "printed", "printedAt": datetime.now(timezone.utc).isoformat(),
+                      "printedVia": f"escpos://{target['host']}:{target.get('port', 9100)}"}},
+        )
+    else:
+        # Couldn't reach the printer — release the claim so this shows back
+        # up as "queued" (visible in the print-routing queue, retryable via
+        # /escpos) instead of stuck in "printing" forever.
+        await db.print_jobs.update_one(
+            {"id": record["id"]}, {"$set": {"status": "queued", "lastError": result.get("error")}})
