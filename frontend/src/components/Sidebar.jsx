@@ -14,7 +14,7 @@ import {
   CalendarCheck, LayoutGrid, SlidersHorizontal, Boxes, Layers, Puzzle,
   Percent, XCircle, Grid3x3, Scale, Sparkles, Ticket, Megaphone, Receipt,
   FileBadge, Wallet, PiggyBank, Target, BookMarked, Cpu,
-  CreditCard, KeyRound, Building2, Rocket, Fingerprint
+  CreditCard, KeyRound, Building2, Rocket, Fingerprint, ArrowLeftRight
 } from 'lucide-react';
 
 // Progressive disclosure: the everyday screens live in a handful of merged
@@ -71,6 +71,7 @@ const buildNavStructure = (vertical) => {
     icon: Warehouse, label: 'Inventory', access: ['owner', 'manager'],
     children: [
       { path: '/inventory', label: 'Stock Levels', icon: Warehouse },
+      { path: '/stock-transfers', label: 'Stock Transfers', icon: ArrowLeftRight, verticals: ['hospitality', 'retail'] },
       { path: '/measured-stock', label: 'Measured Stock', icon: Scale },
       { path: '/ai-pantry', label: 'AI Smart Pantry', icon: Sparkles },
       { path: '/purchase-orders', label: 'Purchase Orders', icon: FileText },

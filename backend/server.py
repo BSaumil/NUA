@@ -10,6 +10,7 @@ import os
 from database import client
 
 from routes.products import router as products_router
+from routes.stock_transfers import router as stock_transfers_router
 from routes.transactions import router as transactions_router
 from routes.customers import router as customers_router
 from routes.identity import router as identity_router
@@ -77,6 +78,7 @@ api_router = APIRouter(prefix="/api")
 # Include all route modules
 api_router.include_router(auth_router)
 api_router.include_router(products_router)
+api_router.include_router(stock_transfers_router)
 api_router.include_router(transactions_router)
 api_router.include_router(customers_router)
 api_router.include_router(identity_router)
