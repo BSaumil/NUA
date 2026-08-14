@@ -31,10 +31,19 @@ def test_unrostered_staff_gets_needs_approval_not_a_token(client, owner_headers)
 def test_rostered_staff_logs_in_normally(client, owner_headers):
     staff = _add_staff(client, owner_headers, "ZZZ Rostered Cashier", "7712")
     now = datetime.now(timezone.utc)
+    # Clamped to today's calendar day: an uncapped now-1h/now+4h window can
+    # cross midnight in either direction and land on the wrong side of the
+    # "date" field below, which is a real scenario but a different one
+    # (see test_is_rostered_now_handles_overnight_shifts_deterministically) —
+    # not what this test is about, so it shouldn't be flaky because of it.
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_of_day = now.replace(hour=23, minute=59, second=0, microsecond=0)
+    start = max(now - timedelta(hours=1), midnight)
+    end = min(now + timedelta(hours=4), end_of_day)
     req(client, "POST", "/api/staff/roster", headers=owner_headers, json={
         "staffId": staff["id"], "staffName": staff["name"], "date": _today_iso(),
-        "startTime": (now - timedelta(hours=1)).strftime("%H:%M"),
-        "endTime": (now + timedelta(hours=4)).strftime("%H:%M"),
+        "startTime": start.strftime("%H:%M"),
+        "endTime": end.strftime("%H:%M"),
     })
 
     r = req(client, "POST", "/api/auth/pin-login", json={"pin": "7712"})
