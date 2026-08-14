@@ -6,10 +6,20 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { useTheme } from '../contexts/ThemeContext';
+import { useAuth } from '../contexts/AuthContext';
 import { preShiftAPI, finalizeAPI } from '../services/api';
+
+function formatClockTime(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+}
 
 export default function PreShift() {
   const { theme } = useTheme();
+  const { user } = useAuth();
+  const isOwner = user?.role === 'owner';
   const [data, setData] = useState(null);
   const [briefing, setBriefing] = useState(null);
 
@@ -234,12 +244,33 @@ export default function PreShift() {
             </CardTitle></CardHeader>
             <CardContent className="text-xs space-y-1 max-h-48 overflow-y-auto">
               {(briefing.onShift || []).length === 0 ? <div className="text-gray-400 italic">No roster loaded for today.</div> :
-                (briefing.onShift || []).map((s, i) => (
-                  <div key={i} className="flex justify-between border-b pb-1">
-                    <span>{s.staffName || s.name || s.staffId}</span>
-                    <span className="text-gray-500">{s.role || s.shift || ''}</span>
-                  </div>
-                ))}
+                (briefing.onShift || []).map((s, i) => {
+                  const startedAt = formatClockTime(s.clockIn);
+                  const finishedAt = formatClockTime(s.clockOut);
+                  return (
+                    <div key={i} className="border-b pb-1">
+                      <div className="flex justify-between">
+                        <span>{s.staffName || s.name || s.staffId}</span>
+                        <span className="text-gray-500">{s.role || s.shift || ''}</span>
+                      </div>
+                      {isOwner && (
+                        <div className="flex items-center justify-between mt-0.5 text-[10px] text-gray-500">
+                          <span>
+                            {startedAt ? `In ${startedAt}` : 'Not clocked in'}
+                            {finishedAt ? ` · Out ${finishedAt}` : ''}
+                            {s.scheduledStart ? ` (sched. ${s.scheduledStart}${s.scheduledEnd ? `-${s.scheduledEnd}` : ''})` : ''}
+                          </span>
+                          {s.onTime === true && <Badge className="bg-emerald-100 text-emerald-700 text-[9px]">On time</Badge>}
+                          {s.onTime === false && (
+                            <Badge className="bg-red-100 text-red-700 text-[9px]">
+                              {s.lateMinutes > 0 ? `${s.lateMinutes}m late` : 'Late'}
+                            </Badge>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
             </CardContent>
           </Card>
 

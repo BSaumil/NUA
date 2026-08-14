@@ -4,13 +4,14 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { POSProvider } from './contexts/POSContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { BusinessProvider } from './contexts/BusinessContext';
+import { BusinessProvider, useBusiness } from './contexts/BusinessContext';
 import { LicenseProvider } from './contexts/LicenseContext';
 import { Toaster } from './components/ui/sonner';
 import BottomDock from './components/BottomDock';
 import BackButton from './components/BackButton';
 import LicensePage, { LicenseLockScreen, LicenseBanner } from './pages/LicensePage';
 const Login = lazy(() => import('./pages/Login'));
+const OnboardingWizard = lazy(() => import('./pages/OnboardingWizard'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const Today = lazy(() => import('./pages/Today'));
 import CommandBar from './components/CommandBar';
@@ -178,6 +179,9 @@ function StaffLayout({ children }) {
 
 function ProtectedRoutes() {
   const { user, loading, logout } = useAuth();
+  // Called unconditionally (Rules of Hooks) even though it only matters
+  // once a user is logged in — same reasoning as useIdleLogout below.
+  const { business, loading: businessLoading } = useBusiness();
   // Owner-configurable POS auto-logout (Settings → POS Session). Called
   // unconditionally (Rules of Hooks) — the hook itself no-ops while
   // enabled is false, i.e. before there's a session to time out.
@@ -189,6 +193,16 @@ function ProtectedRoutes() {
   const shell = getAppShell();
   if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="animate-pulse text-gray-500 text-lg">Loading...</div></div>;
   if (!user) return <Login />;
+
+  // First-login setup wizard — owner only (a cashier/manager logging in
+  // before the owner has finished setup just uses the app normally; there's
+  // nothing for them to configure). Blocks the whole shell, whatever shell
+  // or URL was hit, until name/ABN/vertical are set — same "loading" wait
+  // as the auth check above so it never flashes the real app first.
+  if (user.role === 'owner') {
+    if (businessLoading) return <div className="min-h-screen flex items-center justify-center"><div className="animate-pulse text-gray-500 text-lg">Loading...</div></div>;
+    if (business && !business.onboardingComplete) return <OnboardingWizard />;
+  }
 
   // staff.nuapos.com.au — deliberately narrow (per the v1 scope): whatever
   // path was hit, this is the Staff app and nothing else. Same backend, same

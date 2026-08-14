@@ -12,21 +12,24 @@ const BusinessContext = createContext(null);
 export function BusinessProvider({ children }) {
   const { user } = useAuth();
   const [business, setBusiness] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user || !user.businessId) { setBusiness(null); return; }
+    if (!user || !user.businessId) { setBusiness(null); setLoading(false); return; }
     let cancelled = false;
+    setLoading(true);
     businessAPI.get(user.businessId)
       .then(r => { if (!cancelled) setBusiness(r.data); })
-      .catch(() => { if (!cancelled) setBusiness(null); });
+      .catch(() => { if (!cancelled) setBusiness(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [user?.businessId]);
 
-  const value = { business, vertical: getVertical(business?.type), refresh: () => {
+  const value = { business, loading, vertical: getVertical(business?.type), refresh: () => {
     if (user?.businessId) businessAPI.get(user.businessId).then(r => setBusiness(r.data)).catch(() => {});
   } };
 
   return <BusinessContext.Provider value={value}>{children}</BusinessContext.Provider>;
 }
 
-export const useBusiness = () => useContext(BusinessContext) || { business: null, vertical: 'hospitality', refresh: () => {} };
+export const useBusiness = () => useContext(BusinessContext) || { business: null, loading: false, vertical: 'hospitality', refresh: () => {} };

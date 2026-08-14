@@ -40,11 +40,11 @@ def _now() -> str:
 # Pre-Shift briefing (aggregate — a single call instead of 6)
 # ═════════════════════════════════════════════════════════════════════════
 @router.get("/preshift/briefing")
-async def preshift_briefing(_: dict = Depends(get_user)):
+async def preshift_briefing(user: dict = Depends(get_user)):
     """One call → everything a manager needs before service:
        - out-of-stock items
        - today's specials
-       - who's on shift (from staff_shifts / roster)
+       - who's on shift (today's roster, plus anyone clocked in without one)
        - dishes to push (low-margin? high-stock? high-margin flagged?)
     """
     today = date.today().isoformat()
@@ -65,19 +65,58 @@ async def preshift_briefing(_: dict = Depends(get_user)):
         {"_id": 0, "id": 1, "name": 1, "discount": 1, "schedule": 1},
     ).to_list(200)
 
-    # Who's on shift — look at roster/shifts for today
+    # Who's on shift — today's roster is the real schedule (db.staff_shifts /
+    # db.shifts, read here previously, are dead collections nothing in the
+    # app writes to any more; actual clock-ins land in db.timecards, keyed
+    # by staffId, not by date, so they're matched up by prefix on clockIn).
+    from services.punctuality import shift_punctuality
+    is_owner = user.get("role") == "owner"
+
+    roster_today = await db.roster_shifts.find({"date": today}, {"_id": 0}).sort("startTime", 1).to_list(200)
+    timecards_today = await db.timecards.find(
+        {"clockIn": {"$regex": f"^{today}"}}, {"_id": 0}
+    ).to_list(200)
+    # Last clock-in of the day per staff member — covers a same-day re-clock
+    # after a missed clock-out being fixed up, without double-counting them
+    # in the list below.
+    tc_by_staff = {}
+    for tc in timecards_today:
+        tc_by_staff[tc.get("staffId")] = tc
+
     shifts_today = []
-    try:
-        cursor = db.staff_shifts.find({"date": today}, {"_id": 0})
-        shifts_today = await cursor.to_list(200)
-    except Exception:
-        pass
-    if not shifts_today:
-        try:
-            cursor = db.shifts.find({"date": today}, {"_id": 0})
-            shifts_today = await cursor.to_list(200)
-        except Exception:
-            pass
+    seen_staff_ids = set()
+    for sh in roster_today:
+        staff_id = sh.get("staffId")
+        seen_staff_ids.add(staff_id)
+        entry = {"staffId": staff_id, "staffName": sh.get("staffName"), "role": sh.get("role")}
+        # Owners see actual attendance to check punctuality; everyone else
+        # just sees who's rostered on, same as before this change.
+        if is_owner:
+            entry["scheduledStart"] = sh.get("startTime")
+            entry["scheduledEnd"] = sh.get("endTime")
+            tc = tc_by_staff.get(staff_id)
+            entry["clockIn"] = tc.get("clockIn") if tc else None
+            entry["clockOut"] = tc.get("clockOut") if tc else None
+            if tc:
+                p = shift_punctuality(tc, sh)
+                entry["lateMinutes"] = p["lateMinutes"]
+                entry["earlyLeaveMinutes"] = p["earlyLeaveMinutes"]
+                entry["onTime"] = p["onTime"]
+        shifts_today.append(entry)
+    # Anyone clocked in today without a rostered shift (e.g. a manager
+    # approved an unscheduled clock-in) still counts as on shift.
+    for tc in timecards_today:
+        staff_id = tc.get("staffId")
+        if staff_id in seen_staff_ids:
+            continue
+        seen_staff_ids.add(staff_id)
+        entry = {"staffId": staff_id, "staffName": tc.get("staffName"), "role": tc.get("role")}
+        if is_owner:
+            entry["scheduledStart"] = None
+            entry["scheduledEnd"] = None
+            entry["clockIn"] = tc.get("clockIn")
+            entry["clockOut"] = tc.get("clockOut")
+        shifts_today.append(entry)
 
     # Upsell candidates — high-margin items with plenty of stock
     upsells = await db.products.find(

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request, Depends
 from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from datetime import datetime, timezone
+from services.punctuality import shift_punctuality
 import uuid, os
 
 router = APIRouter()
@@ -14,6 +15,11 @@ async def get_staff_leaderboard(_: dict = Depends(get_user)):
     txns = await db.transactions.find({}, {"_id": 0}).to_list(50000)
     timecards = await db.timecards.find({"clockOut": {"$ne": None}}, {"_id": 0}).to_list(50000)
     tips = await db.tips.find({}, {"_id": 0}).to_list(10000)
+    # Every rostered shift ever, keyed by (staffId, date) — used to check
+    # each completed timecard against the shift it was actually rostered
+    # for, the same pairing preshift_briefing() uses.
+    roster_shifts = await db.roster_shifts.find({}, {"_id": 0}).to_list(20000)
+    roster_by_staff_date = {(sh.get("staffId"), sh.get("date")): sh for sh in roster_shifts}
 
     leaderboard = []
     for s in staff:
@@ -26,14 +32,39 @@ async def get_staff_leaderboard(_: dict = Depends(get_user)):
         total_hours = sum(tc.get("hoursWorked", 0) for tc in staff_cards)
         avg_txn = total_sales / max(total_txns, 1)
         sales_per_hour = total_sales / max(total_hours, 1)
-        # Performance score: weighted composite
-        score = round((total_sales * 0.4) + (total_txns * 2) + (total_tips * 3) + (sales_per_hour * 0.5), 2)
+
+        # Punctuality — only judged against shifts that actually had a
+        # rostered start/end time to be measured against; an unscheduled or
+        # ad-hoc shift can't be "late" for anything, so it's skipped rather
+        # than silently counted as on time or held against them.
+        matched = []
+        for tc in staff_cards:
+            clock_in = tc.get("clockIn") or ""
+            sh = roster_by_staff_date.get((s["id"], clock_in[:10]))
+            if sh:
+                matched.append(shift_punctuality(tc, sh))
+        if matched:
+            punctuality_rate = sum(1 for m in matched if m["onTime"]) / len(matched)
+            late_values = [m["lateMinutes"] for m in matched if m["lateMinutes"] and m["lateMinutes"] > 0]
+            avg_late_minutes = round(sum(late_values) / len(late_values), 1) if late_values else 0.0
+        else:
+            punctuality_rate = None
+            avg_late_minutes = 0.0
+        # A staff member with no rostered history to check contributes
+        # nothing either way — they're not rewarded or punished for a gap
+        # in scheduling that isn't their doing.
+        punctuality_bonus = round((punctuality_rate * 15) - (avg_late_minutes * 0.5), 2) if punctuality_rate is not None else 0.0
+
+        # Performance score: weighted composite, now including punctuality
+        score = round((total_sales * 0.4) + (total_txns * 2) + (total_tips * 3) + (sales_per_hour * 0.5) + punctuality_bonus, 2)
 
         leaderboard.append({
             "id": s["id"], "name": s["name"], "role": s["role"],
             "totalSales": round(total_sales, 2), "totalTransactions": total_txns,
             "totalTips": round(total_tips, 2), "totalHours": round(total_hours, 2),
             "avgTransaction": round(avg_txn, 2), "salesPerHour": round(sales_per_hour, 2),
+            "punctualityRate": round(punctuality_rate, 2) if punctuality_rate is not None else None,
+            "avgLateMinutes": avg_late_minutes, "shiftsTracked": len(matched),
             "performanceScore": score,
         })
 
@@ -42,6 +73,7 @@ async def get_staff_leaderboard(_: dict = Depends(get_user)):
         s["rank"] = i + 1
 
     return {"leaderboard": leaderboard, "generatedAt": datetime.now(timezone.utc).isoformat()}
+
 
 # ============ SMART TIP DISTRIBUTION (Hours + Performance) ============
 @router.post("/tips/smart-distribute")
