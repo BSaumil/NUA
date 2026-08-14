@@ -81,6 +81,14 @@ export default function StaffLeaderboard() {
                     <div className="bg-gray-50 rounded p-2"><p className="text-gray-500">$/Hour</p><p className="font-bold">${s.salesPerHour}</p></div>
                     <div className="bg-gray-50 rounded p-2"><p className="text-gray-500">Score</p><p className="font-bold" style={{ color: theme.primary }}>{s.performanceScore}</p></div>
                   </div>
+                  {s.punctualityRate != null && (
+                    <div className="mt-2 text-xs bg-gray-50 rounded p-2">
+                      <p className="text-gray-500">Punctuality</p>
+                      <p className="font-bold" style={{ color: s.punctualityRate >= 0.9 ? '#059669' : s.punctualityRate >= 0.7 ? '#D97706' : '#DC2626' }}>
+                        {Math.round(s.punctualityRate * 100)}% on time
+                      </p>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             );
@@ -99,6 +107,7 @@ export default function StaffLeaderboard() {
             <th className="text-right p-3 font-medium text-gray-500">Tips</th>
             <th className="text-right p-3 font-medium text-gray-500">Hours</th>
             <th className="text-right p-3 font-medium text-gray-500">$/Hour</th>
+            <th className="text-right p-3 font-medium text-gray-500">Punctuality</th>
             <th className="text-right p-3 font-medium text-gray-500">Score</th>
           </tr></thead>
           <tbody>
@@ -114,6 +123,13 @@ export default function StaffLeaderboard() {
                 <td className="p-3 text-right text-emerald-600">${s.totalTips}</td>
                 <td className="p-3 text-right">{s.totalHours}h</td>
                 <td className="p-3 text-right font-medium">${s.salesPerHour}</td>
+                <td className="p-3 text-right">
+                  {s.punctualityRate != null ? (
+                    <span title={`${s.shiftsTracked} shift${s.shiftsTracked === 1 ? '' : 's'} tracked, avg ${s.avgLateMinutes}m late`}>
+                      {Math.round(s.punctualityRate * 100)}%
+                    </span>
+                  ) : <span className="text-gray-400">—</span>}
+                </td>
                 <td className="p-3 text-right font-bold" style={{ color: theme.primary }}>{s.performanceScore}</td>
               </tr>
             ))}
