@@ -32,6 +32,34 @@ async def _unique_slug(name: str, exclude_id: Optional[str] = None) -> str:
         slug = f"{base}-{n}"
         n += 1
 
+
+async def _owned_business_or_404(business_id: str, user: dict) -> dict:
+    """Fetch a business the caller actually owns, or 404.
+
+    require_owner only checks the caller's role — it says nothing about
+    *which* business a path-supplied business_id belongs to. Every route
+    below that takes business_id as a path parameter needs this before
+    touching that business's data, the same way list_businesses already
+    scopes to {"ownerId": user["id"]} rather than returning every business.
+    404 (not 403) so this doesn't confirm to an unauthorized caller that
+    the business_id even exists.
+
+    seed_default_business() below stamps the bootstrap "default" business
+    with ownerId="system", not a real user — it predates multi-business
+    support, back when there was only ever one. Its real owner is whoever
+    the seeded admin account (or anyone since assigned) actually has as
+    their own businessId, so that's checked as a fallback rather than
+    permanently locking every single-business deployment out of its own
+    business record."""
+    business = await db.businesses.find_one({"id": business_id}, {"_id": 0})
+    if not business:
+        raise HTTPException(status_code=404, detail="Business not found")
+    owner_id = business.get("ownerId")
+    owns_it = owner_id == user["id"] or (owner_id == "system" and user.get("businessId") == business_id)
+    if not owns_it:
+        raise HTTPException(status_code=404, detail="Business not found")
+    return business
+
 @router.post("/create")
 async def create_business(data: dict, user: dict = Depends(require_owner)):
     """Create a new business (Owner only)"""
@@ -80,14 +108,12 @@ async def list_businesses(user: dict = Depends(require_owner)):
     return businesses
 
 @router.get("/{business_id}")
-async def get_business(business_id: str, _: dict = Depends(get_user)):
-    business = await db.businesses.find_one({"id": business_id}, {"_id": 0})
-    if not business:
-        raise HTTPException(status_code=404, detail="Business not found")
-    return business
+async def get_business(business_id: str, user: dict = Depends(require_owner)):
+    return await _owned_business_or_404(business_id, user)
 
 @router.put("/{business_id}")
-async def update_business(business_id: str, data: dict, _: dict = Depends(require_owner)):
+async def update_business(business_id: str, data: dict, user: dict = Depends(require_owner)):
+    await _owned_business_or_404(business_id, user)
     allowed = {"name", "type", "abn", "address", "phone", "email", "timezone", "currency", "taxRate", "settings", "slug", "onboardingComplete"}
     update_data = {k: v for k, v in data.items() if k in allowed}
 
@@ -101,19 +127,15 @@ async def update_business(business_id: str, data: dict, _: dict = Depends(requir
     result = await db.businesses.find_one_and_update(
         {"id": business_id}, {"$set": update_data}, return_document=True
     )
-    if not result:
-        raise HTTPException(status_code=404, detail="Business not found")
     result.pop("_id", None)
     result["slugAdjusted"] = slug_adjusted
     return result
 
 @router.get("/{business_id}/export")
-async def export_business_data(business_id: str, collection: Optional[str] = None, _: dict = Depends(require_owner)):
+async def export_business_data(business_id: str, collection: Optional[str] = None, user: dict = Depends(require_owner)):
     """Export all data for a specific business (Owner only)"""
 
-    business = await db.businesses.find_one({"id": business_id}, {"_id": 0})
-    if not business:
-        raise HTTPException(status_code=404, detail="Business not found")
+    business = await _owned_business_or_404(business_id, user)
 
     collections_to_export = ["products", "transactions", "customers", "reservations",
                               "kitchen_orders", "expenses", "suppliers", "feedback",
@@ -133,15 +155,17 @@ async def export_business_data(business_id: str, collection: Optional[str] = Non
     return export_data
 
 @router.get("/{business_id}/summary")
-async def get_business_summary(business_id: str, _: dict = Depends(require_owner)):
+async def get_business_summary(business_id: str, user: dict = Depends(require_owner)):
     """Quick summary stats for a business"""
+    await _owned_business_or_404(business_id, user)
 
     # Scoped to this business_id specifically (not the caller's own token
     # businessId — an owner with multiple businesses needs to pull summaries
-    # for businesses other than the one they're currently acting as).
-    # tenant_scope_filter still applies its fail-open-to-untagged-legacy-data
-    # semantics so a not-yet-backfilled deployment shows its real numbers
-    # instead of zero.
+    # for businesses other than the one they're currently acting as), via
+    # tenant_scope_filter (reused here rather than hand-rolled, so this
+    # inherits any future change to the fallback) which still applies its
+    # fail-open-to-untagged-legacy-data semantics so a not-yet-backfilled
+    # deployment shows its real numbers instead of zero.
     biz_or_untagged = tenant_scope_filter(business_id)
     txns = await db.transactions.find(biz_or_untagged, {"_id": 0}).to_list(10000)
     products = await db.products.find(biz_or_untagged, {"_id": 0}).to_list(1000)
@@ -274,11 +298,12 @@ async def purge_demo_data(data: dict, user: dict = Depends(require_owner)):
 
 
 @router.get("/{business_id}/setup-status")
-async def get_setup_status(business_id: str, _: dict = Depends(require_owner)):
+async def get_setup_status(business_id: str, user: dict = Depends(require_owner)):
     """Live view of the three Foundation Day runbook steps
     (docs/LAUNCH_FOUNDATION_RUNBOOK.md), so an owner can see launch
     readiness on the Pulse dashboard instead of running curl commands.
     Read-only — never modifies anything."""
+    await _owned_business_or_404(business_id, user)
     untagged_query = {"$or": [{"businessId": {"$exists": False}}, {"businessId": None}]}
     untagged_total = 0
     for name in _BACKFILL_COLLECTIONS:
