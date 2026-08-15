@@ -194,34 +194,67 @@ async def list_vouchers(status: Optional[str] = None,
 
 
 @router.get("/vouchers/{voucher_id}")
-async def get_voucher(voucher_id: str, _: dict = Depends(get_user)):
-    v = await db.vouchers.find_one({"id": voucher_id}, {"_id": 0})
+async def get_voucher(voucher_id: str, user: dict = Depends(get_user)):
+    v = await db.vouchers.find_one({**tenant_scope_filter(user.get("businessId")), "id": voucher_id}, {"_id": 0})
     if not v:
         raise HTTPException(404, "Voucher not found")
     return v
 
 
 @router.get("/vouchers/lookup/{code}")
-async def lookup_code(code: str, _: dict = Depends(get_user)):
-    v = await db.vouchers.find_one({"code": code.upper()}, {"_id": 0})
+async def lookup_code(code: str, user: dict = Depends(get_user)):
+    v = await db.vouchers.find_one({**tenant_scope_filter(user.get("businessId")), "code": code.upper()}, {"_id": 0})
     if not v:
         raise HTTPException(404, "Voucher not found")
     return v
 
 
-async def _resolve_voucher(code: Optional[str], token: Optional[str]) -> dict:
+async def _resolve_voucher(code: Optional[str], token: Optional[str], business_id: Optional[str] = None) -> dict:
+    # Scoped by tenant_scope_filter's usual fail-open rule: matches the
+    # caller's own business plus any not-yet-tagged voucher, but never a
+    # voucher clearly tagged for a *different* business — the same
+    # isolation every other tenant-scoped lookup in this app already gets,
+    # applied here so a caller who does carry business context can't be
+    # handed another business's voucher just by guessing its code.
+    # business_id is passed explicitly by every authenticated caller (their
+    # real user.businessId, from the DB) rather than read from actor
+    # context here — the actor context's businessId can come from an
+    # X-Business-Id/X-Tenant-Id header instead of the JWT when both are
+    # present, which is the right override for a partner integration
+    # calling with its own header but the wrong one to trust for a
+    # logged-in staff member's own request. Only the fully anonymous
+    # public-check path (no user at all) falls back to actor context.
+    scope = tenant_scope_filter(business_id)
     if token:
         payload = _verify_payload(token)
         if not payload:
             raise HTTPException(401, "Invalid or tampered token")
-        v = await db.vouchers.find_one({"id": payload.get("vid")}, {"_id": 0})
+        v = await db.vouchers.find_one({**scope, "id": payload.get("vid")}, {"_id": 0})
     elif code:
-        v = await db.vouchers.find_one({"code": code.strip().upper()}, {"_id": 0})
+        v = await db.vouchers.find_one({**scope, "code": code.strip().upper()}, {"_id": 0})
     else:
         raise HTTPException(400, "Provide code or token")
     if not v:
         raise HTTPException(404, "Voucher not found")
     return v
+
+
+def _compute_voucher_discount(v: dict, subtotal: float) -> float:
+    """The one place voucher-discount math happens — percentage discounts
+    respect rules.maxDiscount (silently ignored everywhere this was
+    previously duplicated, so a "15% off, capped at $20" voucher gave the
+    full uncapped 15% on a large cart), and amount-type discounts still
+    respect residualValue for partially-redeemed vouchers. Always clamped
+    to the cart subtotal so a discount can never exceed what's being paid."""
+    if v["valueType"] == "percentage":
+        discount = subtotal * (float(v["value"]) / 100)
+        max_discount = (v.get("rules") or {}).get("maxDiscount")
+        if max_discount is not None:
+            discount = min(discount, float(max_discount))
+    else:
+        cap = float(v.get("residualValue", v["value"])) if v.get("partialRedeemable") else float(v["value"])
+        discount = min(float(v["value"]), cap)
+    return round(min(discount, subtotal), 2)
 
 
 def _validate_voucher_rules(v: dict, *, cart: Optional[list] = None,
@@ -287,8 +320,8 @@ def _validate_voucher_rules(v: dict, *, cart: Optional[list] = None,
 
 
 @router.post("/vouchers/validate")
-async def validate_voucher(body: VoucherValidateRequest, _: dict = Depends(get_user)):
-    v = await _resolve_voucher(body.code, body.token)
+async def validate_voucher(body: VoucherValidateRequest, user: dict = Depends(get_user)):
+    v = await _resolve_voucher(body.code, body.token, user.get("businessId"))
     reason = _validate_voucher_rules(
         v, cart=body.cart, customer_id=body.customerId,
         location_id=body.locationId, channel=body.channel,
@@ -321,10 +354,7 @@ async def public_check_voucher(body: PublicVoucherCheck):
     if reason:
         return {"valid": False, "reason": reason}
     subtotal = sum(float(i.get("price", 0)) * int(i.get("quantity", 1)) for i in (body.cart or []))
-    if v["valueType"] == "percentage":
-        discount = round(subtotal * (float(v["value"]) / 100), 2)
-    else:
-        discount = round(min(float(v["value"]), float(v.get("residualValue", v["value"])) if v.get("partialRedeemable") else float(v["value"])), 2)
+    discount = _compute_voucher_discount(v, subtotal)
     if discount <= 0:
         return {"valid": False, "reason": "Voucher has no remaining value"}
     return {"valid": True, "discount": discount, "label": v.get("label"), "voucherId": v["id"]}
@@ -332,7 +362,7 @@ async def public_check_voucher(body: PublicVoucherCheck):
 
 @router.post("/vouchers/redeem")
 async def redeem_voucher(body: VoucherRedeemRequest, user: dict = Depends(get_user)):
-    v = await _resolve_voucher(body.code, body.token)
+    v = await _resolve_voucher(body.code, body.token, user.get("businessId"))
 
     # Duplicate redemption guard must run BEFORE rule/quota checks so that
     # accidental double-clicks return a clear 409 rather than "max reached".

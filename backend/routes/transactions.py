@@ -522,7 +522,7 @@ async def get_refunds(_user: dict = Depends(get_user)):
 @router.post("/refunds", response_model=Refund)
 async def create_refund(refund: RefundCreate, _user: dict = Depends(require_owner_or_manager)):
     original_txn = await db.transactions.find_one({"id": refund.originalTransactionId})
-    if not original_txn:
+    if not original_txn or not tenant_owns(original_txn.get("businessId"), _user.get("businessId")):
         raise HTTPException(status_code=404, detail="Original transaction not found")
     if refund.amount <= 0:
         raise HTTPException(status_code=400, detail="Refund amount must be positive")

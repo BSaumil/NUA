@@ -553,6 +553,7 @@ async def process_payrun(data: dict, user: dict = Depends(require_owner)):
         "gstAmount": 0,
         "date": datetime.now(timezone.utc).isoformat(),
         "payrunId": payrun["id"],
+        "businessId": user.get("businessId"),
     })
     # Super expense
     await db.expenses.insert_one({
@@ -563,6 +564,7 @@ async def process_payrun(data: dict, user: dict = Depends(require_owner)):
         "gstAmount": 0,
         "date": datetime.now(timezone.utc).isoformat(),
         "payrunId": payrun["id"],
+        "businessId": user.get("businessId"),
     })
 
     return payrun
