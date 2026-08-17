@@ -193,6 +193,7 @@ export const financeAPI = {
   // AR
   listInvoices: (params) => api.get('/accounting/invoices', { params }),
   createInvoice: (data) => api.post('/accounting/invoices', data),
+  parseInvoiceUpload: (data) => api.post('/accounting/invoices/parse-upload', data),
   receiveInvoice: (id, data) => api.post(`/accounting/invoices/${id}/receive`, data),
   // Deposits
   listDeposits: (status) => api.get('/accounting/deposits', { params: status ? { status } : {} }),
