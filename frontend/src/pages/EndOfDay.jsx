@@ -10,6 +10,7 @@ import { Badge } from '../components/ui/badge';
 import { useTheme } from '../contexts/ThemeContext';
 import { toast } from 'sonner';
 import { advancedAPI } from '../services/api';
+import MiniChart, { ChartTypeToggle } from '../components/charts/MiniChart';
 
 const PERIODS = [
   { value: 'today', label: 'Today' },
@@ -29,6 +30,7 @@ export default function EndOfDay() {
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
   const [activeSection, setActiveSection] = useState('overview');
+  const [chartType, setChartType] = useState('bar');
   const [aiInsights, setAiInsights] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
 
@@ -222,7 +224,20 @@ export default function EndOfDay() {
       {/* === CATEGORIES === */}
       {activeSection === 'categories' && (
         <Card><CardContent className="p-5">
-          <h3 className="font-semibold mb-4 flex items-center gap-2"><PieChart size={18} /> Category Sales</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold flex items-center gap-2"><PieChart size={18} /> Category Sales</h3>
+            <ChartTypeToggle value={chartType} onChange={setChartType} color={theme.primary} />
+          </div>
+          {(report.byCategory || []).length > 0 && (
+            <div className="mb-6">
+              <MiniChart
+                type={chartType}
+                color={theme.primary}
+                data={(report.byCategory || []).map(c => ({ label: c.category, value: c.revenue }))}
+                valueFormatter={v => `$${v.toFixed(0)}`}
+              />
+            </div>
+          )}
           <div className="space-y-3">
             {(report.byCategory || []).map((cat, i) => {
               const maxRev = Math.max(...(report.byCategory || []).map(c => c.revenue), 1);
@@ -296,7 +311,20 @@ export default function EndOfDay() {
       {/* === HOURLY === */}
       {activeSection === 'hourly' && (
         <Card><CardContent className="p-5">
-          <h3 className="font-semibold mb-4 flex items-center gap-2"><Clock size={18} /> Sales by Hour</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold flex items-center gap-2"><Clock size={18} /> Sales by Hour</h3>
+            <ChartTypeToggle value={chartType} onChange={setChartType} color={theme.primary} />
+          </div>
+          {(report.byHour || []).length > 0 && (
+            <div className="mb-6">
+              <MiniChart
+                type={chartType}
+                color={theme.primary}
+                data={(report.byHour || []).map(h => ({ label: `${h.hour.toString().padStart(2, '0')}:00`, value: h.total }))}
+                valueFormatter={v => `$${v.toFixed(0)}`}
+              />
+            </div>
+          )}
           <div className="space-y-2">
             {(report.byHour || []).map((h, i) => {
               const maxHour = Math.max(...(report.byHour || []).map(x => x.total), 1);
@@ -318,6 +346,20 @@ export default function EndOfDay() {
       {/* === AI INSIGHTS === */}
       {activeSection === 'ai' && (
         <div className="space-y-4">
+          {(report.byHour || []).length > 0 && (
+            <Card><CardContent className="p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold flex items-center gap-2"><TrendingUp size={18} style={{ color: theme.secondary }} /> Revenue Trend</h3>
+                <ChartTypeToggle value={chartType} onChange={setChartType} color={theme.secondary} />
+              </div>
+              <MiniChart
+                type={chartType}
+                color={theme.secondary}
+                data={(report.byHour || []).map(h => ({ label: `${h.hour.toString().padStart(2, '0')}:00`, value: h.total }))}
+                valueFormatter={v => `$${v.toFixed(0)}`}
+              />
+            </CardContent></Card>
+          )}
           {!aiInsights ? (
             <Card><CardContent className="p-8 text-center">
               <Sparkles size={40} className="mx-auto mb-4 text-amber-500" />
@@ -336,7 +378,11 @@ export default function EndOfDay() {
                   <Button size="sm" variant="outline" onClick={generateAIInsights} disabled={aiLoading}>Regenerate</Button>
                 </div>
               </div>
-              <div className="prose prose-sm max-w-none text-gray-700 whitespace-pre-wrap" data-testid="ai-insights-content">
+              <div
+                className="prose prose-sm max-w-none text-gray-700 whitespace-pre-wrap rounded-lg p-4"
+                style={{ background: `${theme.secondary}0d`, borderLeft: `3px solid ${theme.secondary}` }}
+                data-testid="ai-insights-content"
+              >
                 {aiInsights.insights}
               </div>
             </CardContent></Card>
