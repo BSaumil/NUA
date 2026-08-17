@@ -128,7 +128,6 @@ const ALL_FEATURES = [
   ]},
   { group: 'Reservations', verticals: ['hospitality'], items: [
     { path: '/reservations', label: 'Bookings', icon: Utensils, access: ['owner', 'manager', 'cashier'] },
-    { path: '/bookings-inbox', label: 'AI Bookings Inbox', icon: Mail, access: ['owner', 'manager', 'cashier'] },
     { path: '/floor-plan', label: 'Floor Plan', icon: MapPin, access: ['owner', 'manager', 'cashier'] },
     { path: '/waitlist', label: 'Waitlist', icon: Clock, access: ['owner', 'manager', 'cashier'] },
     { path: '/table-layout', label: 'Table Layout', icon: MapPin, access: ['owner', 'manager'] },
@@ -237,7 +236,6 @@ const ALL_FEATURES = [
     { path: '/kitchen-load', label: 'Kitchen Load', icon: ChefHat, access: ['owner', 'manager', 'kitchen'], verticals: ['hospitality'] },
     { path: '/audit-log', label: 'Audit Log', icon: ShieldAlert, access: ['owner', 'manager'] },
     { path: '/anomalies', label: 'Inventory Anomalies', icon: AlertTriangle, access: ['owner', 'manager'] },
-    { path: '/booking-heatmap', label: 'Busy Heatmap', icon: Flame, access: ['owner', 'manager'] },
     { path: '/cohort-retention', label: 'Cohort Retention', icon: Users, access: ['owner', 'manager'] },
     { path: '/shift-swaps', label: 'Shift Swaps', icon: ArrowLeftRight, access: ['owner', 'manager', 'cashier', 'kitchen', 'barista'] },
     { path: '/security', label: 'Security & GDPR', icon: Shield, access: ['owner', 'manager'] },

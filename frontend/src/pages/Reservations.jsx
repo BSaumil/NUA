@@ -18,6 +18,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { reservationsAPI, floorPlansAPI, aiWave2API, reservationsAIAPI } from '../services/api';
 import { toast } from 'sonner';
 import BookingsInbox from './BookingsInbox';
+import BookingHeatmap from './BookingHeatmap';
 import BookingSourceStrip from '../components/reservations/BookingSourceStrip';
 import BookingMonthCalendar from '../components/reservations/BookingMonthCalendar';
 
@@ -61,7 +62,7 @@ export default function Reservations() {
   const [guestSearching, setGuestSearching] = useState(false);
   const guestSearchTimer = useRef(null);
   const [view, setView] = useState('list'); // list | calendar | month
-  const [mainTab, setMainTab] = useState('bookings'); // bookings | inbox
+  const [mainTab, setMainTab] = useState('bookings'); // bookings | inbox | heatmap
 
   const fetchData = useCallback(async () => {
     try {
@@ -245,9 +246,13 @@ export default function Reservations() {
         <TabsList data-testid="reservations-main-tabs">
           <TabsTrigger value="bookings" data-testid="tab-bookings">Bookings</TabsTrigger>
           <TabsTrigger value="inbox" data-testid="tab-inbox">AI Inbox</TabsTrigger>
+          <TabsTrigger value="heatmap" data-testid="tab-heatmap">Busy-Time Heatmap</TabsTrigger>
         </TabsList>
         <TabsContent value="inbox" className="mt-6">
           <BookingsInbox />
+        </TabsContent>
+        <TabsContent value="heatmap" className="mt-6">
+          <BookingHeatmap />
         </TabsContent>
         <TabsContent value="bookings" className="mt-6 space-y-6">
       {/* Header */}
