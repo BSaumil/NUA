@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from deps import get_user, require_owner, require_owner_or_manager, require_permission
 from database import db
 from middleware.actor_context import tenant_scope_filter
+from routes.gamification import compute_staff_performance
 from datetime import datetime, timezone, timedelta
 import logging
 import uuid
@@ -501,6 +502,13 @@ async def auto_roster(data: dict, _: dict = Depends(require_owner_or_manager)):
     ).to_list(200)
     avail_map = {a["staffId"]: a for a in avail_rows}
 
+    # Rank staff by the same composite score the leaderboard shows, so a day
+    # that can't fit everyone available fills with its best performers first
+    # rather than whoever happens to sort first in the database.
+    perf_rows = await compute_staff_performance()
+    perf_map = {p["id"]: p["performanceScore"] for p in perf_rows}
+    staff = sorted(staff, key=lambda s: perf_map.get(s["id"], 0), reverse=True)
+
     def _date_for(day_name: str) -> str:
         # Resolve which calendar date a weekday falls on inside the requested week.
         # week_start is expected as ISO Monday (YYYY-MM-DD). If not provided, use today.
@@ -590,6 +598,7 @@ async def auto_roster(data: dict, _: dict = Depends(require_owner_or_manager)):
                 "startTime": start_time, "endTime": end_time,
                 "role": s.get("role", "Floor").capitalize(),
                 "notes": s.get("role", "Floor").capitalize(),
+                "performanceScore": perf_map.get(s["id"], 0),
                 "aiGenerated": True,
             })
 
@@ -617,7 +626,9 @@ async def auto_roster(data: dict, _: dict = Depends(require_owner_or_manager)):
             f"(floor {settings['weekdayStaffTarget']}/weekday, {settings['weekendStaffTarget']}/weekend), "
             f"every shift honouring the {min_hours:.1f}h minimum engagement. "
             f"{len(excluded)} blackout exclusions honoured. "
-            f"Estimated week labor cost ${round(total_labor, 2):,.2f} ({week_labor_pct}% of forecast revenue, target {settings['targetLaborPct']}%)."
+            f"Estimated week labor cost ${round(total_labor, 2):,.2f} ({week_labor_pct}% of forecast revenue, target {settings['targetLaborPct']}%). "
+            f"Where a day couldn't fit everyone available, shifts went to the best-performing available staff first, "
+            f"using the same sales/tips/punctuality score as the leaderboard."
         ),
     }
 
