@@ -10,7 +10,7 @@ import { Search, CornerDownLeft, Package } from 'lucide-react';
  * Faster than the sidebar for anyone who already knows what they're after.
  */
 const DESTINATIONS = [
-  { label: 'Today', path: '/today', keywords: 'home overview pulse alerts', roles: ['owner', 'manager'] },
+  { label: 'Today', path: '/today', keywords: 'home overview pulse alerts briefing vips 86', roles: ['owner', 'manager', 'cashier', 'kitchen'] },
   { label: 'POS Terminal', path: '/pos', keywords: 'sell checkout order cart', roles: ['owner', 'manager', 'cashier'] },
   { label: 'Kitchen Display', path: '/kitchen', keywords: 'kds tickets', roles: ['owner', 'manager', 'kitchen'] },
   { label: 'Floor Plan', path: '/floor-plan', keywords: 'tables seating', roles: ['owner', 'manager', 'cashier'] },
@@ -39,7 +39,6 @@ const DESTINATIONS = [
   { label: 'End of Day', path: '/end-of-day', keywords: 'close till z-report settle', roles: ['owner', 'manager'] },
   { label: 'Online Orders', path: '/online-orders', keywords: 'delivery pickup web', roles: ['owner', 'manager'] },
   { label: 'Gift Cards', path: '/gift-cards', keywords: 'sell voucher card barcode reload stop resend', roles: ['owner', 'manager', 'cashier'] },
-  { label: 'Pre-Shift Briefing', path: '/pre-shift', keywords: 'briefing vips 86', roles: ['owner', 'manager', 'kitchen'] },
   { label: 'NUA AI', path: '/ash', keywords: 'ai assistant intelligence brain ash', roles: ['owner', 'manager'] },
   { label: 'Automation Brain', path: '/automation-triggers', keywords: 'rules triggers automation', roles: ['owner', 'manager'] },
   { label: 'Approvals', path: '/approvals', keywords: 'pending requests', roles: ['owner', 'manager'] },
