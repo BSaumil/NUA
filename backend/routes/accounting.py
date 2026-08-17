@@ -31,6 +31,7 @@ AP (Bills)
 
 AR (Invoices)
   GET/POST   /accounting/invoices
+  POST       /accounting/invoices/parse-upload  (AI OCR draft from a photo/text)
   POST       /accounting/invoices/{id}/receive
   DELETE     /accounting/invoices/{id}
 
@@ -445,6 +446,93 @@ async def delete_invoice(iid: str, _: dict = Depends(require_owner_or_manager)):
             pass
     await db.ar_invoices.delete_one({"id": iid})
     return {"deleted": True}
+
+
+@router.post("/invoices/parse-upload")
+async def parse_invoice_upload(data: dict, user: dict = Depends(require_owner_or_manager)):
+    """Upload an invoice the business is sending to ITS customer (a photo or
+    pasted text) and let the LLM extract a draft — the same OCR pattern
+    ai_pantry.py's parse-invoice uses for supplier bills, pointed at accounts
+    receivable instead. Returns a draft only; nothing is saved until the
+    caller reviews it and POSTs the result to /accounting/invoices."""
+    invoice_text = (data.get("text") or "").strip()
+    image_b64 = data.get("imageBase64")
+    if not invoice_text and not image_b64:
+        raise HTTPException(status_code=400, detail="Provide either invoice 'text' or 'imageBase64'")
+
+    sys_msg = (
+        "You parse invoices a business is sending to ITS customer (accounts "
+        "receivable — money owed TO the business, not a supplier bill). "
+        "Extract and return STRICT JSON with this shape: {"
+        '"customerName":"...", "invoiceNumber":"...", "issueDate":"YYYY-MM-DD", '
+        '"dueDate":"YYYY-MM-DD", "lines":[{"description":"...", "quantity":0, '
+        '"unitPrice":0.00, "amount":0.00}], "gst":0, "total":0}. '
+        "Use lower-case keys. If a value is missing use null. "
+        "Best-guess parsing — do not invent line items."
+    )
+
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    chat = LlmChat(
+        api_key=os.environ.get("EMERGENT_LLM_KEY"),
+        session_id=f"ar-invoice-{uuid.uuid4().hex[:6]}",
+        system_message=sys_msg,
+    ).with_model("openai", "gpt-5.2")
+
+    msg_args = {"text": invoice_text or "Parse the attached invoice image."}
+    if image_b64:
+        try:
+            from emergentintegrations.llm.chat import ImageContent
+            msg_args["file_contents"] = [ImageContent(image_base64=image_b64)]
+        except Exception:
+            pass
+    reply = await chat.send_message(UserMessage(**msg_args))
+
+    import json as _json
+    parsed = None
+    try:
+        parsed = _json.loads(reply)
+    except Exception:
+        s, e = reply.find("{"), reply.rfind("}") + 1
+        if s >= 0 and e > s:
+            try: parsed = _json.loads(reply[s:e])
+            except Exception: parsed = None
+    if not parsed:
+        raise HTTPException(status_code=422, detail=f"Could not parse invoice. AI returned: {reply[:300]}")
+
+    # Best-guess match against existing customers by name — same fuzzy
+    # token-overlap approach the supplier-invoice OCR uses for products.
+    customers = await db.customers.find({}, {"_id": 0}).to_list(5000)
+    matched_customer = None
+    name = (parsed.get("customerName") or "").strip().lower()
+    if name:
+        for c in customers:
+            if (c.get("name") or "").strip().lower() == name:
+                matched_customer = c
+                break
+        if not matched_customer:
+            tokens = set(t for t in name.split() if len(t) > 2)
+            best, best_score = None, 0
+            for c in customers:
+                c_tokens = set(t for t in (c.get("name") or "").lower().split() if len(t) > 2)
+                score = len(tokens & c_tokens)
+                if score > best_score:
+                    best, best_score = c, score
+            if best_score > 0:
+                matched_customer = best
+
+    today_iso = datetime.now(timezone.utc).date().isoformat()
+    lines = parsed.get("lines") or []
+    return {
+        "customerId": matched_customer["id"] if matched_customer else None,
+        "customerName": parsed.get("customerName") or (matched_customer["name"] if matched_customer else None),
+        "customerMatched": matched_customer is not None,
+        "invoiceNumber": parsed.get("invoiceNumber"),
+        "issueDate": parsed.get("issueDate") or today_iso,
+        "dueDate": parsed.get("dueDate") or today_iso,
+        "total": parsed.get("total") or round(sum((l.get("amount") or 0) for l in lines), 2),
+        "gst": parsed.get("gst") or 0,
+        "lines": lines,
+    }
 
 
 # ═════════════════════════════════════════════════════════════════════════
