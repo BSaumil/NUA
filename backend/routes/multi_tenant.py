@@ -205,7 +205,19 @@ async def get_business_summary(business_id: str, user: dict = Depends(require_ow
 # Seed default business
 async def seed_default_business():
     existing = await db.businesses.find_one({"id": "default"})
-    if not existing:
+    if existing:
+        if "onboardingComplete" not in existing:
+            # Backfill for a "default" business created before this field
+            # existed. Without this, App.js's `!business.onboardingComplete`
+            # check traps the owner behind the first-run OnboardingWizard on
+            # every login forever — the wizard *is* the whole shell (see
+            # App.js's ProtectedRoutes), so there's no Settings page they
+            # could otherwise reach to fix it themselves. Runs on every
+            # startup (idempotent — a no-op once the field is set), so an
+            # already-affected deployment self-heals on its next restart
+            # with no manual step required.
+            await db.businesses.update_one({"id": "default"}, {"$set": {"onboardingComplete": True}})
+    else:
         await db.businesses.insert_one({
             "id": "default",
             "slug": "default",
@@ -263,6 +275,16 @@ async def backfill_tenant(user: dict = Depends(require_owner)):
         await db.businesses.update_one({"id": biz["id"]}, {"$set": {"slug": await _unique_slug(biz.get("name", ""))}})
         slugged += 1
     results["businesses.slug"] = slugged
+    # Same gap as the "default" business's own grandfather-in in
+    # seed_default_business() above, generalised to every business: one
+    # created before the onboardingComplete field existed has it missing
+    # (falsy), which traps its owner behind the first-run OnboardingWizard
+    # on every login. Only a genuinely-missing field is backfilled — a
+    # business that explicitly has onboardingComplete=False is still
+    # mid-wizard and must keep seeing it.
+    results["businesses.onboardingComplete"] = (await db.businesses.update_many(
+        {"onboardingComplete": {"$exists": False}}, {"$set": {"onboardingComplete": True}}
+    )).modified_count
     return {"backfilled": results, "total": sum(results.values())}
 
 
