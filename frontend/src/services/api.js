@@ -619,6 +619,14 @@ export const reservationFeaturesAPI = {
   removeSocialAccount: (id) => api.delete(`/clubmember/social-accounts/${id}`),
 };
 
+// Booking Analytics — real reporting layer (channels, time analysis, table
+// performance, actual/estimated/unknown revenue, report builder + exports)
+export const bookingAnalyticsAPI = {
+  getReport: (params) => api.get('/booking-analytics/report', { params }),
+  downloadCsv: (params) => api.get('/booking-analytics/report.csv', { params, responseType: 'blob' }),
+  downloadPdf: (params) => api.get('/booking-analytics/report.pdf', { params, responseType: 'blob' }),
+};
+
 // Loyalty API (enhanced)
 export const loyaltyAPI = {
   getTiers: () => api.get('/loyalty/tiers'),
