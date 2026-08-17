@@ -37,7 +37,6 @@ const FloorPlan = lazy(() => import('./pages/FloorPlan'));
 const WaitlistPage = lazy(() => import('./pages/Waitlist'));
 const Kitchen = lazy(() => import('./pages/Kitchen'));
 const CoursingAnalytics = lazy(() => import('./pages/CoursingAnalytics'));
-const PreShift = lazy(() => import('./pages/PreShift'));
 const ClockInPrompt = lazy(() => import('./pages/ClockInPrompt'));
 const CommandCenter = lazy(() => import('./pages/CommandCenter'));
 const MenuEngineering = lazy(() => import('./pages/MenuEngineering'));
@@ -237,7 +236,8 @@ function ProtectedRoutes() {
         <Route path="/staff-app" element={<StaffApp />} />
         <Route path="/owner-dashboard" element={<OwnerDashboardApp />} />
         <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/pre-shift" element={<PreShift />} />
+        {/* Pre-Shift Briefing merged into Today (Aug 2026) — old links/bookmarks still land somewhere useful */}
+        <Route path="/pre-shift" element={<Navigate to="/today" replace />} />
         <Route path="/clock-in" element={<ClockInPrompt />} />
         <Route path="/command-center" element={<CommandCenter />} />
         <Route path="/pos" element={<POSTerminal />} />

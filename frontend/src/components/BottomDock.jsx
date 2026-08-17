@@ -41,7 +41,7 @@ export const QUICK_ACTIONS = {
   ],
   kitchen: [
     { path: '/kitchen', label: 'Kitchen', icon: ChefHat },
-    { path: '/pre-shift', label: 'Pre-Shift', icon: Sunrise },
+    { path: '/today', label: 'Today', icon: Sunrise },
     { path: '/inventory', label: 'Inventory', icon: Warehouse },
     { path: '/ai-pantry', label: 'AI Pantry', icon: Brain },
   ],
@@ -119,10 +119,9 @@ const quickActionsFor = (role, vertical) => {
 // showing them a restaurant's tools.
 const ALL_FEATURES = [
   { group: 'Operations', items: [
-    { path: '/today', label: 'Today', icon: Sunrise, access: ['owner', 'manager'] },
+    { path: '/today', label: 'Today', icon: Sunrise, access: ['owner', 'manager', 'cashier', 'kitchen'] },
     { path: '/pos', label: 'POS Terminal', icon: ShoppingCart, access: ['owner', 'manager', 'cashier', 'barista'] },
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, access: ['owner', 'manager'] },
-    { path: '/pre-shift', label: 'Pre-Shift', icon: Sunrise, access: ['owner', 'manager', 'kitchen'], verticals: ['hospitality'] },
     { path: '/command-center', label: 'Command Center', icon: Brain, access: ['owner', 'manager'] },
     { path: '/kitchen', label: 'Kitchen Display', icon: ChefHat, access: ['owner', 'manager', 'kitchen'], verticals: ['hospitality'] },
     { path: '/temperature', label: 'Temp Monitoring', icon: Flame, access: ['owner', 'manager', 'kitchen'], verticals: ['hospitality'] },
