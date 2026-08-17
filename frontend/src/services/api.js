@@ -771,6 +771,8 @@ export const v25API = {
   shiftManager: () => api.get('/v25/shift-manager'),
   autoMarketing: (audience) => api.post('/v25/marketing/auto', { audience }),
   listMarketing: () => api.get('/v25/marketing/auto'),
+  sendMarketing: (id, edits) => api.post(`/v25/marketing/auto/${id}/send`, edits || {}),
+  holdMarketing: (id, hold) => api.post(`/v25/marketing/auto/${id}/hold`, { hold }),
   // Tier 2
   dynamicRules: () => api.get('/v25/dynamic-pricing'),
   addDynamic: (data) => api.post('/v25/dynamic-pricing', data),
