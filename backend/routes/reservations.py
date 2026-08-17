@@ -3,7 +3,7 @@ from fastapi.responses import StreamingResponse
 from typing import List, Optional
 from datetime import datetime
 from database import db
-from deps import get_user
+from deps import get_user, require_owner_or_manager
 from services import floor_tables
 from models.reservation import Reservation, ReservationCreate, ReservationUpdate
 from models.floor_plan import FloorPlan, FloorPlanCreate, FloorPlanUpdate
@@ -264,6 +264,78 @@ async def mark_no_show(reservation_id: str, fee: float = 0):
             _, plan_id = found
             await floor_tables.set_table_status(res["tableId"], plan_id, "available")
     return {"message": "Marked as no-show"}
+
+
+@router.post("/reservations/{reservation_id}/cancel", response_model=Reservation)
+async def cancel_reservation(reservation_id: str, body: dict = None, user: dict = Depends(require_owner_or_manager)):
+    """Cancel a booking without destroying it — status only, so it can be
+    restored later. This is the correct way to cancel; the hard DELETE
+    endpoint is for genuinely removing a record, not everyday cancellation.
+    """
+    res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
+    if not res:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    if res.get("status") in ("cancelled", "no_show", "completed"):
+        raise HTTPException(status_code=400, detail=f"Booking is already {res.get('status')}")
+
+    reason = (body or {}).get("reason")
+    update_data = {"status": "cancelled", "cancellationReason": reason, "updatedAt": datetime.utcnow().isoformat()}
+    await db.reservations.update_one({"id": reservation_id}, {"$set": update_data})
+
+    if res.get("tableId"):
+        found = await floor_tables.get_table_by_id(res["tableId"])
+        if found:
+            _, plan_id = found
+            await floor_tables.set_table_status(res["tableId"], plan_id, "available")
+
+    updated = {**res, **update_data}
+    from services import audit_service
+    await audit_service.log_event(
+        entity_type="reservation", entity_id=reservation_id, action="updated",
+        before=res, after=updated,
+        memo=f"Booking cancelled by {user.get('email', 'staff')}" + (f": {reason}" if reason else ""),
+        severity="notice",
+    )
+    return Reservation(**updated)
+
+
+@router.post("/reservations/{reservation_id}/restore", response_model=Reservation)
+async def restore_reservation(reservation_id: str, body: dict = None, user: dict = Depends(require_owner_or_manager)):
+    """Bring a Cancelled or No-show booking back to Confirmed.
+
+    Deliberately doesn't re-occupy a table — the table was already freed
+    when the booking was cancelled/no-showed and may since have gone to
+    someone else, so restoring status alone (not a table sight-unseen) is
+    the safe default. Staff can re-run auto-assign/AI-assign afterward if
+    the guest still needs seating.
+    """
+    res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
+    if not res:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    prior_status = res.get("status")
+    if prior_status not in ("cancelled", "no_show"):
+        raise HTTPException(status_code=400, detail=f"Only a cancelled or no-show booking can be restored (this one is {prior_status})")
+
+    restored_status = (body or {}).get("status") or "confirmed"
+    if restored_status not in ("confirmed", "seated"):
+        raise HTTPException(status_code=400, detail="Can only restore to confirmed or seated")
+
+    update_data = {"status": restored_status, "cancellationReason": None, "updatedAt": datetime.utcnow().isoformat()}
+    await db.reservations.update_one({"id": reservation_id}, {"$set": update_data})
+
+    # Reverse the no-show penalty this booking caused, if any.
+    if prior_status == "no_show" and res.get("customerId"):
+        await db.customers.update_one({"id": res["customerId"]}, {"$inc": {"noShowCount": -1}})
+
+    updated = {**res, **update_data}
+    from services import audit_service
+    await audit_service.log_event(
+        entity_type="reservation", entity_id=reservation_id, action="restored",
+        before=res, after=updated,
+        memo=f"Booking restored from {prior_status} to {restored_status} by {user.get('email', 'staff')}",
+        severity="notice",
+    )
+    return Reservation(**updated)
 
 @router.get("/reservations/auto-assign/{reservation_id}")
 async def auto_assign_table(reservation_id: str):

@@ -73,6 +73,7 @@ class Reservation(BaseModel):
     source: str = "walk_in"
     seatedAt: Optional[str] = None
     completedAt: Optional[str] = None
+    cancellationReason: Optional[str] = None
     createdAt: str = ""
     updatedAt: str = ""
 
