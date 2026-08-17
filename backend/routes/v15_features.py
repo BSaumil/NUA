@@ -1,17 +1,17 @@
-"""v15 advanced features: tabs/hold, shift swap, voice POS (Whisper), Ask NUA (LLM),
-Nano Banana image gen, anomaly detection, auto-rostering, audit log, variants, CSV import,
+"""v15 advanced features: tabs/hold, shift swap, voice POS (Whisper),
+anomaly detection, auto-rostering, audit log, variants, CSV import,
 cohort retention, booking heatmap, 2FA, GDPR.
 """
 from fastapi import APIRouter, HTTPException, Depends
 from deps import get_user, require_owner, require_owner_or_manager, require_permission
 from database import db
 from middleware.actor_context import tenant_scope_filter
+from routes.gamification import compute_staff_performance
 from datetime import datetime, timezone, timedelta
 import logging
 import uuid
 import os
 import base64
-import json
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -183,25 +183,6 @@ async def split_tab(tab_id: str, data: dict, user: dict = Depends(get_user)):
     return {"tabs": new_tabs}
 
 
-# =============================================================================
-# FAVORITES (Quick Keys)
-# =============================================================================
-@router.get("/pos/favorites")
-async def get_favorites(user: dict = Depends(get_user)):
-    fav = await db.pos_favorites.find_one({"userId": user["id"]}, {"_id": 0})
-    return fav or {"userId": user["id"], "productIds": []}
-
-@router.post("/pos/favorites")
-async def save_favorites(data: dict, user: dict = Depends(get_user)):
-    product_ids = data.get("productIds", [])
-    await db.pos_favorites.update_one(
-        {"userId": user["id"]},
-        {"$set": {"userId": user["id"], "productIds": product_ids, "updatedAt": datetime.now(timezone.utc).isoformat()}},
-        upsert=True,
-    )
-    return {"productIds": product_ids}
-
-
 # ─── Cash drawer (no-sale open) — owner-grantable, always audited ─────────
 DRAWER_REASONS = ("change", "note_to_coin", "float_check", "other")
 
@@ -330,71 +311,6 @@ async def voice_order(data: dict, _: dict = Depends(get_user)):
 
 
 # =============================================================================
-# ASK NUA — natural-language analytics (LLM)
-# =============================================================================
-@router.post("/ai/ask-nua")
-async def ask_nua(data: dict, user: dict = Depends(require_owner_or_manager)):
-    question = data.get("question", "")
-    if not question: raise HTTPException(status_code=400, detail="question required")
-
-    # Gather context: top-line metrics
-    today = datetime.now(timezone.utc).date().isoformat()
-    tx = await db.transactions.find({"createdAt": {"$gte": today}}, {"_id": 0}).to_list(500)
-    products = await db.products.count_documents({})
-    customers = await db.customers.count_documents({})
-    bookings_today = await db.reservations.count_documents({"date": today})
-    total_revenue = sum(t.get("total", 0) for t in tx)
-
-    context = {
-        "today_date": today,
-        "todayRevenue": round(total_revenue, 2),
-        "todayTransactions": len(tx),
-        "totalProducts": products,
-        "totalCustomers": customers,
-        "bookingsToday": bookings_today,
-        "recentTransactions": [{"items": t.get("items", []), "total": t.get("total"), "method": t.get("paymentMethod")} for t in tx[:10]],
-    }
-    try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-        chat = LlmChat(
-            api_key=os.environ.get("EMERGENT_LLM_KEY"),
-            session_id=f"ask-nua-{user['id']}-{uuid.uuid4()}",
-            system_message=(
-                "You are NUA, an AI restaurant operations assistant. Answer questions about today's business "
-                "using the provided context JSON. Be concise (2-4 sentences). If you don't have the data, say so honestly. "
-                "Never invent numbers."
-            ),
-        )
-        chat.with_model("openai", "gpt-5.2")
-        msg = UserMessage(text=f"Context:\n{json.dumps(context)}\n\nQuestion: {question}")
-        resp = await chat.send_message(msg)
-        return {"answer": resp, "context": context}
-    except Exception as e:
-        return {"answer": f"Unable to reach AI right now: {str(e)[:120]}", "context": context}
-
-
-# =============================================================================
-# NANO BANANA — item image generation
-# =============================================================================
-@router.post("/items/generate-image")
-async def generate_image(data: dict, _: dict = Depends(require_owner_or_manager)):
-    name = data.get("name", "")
-    cuisine = data.get("cuisine", "modern cafe")
-    if not name: raise HTTPException(status_code=400, detail="name required")
-    try:
-        from emergentintegrations.llm.image_gen import OpenAIImageGeneration
-        gen = OpenAIImageGeneration(api_key=os.environ.get("EMERGENT_LLM_KEY"))
-        prompt = f"Professional marketing photo of {name} from a {cuisine} restaurant, soft natural lighting, plated beautifully, top-down view, white background, food photography style"
-        images = await gen.generate_images(prompt=prompt, number_of_images=1)
-        if images and len(images):
-            img_b64 = base64.b64encode(images[0]).decode("utf-8")
-            return {"image": f"data:image/png;base64,{img_b64}"}
-        raise Exception("no image returned")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)[:200]}")
-
-
-# =============================================================================
 # INVENTORY ANOMALY DETECTION
 # =============================================================================
 @router.get("/analytics/inventory-anomalies")
@@ -501,6 +417,13 @@ async def auto_roster(data: dict, _: dict = Depends(require_owner_or_manager)):
     ).to_list(200)
     avail_map = {a["staffId"]: a for a in avail_rows}
 
+    # Rank staff by the same composite score the leaderboard shows, so a day
+    # that can't fit everyone available fills with its best performers first
+    # rather than whoever happens to sort first in the database.
+    perf_rows = await compute_staff_performance()
+    perf_map = {p["id"]: p["performanceScore"] for p in perf_rows}
+    staff = sorted(staff, key=lambda s: perf_map.get(s["id"], 0), reverse=True)
+
     def _date_for(day_name: str) -> str:
         # Resolve which calendar date a weekday falls on inside the requested week.
         # week_start is expected as ISO Monday (YYYY-MM-DD). If not provided, use today.
@@ -590,6 +513,7 @@ async def auto_roster(data: dict, _: dict = Depends(require_owner_or_manager)):
                 "startTime": start_time, "endTime": end_time,
                 "role": s.get("role", "Floor").capitalize(),
                 "notes": s.get("role", "Floor").capitalize(),
+                "performanceScore": perf_map.get(s["id"], 0),
                 "aiGenerated": True,
             })
 
@@ -617,7 +541,9 @@ async def auto_roster(data: dict, _: dict = Depends(require_owner_or_manager)):
             f"(floor {settings['weekdayStaffTarget']}/weekday, {settings['weekendStaffTarget']}/weekend), "
             f"every shift honouring the {min_hours:.1f}h minimum engagement. "
             f"{len(excluded)} blackout exclusions honoured. "
-            f"Estimated week labor cost ${round(total_labor, 2):,.2f} ({week_labor_pct}% of forecast revenue, target {settings['targetLaborPct']}%)."
+            f"Estimated week labor cost ${round(total_labor, 2):,.2f} ({week_labor_pct}% of forecast revenue, target {settings['targetLaborPct']}%). "
+            f"Where a day couldn't fit everyone available, shifts went to the best-performing available staff first, "
+            f"using the same sales/tips/punctuality score as the leaderboard."
         ),
     }
 
@@ -858,28 +784,6 @@ async def gdpr_erase(customer_id: str, user: dict = Depends(require_owner)):
     await db.customers.update_one({"id": customer_id}, {"$set": anon})
     await db.feedback.update_many({"customerId": customer_id}, {"$set": {"customerName": "[REDACTED]"}})
     return {"message": "Customer data anonymized (financial records preserved per regulation)"}
-
-
-# =============================================================================
-# BAS / GST e-file finalize (stub with audit trail)
-# =============================================================================
-@router.post("/bas-gst/efile/{report_id}")
-async def efile_bas(report_id: str, data: dict, user: dict = Depends(require_owner)):
-    abn = data.get("abn", "")
-    if not abn or len(abn.replace(" ", "")) != 11:
-        raise HTTPException(status_code=400, detail="Valid 11-digit ABN required")
-    # In production, integrate with ATO SBR2 (Standard Business Reporting). For now, record submission intent.
-    submission = {
-        "reportId": report_id, "abn": abn,
-        "submittedBy": user["id"], "submittedByName": user["name"],
-        "submittedAt": datetime.now(timezone.utc).isoformat(),
-        "status": "received",
-        "trackingNumber": f"ATO-{str(uuid.uuid4())[:8].upper()}",
-    }
-    await db.bas_submissions.insert_one(submission)
-    submission.pop("_id", None)
-    await db.bas_reports.update_one({"id": report_id}, {"$set": {"efiled": True, "trackingNumber": submission["trackingNumber"]}})
-    return submission
 
 
 # =============================================================================

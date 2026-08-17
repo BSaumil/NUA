@@ -3,7 +3,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { QUICK_ACTIONS } from './BottomDock';
+import { useBusiness } from '../contexts/BusinessContext';
+import { quickActionsFor } from './BottomDock';
 
 // Same "front door" logic ProtectedRoutes uses to pick where a role lands —
 // that's also where Back should bottom out once there's nothing earlier to
@@ -19,6 +20,7 @@ export default function BackButton() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { theme, darkMode } = useTheme();
+  const { vertical } = useBusiness();
   const stackRef = useRef([location.pathname]);
   const [, forceRender] = useState(0);
 
@@ -31,7 +33,7 @@ export default function BackButton() {
   }, [location.pathname]);
 
   if (!user) return null;
-  const quickPaths = (QUICK_ACTIONS[user.role] || QUICK_ACTIONS.cashier).map(q => q.path);
+  const quickPaths = quickActionsFor(user.role, vertical).map(q => q.path);
   // Nothing to back out of — already on one of the role's main destinations.
   if (quickPaths.includes(location.pathname)) return null;
 

@@ -26,7 +26,6 @@ const Inventory = lazy(() => import('./pages/Inventory'));
 const StockTransfers = lazy(() => import('./pages/StockTransfers'));
 const Appointments = lazy(() => import('./pages/Appointments'));
 const InventoryAccounting = lazy(() => import('./pages/InventoryAccounting'));
-const BookingsInbox = lazy(() => import('./pages/BookingsInbox'));
 const ChannelMenus = lazy(() => import('./pages/ChannelMenus'));
 const SocialMedia = lazy(() => import('./pages/SocialMedia'));
 const Accounting = lazy(() => import('./pages/Accounting'));
@@ -37,7 +36,6 @@ const FloorPlan = lazy(() => import('./pages/FloorPlan'));
 const WaitlistPage = lazy(() => import('./pages/Waitlist'));
 const Kitchen = lazy(() => import('./pages/Kitchen'));
 const CoursingAnalytics = lazy(() => import('./pages/CoursingAnalytics'));
-const PreShift = lazy(() => import('./pages/PreShift'));
 const ClockInPrompt = lazy(() => import('./pages/ClockInPrompt'));
 const CommandCenter = lazy(() => import('./pages/CommandCenter'));
 const MenuEngineering = lazy(() => import('./pages/MenuEngineering'));
@@ -92,7 +90,6 @@ const Discounts = lazy(() => import('./pages/Discounts'));
 const CompVoid = lazy(() => import('./pages/CompVoid'));
 const PaymentLinks = lazy(() => import('./pages/PaymentLinks'));
 const InventoryAnomalies = lazy(() => import('./pages/InventoryAnomalies'));
-const BookingHeatmap = lazy(() => import('./pages/BookingHeatmap'));
 const CohortRetention = lazy(() => import('./pages/CohortRetention'));
 const ShiftSwaps = lazy(() => import('./pages/ShiftSwaps'));
 const SecurityCompliance = lazy(() => import('./pages/SecurityCompliance'));
@@ -237,12 +234,14 @@ function ProtectedRoutes() {
         <Route path="/staff-app" element={<StaffApp />} />
         <Route path="/owner-dashboard" element={<OwnerDashboardApp />} />
         <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/pre-shift" element={<PreShift />} />
+        {/* Pre-Shift Briefing merged into Today (Aug 2026) — old links/bookmarks still land somewhere useful */}
+        <Route path="/pre-shift" element={<Navigate to="/today" replace />} />
         <Route path="/clock-in" element={<ClockInPrompt />} />
         <Route path="/command-center" element={<CommandCenter />} />
         <Route path="/pos" element={<POSTerminal />} />
         <Route path="/reservations" element={<Reservations />} />
-        <Route path="/bookings-inbox" element={<BookingsInbox />} />
+        {/* AI Bookings Inbox and Busy-Time Heatmap merged into Reservations as tabs (Aug 2026) */}
+        <Route path="/bookings-inbox" element={<Navigate to="/reservations" replace />} />
         <Route path="/channel-menus" element={<ChannelMenus />} />
         <Route path="/social-media" element={<Navigate to="/marketing?tab=social" replace />} />
         <Route path="/marketing" element={<Marketing />} />
@@ -305,7 +304,6 @@ function ProtectedRoutes() {
         <Route path="/print-routing" element={<Navigate to="/settings?tab=print-routing" replace />} />
         <Route path="/security" element={<SecurityCompliance />} />
         <Route path="/anomalies" element={<InventoryAnomalies />} />
-        <Route path="/booking-heatmap" element={<BookingHeatmap />} />
         <Route path="/cohort-retention" element={<CohortRetention />} />
         <Route path="/shift-swaps" element={<ShiftSwaps />} />
         <Route path="/loyalty-config" element={<LoyaltyConfig />} />

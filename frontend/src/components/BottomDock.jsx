@@ -41,7 +41,7 @@ export const QUICK_ACTIONS = {
   ],
   kitchen: [
     { path: '/kitchen', label: 'Kitchen', icon: ChefHat },
-    { path: '/pre-shift', label: 'Pre-Shift', icon: Sunrise },
+    { path: '/today', label: 'Today', icon: Sunrise },
     { path: '/inventory', label: 'Inventory', icon: Warehouse },
     { path: '/ai-pantry', label: 'AI Pantry', icon: Brain },
   ],
@@ -103,7 +103,7 @@ const QUICK_ACTIONS_BEAUTY_SERVICES = {
   ],
 };
 
-const quickActionsFor = (role, vertical) => {
+export const quickActionsFor = (role, vertical) => {
   const table = vertical === 'hospitality' ? QUICK_ACTIONS
     : vertical === 'beauty' || vertical === 'services' ? { ...QUICK_ACTIONS, ...QUICK_ACTIONS_BEAUTY_SERVICES }
     : { ...QUICK_ACTIONS, ...QUICK_ACTIONS_NON_HOSPITALITY };
@@ -119,17 +119,15 @@ const quickActionsFor = (role, vertical) => {
 // showing them a restaurant's tools.
 const ALL_FEATURES = [
   { group: 'Operations', items: [
-    { path: '/today', label: 'Today', icon: Sunrise, access: ['owner', 'manager'] },
+    { path: '/today', label: 'Today', icon: Sunrise, access: ['owner', 'manager', 'cashier', 'kitchen'] },
     { path: '/pos', label: 'POS Terminal', icon: ShoppingCart, access: ['owner', 'manager', 'cashier', 'barista'] },
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, access: ['owner', 'manager'] },
-    { path: '/pre-shift', label: 'Pre-Shift', icon: Sunrise, access: ['owner', 'manager', 'kitchen'], verticals: ['hospitality'] },
     { path: '/command-center', label: 'Command Center', icon: Brain, access: ['owner', 'manager'] },
     { path: '/kitchen', label: 'Kitchen Display', icon: ChefHat, access: ['owner', 'manager', 'kitchen'], verticals: ['hospitality'] },
     { path: '/temperature', label: 'Temp Monitoring', icon: Flame, access: ['owner', 'manager', 'kitchen'], verticals: ['hospitality'] },
   ]},
   { group: 'Reservations', verticals: ['hospitality'], items: [
     { path: '/reservations', label: 'Bookings', icon: Utensils, access: ['owner', 'manager', 'cashier'] },
-    { path: '/bookings-inbox', label: 'AI Bookings Inbox', icon: Mail, access: ['owner', 'manager', 'cashier'] },
     { path: '/floor-plan', label: 'Floor Plan', icon: MapPin, access: ['owner', 'manager', 'cashier'] },
     { path: '/waitlist', label: 'Waitlist', icon: Clock, access: ['owner', 'manager', 'cashier'] },
     { path: '/table-layout', label: 'Table Layout', icon: MapPin, access: ['owner', 'manager'] },
@@ -219,7 +217,6 @@ const ALL_FEATURES = [
     { path: '/vouchers', label: 'Vouchers & Codes', icon: Tag, access: ['owner', 'manager'] },
     { path: '/events', label: 'Events & Experiences', icon: Trophy, access: ['owner', 'manager'] },
     { path: '/staff-availability', label: 'Staff Availability', icon: Users, access: ['owner', 'manager'] },
-    { path: '/gift-cards', label: 'Sell Gift Card', icon: Tag, access: ['owner', 'manager', 'cashier'] },
     { path: '/marketing?tab=email', label: 'AI Marketing Emails', icon: Sparkles, access: ['owner', 'manager'] },
     { path: '/online-orders', label: 'Online Orders', icon: ShoppingBag, access: ['owner', 'manager', 'cashier', 'kitchen'] },
     { path: '/inventory-accounting', label: 'Inventory & BAS', icon: Receipt, access: ['owner', 'manager'] },
@@ -236,9 +233,8 @@ const ALL_FEATURES = [
     { path: '/price-tune', label: 'Price-Tune', icon: Tag, access: ['owner', 'manager'] },
     { path: '/voice-recipe', label: 'Voice-to-Recipe', icon: BookOpen, access: ['owner', 'manager', 'kitchen'], verticals: ['hospitality'] },
     { path: '/kitchen-load', label: 'Kitchen Load', icon: ChefHat, access: ['owner', 'manager', 'kitchen'], verticals: ['hospitality'] },
-    { path: '/audit-log', label: 'Audit Log', icon: ShieldAlert, access: ['owner', 'manager'] },
+    { path: '/audit', label: 'Audit Log', icon: ShieldAlert, access: ['owner', 'manager'] },
     { path: '/anomalies', label: 'Inventory Anomalies', icon: AlertTriangle, access: ['owner', 'manager'] },
-    { path: '/booking-heatmap', label: 'Busy Heatmap', icon: Flame, access: ['owner', 'manager'] },
     { path: '/cohort-retention', label: 'Cohort Retention', icon: Users, access: ['owner', 'manager'] },
     { path: '/shift-swaps', label: 'Shift Swaps', icon: ArrowLeftRight, access: ['owner', 'manager', 'cashier', 'kitchen', 'barista'] },
     { path: '/security', label: 'Security & GDPR', icon: Shield, access: ['owner', 'manager'] },

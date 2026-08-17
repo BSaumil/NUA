@@ -46,6 +46,9 @@ async def _execute_action(params: dict, action_type: str, rule_id: Optional[str]
         if not tool:
             return {"error": f"Unknown agent tool: {action_type}"}
         return await tool.execute(params)
+    if action_type == "marketing.launch_campaign":
+        from routes.v25_suite import create_and_send_campaign_from_approval
+        return await create_and_send_campaign_from_approval(params, created_by=source or "ash")
     action_meta = re_svc.ACTION_LIBRARY.get(action_type)
     if not action_meta:
         return {"error": f"Unknown action {action_type}"}

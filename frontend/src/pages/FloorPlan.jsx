@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Plus, Save, Trash2, RotateCcw, Maximize2, Circle, Square, RectangleHorizontal,
-  Users, ChevronDown, Eye, Settings, Pencil
+  Users, ChevronDown, Eye, Settings, Pencil, Crown, BrushCleaning
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -22,17 +22,25 @@ import { toast } from 'sonner';
 import { TableInfoDrawer } from '../components/floor/TableInfoDrawer';
 import useLiveFeed from '../hooks/useLiveFeed';
 
+// Table colour scheme: OPEN/SEATED/RESERVED are base statuses; VIP and
+// OVERDUE are accents layered on top (a ring + badge, not a fill swap) so a
+// seated table's course colour stays visible underneath. "Cleaning" is a
+// real status internally (still cycled via shift-click, still saved) but
+// renders visually the same as Open, with a small brush badge — there's no
+// separate "needs cleaning" swatch in the legend.
 const TABLE_STATUS_COLORS = {
-  available: { fill: '#10B981', stroke: '#059669', label: 'Available' },
-  occupied: { fill: '#EF4444', stroke: '#DC2626', label: 'Occupied' },
-  reserved: { fill: '#3B82F6', stroke: '#2563EB', label: 'Reserved' },
-  cleaning: { fill: '#F59E0B', stroke: '#D97706', label: 'Cleaning' },
+  available: { fill: '#FFFFFF', stroke: '#CBD5E1', label: 'Open' },
+  occupied: { fill: '#1E293B', stroke: '#1E293B', label: 'Seated' },
+  reserved: { fill: '#EC4899', stroke: '#DB2777', label: 'Reserved' },
+  cleaning: { fill: '#FFFFFF', stroke: '#CBD5E1', label: 'Open' },
 };
+const VIP_COLOR = '#8B5CF6';
+const DEFAULT_OVERDUE_COLOR = '#F97316';
 
 const SECTIONS_COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#06B6D4'];
 
 export default function FloorPlan() {
-  const { theme } = useTheme();
+  const { theme, darkMode } = useTheme();
   const canvasRef = useRef(null);
   const [plans, setPlans] = useState([]);
   const [activePlanId, setActivePlanId] = useState(null);
@@ -51,7 +59,7 @@ export default function FloorPlan() {
   // Course-aware live states (from /table-courses/states)
   const [courseStates, setCourseStates] = useState([]);
   const [courseDefs, setCourseDefs] = useState([]);
-  const [overdueColour, setOverdueColour] = useState('#7F1D1D');
+  const [overdueColour, setOverdueColour] = useState(DEFAULT_OVERDUE_COLOR);
   const [drawerTable, setDrawerTable] = useState(null);
   const [courseSettingsOpen, setCourseSettingsOpen] = useState(false);
   const [courseDraft, setCourseDraft] = useState([]);
@@ -254,9 +262,24 @@ export default function FloorPlan() {
     setSelectedTable(tableId);
   };
 
-  // Stats
+  // Stats — VIP/Overdue are accents (from live course state), not a `status`
+  // value, so they're counted separately rather than folded into statusCounts.
   const statusCounts = { available: 0, occupied: 0, reserved: 0, cleaning: 0 };
   tables.forEach(t => { if (statusCounts[t.status] !== undefined) statusCounts[t.status]++; });
+  const vipCount = tables.filter(t => courseStates.find(cs => cs.tableId === t.id)?.isVip).length;
+  const overdueCount = tables.filter(t => courseStates.find(cs => cs.tableId === t.id)?.overdue).length;
+  const legendItems = [
+    { key: 'vip', label: 'VIP', color: VIP_COLOR, count: vipCount },
+    { key: 'seated', label: 'Seated', color: darkMode ? '#334155' : TABLE_STATUS_COLORS.occupied.fill, count: statusCounts.occupied },
+    { key: 'overdue', label: 'Overdue', color: overdueColour || DEFAULT_OVERDUE_COLOR, count: overdueCount },
+    { key: 'open', label: 'Open', color: darkMode ? '#1c1c26' : TABLE_STATUS_COLORS.available.fill, count: statusCounts.available + statusCounts.cleaning },
+    { key: 'reserved', label: 'Reserved', color: TABLE_STATUS_COLORS.reserved.fill, count: statusCounts.reserved },
+  ];
+
+  // White text reads fine on every dark/saturated fill this page uses; only
+  // the Open/white base fill needs dark text instead, so this only has to
+  // catch that one case rather than compute real luminance per colour.
+  const isLightFill = (hex) => ['#FFFFFF', '#ffffff'].includes(hex);
 
   const renderTable = (t) => {
     const sc = TABLE_STATUS_COLORS[t.status] || TABLE_STATUS_COLORS.available;
@@ -264,10 +287,20 @@ export default function FloorPlan() {
     const isMergeSelected = mergeMode && mergeSelection.includes(t.id);
     const sectionObj = sections.find(s => s.name === t.section);
     const sectionColor = sectionObj?.color || '#6B7280';
-    // Course-driven colour overrides status colour when a live state exists.
+    // Course-driven colour overrides status colour when a live state exists
+    // (the table is actually seated) — VIP/overdue are drawn as separate
+    // accent rings below rather than changing this fill, so which course a
+    // table is in stays visible even when it's flagged VIP or running late.
     const liveState = courseStates.find(cs => cs.tableId === t.id);
-    const fillColor = liveState?.colour || sc.fill;
-    const strokeColor = isMergeSelected ? '#4F46E5' : isSelected ? theme.primary : (liveState ? liveState.colour : sc.stroke);
+    const isOpenBase = !liveState && (t.status === 'available' || t.status === 'cleaning');
+    const fillColor = liveState?.colour || (isOpenBase && darkMode ? '#1c1c26' : sc.fill);
+    const strokeColor = isMergeSelected ? '#4F46E5' : isSelected ? theme.primary : (liveState ? liveState.colour : (isOpenBase && darkMode ? '#3f3f4a' : sc.stroke));
+    const textColor = isLightFill(fillColor) ? '#1F2937' : 'white';
+    const textColorMuted = isLightFill(fillColor) ? 'rgba(31,41,55,0.7)' : 'rgba(255,255,255,0.8)';
+    const isVip = !!liveState?.isVip;
+    const isOverdue = !!liveState?.overdue;
+    const needsCleaning = t.status === 'cleaning';
+    const cx = t.x + t.width / 2, cy = t.y + t.height / 2;
 
     return (
       <g key={t.id} data-testid={`floor-table-${t.id}`}
@@ -277,15 +310,24 @@ export default function FloorPlan() {
         onDoubleClick={() => mode === 'edit' && openTableEditor(t)}>
         {/* Shadow */}
         {t.shape === 'circle' ? (
-          <ellipse cx={t.x + t.width / 2} cy={t.y + t.height / 2 + 3}
-            rx={t.width / 2} ry={t.height / 2} fill="rgba(0,0,0,0.08)" />
+          <ellipse cx={cx} cy={cy + 3} rx={t.width / 2} ry={t.height / 2} fill="rgba(0,0,0,0.08)" />
         ) : (
           <rect x={t.x + 2} y={t.y + 3} width={t.width} height={t.height}
             rx={t.shape === 'square' ? 4 : 8} fill="rgba(0,0,0,0.08)" />
         )}
+        {/* Overdue accent ring — sits outside the table body so it reads as
+            an alert around a table, not a colour change to the table itself. */}
+        {isOverdue && (t.shape === 'circle' ? (
+          <ellipse cx={cx} cy={cy} rx={t.width / 2 + 4} ry={t.height / 2 + 4}
+            fill="none" stroke={overdueColour || DEFAULT_OVERDUE_COLOR} strokeWidth={2.5} data-testid={`overdue-ring-${t.id}`} />
+        ) : (
+          <rect x={t.x - 4} y={t.y - 4} width={t.width + 8} height={t.height + 8}
+            rx={(t.shape === 'square' ? 4 : 8) + 4}
+            fill="none" stroke={overdueColour || DEFAULT_OVERDUE_COLOR} strokeWidth={2.5} data-testid={`overdue-ring-${t.id}`} />
+        ))}
         {/* Table body */}
         {t.shape === 'circle' ? (
-          <ellipse cx={t.x + t.width / 2} cy={t.y + t.height / 2}
+          <ellipse cx={cx} cy={cy}
             rx={t.width / 2} ry={t.height / 2}
             fill={fillColor} stroke={strokeColor}
             strokeWidth={isMergeSelected ? 4 : isSelected ? 3 : 1.5} strokeDasharray={isMergeSelected ? '6 3' : undefined} opacity={0.9} />
@@ -296,17 +338,31 @@ export default function FloorPlan() {
             strokeWidth={isMergeSelected ? 4 : isSelected ? 3 : 1.5} strokeDasharray={isMergeSelected ? '6 3' : undefined} opacity={0.9} />
         )}
         {/* Table number */}
-        <text x={t.x + t.width / 2} y={t.y + t.height / 2 - 4}
-          textAnchor="middle" fill="white" fontSize="14" fontWeight="bold">
+        <text x={cx} y={cy - 4}
+          textAnchor="middle" fill={textColor} fontSize="14" fontWeight="bold">
           {t.number}
         </text>
         {/* Capacity */}
-        <text x={t.x + t.width / 2} y={t.y + t.height / 2 + 12}
-          textAnchor="middle" fill="rgba(255,255,255,0.8)" fontSize="10">
+        <text x={cx} y={cy + 12}
+          textAnchor="middle" fill={textColorMuted} fontSize="10">
           {t.maxCovers || t.capacity}p
         </text>
         {/* Section indicator */}
         <circle cx={t.x + t.width - 4} cy={t.y + 4} r={4} fill={sectionColor} stroke="white" strokeWidth={1} />
+        {/* VIP badge */}
+        {isVip && (
+          <g transform={`translate(${t.x + 4}, ${t.y + 4})`} data-testid={`vip-badge-${t.id}`}>
+            <circle r={7} fill={VIP_COLOR} stroke="white" strokeWidth={1} />
+            <Crown x={-4} y={-4} width={8} height={8} color="white" strokeWidth={2.5} />
+          </g>
+        )}
+        {/* Needs-cleaning badge */}
+        {needsCleaning && (
+          <g transform={`translate(${t.x + 4}, ${t.y + t.height - 4})`} data-testid={`cleaning-badge-${t.id}`}>
+            <circle r={7} fill="#F59E0B" stroke="white" strokeWidth={1} />
+            <BrushCleaning x={-4} y={-4} width={8} height={8} color="white" strokeWidth={2.5} />
+          </g>
+        )}
       </g>
     );
   };
@@ -356,12 +412,12 @@ export default function FloorPlan() {
       </div>
 
       {/* Status legend */}
-      <div className="flex items-center gap-6">
-        {Object.entries(TABLE_STATUS_COLORS).map(([key, val]) => (
-          <div key={key} className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded" style={{ background: val.fill }} />
-            <span className="text-sm text-gray-600">{val.label}</span>
-            <Badge variant="outline" className="text-xs ml-1">{statusCounts[key]}</Badge>
+      <div className="flex items-center gap-6" data-testid="floor-legend">
+        {legendItems.map(item => (
+          <div key={item.key} className="flex items-center gap-2" data-testid={`legend-${item.key}`}>
+            <div className="w-4 h-4 rounded border" style={{ background: item.color, borderColor: item.key === 'open' ? (darkMode ? '#3f3f4a' : '#CBD5E1') : item.color }} />
+            <span className="text-sm" style={{ color: theme.text }}>{item.label}</span>
+            <Badge variant="outline" className="text-xs ml-1">{item.count}</Badge>
           </div>
         ))}
         <div className="ml-auto text-sm text-gray-500">
@@ -391,15 +447,26 @@ export default function FloorPlan() {
         <Card className="flex-1 border-0 shadow-sm">
           <CardContent className="p-4">
             <svg ref={canvasRef} width="100%" height="580" viewBox="0 0 1000 580"
-              className="bg-gray-50 rounded-lg border-2 border-dashed border-gray-200"
+              className="rounded-lg border"
+              style={{
+                // Light mode: a soft brand-tinted gradient (orange → white →
+                // purple, echoing the logo) instead of a flat grey box. Dark
+                // mode: the same surface colour as the sidebar/menu panel
+                // (--nua-surface) so the canvas doesn't look like a mismatched
+                // cutout against the rest of the dark shell.
+                background: darkMode
+                  ? 'var(--nua-surface)'
+                  : 'linear-gradient(135deg, rgba(245,140,20,0.06), rgba(255,255,255,1) 45%, rgba(139,92,246,0.06))',
+                borderColor: darkMode ? '#2a2a35' : '#e5e7eb',
+              }}
               onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
               data-testid="floor-canvas">
               {/* Grid lines */}
               {Array.from({ length: 21 }, (_, i) => (
-                <line key={`gv${i}`} x1={i * 50} y1={0} x2={i * 50} y2={580} stroke="#e5e7eb" strokeWidth={0.5} />
+                <line key={`gv${i}`} x1={i * 50} y1={0} x2={i * 50} y2={580} stroke={darkMode ? '#26262f' : '#e5e7eb'} strokeWidth={0.5} />
               ))}
               {Array.from({ length: 12 }, (_, i) => (
-                <line key={`gh${i}`} x1={0} y1={i * 50} x2={1000} y2={i * 50} stroke="#e5e7eb" strokeWidth={0.5} />
+                <line key={`gh${i}`} x1={0} y1={i * 50} x2={1000} y2={i * 50} stroke={darkMode ? '#26262f' : '#e5e7eb'} strokeWidth={0.5} />
               ))}
               {/* Tables */}
               {tables.map(renderTable)}

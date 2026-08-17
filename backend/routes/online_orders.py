@@ -23,7 +23,7 @@ import json
 import uuid
 
 from utils.notifications import notify_order
-from routes.commerce_v29 import _resolve_voucher, _validate_voucher_rules
+from routes.commerce_v29 import _resolve_voucher, _validate_voucher_rules, _compute_voucher_discount
 from middleware.actor_context import tenant_scope_filter, tenant_owns
 
 router = APIRouter()
@@ -263,12 +263,7 @@ async def place_order(data: dict):
         try:
             v = await _resolve_voucher(voucher_code, None)
             if not _validate_voucher_rules(v, cart=items):
-                if v["valueType"] == "percentage":
-                    voucher_discount = round(subtotal * (float(v["value"]) / 100), 2)
-                else:
-                    cap = float(v.get("residualValue", v["value"])) if v.get("partialRedeemable") else float(v["value"])
-                    voucher_discount = round(min(float(v["value"]), cap), 2)
-                voucher_discount = min(voucher_discount, subtotal)
+                voucher_discount = _compute_voucher_discount(v, subtotal)
                 voucher_label = v.get("label")
         except HTTPException:
             voucher_code = ""

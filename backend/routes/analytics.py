@@ -8,6 +8,7 @@ from models.expense import Expense, ExpenseCreate
 from models.supplier import Supplier, SupplierCreate, PurchaseOrder, PurchaseOrderCreate
 from middleware.actor_context import tenant_scope_filter
 from utils.dates import date_range_filter as _date_match
+import asyncio
 import uuid
 import random
 import logging
@@ -39,8 +40,10 @@ COGS_CATEGORIES = ("Ingredients", "Food Supplies", "Beverages")
 @router.get("/accounting/summary")
 async def get_accounting_summary(start_date: Optional[str] = None, end_date: Optional[str] = None,
                                  user: dict = Depends(require_owner_or_manager)):
-    txn_totals = await _sum_transactions({**_date_match("timestamp", start_date, end_date), **tenant_scope_filter(user.get("businessId"))})
-    expense_rows = await _sum_expenses({**_date_match("date", start_date, end_date), **tenant_scope_filter(user.get("businessId"))})
+    txn_totals, expense_rows = await asyncio.gather(
+        _sum_transactions({**_date_match("timestamp", start_date, end_date), **tenant_scope_filter(user.get("businessId"))}),
+        _sum_expenses({**_date_match("date", start_date, end_date), **tenant_scope_filter(user.get("businessId"))}),
+    )
     total_expenses = sum(r["amount"] for r in expense_rows)
     total_gst_paid = sum(r["gst"] for r in expense_rows)
     return {
@@ -55,8 +58,10 @@ async def get_accounting_summary(start_date: Optional[str] = None, end_date: Opt
 @router.get("/accounting/p-and-l")
 async def get_p_and_l(start_date: Optional[str] = None, end_date: Optional[str] = None,
                       user: dict = Depends(require_owner_or_manager)):
-    txn_totals = await _sum_transactions({**_date_match("timestamp", start_date, end_date), **tenant_scope_filter(user.get("businessId"))})
-    expense_rows = await _sum_expenses({**_date_match("date", start_date, end_date), **tenant_scope_filter(user.get("businessId"))})
+    txn_totals, expense_rows = await asyncio.gather(
+        _sum_transactions({**_date_match("timestamp", start_date, end_date), **tenant_scope_filter(user.get("businessId"))}),
+        _sum_expenses({**_date_match("date", start_date, end_date), **tenant_scope_filter(user.get("businessId"))}),
+    )
     revenue = txn_totals["revenue"]
     cogs = sum(r["amount"] for r in expense_rows if r["_id"] in COGS_CATEGORIES)
     operating = sum(r["amount"] for r in expense_rows if r["_id"] not in COGS_CATEGORIES)

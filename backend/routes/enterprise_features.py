@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Depends
 from deps import require_owner, require_owner_or_manager
 from database import db
 from middleware.actor_context import tenant_scope_filter
@@ -258,31 +258,6 @@ async def clear_staff_override(staff_id: str, _: dict = Depends(require_owner)):
         role_default = await _role_permissions_for(staff.get("role"))
     return {"message": "Reverted to role defaults", "roleDefaults": role_default}
 
-# ============ SMART KIOSK UPSELLS ============
-@router.get("/pos/upsells")
-async def get_upsells(request: Request):
-    """Get smart upsell suggestions based on cart items"""
-    cart_items = request.query_params.get("items", "").split(",")
-    products = await db.products.find({}, {"_id": 0}).to_list(1000)
-    txns = await db.transactions.find({}, {"_id": 0, "items": 1}).to_list(10000)
-    # Find frequently bought together items
-    co_purchases = {}
-    for t in txns:
-        items = [i.get("productId") for i in t.get("items", [])]
-        for ci in cart_items:
-            if ci in items:
-                for other in items:
-                    if other != ci and other not in cart_items:
-                        co_purchases[other] = co_purchases.get(other, 0) + 1
-    # Sort by frequency and return top 3
-    top = sorted(co_purchases.items(), key=lambda x: x[1], reverse=True)[:3]
-    suggestions = []
-    for pid, freq in top:
-        p = next((pr for pr in products if pr.get("id") == pid), None)
-        if p:
-            suggestions.append({"id": p["id"], "name": p["name"], "price": p["price"], "image": p.get("image", ""), "frequency": freq})
-    return suggestions
-
 # ============ AUTOMATED REPORTING ============
 @router.get("/reports/automated-config")
 async def get_report_config(_: dict = Depends(require_owner)):
@@ -297,65 +272,6 @@ async def get_report_config(_: dict = Depends(require_owner)):
 async def save_report_config(data: dict, _: dict = Depends(require_owner)):
     await db.settings.update_one({"key": "auto_report_config"}, {"$set": {"key": "auto_report_config", "value": data}}, upsert=True)
     return {"message": "Automated report settings saved"}
-
-@router.post("/reports/generate")
-async def generate_report(data: dict, _: dict = Depends(require_owner_or_manager)):
-    """Generate a report on demand"""
-
-    report_type = data.get("type", "detailed")  # itemised, category, detailed
-
-    txns = await db.transactions.find({}, {"_id": 0}).to_list(50000)
-    products = await db.products.find({}, {"_id": 0}).to_list(10000)
-
-    if report_type == "itemised":
-        item_sales = {}
-        for t in txns:
-            for item in t.get("items", []):
-                pid = item.get("productId", "")
-                if pid not in item_sales:
-                    item_sales[pid] = {"name": item.get("productName", ""), "qty": 0, "revenue": 0, "cost": 0}
-                item_sales[pid]["qty"] += item.get("quantity", 0)
-                item_sales[pid]["revenue"] += item.get("price", 0) * item.get("quantity", 0)
-                p = next((pr for pr in products if pr.get("id") == pid), {})
-                item_sales[pid]["cost"] += p.get("cost", 0) * item.get("quantity", 0)
-        items = sorted(item_sales.values(), key=lambda x: x["revenue"], reverse=True)
-        for i in items:
-            i["profit"] = round(i["revenue"] - i["cost"], 2)
-            i["margin"] = round((i["profit"] / max(i["revenue"], 0.01)) * 100, 1)
-        return {"type": "itemised", "items": items, "totalRevenue": round(sum(i["revenue"] for i in items), 2), "totalProfit": round(sum(i["profit"] for i in items), 2)}
-
-    elif report_type == "category":
-        cat_sales = {}
-        for t in txns:
-            for item in t.get("items", []):
-                cat = item.get("category", "Uncategorized")
-                if not cat:
-                    p = next((pr for pr in products if pr.get("id") == item.get("productId")), {})
-                    cat = p.get("category", "Uncategorized")
-                if cat not in cat_sales:
-                    cat_sales[cat] = {"qty": 0, "revenue": 0, "cost": 0}
-                cat_sales[cat]["qty"] += item.get("quantity", 0)
-                cat_sales[cat]["revenue"] += item.get("price", 0) * item.get("quantity", 0)
-        cats = [{"category": k, **v, "profit": round(v["revenue"] - v["cost"], 2)} for k, v in sorted(cat_sales.items(), key=lambda x: x[1]["revenue"], reverse=True)]
-        return {"type": "category", "categories": cats, "totalRevenue": round(sum(c["revenue"] for c in cats), 2)}
-
-    else:  # detailed
-        total_revenue = sum(t.get("total", 0) for t in txns)
-        total_gst = sum(t.get("gst", 0) for t in txns)
-        expenses = await db.expenses.find({}, {"_id": 0}).to_list(10000)
-        total_expenses = sum(e.get("amount", 0) for e in expenses)
-        cogs = sum(e.get("amount", 0) for e in expenses if e.get("category") in ("Wages", "Ingredients", "Food Supplies", "Superannuation"))
-        refunds = await db.refunds.find({}, {"_id": 0}).to_list(1000)
-        total_refunds = sum(r.get("amount", 0) for r in refunds)
-        return {
-            "type": "detailed",
-            "revenue": round(total_revenue, 2), "gst": round(total_gst, 2),
-            "expenses": round(total_expenses, 2), "cogs": round(cogs, 2),
-            "refunds": round(total_refunds, 2),
-            "grossProfit": round(total_revenue - cogs, 2),
-            "netProfit": round(total_revenue - total_expenses - total_refunds, 2),
-            "transactionCount": len(txns),
-        }
 
 # ============ HARDWARE INTEGRATIONS ============
 @router.get("/hardware/printers")

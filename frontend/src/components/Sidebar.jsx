@@ -9,7 +9,7 @@ import {
   Calculator, FileText, Settings, Utensils, MapPin, Clock,
   ChefHat, BarChart3, Zap, Award, TrendingUp,
   FlaskConical, Sunrise, Brain, Plug, Users2, LogOut, ShieldCheck, Store,
-  Mail, ClipboardList, DollarSign, Trophy, Printer, PieChart,
+  Mail, DollarSign, Trophy, Printer, PieChart,
   ChevronDown, ChevronRight, Timer,
   CalendarCheck, LayoutGrid, SlidersHorizontal, Boxes, Layers, Puzzle,
   Percent, XCircle, Grid3x3, Scale, Sparkles, Ticket, Megaphone, Receipt,
@@ -38,7 +38,7 @@ import {
 const buildNavStructure = (vertical) => {
   const menu = getMenuLabels(vertical);
   return [
-  { path: '/today', icon: Sunrise, label: 'Today', access: ['owner', 'manager'] },
+  { path: '/today', icon: Sunrise, label: 'Today', access: ['owner', 'manager', 'cashier', 'kitchen'] },
   { path: '/whats-new', icon: Rocket, label: "What's New", access: ['owner', 'manager'] },
   { path: '/pos', icon: ShoppingCart, label: 'POS Terminal', access: ['owner', 'manager', 'cashier'] },
   { path: '/kitchen', icon: ChefHat, label: 'Kitchen', access: ['owner', 'manager', 'kitchen'], verticals: ['hospitality'] },
@@ -49,7 +49,6 @@ const buildNavStructure = (vertical) => {
       { path: '/reservations', label: 'Bookings', icon: CalendarCheck },
       { path: '/floor-plan', label: 'Floor Plan', icon: MapPin },
       { path: '/waitlist', label: 'Waitlist', icon: Clock },
-      { path: '/pre-shift', label: 'Pre-Shift Briefing', icon: ClipboardList },
       { path: '/table-layout', label: 'Table Layout', icon: LayoutGrid },
       { path: '/booking-settings', label: 'Booking Rules', icon: SlidersHorizontal },
       { path: '/booking-analytics', label: 'Booking Analytics', icon: BarChart3 },
