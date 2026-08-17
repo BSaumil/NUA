@@ -56,7 +56,6 @@ const MemberPortal = lazy(() => import('./pages/MemberPortal'));
 const StaffRoster = lazy(() => import('./pages/StaffRoster'));
 const StaffLeaderboard = lazy(() => import('./pages/StaffLeaderboard'));
 const QuarterlyReview = lazy(() => import('./pages/QuarterlyReview'));
-const TableLayout = lazy(() => import('./pages/TableLayout'));
 const BookingSettings = lazy(() => import('./pages/BookingSettings'));
 const BookingExperience = lazy(() => import('./pages/BookingExperience'));
 const BookingAnalytics = lazy(() => import('./pages/BookingAnalytics'));
@@ -247,7 +246,8 @@ function ProtectedRoutes() {
         <Route path="/marketing" element={<Marketing />} />
         <Route path="/floor-plan" element={<FloorPlan />} />
         <Route path="/waitlist" element={<WaitlistPage />} />
-        <Route path="/table-layout" element={<TableLayout />} />
+        {/* Table Layout's combinations feature merged into Floor Plan as a panel (Aug 2026) */}
+        <Route path="/table-layout" element={<Navigate to="/floor-plan" replace />} />
         <Route path="/booking-settings" element={<BookingSettings />} />
         <Route path="/booking-experience" element={<Navigate to="/marketing?tab=experiences" replace />} />
         <Route path="/clubmember" element={<Navigate to="/marketing?tab=club" replace />} />

@@ -11,7 +11,7 @@ import {
   FlaskConical, Sunrise, Brain, Plug, Users2, LogOut, ShieldCheck, Store,
   Mail, DollarSign, Trophy, Printer, PieChart,
   ChevronDown, ChevronRight, Timer,
-  CalendarCheck, LayoutGrid, SlidersHorizontal, Boxes, Layers, Puzzle,
+  CalendarCheck, SlidersHorizontal, Boxes, Layers, Puzzle,
   Percent, XCircle, Grid3x3, Scale, Sparkles, Ticket, Megaphone, Receipt,
   FileBadge, Wallet, PiggyBank, Target, BookMarked, Cpu,
   CreditCard, KeyRound, Building2, Rocket, Fingerprint, ArrowLeftRight
@@ -49,7 +49,6 @@ const buildNavStructure = (vertical) => {
       { path: '/reservations', label: 'Bookings', icon: CalendarCheck },
       { path: '/floor-plan', label: 'Floor Plan', icon: MapPin },
       { path: '/waitlist', label: 'Waitlist', icon: Clock },
-      { path: '/table-layout', label: 'Table Layout', icon: LayoutGrid },
       { path: '/booking-settings', label: 'Booking Rules', icon: SlidersHorizontal },
       { path: '/booking-analytics', label: 'Booking Analytics', icon: BarChart3 },
     ],
