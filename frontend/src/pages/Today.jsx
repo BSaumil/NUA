@@ -78,7 +78,6 @@ const Today = () => {
     load();
     const id = setInterval(load, 60000); // refresh every minute — live pulse, not a report
     return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const role = user?.role === 'owner' ? 'owner' : 'manager';
