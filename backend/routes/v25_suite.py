@@ -838,13 +838,38 @@ async def send_marketing(campaign_id: str, data: dict = None, user: dict = Depen
     Idempotent per customer — re-sending won't mint a second voucher for
     someone who already has one for this campaign, so a retry after a
     partial failure is safe.
+
+    `data` may carry owner edits (emailSubject/emailBody/sms) made in the
+    review step before sending — the campaign is updated with them first,
+    so Edit-then-Send never needs a separate save endpoint.
     """
     if user["role"] not in ("owner", "manager"):
         raise HTTPException(status_code=403, detail="Owner/Manager only")
     campaign = await db.marketing_campaigns.find_one({"id": campaign_id}, {"_id": 0})
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
+    if campaign.get("status") == "held":
+        raise HTTPException(status_code=400, detail="Campaign is on hold — take it off hold before sending")
 
+    edits = {k: v for k, v in (data or {}).items() if k in ("emailSubject", "emailBody", "sms") and v}
+    if edits:
+        await db.marketing_campaigns.update_one({"id": campaign_id}, {"$set": edits})
+        campaign.update(edits)
+
+    return await _execute_campaign_send(campaign)
+
+
+async def _execute_campaign_send(campaign: dict) -> dict:
+    """The actual send: issue each targeted customer their own voucher and
+    email it out. Shared by the review-and-send route above and by the
+    Ash-drafted marketing-campaign approval path (routes/approvals.py),
+    which used to reference this action type without anything to execute it.
+
+    Idempotent per customer — re-sending won't mint a second voucher for
+    someone who already has one for this campaign, so a retry after a
+    partial failure is safe.
+    """
+    campaign_id = campaign["id"]
     from services.campaign_offers import issue_campaign_voucher, render_offer_email
     from utils.notifications import send_email
 
@@ -889,6 +914,52 @@ async def send_marketing(campaign_id: str, data: dict = None, user: dict = Depen
     return {"campaignId": campaign_id, "vouchersIssued": issued,
             "emailsDelivered": sent, "skipped": skipped,
             "recipients": len(recipients)}
+
+
+async def create_and_send_campaign_from_approval(params: dict, created_by: str = "ash") -> dict:
+    """Turn an Ash-drafted marketing-campaign approval into a real, sendable
+    v25 campaign and send it immediately — this is what fires when an owner
+    clicks Approve on a "marketing.launch_campaign" approval.
+
+    Ash's draft describes its target as a free-text segment expression
+    (e.g. "visits>=3 AND lapsed_30d"), which this simpler audience-tier
+    system can't evaluate, so it lands as an "all customers" campaign —
+    still real and sent, just not narrowed to the exact cohort Ash reasoned
+    about. Narrowing that requires the segment engine other parts of this
+    codebase already use, which is out of scope for making this action
+    execute instead of silently failing.
+    """
+    copy = params.get("copy") or {}
+    campaign = {
+        "id": _uid("MKT"), "audience": "all",
+        "sms": copy.get("sms"),
+        "emailSubject": copy.get("subject") or params.get("name") or "An offer for you",
+        "emailBody": copy.get("email") or copy.get("sms") or "",
+        "offer": params.get("offer") or {"valueType": "percentage", "value": 10, "label": "Thanks for being a regular"},
+        "status": "draft", "createdAt": _now(), "createdBy": created_by,
+        "sent": 0, "vouchersIssued": 0,
+        "ashDraft": {"segment": params.get("segment"), "reasoning": params.get("reasoning")},
+    }
+    await db.marketing_campaigns.insert_one(dict(campaign))
+    return await _execute_campaign_send(campaign)
+
+
+@router.post("/marketing/auto/{campaign_id}/hold")
+async def hold_marketing(campaign_id: str, data: dict = None, user: dict = Depends(get_user)):
+    """Owner intervention: put a drafted campaign on hold (or take it off
+    hold) instead of it just sitting there ambiguously as an untouched
+    draft. A held campaign can't be sent until it's taken off hold again."""
+    if user["role"] not in ("owner", "manager"):
+        raise HTTPException(status_code=403, detail="Owner/Manager only")
+    campaign = await db.marketing_campaigns.find_one({"id": campaign_id}, {"_id": 0})
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if campaign.get("status") == "sent":
+        raise HTTPException(status_code=400, detail="Campaign already sent")
+    hold = (data or {}).get("hold", True)
+    new_status = "held" if hold else "draft"
+    await db.marketing_campaigns.update_one({"id": campaign_id}, {"$set": {"status": new_status}})
+    return {"campaignId": campaign_id, "status": new_status}
 
 
 @router.get("/marketing/auto/{campaign_id}/performance")
