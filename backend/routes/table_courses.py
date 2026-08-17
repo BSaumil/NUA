@@ -26,7 +26,7 @@ router = APIRouter()
 
 # ─── Defaults — sensible thresholds for a mid-tier venue ─────────────────
 DEFAULT_COURSES = [
-    {"key": "seated",    "label": "Seated",    "colour": "#94A3B8", "maxMinutes": 5,   "next": "drinks"},
+    {"key": "seated",    "label": "Seated",    "colour": "#1E293B", "maxMinutes": 5,   "next": "drinks"},
     {"key": "drinks",    "label": "Drinks",    "colour": "#38BDF8", "maxMinutes": 10,  "next": "entree"},
     {"key": "entree",    "label": "Entrée",    "colour": "#22C55E", "maxMinutes": 20,  "next": "main"},
     {"key": "main",      "label": "Main",      "colour": "#F59E0B", "maxMinutes": 45,  "next": "dessert"},
@@ -34,8 +34,11 @@ DEFAULT_COURSES = [
     {"key": "coffee",    "label": "Coffee",    "colour": "#8B5CF6", "maxMinutes": 15,  "next": "check"},
     {"key": "check",     "label": "Check",     "colour": "#EF4444", "maxMinutes": 10,  "next": None},
 ]
-# When a table stays in a course past maxMinutes, its colour intensifies to signal to servers.
-OVERDUE_COLOUR = "#7F1D1D"
+# A table past its course's maxMinutes gets flagged overdue (see `overdue` on
+# each state below) — this is the accent colour the floor plan rings it in,
+# layered on top of the course colour rather than replacing it, so staff can
+# still see which course a late table is stuck in.
+OVERDUE_COLOUR = "#F97316"
 
 
 class Course(BaseModel):
@@ -96,6 +99,7 @@ class TableStateIn(BaseModel):
     partySize: Optional[int] = None
     serverId: Optional[str] = None
     reservationId: Optional[str] = None
+    customerId: Optional[str] = None
     guestName: Optional[str] = None
     note: Optional[str] = None
     clearState: bool = False
@@ -113,6 +117,17 @@ async def list_states(_: dict = Depends(get_user)):
     by_key = {c["key"]: c for c in courses}
     now = datetime.now(timezone.utc)
 
+    # One batched lookup for every attached guest's VIP flag, instead of a
+    # query per table — states rarely number more than a few dozen, but no
+    # reason to pay N round trips for what's a single $in.
+    customer_ids = [s["customerId"] for s in states if s.get("customerId")]
+    vip_ids = set()
+    if customer_ids:
+        vip_customers = await db.customers.find(
+            {"id": {"$in": customer_ids}, "isVip": True}, {"_id": 0, "id": 1}
+        ).to_list(len(customer_ids))
+        vip_ids = {c["id"] for c in vip_customers}
+
     enriched = []
     for s in states:
         course_obj = by_key.get(s.get("course"), by_key.get("seated", courses[0]))
@@ -125,12 +140,23 @@ async def list_states(_: dict = Depends(get_user)):
             dwell_min = max(0, int((now - datetime.fromisoformat(seated_at)).total_seconds() // 60))
         if course_at:
             course_min = max(0, int((now - datetime.fromisoformat(course_at)).total_seconds() // 60))
-        overdue = course_obj.get("maxMinutes") and course_min > course_obj["maxMinutes"]
+        # `is not None`, not truthiness — a 0-minute threshold ("overdue the
+        # moment this course starts") is a legitimate setting a venue can
+        # dial in, but `0 and ...` short-circuits to falsy and would make it
+        # unreachable.
+        max_minutes = course_obj.get("maxMinutes")
+        overdue = max_minutes is not None and course_min > max_minutes
         s["dwellMinutes"] = dwell_min
         s["courseMinutes"] = course_min
         s["courseLabel"] = course_obj.get("label")
-        s["colour"] = overdue_colour if overdue else course_obj.get("colour")
+        # The course's own colour, always — overdue is surfaced separately
+        # via `overdue` (and the top-level `overdueColour`) so the floor
+        # plan can ring a late table in the alert colour while still
+        # showing which course it's stuck in, rather than replacing that
+        # information with a flat "it's late" colour.
+        s["colour"] = course_obj.get("colour")
         s["overdue"] = bool(overdue)
+        s["isVip"] = s.get("customerId") in vip_ids
         enriched.append(s)
     return {"states": enriched, "courses": courses, "overdueColour": overdue_colour}
 
@@ -149,7 +175,7 @@ async def upsert_state(body: TableStateIn, user: dict = Depends(get_user)):
         if body.course and body.course != existing.get("course"):
             update["course"] = body.course
             update["courseStartedAt"] = now
-        for f in ("partySize", "serverId", "reservationId", "guestName", "note"):
+        for f in ("partySize", "serverId", "reservationId", "customerId", "guestName", "note"):
             v = getattr(body, f)
             if v is not None:
                 update[f] = v
@@ -163,6 +189,7 @@ async def upsert_state(body: TableStateIn, user: dict = Depends(get_user)):
         "partySize": body.partySize,
         "serverId": body.serverId,
         "reservationId": body.reservationId,
+        "customerId": body.customerId,
         "guestName": body.guestName,
         "note": body.note,
         "seatedAt": now,
