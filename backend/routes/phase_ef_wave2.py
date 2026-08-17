@@ -13,6 +13,7 @@ F9  Kitchen-Load Balancing                   GET  /api/ai/kitchen-load
 from fastapi import APIRouter, HTTPException, Depends
 from deps import get_user, require_owner, require_owner_or_manager
 from database import db
+from services import floor_tables
 from datetime import datetime, timezone, timedelta
 from collections import Counter, defaultdict
 import uuid
@@ -197,8 +198,8 @@ async def overbooking_check(data: dict, _: dict = Depends(get_user)):
         raise HTTPException(status_code=400, detail="date + time required")
 
     # Capacity = sum of seats across active tables, or 60 if none configured
-    tables = await db.floor_tables.find({}, {"_id": 0, "capacity": 1, "seats": 1}).to_list(500)
-    capacity = sum(int(t.get("capacity") or t.get("seats") or 4) for t in tables) or 60
+    tables = await floor_tables.list_tables()
+    capacity = sum(int(t.get("maxCovers") or t.get("capacity") or t.get("seats") or 4) for t in tables) or 60
     # Buffer ratio — owner-configurable via settings doc, default 1.10
     settings = await db.settings.find_one({"id": "overbooking"}, {"_id": 0}) or {}
     buffer_ratio = float(settings.get("bufferRatio", 1.10))
