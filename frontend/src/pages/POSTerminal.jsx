@@ -1602,14 +1602,14 @@ const POSTerminal = () => {
                         <div className="p-2">
                           <h3 className="font-medium text-xs leading-tight line-clamp-1" style={{ color: theme.text }}>{product.name}</h3>
                           <div className="flex items-center justify-between mt-1">
-                            <span className="text-sm font-bold" style={{ color: theme.primary }}>${product.price.toFixed(2)}</span>
+                            <span className="flex items-center gap-1">
+                              <span className="text-sm font-bold" style={{ color: theme.primary }}>${product.price.toFixed(2)}</span>
+                              {(product.modifierIds || []).length > 0 && (
+                                <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ backgroundColor: theme.secondary }} data-testid={`pos-prod-mod-hint-${product.id}`} title="Has options" />
+                              )}
+                            </span>
                             <span className="text-[9px] text-gray-400">{product.stock}</span>
                           </div>
-                          {(product.modifierIds || []).length > 0 && (
-                            <span className="text-[9px] mt-0.5 inline-block" style={{ color: theme.secondary }} data-testid={`pos-prod-mod-hint-${product.id}`}>
-                              + {product.modifierIds.length} option{product.modifierIds.length > 1 ? 's' : ''}
-                            </span>
-                          )}
                         </div>
                       </button>
                     ))}
@@ -1636,14 +1636,14 @@ const POSTerminal = () => {
                   <div className="p-2">
                     <h3 className="font-medium text-xs leading-tight line-clamp-1" style={{ color: theme.text }}>{product.name}</h3>
                     <div className="flex items-center justify-between mt-1">
-                      <span className="text-sm font-bold" style={{ color: theme.primary }}>${product.price.toFixed(2)}</span>
+                      <span className="flex items-center gap-1">
+                        <span className="text-sm font-bold" style={{ color: theme.primary }}>${product.price.toFixed(2)}</span>
+                        {(product.modifierIds || []).length > 0 && (
+                          <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ backgroundColor: theme.secondary }} data-testid={`pos-prod-mod-hint-flat-${product.id}`} title="Has options" />
+                        )}
+                      </span>
                       <span className="text-[9px] text-gray-400">{product.stock}</span>
                     </div>
-                    {(product.modifierIds || []).length > 0 && (
-                      <span className="text-[9px] mt-0.5 inline-block" style={{ color: theme.secondary }} data-testid={`pos-prod-mod-hint-flat-${product.id}`}>
-                        + {product.modifierIds.length} option{product.modifierIds.length > 1 ? 's' : ''}
-                      </span>
-                    )}
                   </div>
                 </button>
               ))}
