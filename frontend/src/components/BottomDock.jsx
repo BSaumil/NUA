@@ -103,7 +103,7 @@ const QUICK_ACTIONS_BEAUTY_SERVICES = {
   ],
 };
 
-const quickActionsFor = (role, vertical) => {
+export const quickActionsFor = (role, vertical) => {
   const table = vertical === 'hospitality' ? QUICK_ACTIONS
     : vertical === 'beauty' || vertical === 'services' ? { ...QUICK_ACTIONS, ...QUICK_ACTIONS_BEAUTY_SERVICES }
     : { ...QUICK_ACTIONS, ...QUICK_ACTIONS_NON_HOSPITALITY };
