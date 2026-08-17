@@ -22,6 +22,15 @@ def _table(id_, number, capacity, status="available", section=None):
 
 
 def test_walkin_ai_assign_with_no_tables_configured_returns_a_setup_error_not_a_500(client, owner_headers):
+    # This test's whole point requires a genuinely empty db.floor_plans,
+    # but the client/database fixture is session-scoped (see conftest.py) —
+    # other test files (e.g. test_booking_status_restore.py) create floor
+    # plans that would otherwise still be sitting there when this runs as
+    # part of the full suite. Clear them via the real API first.
+    existing = req(client, "GET", "/api/floor-plans", headers=owner_headers).json()
+    for plan in existing:
+        req(client, "DELETE", f"/api/floor-plans/{plan['id']}", headers=owner_headers)
+
     r = req(client, "POST", "/api/walkins/ai-assign", headers=owner_headers, json={"partySize": 2})
     assert r.status_code == 404
     assert r.json()["detail"] == "No tables are configured yet"

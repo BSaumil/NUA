@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   CalendarDays, Clock, Users, Plus, Search, Filter, ChevronLeft, ChevronRight,
-  Phone, Mail, Edit2, Trash2, Check, X, UserCheck, AlertTriangle, MapPin
+  Phone, Mail, Edit2, Trash2, Check, X, UserCheck, AlertTriangle, MapPin, Ban, RotateCcw
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -178,7 +178,7 @@ export default function Reservations() {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Delete this reservation?')) return;
+    if (!window.confirm('Permanently delete this reservation? This cannot be undone — use Cancel instead if you just want to mark it cancelled and keep the record.')) return;
     try { await reservationsAPI.delete(id); toast.success('Deleted'); fetchData(); }
     catch (e) { toast.error('Failed to delete'); }
   };
@@ -196,6 +196,17 @@ export default function Reservations() {
   const handleNoShow = async (id) => {
     try { await reservationsAPI.noShow(id, 0); toast.warning('Marked as no-show'); fetchData(); }
     catch (e) { toast.error('Failed'); }
+  };
+
+  const handleCancel = async (id) => {
+    const reason = window.prompt('Reason for cancelling? (optional)') || undefined;
+    try { await reservationsAPI.cancel(id, reason); toast.success('Booking cancelled — it can be restored later'); fetchData(); }
+    catch (e) { toast.error(e?.response?.data?.detail || 'Failed to cancel'); }
+  };
+
+  const handleRestore = async (id) => {
+    try { await reservationsAPI.restore(id); toast.success('Booking restored to confirmed'); fetchData(); }
+    catch (e) { toast.error(e?.response?.data?.detail || 'Failed to restore'); }
   };
 
   const handleAutoAssign = async (id) => {
@@ -440,6 +451,10 @@ export default function Reservations() {
                                   className="text-yellow-600 hover:bg-yellow-50 h-8 px-2" data-testid={`no-show-btn-${r.id}`}>
                                   <AlertTriangle size={14} />
                                 </Button>
+                                <Button variant="ghost" size="sm" onClick={() => handleCancel(r.id)}
+                                  className="text-red-500 hover:bg-red-50 h-8 px-2" data-testid={`cancel-btn-${r.id}`} title="Cancel booking">
+                                  <Ban size={14} />
+                                </Button>
                               </>
                             )}
                             {r.status === 'seated' && (
@@ -448,11 +463,17 @@ export default function Reservations() {
                                 <Check size={14} className="mr-1" /> Done
                               </Button>
                             )}
+                            {(r.status === 'cancelled' || r.status === 'no_show') && (
+                              <Button variant="ghost" size="sm" onClick={() => handleRestore(r.id)}
+                                className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 h-8 px-2" data-testid={`restore-btn-${r.id}`}>
+                                <RotateCcw size={14} className="mr-1" /> Restore
+                              </Button>
+                            )}
                             <Button variant="ghost" size="sm" onClick={() => openEdit(r)} className="h-8 px-2" data-testid={`edit-btn-${r.id}`}>
                               <Edit2 size={14} />
                             </Button>
                             <Button variant="ghost" size="sm" onClick={() => handleDelete(r.id)}
-                              className="text-red-500 hover:bg-red-50 h-8 px-2" data-testid={`delete-btn-${r.id}`}>
+                              className="text-red-500 hover:bg-red-50 h-8 px-2" data-testid={`delete-btn-${r.id}`} title="Permanently delete (use Cancel to keep a record)">
                               <Trash2 size={14} />
                             </Button>
                           </div>

@@ -298,6 +298,8 @@ export const reservationsAPI = {
   seat: (id, tableId) => api.post(`/reservations/${id}/seat`, null, { params: { table_id: tableId } }),
   complete: (id) => api.post(`/reservations/${id}/complete`),
   noShow: (id, fee) => api.post(`/reservations/${id}/no-show`, null, { params: { fee } }),
+  cancel: (id, reason) => api.post(`/reservations/${id}/cancel`, { reason }),
+  restore: (id, status) => api.post(`/reservations/${id}/restore`, status ? { status } : {}),
   autoAssign: (id) => api.get(`/reservations/auto-assign/${id}`),
   // Booking calendar helpers
   dayCounts: (fromDate, toDate) => api.get('/reservations/day-counts', { params: { fromDate, toDate } }),
