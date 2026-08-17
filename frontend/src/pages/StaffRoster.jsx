@@ -98,6 +98,11 @@ export default function StaffRoster() {
   // standard shift rules and cost/revenue targets auto-roster generates against.
   const [showRosterSettings, setShowRosterSettings] = useState(false);
   const [rosterSettings, setRosterSettings] = useState(null);
+  // AI Auto-Roster draft — a proposal to review before anything touches the
+  // real roster, not an instant commit.
+  const [draftRoster, setDraftRoster] = useState(null);
+  const [showDraftPreview, setShowDraftPreview] = useState(false);
+  const [committingDraft, setCommittingDraft] = useState(false);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor)
@@ -138,6 +143,20 @@ export default function StaffRoster() {
   const handleClockIn = async () => { try { await staffMgmtAPI.clockIn(); toast.success('Clocked in!'); fetchAll(); } catch (e) { toast.error(e.response?.data?.detail || 'Failed'); } };
   const handleClockOut = async () => { try { await staffMgmtAPI.clockOut({ breakMinutes: parseInt(breakMins) || 0 }); toast.success('Clocked out!'); fetchAll(); } catch (e) { toast.error(e.response?.data?.detail || 'Failed'); } };
   const handleDeleteShift = async (id) => { try { await staffMgmtAPI.deleteRosterShift(id); toast.success('Shift removed'); fetchAll(); } catch (e) { toast.error(e.response?.data?.detail || 'Failed to remove shift'); } };
+
+  const handleCommitDraft = async () => {
+    if (!draftRoster?.suggestions?.length) return;
+    setCommittingDraft(true);
+    try {
+      const { v15API } = await import('../services/api');
+      await v15API.commitAutoRoster(draftRoster.suggestions);
+      toast.success(`Created ${draftRoster.suggestions.length} shifts`);
+      setShowDraftPreview(false);
+      setDraftRoster(null);
+      fetchAll();
+    } catch { toast.error('Failed to commit draft roster'); }
+    setCommittingDraft(false);
+  };
 
   // Blackout/approved-leave conflicts come back as a 409 with a human reason.
   // Offer an explicit override rather than silently failing or silently blocking.
@@ -413,12 +432,8 @@ export default function StaffRoster() {
                 const { v15API } = await import('../services/api');
                 try {
                   const r = await v15API.autoRoster(weekForm.weekStart || new Date().toISOString().split('T')[0]);
-                  const shifts = r.data?.suggestions || [];
-                  if (window.confirm(`AI suggests ${shifts.length} shifts:\n\n${r.data?.reasoning}\n\nCommit them to the roster?`)) {
-                    await v15API.commitAutoRoster(shifts);
-                    toast.success(`Created ${shifts.length} shifts`);
-                    fetchAll();
-                  }
+                  setDraftRoster(r.data);
+                  setShowDraftPreview(true);
                 } catch { toast.error('AI roster failed'); }
               }} data-testid="auto-roster-btn"><Brain size={14} className="mr-1" /> AI Auto-Roster</Button>}
               {isOwner && <Button size="sm" variant="outline" onClick={openRosterSettings} data-testid="roster-settings-btn">
@@ -776,6 +791,83 @@ export default function StaffRoster() {
               <Button className="w-full" style={{ backgroundColor: theme.primary }} onClick={saveRosterSettings} data-testid="save-roster-settings-btn">
                 Save Settings
               </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* AI Auto-Roster draft — nothing here touches the real roster until Commit is clicked */}
+      <Dialog open={showDraftPreview} onOpenChange={(o) => { setShowDraftPreview(o); if (!o) setDraftRoster(null); }}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto" data-testid="draft-roster-dialog">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Brain size={18} /> Draft Roster</DialogTitle></DialogHeader>
+          {draftRoster && (
+            <div className="space-y-4 py-2 text-sm">
+              <p className="text-xs text-gray-500">{draftRoster.reasoning}</p>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-lg border p-3 text-center">
+                  <p className="text-lg font-bold" style={{ color: theme.primary }}>{draftRoster.suggestions?.length || 0}</p>
+                  <p className="text-[10px] text-gray-500">Shifts proposed</p>
+                </div>
+                <div className="rounded-lg border p-3 text-center">
+                  <p className="text-lg font-bold">${(draftRoster.weekEstimate?.estLaborCost || 0).toLocaleString()}</p>
+                  <p className="text-[10px] text-gray-500">Est. labor cost</p>
+                </div>
+                <div className="rounded-lg border p-3 text-center">
+                  <p className="text-lg font-bold">{draftRoster.weekEstimate?.laborPct ?? '–'}%</p>
+                  <p className="text-[10px] text-gray-500">Of forecast revenue</p>
+                </div>
+              </div>
+
+              <div className="space-y-3" data-testid="draft-roster-days">
+                {(draftRoster.daySummaries || []).map(day => {
+                  const dayShifts = (draftRoster.suggestions || []).filter(s => s.date === day.date);
+                  return (
+                    <div key={day.date} className="rounded-lg border p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="font-semibold">{day.date}</p>
+                        <span className="text-xs text-gray-500">
+                          {day.staffed} staffed · {day.forecastCovers} covers forecast{day.trimmedForCost ? ' · trimmed for cost' : ''}
+                        </span>
+                      </div>
+                      <div className="space-y-1">
+                        {dayShifts.map((s, i) => (
+                          <div key={i} className="flex items-center justify-between text-xs py-1 border-t first:border-t-0">
+                            <span className="font-medium">{s.staffName}</span>
+                            <span className="text-gray-500">{s.role} · {s.startTime}-{s.endTime}</span>
+                            <Badge variant="outline" className="text-[9px]" title="Performance score — sales, tips & punctuality">
+                              ★ {Math.round(s.performanceScore || 0)}
+                            </Badge>
+                          </div>
+                        ))}
+                        {dayShifts.length === 0 && <p className="text-xs text-gray-400">No shifts</p>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {(draftRoster.excluded || []).length > 0 && (
+                <div className="rounded-lg border p-3" style={{ backgroundColor: `${theme.primary}0d` }} data-testid="draft-roster-excluded">
+                  <p className="text-xs font-semibold mb-1" style={{ color: theme.primary }}>
+                    {draftRoster.excluded.length} staff skipped (unavailable)
+                  </p>
+                  <div className="space-y-0.5">
+                    {draftRoster.excluded.map((e, i) => (
+                      <p key={i} className="text-[11px] text-gray-600">{e.staffName} — {e.date} ({(e.reason || '').replace('_', ' ')})</p>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-2">
+                <Button variant="outline" className="flex-1" onClick={() => { setShowDraftPreview(false); setDraftRoster(null); }} data-testid="discard-draft-btn">
+                  Discard
+                </Button>
+                <Button className="flex-1" style={{ backgroundColor: theme.primary }} onClick={handleCommitDraft} disabled={committingDraft} data-testid="commit-draft-btn">
+                  {committingDraft ? 'Committing...' : `Commit ${draftRoster.suggestions?.length || 0} Shifts`}
+                </Button>
+              </div>
             </div>
           )}
         </DialogContent>

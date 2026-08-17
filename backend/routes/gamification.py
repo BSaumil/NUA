@@ -8,9 +8,10 @@ import uuid, os
 router = APIRouter()
 
 # ============ STAFF LEADERBOARD ============
-@router.get("/staff/leaderboard")
-async def get_staff_leaderboard(_: dict = Depends(get_user)):
-
+async def compute_staff_performance() -> list[dict]:
+    """Unranked per-staff performance rows — the same composite score the
+    leaderboard shows, factored out so other features (e.g. auto-rostering)
+    can weigh staff by performance without duplicating this math."""
     staff = await db.auth_users.find({"status": "active", "role": {"$ne": "owner"}}, {"_id": 0, "password_hash": 0}).to_list(100)
     txns = await db.transactions.find({}, {"_id": 0}).to_list(50000)
     timecards = await db.timecards.find({"clockOut": {"$ne": None}}, {"_id": 0}).to_list(50000)
@@ -68,6 +69,12 @@ async def get_staff_leaderboard(_: dict = Depends(get_user)):
             "performanceScore": score,
         })
 
+    return leaderboard
+
+
+@router.get("/staff/leaderboard")
+async def get_staff_leaderboard(_: dict = Depends(get_user)):
+    leaderboard = await compute_staff_performance()
     leaderboard.sort(key=lambda x: x["performanceScore"], reverse=True)
     for i, s in enumerate(leaderboard):
         s["rank"] = i + 1
