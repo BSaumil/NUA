@@ -306,30 +306,40 @@ SEED_MODIFIERS = [
 @router.post("/seed/catalog")
 async def seed_catalog(_: dict = Depends(require_owner)):
     """Owner-only: seed 5 categories, 60 products, 10 modifiers. Idempotent —
-    skips items that already exist by name+category."""
+    skips items that already exist by name+category.
+
+    Each item uses an atomic upsert (update_one(..., upsert=True)) rather
+    than a find_one-then-insert_one pair. The old check-then-insert had a
+    real race window: two calls close together (e.g. an onboarding
+    auto-trigger racing a manual "Seed Demo Data" click, or a client retry
+    after a slow response) could both see "nothing exists yet" and both
+    insert, producing two rows with the same name/SKU but different ids —
+    a duplicate menu item, silently. An upsert is atomic per document, so
+    a second concurrent call for the same item is guaranteed to either lose
+    the race entirely (matches the just-inserted document, updates it) or
+    win it outright — never both insert.
+    """
     # Categories
     cat_added = 0
     for c in SEED_CATEGORIES:
-        existing = await db.categories.find_one({"name": c["name"]})
-        if existing:
-            await db.categories.update_one(
-                {"name": c["name"]},
-                {"$set": {"icon": c["icon"], "color": c["color"],
-                          "prepTime": c["prepTime"], "channels": c["channels"]}},
-            )
-        else:
-            await db.categories.insert_one({**c})
+        result = await db.categories.update_one(
+            {"name": c["name"]},
+            {
+                "$set": {"icon": c["icon"], "color": c["color"],
+                         "prepTime": c["prepTime"], "channels": c["channels"]},
+                "$setOnInsert": {k: v for k, v in c.items()
+                                  if k not in ("icon", "color", "prepTime", "channels", "name")},
+            },
+            upsert=True,
+        )
+        if result.upserted_id is not None:
             cat_added += 1
     # Products
     prod_added = 0
     for i, p in enumerate(SEED_PRODUCTS):
-        existing = await db.products.find_one({"name": p["name"], "category": p["category"]})
-        if existing:
-            continue
         sku = f"SEED-{p['category'][:3].upper()}-{i:03d}"
         product = {
             "id": str(uuid.uuid4()),
-            "name": p["name"], "category": p["category"],
             "price": float(p["price"]), "cost": float(p["cost"]),
             "stock": int(p["stock"]),
             "sku": sku, "image": p["image"],
@@ -337,22 +347,29 @@ async def seed_catalog(_: dict = Depends(require_owner)):
             "onlineChannels": [], "seoDescription": "", "description": "",
             "createdAt": datetime.now(timezone.utc).isoformat(),
         }
-        await db.products.insert_one(product)
-        prod_added += 1
+        result = await db.products.update_one(
+            {"name": p["name"], "category": p["category"]},
+            {"$setOnInsert": product},
+            upsert=True,
+        )
+        if result.upserted_id is not None:
+            prod_added += 1
     # Modifiers
     mod_added = 0
     for m in SEED_MODIFIERS:
-        existing = await db.modifiers.find_one({"name": m["name"]})
-        if existing:
-            continue
         mod = {
             "id": f"mod-{str(uuid.uuid4())[:8]}",
             "printWithItem": True,
             "createdAt": datetime.now(timezone.utc).isoformat(),
-            **m,
+            **{k: v for k, v in m.items() if k != "name"},
         }
-        await db.modifiers.insert_one(mod)
-        mod_added += 1
+        result = await db.modifiers.update_one(
+            {"name": m["name"]},
+            {"$setOnInsert": mod},
+            upsert=True,
+        )
+        if result.upserted_id is not None:
+            mod_added += 1
     return {
         "categoriesAdded": cat_added, "categoriesTotal": len(SEED_CATEGORIES),
         "productsAdded": prod_added, "productsTotal": len(SEED_PRODUCTS),
