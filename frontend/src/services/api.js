@@ -276,6 +276,7 @@ export const channelMenusAPI = {
 export const reservationsAIAPI = {
   aiAssignTable: (reservationId) => api.post(`/reservations/${reservationId}/ai-assign-table`),
   aiAssignWalkin: (body) => api.post('/walkins/ai-assign', body),
+  seatWalkin: (body) => api.post('/walkins/seat', body),
 };
 
 // Modifiers API

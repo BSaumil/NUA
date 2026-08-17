@@ -21,6 +21,7 @@ import BookingsInbox from './BookingsInbox';
 import BookingHeatmap from './BookingHeatmap';
 import BookingSourceStrip from '../components/reservations/BookingSourceStrip';
 import BookingMonthCalendar from '../components/reservations/BookingMonthCalendar';
+import WalkInAISeatDialog from '../components/reservations/WalkInAISeatDialog';
 
 const TIME_SLOTS = [];
 for (let h = 9; h <= 22; h++) {
@@ -63,6 +64,7 @@ export default function Reservations() {
   const guestSearchTimer = useRef(null);
   const [view, setView] = useState('list'); // list | calendar | month
   const [mainTab, setMainTab] = useState('bookings'); // bookings | inbox | heatmap
+  const [showWalkinDialog, setShowWalkinDialog] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -264,15 +266,7 @@ export default function Reservations() {
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
-            onClick={async () => {
-              const partySize = parseInt(prompt('Walk-in party size?', '2') || '0');
-              if (!partySize) return;
-              try {
-                const r = await reservationsAIAPI.aiAssignWalkin({ partySize });
-                if (r.data.assigned) toast.success(`Walk-in seated at ${r.data.tableName}${r.data.section ? ` · ${r.data.section}` : ''}`);
-                else toast.warning(r.data.reason || 'No table free');
-              } catch (e) { toast.error(e?.response?.data?.detail || 'Failed'); }
-            }}
+            onClick={() => setShowWalkinDialog(true)}
             data-testid="walkin-ai-assign"
           >
             <Users size={16} className="mr-1.5" /> Walk-in → AI Seat
@@ -739,6 +733,12 @@ export default function Reservations() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <WalkInAISeatDialog
+        open={showWalkinDialog}
+        onClose={() => setShowWalkinDialog(false)}
+        onSeated={fetchData}
+      />
         </TabsContent>
       </Tabs>
     </div>

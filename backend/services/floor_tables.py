@@ -83,6 +83,14 @@ async def resolve_table(raw: Any) -> Optional[Tuple[Dict[str, Any], str]]:
     return None
 
 
+async def get_table_by_id(table_id: str) -> Optional[Tuple[Dict[str, Any], str]]:
+    """Return (table, planId) for a table by its own id, across all plans."""
+    for t in await list_tables():
+        if t.get("id") == table_id:
+            return t, t.get("planId")
+    return None
+
+
 async def suggest(raw: Any, limit: int = 6) -> List[str]:
     """Nearby table numbers to offer when a typed one doesn't exist."""
     key = normalize_table_number(raw)
@@ -97,8 +105,18 @@ async def suggest(raw: Any, limit: int = 6) -> List[str]:
 
 
 async def set_table_status(table_id: str, plan_id: str, status: str,
-                           order_id: Optional[str] = None) -> bool:
-    """Write a table's status back onto its plan. Returns True if it changed."""
+                           order_id: Optional[str] = None,
+                           reservation_id: Optional[str] = None,
+                           clear_reservation: bool = False) -> bool:
+    """Write a table's status back onto its plan. Returns True if it changed.
+
+    `reservation_id` links the table to a booking/walk-in the same way
+    `order_id` links it to a POS sale (both are just carried on the table
+    dict). Freeing a table (`status="available"`) always clears both —
+    `clear_reservation` lets a caller clear the reservation link without
+    freeing the table outright (e.g. a completed reservation moves the
+    table to "cleaning", not straight back to "available").
+    """
     plan = await db.floor_plans.find_one({"id": plan_id}, {"_id": 0})
     if not plan:
         return False
@@ -109,8 +127,14 @@ async def set_table_status(table_id: str, plan_id: str, status: str,
             t["status"] = status
             if status == "available":
                 t["currentOrderId"] = None
-            elif order_id is not None:
-                t["currentOrderId"] = order_id
+                t["currentReservationId"] = None
+            else:
+                if order_id is not None:
+                    t["currentOrderId"] = order_id
+                if reservation_id is not None:
+                    t["currentReservationId"] = reservation_id
+                elif clear_reservation:
+                    t["currentReservationId"] = None
             hit = True
             break
     if not hit:
