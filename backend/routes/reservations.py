@@ -3,7 +3,7 @@ from fastapi.responses import StreamingResponse
 from typing import List, Optional
 from datetime import datetime
 from database import db
-from deps import get_user
+from deps import get_user, require_owner_or_manager
 from services import floor_tables
 from models.reservation import Reservation, ReservationCreate, ReservationUpdate
 from models.floor_plan import FloorPlan, FloorPlanCreate, FloorPlanUpdate
@@ -137,10 +137,10 @@ async def create_reservation(reservation: ReservationCreate):
     doc = res_obj.dict()
     await db.reservations.insert_one(doc)
     if reservation.tableId:
-        await db.floor_tables.update_one(
-            {"id": reservation.tableId},
-            {"$set": {"status": "reserved", "currentReservationId": res_obj.id}}
-        )
+        found = await floor_tables.get_table_by_id(reservation.tableId)
+        if found:
+            _, plan_id = found
+            await floor_tables.set_table_status(reservation.tableId, plan_id, "reserved", reservation_id=res_obj.id)
     if reservation.customerId:
         await db.customers.update_one(
             {"id": reservation.customerId},
@@ -203,10 +203,10 @@ async def delete_reservation(reservation_id: str):
     if not res:
         raise HTTPException(status_code=404, detail="Reservation not found")
     if res.get("tableId"):
-        await db.floor_tables.update_one(
-            {"id": res["tableId"]},
-            {"$set": {"status": "available", "currentReservationId": None}}
-        )
+        found = await floor_tables.get_table_by_id(res["tableId"])
+        if found:
+            _, plan_id = found
+            await floor_tables.set_table_status(res["tableId"], plan_id, "available")
     await db.reservations.delete_one({"id": reservation_id})
     try:
         from services.bookings_partner_client import mirror_reservation_status
@@ -224,9 +224,10 @@ async def seat_reservation(reservation_id: str, table_id: Optional[str] = None):
     update_data = {"status": "seated", "seatedAt": datetime.utcnow().isoformat(), "updatedAt": datetime.utcnow().isoformat()}
     if tid:
         update_data["tableId"] = tid
-        await db.floor_tables.update_one(
-            {"id": tid}, {"$set": {"status": "occupied", "currentReservationId": reservation_id}}
-        )
+        found = await floor_tables.get_table_by_id(tid)
+        if found:
+            _, plan_id = found
+            await floor_tables.set_table_status(tid, plan_id, "occupied", reservation_id=reservation_id)
     await db.reservations.update_one({"id": reservation_id}, {"$set": update_data})
     return {"message": "Guest seated", "tableId": tid}
 
@@ -240,9 +241,10 @@ async def complete_reservation(reservation_id: str):
         {"$set": {"status": "completed", "completedAt": datetime.utcnow().isoformat(), "updatedAt": datetime.utcnow().isoformat()}}
     )
     if res.get("tableId"):
-        await db.floor_tables.update_one(
-            {"id": res["tableId"]}, {"$set": {"status": "cleaning", "currentReservationId": None}}
-        )
+        found = await floor_tables.get_table_by_id(res["tableId"])
+        if found:
+            _, plan_id = found
+            await floor_tables.set_table_status(res["tableId"], plan_id, "cleaning", clear_reservation=True)
     return {"message": "Reservation completed"}
 
 @router.post("/reservations/{reservation_id}/no-show")
@@ -257,10 +259,83 @@ async def mark_no_show(reservation_id: str, fee: float = 0):
     if res.get("customerId"):
         await db.customers.update_one({"id": res["customerId"]}, {"$inc": {"noShowCount": 1}})
     if res.get("tableId"):
-        await db.floor_tables.update_one(
-            {"id": res["tableId"]}, {"$set": {"status": "available", "currentReservationId": None}}
-        )
+        found = await floor_tables.get_table_by_id(res["tableId"])
+        if found:
+            _, plan_id = found
+            await floor_tables.set_table_status(res["tableId"], plan_id, "available")
     return {"message": "Marked as no-show"}
+
+
+@router.post("/reservations/{reservation_id}/cancel", response_model=Reservation)
+async def cancel_reservation(reservation_id: str, body: dict = None, user: dict = Depends(require_owner_or_manager)):
+    """Cancel a booking without destroying it — status only, so it can be
+    restored later. This is the correct way to cancel; the hard DELETE
+    endpoint is for genuinely removing a record, not everyday cancellation.
+    """
+    res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
+    if not res:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    if res.get("status") in ("cancelled", "no_show", "completed"):
+        raise HTTPException(status_code=400, detail=f"Booking is already {res.get('status')}")
+
+    reason = (body or {}).get("reason")
+    update_data = {"status": "cancelled", "cancellationReason": reason, "updatedAt": datetime.utcnow().isoformat()}
+    await db.reservations.update_one({"id": reservation_id}, {"$set": update_data})
+
+    if res.get("tableId"):
+        found = await floor_tables.get_table_by_id(res["tableId"])
+        if found:
+            _, plan_id = found
+            await floor_tables.set_table_status(res["tableId"], plan_id, "available")
+
+    updated = {**res, **update_data}
+    from services import audit_service
+    await audit_service.log_event(
+        entity_type="reservation", entity_id=reservation_id, action="updated",
+        before=res, after=updated,
+        memo=f"Booking cancelled by {user.get('email', 'staff')}" + (f": {reason}" if reason else ""),
+        severity="notice",
+    )
+    return Reservation(**updated)
+
+
+@router.post("/reservations/{reservation_id}/restore", response_model=Reservation)
+async def restore_reservation(reservation_id: str, body: dict = None, user: dict = Depends(require_owner_or_manager)):
+    """Bring a Cancelled or No-show booking back to Confirmed.
+
+    Deliberately doesn't re-occupy a table — the table was already freed
+    when the booking was cancelled/no-showed and may since have gone to
+    someone else, so restoring status alone (not a table sight-unseen) is
+    the safe default. Staff can re-run auto-assign/AI-assign afterward if
+    the guest still needs seating.
+    """
+    res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
+    if not res:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    prior_status = res.get("status")
+    if prior_status not in ("cancelled", "no_show"):
+        raise HTTPException(status_code=400, detail=f"Only a cancelled or no-show booking can be restored (this one is {prior_status})")
+
+    restored_status = (body or {}).get("status") or "confirmed"
+    if restored_status not in ("confirmed", "seated"):
+        raise HTTPException(status_code=400, detail="Can only restore to confirmed or seated")
+
+    update_data = {"status": restored_status, "cancellationReason": None, "updatedAt": datetime.utcnow().isoformat()}
+    await db.reservations.update_one({"id": reservation_id}, {"$set": update_data})
+
+    # Reverse the no-show penalty this booking caused, if any.
+    if prior_status == "no_show" and res.get("customerId"):
+        await db.customers.update_one({"id": res["customerId"]}, {"$inc": {"noShowCount": -1}})
+
+    updated = {**res, **update_data}
+    from services import audit_service
+    await audit_service.log_event(
+        entity_type="reservation", entity_id=reservation_id, action="restored",
+        before=res, after=updated,
+        memo=f"Booking restored from {prior_status} to {restored_status} by {user.get('email', 'staff')}",
+        severity="notice",
+    )
+    return Reservation(**updated)
 
 @router.get("/reservations/auto-assign/{reservation_id}")
 async def auto_assign_table(reservation_id: str):
@@ -269,20 +344,24 @@ async def auto_assign_table(reservation_id: str):
         raise HTTPException(status_code=404, detail="Reservation not found")
     party = res.get("partySize", 2)
     section_pref = res.get("section")
-    query = {"status": "available", "isActive": True, "maxCovers": {"$gte": party}}
-    if section_pref:
-        query["section"] = section_pref
-    tables = await db.floor_tables.find(query, {"_id": 0}).sort("maxCovers", 1).to_list(100)
-    if not tables:
+    all_tables = await floor_tables.list_tables()
+    candidates = [
+        t for t in all_tables
+        if t.get("status") == "available"
+        and int(t.get("maxCovers") or t.get("capacity") or 0) >= party
+        and (not section_pref or t.get("section") == section_pref)
+    ]
+    if not candidates:
+        if not all_tables:
+            return {"assigned": False, "message": "No tables are configured yet"}
         return {"assigned": False, "message": "No suitable tables available"}
-    best = tables[0]
+    candidates.sort(key=lambda t: int(t.get("maxCovers") or t.get("capacity") or 0))
+    best = candidates[0]
     await db.reservations.update_one(
         {"id": reservation_id},
         {"$set": {"tableId": best["id"], "tableNumber": best.get("number", ""), "updatedAt": datetime.utcnow().isoformat()}}
     )
-    await db.floor_tables.update_one(
-        {"id": best["id"]}, {"$set": {"status": "reserved", "currentReservationId": reservation_id}}
-    )
+    await floor_tables.set_table_status(best["id"], best.get("planId"), "reserved", reservation_id=reservation_id)
     return {"assigned": True, "table": best}
 
 
@@ -633,9 +712,9 @@ async def ai_assign_table(reservation_id: str):
         raise HTTPException(status_code=404, detail="Reservation not found")
     party = int(res.get("partySize", 2) or 2)
 
-    tables = await db.floor_tables.find({}, {"_id": 0}).to_list(500)
+    tables = await floor_tables.list_tables()
     if not tables:
-        return {"assigned": False, "reason": "No floor tables defined yet"}
+        return {"assigned": False, "reason": "No tables are configured yet"}
 
     # Time window check — pull same-day reservations conflicting with this slot
     same_day = await db.reservations.find({"date": res.get("date"), "id": {"$ne": reservation_id}}, {"_id": 0}).to_list(500)
@@ -655,7 +734,7 @@ async def ai_assign_table(reservation_id: str):
     preferred_section = (res.get("section") or "").lower()
     candidates = []
     for t in tables:
-        capacity = int(t.get("capacity", 0) or 0)
+        capacity = int(t.get("maxCovers") or t.get("capacity") or 0)
         if capacity < party:
             continue
         if conflicts(t["id"]):
@@ -676,10 +755,7 @@ async def ai_assign_table(reservation_id: str):
         {"id": reservation_id},
         {"$set": {"tableId": chosen["id"], "tableNumber": chosen.get("number") or chosen.get("name"), "updatedAt": datetime.utcnow().isoformat()}}
     )
-    await db.floor_tables.update_one(
-        {"id": chosen["id"]},
-        {"$set": {"status": "reserved", "currentReservationId": reservation_id}}
-    )
+    await floor_tables.set_table_status(chosen["id"], chosen.get("planId"), "reserved", reservation_id=reservation_id)
     return {
         "assigned": True,
         "tableId": chosen["id"],
@@ -690,19 +766,25 @@ async def ai_assign_table(reservation_id: str):
 
 @router.post("/walkins/ai-assign")
 async def ai_assign_walkin(body: dict):
-    """Walk-in helper: pick a table NOW for an unscheduled walk-in.
+    """Walk-in helper: recommend tables for an unscheduled walk-in right now.
+
+    This only recommends — it does not seat anyone. The Walk-in AI Seat
+    popup shows the top pick plus alternatives and lets staff confirm (or
+    pick a different one) via POST /walkins/seat, which is where the table
+    actually gets marked occupied.
     body: { partySize, section?, customerId? }
     """
     party = int(body.get("partySize", 1) or 1)
     section = (body.get("section") or "").lower()
-    tables = await db.floor_tables.find({}, {"_id": 0}).to_list(500)
+    tables = await floor_tables.list_tables()
     if not tables:
-        raise HTTPException(status_code=404, detail="No floor tables defined")
+        raise HTTPException(status_code=404, detail="No tables are configured yet")
+
     candidates = []
     for t in tables:
         if t.get("status") not in (None, "available", "cleaning"):
             continue
-        cap = int(t.get("capacity", 0) or 0)
+        cap = int(t.get("maxCovers") or t.get("capacity") or 0)
         if cap < party:
             continue
         score = cap - party
@@ -711,17 +793,67 @@ async def ai_assign_walkin(body: dict):
         if t.get("status") == "available":
             score -= 1
         candidates.append((score, t))
+
+    guest = None
+    customer_id = body.get("customerId")
+    if customer_id:
+        cust = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+        if cust:
+            guest = {
+                "id": cust.get("id"), "name": cust.get("name"),
+                "isVip": bool(cust.get("isVip")), "visits": cust.get("visits", 0),
+                "totalSpent": cust.get("totalSpent", 0),
+                "dietaryRestrictions": cust.get("dietaryRestrictions") or [],
+                "allergies": cust.get("allergies") or [],
+            }
+
     if not candidates:
-        return {"assigned": False, "reason": "No suitable table free right now"}
+        return {"assigned": False, "reason": "No suitable table free right now", "guest": guest, "partySize": party}
+
     candidates.sort(key=lambda x: x[0])
-    chosen = candidates[0][1]
+
+    def _table_view(score, t):
+        return {
+            "tableId": t["id"], "tableNumber": t.get("number") or t.get("name"),
+            "capacity": int(t.get("maxCovers") or t.get("capacity") or 0),
+            "status": t.get("status") or "available",
+            "section": t.get("section"), "floor": t.get("planName"), "floorId": t.get("planId"),
+            "score": score,
+        }
+
+    ranked = [_table_view(s, t) for s, t in candidates[:6]]
+    return {
+        "assigned": True, "partySize": party, "guest": guest,
+        "recommended": ranked[0], "alternatives": ranked[1:],
+    }
+
+
+@router.post("/walkins/seat")
+async def seat_walkin(body: dict):
+    """Commit a walk-in to a specific table — the confirm step after
+    /walkins/ai-assign recommends one.
+
+    Re-checks the table's live status right before writing, so two staff
+    confirming the same recommendation in quick succession can't both seat
+    a party on it — the second one gets a 409 instead of a silent overwrite.
+    body: { tableId, partySize?, guestName?, customerId? }
+    """
+    table_id = body.get("tableId")
+    if not table_id:
+        raise HTTPException(status_code=400, detail="tableId required")
+    found = await floor_tables.get_table_by_id(table_id)
+    if not found:
+        raise HTTPException(status_code=404, detail="Table not found")
+    table, plan_id = found
+    if table.get("status") not in (None, "available", "cleaning"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Table {table.get('number') or table.get('name')} is already {table.get('status')} — pick another table",
+        )
     walkin_id = f"WALK-{datetime.utcnow().strftime('%H%M%S')}"
-    await db.floor_tables.update_one(
-        {"id": chosen["id"]},
-        {"$set": {"status": "occupied", "currentReservationId": walkin_id}}
-    )
+    await floor_tables.set_table_status(table_id, plan_id, "occupied", reservation_id=walkin_id)
     return {
         "assigned": True, "walkinId": walkin_id,
-        "tableId": chosen["id"], "tableName": chosen.get("name") or chosen.get("number"),
-        "section": chosen.get("section"), "score": candidates[0][0],
+        "tableId": table_id, "tableName": table.get("name") or table.get("number"),
+        "section": table.get("section"),
     }

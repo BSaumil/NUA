@@ -276,6 +276,7 @@ export const channelMenusAPI = {
 export const reservationsAIAPI = {
   aiAssignTable: (reservationId) => api.post(`/reservations/${reservationId}/ai-assign-table`),
   aiAssignWalkin: (body) => api.post('/walkins/ai-assign', body),
+  seatWalkin: (body) => api.post('/walkins/seat', body),
 };
 
 // Modifiers API
@@ -297,6 +298,8 @@ export const reservationsAPI = {
   seat: (id, tableId) => api.post(`/reservations/${id}/seat`, null, { params: { table_id: tableId } }),
   complete: (id) => api.post(`/reservations/${id}/complete`),
   noShow: (id, fee) => api.post(`/reservations/${id}/no-show`, null, { params: { fee } }),
+  cancel: (id, reason) => api.post(`/reservations/${id}/cancel`, { reason }),
+  restore: (id, status) => api.post(`/reservations/${id}/restore`, status ? { status } : {}),
   autoAssign: (id) => api.get(`/reservations/auto-assign/${id}`),
   // Booking calendar helpers
   dayCounts: (fromDate, toDate) => api.get('/reservations/day-counts', { params: { fromDate, toDate } }),
@@ -614,6 +617,14 @@ export const reservationFeaturesAPI = {
   getSocialAccounts: () => api.get('/clubmember/social-accounts'),
   addSocialAccount: (data) => api.post('/clubmember/social-accounts', data),
   removeSocialAccount: (id) => api.delete(`/clubmember/social-accounts/${id}`),
+};
+
+// Booking Analytics — real reporting layer (channels, time analysis, table
+// performance, actual/estimated/unknown revenue, report builder + exports)
+export const bookingAnalyticsAPI = {
+  getReport: (params) => api.get('/booking-analytics/report', { params }),
+  downloadCsv: (params) => api.get('/booking-analytics/report.csv', { params, responseType: 'blob' }),
+  downloadPdf: (params) => api.get('/booking-analytics/report.pdf', { params, responseType: 'blob' }),
 };
 
 // Loyalty API (enhanced)

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Plus, Save, Trash2, RotateCcw, Maximize2, Circle, Square, RectangleHorizontal,
-  Users, ChevronDown, Eye, Settings, Pencil, Crown, BrushCleaning
+  Users, ChevronDown, Eye, Settings, Pencil, Crown, BrushCleaning, Layers
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -17,7 +17,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger
 } from '../components/ui/dropdown-menu';
 import { useTheme } from '../contexts/ThemeContext';
-import { floorPlansAPI, tableCoursesAPI, v15API } from '../services/api';
+import { floorPlansAPI, tableCoursesAPI, v15API, reservationFeaturesAPI } from '../services/api';
 import { toast } from 'sonner';
 import { TableInfoDrawer } from '../components/floor/TableInfoDrawer';
 import useLiveFeed from '../hooks/useLiveFeed';
@@ -69,6 +69,54 @@ export default function FloorPlan() {
   // staff to juggle separate tabs or leave the floor to rearrange seating.
   const [mergeMode, setMergeMode] = useState(false);
   const [mergeSelection, setMergeSelection] = useState([]);
+
+  // Table Combinations: which physical tables can be pushed together to seat
+  // a party larger than any single table's capacity — a static grouping used
+  // when assigning big bookings, not to be confused with Merge Tables above
+  // (which combines two already-open POS checks into one, a live/financial
+  // operation). Previously its own separate "Table Layout" nav page; folded
+  // in here so staff have one destination for everything table-related
+  // instead of two similarly-named, easy-to-confuse screens. Reuses the
+  // existing table_combinations data model and reservationFeaturesAPI
+  // unchanged — only the UI moved.
+  const [combosOpen, setCombosOpen] = useState(false);
+  const [combos, setCombos] = useState([]);
+  const [comboSelection, setComboSelection] = useState([]);
+  const [comboName, setComboName] = useState('');
+  const [comboMaxCovers, setComboMaxCovers] = useState('');
+
+  const fetchCombos = useCallback(async () => {
+    try {
+      const r = await reservationFeaturesAPI.getTableCombos();
+      setCombos(r.data || []);
+    } catch { /* non-fatal */ }
+  }, []);
+
+  const toggleComboSelect = (tableKey) => {
+    setComboSelection(sel => sel.includes(tableKey) ? sel.filter(id => id !== tableKey) : [...sel, tableKey]);
+  };
+
+  const createCombo = async () => {
+    if (comboSelection.length < 2) { toast.error('Select at least 2 tables'); return; }
+    try {
+      await reservationFeaturesAPI.createTableCombo({
+        tableIds: comboSelection,
+        name: comboName || `Combo ${comboSelection.join('+')}`,
+        maxCovers: parseInt(comboMaxCovers) || comboSelection.length * 4,
+      });
+      toast.success('Combination created');
+      setComboSelection([]); setComboName(''); setComboMaxCovers('');
+      fetchCombos();
+    } catch { toast.error('Failed to create combination'); }
+  };
+
+  const deleteCombo = async (id) => {
+    try {
+      await reservationFeaturesAPI.deleteTableCombo(id);
+      setCombos(combos.filter(c => c.id !== id));
+      toast.success('Combination deleted');
+    } catch { toast.error('Failed to delete'); }
+  };
 
   const fetchCourses = useCallback(async () => {
     try {
@@ -390,6 +438,11 @@ export default function FloorPlan() {
             <Plus size={16} className="mr-1" /> New Floor
           </Button>
           {mode === 'view' && (
+            <Button variant="outline" onClick={() => { setCombosOpen(true); fetchCombos(); }} data-testid="table-combos-btn">
+              <Layers size={16} className="mr-1" /> Table Combinations
+            </Button>
+          )}
+          {mode === 'view' && (
             <Button variant={mergeMode ? 'default' : 'outline'}
               onClick={() => { setMergeMode(m => !m); setMergeSelection([]); }}
               style={mergeMode ? { background: '#4F46E5' } : {}}
@@ -617,6 +670,58 @@ export default function FloorPlan() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setNewPlanDialog(false)}>Cancel</Button>
             <Button onClick={createPlan} style={{ background: theme.primary }} data-testid="create-plan-btn">Create</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Table Combinations dialog — which tables can be pushed together for
+          a large party. Separate concept from Merge Tables (live checks). */}
+      <Dialog open={combosOpen} onOpenChange={setCombosOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto" data-testid="table-combos-dialog">
+          <DialogHeader>
+            <DialogTitle>Table Combinations</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-gray-500 -mt-2">
+            Group tables that can be pushed together for a large party. Click to select, then combine.
+          </p>
+          <div className="grid grid-cols-6 md:grid-cols-8 gap-2">
+            {tables.map(t => {
+              const key = t.number?.toString() || t.id;
+              const isSelected = comboSelection.includes(key);
+              return (
+                <button key={key} onClick={() => toggleComboSelect(key)}
+                  className={`p-2 rounded-lg border-2 text-center transition-all cursor-pointer ${isSelected ? 'border-blue-500 bg-blue-50 shadow-md' : 'border-gray-200 hover:border-gray-400'}`}
+                  data-testid={`combo-table-${key}`}>
+                  <p className="text-sm font-bold">{t.number || t.id}</p>
+                  <p className="text-[10px] text-gray-500">{t.maxCovers || t.capacity || 4} seats</p>
+                </button>
+              );
+            })}
+            {tables.length === 0 && <p className="col-span-full text-gray-400 text-sm text-center py-4">No tables on this floor yet.</p>}
+          </div>
+          {comboSelection.length > 0 && (
+            <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
+              <Badge className="bg-blue-600 text-white">{comboSelection.length} selected</Badge>
+              <Input placeholder="Combination name" className="flex-1 h-8 text-sm" value={comboName} onChange={e => setComboName(e.target.value)} data-testid="combo-name-input" />
+              <Input type="number" placeholder="Max covers" className="w-28 h-8 text-sm" value={comboMaxCovers} onChange={e => setComboMaxCovers(e.target.value)} data-testid="combo-covers-input" />
+              <Button size="sm" style={{ background: theme.primary }} onClick={createCombo} data-testid="create-combo-btn"><Plus size={14} className="mr-1" /> Add</Button>
+            </div>
+          )}
+          <div className="space-y-2 pt-2 border-t">
+            <p className="text-sm font-medium">Existing Combinations</p>
+            {combos.map(c => (
+              <div key={c.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg" data-testid={`combo-${c.id}`}>
+                <div>
+                  <p className="font-medium text-sm">{c.name}</p>
+                  <p className="text-xs text-gray-500">Tables: {(c.tableIds || []).join(', ')} | Max {c.maxCovers} covers</p>
+                </div>
+                <Button variant="ghost" size="sm" className="text-red-500" onClick={() => deleteCombo(c.id)}><Trash2 size={14} /></Button>
+              </div>
+            ))}
+            {combos.length === 0 && <p className="text-gray-400 text-sm text-center py-4">No combinations yet</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCombosOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

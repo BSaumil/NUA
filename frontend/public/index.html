@@ -33,8 +33,34 @@
     />
     <meta name="twitter:image" content="%PUBLIC_URL%/android-chrome-512x512.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="%PUBLIC_URL%/apple-touch-icon-180x180.png" />
-    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+    <link rel="manifest" id="nua-manifest" href="%PUBLIC_URL%/manifest.json" />
     <title>NUA POS</title>
+    <script>
+      // One build serves three front doors (app. / staff. / owner.), so the
+      // install prompt has to describe whichever one you're actually on —
+      // otherwise a crew member adding the staff app to their home screen
+      // gets an icon labelled "NUA POS" that opens the till. Runs before the
+      // bundle loads so the browser reads the right manifest first time.
+      // Mirrors the resolution order in src/lib/appShell.js.
+      (function () {
+        try {
+          var VALID = ['pos', 'staff', 'owner'];
+          var shell = new URLSearchParams(window.location.search).get('shell');
+          if (!shell || VALID.indexOf(shell) === -1) {
+            shell = localStorage.getItem('nua_app_shell');
+          }
+          if (!shell || VALID.indexOf(shell) === -1) {
+            var host = window.location.hostname || '';
+            shell = host.indexOf('staff.') === 0 ? 'staff'
+                  : host.indexOf('owner.') === 0 ? 'owner' : 'pos';
+          }
+          if (shell === 'pos') return;
+          var link = document.getElementById('nua-manifest');
+          if (link) link.setAttribute('href', '/manifest.' + shell + '.json');
+          document.title = shell === 'staff' ? 'NUA Crew' : 'NUA Pulse';
+        } catch (e) { /* keep the default manifest */ }
+      })();
+    </script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>

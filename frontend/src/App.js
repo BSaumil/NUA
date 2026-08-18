@@ -56,7 +56,6 @@ const MemberPortal = lazy(() => import('./pages/MemberPortal'));
 const StaffRoster = lazy(() => import('./pages/StaffRoster'));
 const StaffLeaderboard = lazy(() => import('./pages/StaffLeaderboard'));
 const QuarterlyReview = lazy(() => import('./pages/QuarterlyReview'));
-const TableLayout = lazy(() => import('./pages/TableLayout'));
 const BookingSettings = lazy(() => import('./pages/BookingSettings'));
 const BookingExperience = lazy(() => import('./pages/BookingExperience'));
 const BookingAnalytics = lazy(() => import('./pages/BookingAnalytics'));
@@ -223,7 +222,12 @@ function ProtectedRoutes() {
   // staff shell, the owner shell keeps the full admin nav — the Dashboard
   // app is the front door, not a cage, since owners need to reach every
   // report and drill-down NUA POS has.
-  const home = shell === 'owner' ? '/owner-dashboard'
+  // owner.nuapos.com.au opens Pulse — but only for the roles Pulse is for.
+  // A cashier or kitchen login reaching the owner subdomain (a shared
+  // device, a bookmark, a mistyped URL) still lands on their own home
+  // screen rather than a dashboard of takings and margins.
+  const isManagement = user.role === 'owner' || user.role === 'manager';
+  const home = (shell === 'owner' && isManagement) ? '/owner-dashboard'
     : user.role === 'cashier' ? '/pos' : user.role === 'kitchen' ? '/kitchen' : '/today';
   return (
     <LicenseProvider>
@@ -232,7 +236,9 @@ function ProtectedRoutes() {
         <Route path="/" element={<Navigate to={home} replace />} />
         <Route path="/today" element={<Today />} />
         <Route path="/staff-app" element={<StaffApp />} />
-        <Route path="/owner-dashboard" element={<OwnerDashboardApp />} />
+        {/* Pulse is owner/manager only — the route itself is guarded, not
+            just the nav entry, so typing the URL doesn't get you in either. */}
+        <Route path="/owner-dashboard" element={isManagement ? <OwnerDashboardApp /> : <Navigate to={home} replace />} />
         <Route path="/dashboard" element={<Dashboard />} />
         {/* Pre-Shift Briefing merged into Today (Aug 2026) — old links/bookmarks still land somewhere useful */}
         <Route path="/pre-shift" element={<Navigate to="/today" replace />} />
@@ -247,7 +253,8 @@ function ProtectedRoutes() {
         <Route path="/marketing" element={<Marketing />} />
         <Route path="/floor-plan" element={<FloorPlan />} />
         <Route path="/waitlist" element={<WaitlistPage />} />
-        <Route path="/table-layout" element={<TableLayout />} />
+        {/* Table Layout's combinations feature merged into Floor Plan as a panel (Aug 2026) */}
+        <Route path="/table-layout" element={<Navigate to="/floor-plan" replace />} />
         <Route path="/booking-settings" element={<BookingSettings />} />
         <Route path="/booking-experience" element={<Navigate to="/marketing?tab=experiences" replace />} />
         <Route path="/clubmember" element={<Navigate to="/marketing?tab=club" replace />} />

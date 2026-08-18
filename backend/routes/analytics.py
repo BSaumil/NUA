@@ -859,7 +859,12 @@ async def _notify_critical_alerts_once(today_iso: str, alerts: List[dict]) -> No
 
 # ============ TODAY PULSE — one call that answers "is anything wrong right now?" ============
 @router.get("/analytics/today-pulse")
-async def get_today_pulse(_user: dict = Depends(get_user)):
+async def get_today_pulse(_user: dict = Depends(require_owner_or_manager)):
+    # Owner/manager only: takings against target, labour cost and labour %,
+    # refund totals and comp/void counts. Today.jsx already skips this call
+    # for cashier/kitchen logins and hides the tiles — but the client
+    # declining to ask is not the same as the server declining to answer,
+    # and the owner.nuapos.com.au shell makes that distinction matter.
     """Single feed for the Today home screen: sales vs target, labor %,
     and exception alerts (refund spikes, voids, stockouts, low stock).
     Alerts carry a severity and a deep-link so problems tap the manager
