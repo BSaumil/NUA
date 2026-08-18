@@ -222,7 +222,12 @@ function ProtectedRoutes() {
   // staff shell, the owner shell keeps the full admin nav — the Dashboard
   // app is the front door, not a cage, since owners need to reach every
   // report and drill-down NUA POS has.
-  const home = shell === 'owner' ? '/owner-dashboard'
+  // owner.nuapos.com.au opens Pulse — but only for the roles Pulse is for.
+  // A cashier or kitchen login reaching the owner subdomain (a shared
+  // device, a bookmark, a mistyped URL) still lands on their own home
+  // screen rather than a dashboard of takings and margins.
+  const isManagement = user.role === 'owner' || user.role === 'manager';
+  const home = (shell === 'owner' && isManagement) ? '/owner-dashboard'
     : user.role === 'cashier' ? '/pos' : user.role === 'kitchen' ? '/kitchen' : '/today';
   return (
     <LicenseProvider>
@@ -231,7 +236,9 @@ function ProtectedRoutes() {
         <Route path="/" element={<Navigate to={home} replace />} />
         <Route path="/today" element={<Today />} />
         <Route path="/staff-app" element={<StaffApp />} />
-        <Route path="/owner-dashboard" element={<OwnerDashboardApp />} />
+        {/* Pulse is owner/manager only — the route itself is guarded, not
+            just the nav entry, so typing the URL doesn't get you in either. */}
+        <Route path="/owner-dashboard" element={isManagement ? <OwnerDashboardApp /> : <Navigate to={home} replace />} />
         <Route path="/dashboard" element={<Dashboard />} />
         {/* Pre-Shift Briefing merged into Today (Aug 2026) — old links/bookmarks still land somewhere useful */}
         <Route path="/pre-shift" element={<Navigate to="/today" replace />} />
