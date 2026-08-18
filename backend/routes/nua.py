@@ -21,7 +21,7 @@ async def list_insights(
     severity: Optional[str] = None,
     include_resolved: bool = False,
     limit: int = 200,
-    _: dict = Depends(get_user),
+    _: dict = Depends(require_owner_or_manager),
 ):
     q = {}
     if category: q["category"] = category
@@ -33,7 +33,7 @@ async def list_insights(
 
 
 @router.get("/insights/summary")
-async def insights_summary(_: dict = Depends(get_user)):
+async def insights_summary(_: dict = Depends(require_owner_or_manager)):
     """Grouped counts for the dashboard."""
     pipeline = [
         {"$match": {"resolvedAt": None}},
@@ -573,13 +573,20 @@ async def flag_execution(audit_id: str, body: dict, user: dict = Depends(require
 
 
 @router.get("/health-score")
-async def get_health_score(_: dict = Depends(get_user)):
+async def get_health_score(_: dict = Depends(require_owner_or_manager)):
+    # Owner/manager only — the payload carries gross and net margin.
+    # POST /briefing/regenerate below was already gated this way; these read
+    # endpoints were simply missed, which let any authenticated account (a
+    # cashier or kitchen login) pull the venue's margins straight from the API.
     return await health_score.compute_health()
 
 
 @router.get("/briefing")
-async def get_briefing(force: bool = False, _: dict = Depends(get_user)):
-    """Return today's briefing — cached in db.ash_briefings, regenerate if force=true."""
+async def get_briefing(force: bool = False, _: dict = Depends(require_owner_or_manager)):
+    """Return today's briefing — cached in db.ash_briefings, regenerate if force=true.
+
+    Owner/manager only: the narrative quotes revenue, forecast and margin.
+    """
     today = datetime.now(timezone.utc).date().isoformat()
     if not force:
         existing = await db.ash_briefings.find_one({"date": today}, {"_id": 0})
