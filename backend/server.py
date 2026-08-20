@@ -65,11 +65,13 @@ from routes.audit import router as audit_router
 from routes.approvals import router as approvals_router
 from routes.nua import router as nua_router
 from routes.repo_sync import router as repo_sync_router
+from routes.marketing_digest import router as marketing_digest_router
 from routes.hq import router as hq_router
 from routes.ops import router as ops_router
 from routes.changelog import router as changelog_router
 from routes.crypto_payments import router as crypto_payments_router
 from routes.voice_calls import router as voice_calls_router
+from routes.voice_inbound import router as voice_inbound_router
 from routes.bill_split import router as bill_split_router
 from middleware.license_middleware import LicenseEnforcementMiddleware
 from middleware.actor_context import ActorContextMiddleware
@@ -134,12 +136,14 @@ api_router.include_router(audit_router)
 api_router.include_router(approvals_router)
 api_router.include_router(nua_router)
 api_router.include_router(repo_sync_router)
+api_router.include_router(marketing_digest_router)
 api_router.include_router(hq_router)
 api_router.include_router(multi_tenant_router)
 api_router.include_router(ops_router)
 api_router.include_router(changelog_router)
 api_router.include_router(crypto_payments_router)
 api_router.include_router(voice_calls_router)
+api_router.include_router(voice_inbound_router)
 api_router.include_router(bill_split_router)
 
 @api_router.get("/")

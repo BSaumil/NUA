@@ -1095,4 +1095,9 @@ export const changelogAPI = {
   summary: () => api.get('/changelog/summary'),
 };
 
+export const repoSyncAPI = {
+  status: (limit = 10) => api.get('/repo-sync/status', { params: { limit } }),
+  run: () => api.post('/repo-sync/run'),
+};
+
 export default api;

@@ -6,6 +6,7 @@ import { Button } from '../components/ui/button';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { analyticsAPI, preShiftAPI, finalizeAPI } from '../services/api';
+import SyncHistoryCard from '../components/today/SyncHistoryCard';
 import {
   AlertTriangle, AlertOctagon, Info, RefreshCw, ShoppingCart, ChefHat,
   Utensils, CalendarClock, Users2, TrendingUp, CheckCircle2, ArrowRight,
@@ -451,6 +452,8 @@ const Today = () => {
               ))}
             </CardContent>
           </Card>
+
+          {isOwner && <SyncHistoryCard />}
         </div>
       )}
     </div>
