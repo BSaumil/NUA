@@ -22,6 +22,7 @@ import BookingHeatmap from './BookingHeatmap';
 import BookingSourceStrip from '../components/reservations/BookingSourceStrip';
 import BookingMonthCalendar from '../components/reservations/BookingMonthCalendar';
 import WalkInAISeatDialog from '../components/reservations/WalkInAISeatDialog';
+import LiveCallBanner from '../components/bookings/LiveCallBanner';
 
 const TIME_SLOTS = [];
 for (let h = 9; h <= 22; h++) {
@@ -254,6 +255,7 @@ export default function Reservations() {
 
   return (
     <div className="space-y-6" data-testid="reservations-page">
+      <LiveCallBanner />
       {/* Master Tabs: Bookings vs AI Inbox */}
       <Tabs value={mainTab} onValueChange={setMainTab}>
         <TabsList data-testid="reservations-main-tabs">

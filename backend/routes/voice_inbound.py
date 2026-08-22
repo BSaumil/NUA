@@ -384,3 +384,36 @@ async def inbound_recent(request: Request, limit: int = 20):
         {"direction": "inbound"}, {"_id": 0}
     ).sort("createdAt", -1).to_list(limit)
     return rows
+
+
+@router.get("/voice/inbound/active")
+async def inbound_active(request: Request):
+    """Currently in-progress inbound call(s), so the Bookings screen can
+    show a live banner: 'NUA is on a call — party of 4 for Friday at 7pm…'
+    with the transcript streaming in. Small payload, safe to poll every 2s."""
+    user = await get_current_user(request)
+    if user.get("role") not in ("owner", "manager", "cashier", "kitchen"):
+        raise HTTPException(403, "Staff only")
+    # Anything that started in the last 5 minutes and hasn't ended is live.
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    rows = await db.voice_calls.find(
+        {"direction": "inbound", "status": "in_progress", "createdAt": {"$gte": cutoff}},
+        {"_id": 0}
+    ).sort("createdAt", -1).to_list(5)
+    # Compact projection — banner only needs the shape of the call, not history.
+    def _slim(c: dict) -> dict:
+        st = c.get("state") or {}
+        return {
+            "id": c.get("id"),
+            "phone": c.get("phone"),
+            "startedAt": c.get("createdAt"),
+            "turns": c.get("turns", 0),
+            "slots": {
+                "partySize": st.get("partySize"),
+                "date": st.get("date"),
+                "time": st.get("time"),
+                "name": st.get("name"),
+            },
+            "transcript": (c.get("transcript") or [])[-6:],  # last 3 exchanges
+        }
+    return [_slim(r) for r in rows]
