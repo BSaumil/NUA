@@ -1,0 +1,61 @@
+{
+  "split": {
+    "title": "Split Bill",
+    "subtitle": "Pay only your share",
+    "yourShare": "Your Share",
+    "totalBill": "Total Bill",
+    "mode": "Split Mode",
+    "items": "By Items",
+    "equal": "Equal Split",
+    "selectItems": "Tap items to claim",
+    "selectedCount": "{{count}} items selected",
+    "phone": "Mobile Number",
+    "enterPhone": "Enter your phone number",
+    "sendCode": "Send Verification Code",
+    "code": "Verification Code",
+    "enterCode": "Enter the code we texted you",
+    "verify": "Verify",
+    "claim": "Claim Items",
+    "pay": "Pay Now",
+    "payingFor": "Paying for {{count}} items",
+    "amount": "${{amount}}",
+    "status": {
+      "open": "Available",
+      "claimed": "Claimed",
+      "paid": "Paid"
+    },
+    "messages": {
+      "codeSent": "Code sent to {{phone}}",
+      "codeExpired": "Code expired",
+      "claimed": "Items claimed successfully",
+      "paymentProcessing": "Processing payment...",
+      "paymentComplete": "Payment complete!"
+    },
+    "group": {
+      "title": "Group Split",
+      "organizer": "Organizer",
+      "participants": "Participants",
+      "invite": "Invite Guest",
+      "invitePhone": "Guest phone number",
+      "sendInvite": "Send Invite",
+      "joinGroup": "Join Group",
+      "inviteCode": "Invite Code",
+      "enterCode": "Enter invite code"
+    },
+    "tab": {
+      "title": "Pay Later",
+      "partial": "Pay Partial Amount",
+      "payNow": "Pay Now",
+      "amountToPay": "Amount to Pay",
+      "remaining": "Remaining Balance",
+      "tabCreated": "Tab created - you can pay the rest later"
+    },
+    "errors": {
+      "phoneRequired": "Please enter your phone number",
+      "codeRequired": "Please enter your verification code",
+      "invalidCode": "Invalid verification code",
+      "noItems": "Please select at least one item",
+      "amountRequired": "Please enter an amount to pay"
+    }
+  }
+}
