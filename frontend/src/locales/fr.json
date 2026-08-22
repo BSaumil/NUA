@@ -1,0 +1,61 @@
+{
+  "split": {
+    "title": "Partage de l'Addition",
+    "subtitle": "Payez uniquement votre part",
+    "yourShare": "Votre Part",
+    "totalBill": "Montant Total",
+    "mode": "Mode de Partage",
+    "items": "Par Articles",
+    "equal": "Partage Équitable",
+    "selectItems": "Appuyez sur les articles à réclamer",
+    "selectedCount": "{{count}} articles sélectionnés",
+    "phone": "Numéro de Téléphone",
+    "enterPhone": "Entrez votre numéro de téléphone",
+    "sendCode": "Envoyer le Code de Vérification",
+    "code": "Code de Vérification",
+    "enterCode": "Entrez le code que nous vous avons envoyé",
+    "verify": "Vérifier",
+    "claim": "Réclamer les Articles",
+    "pay": "Payer Maintenant",
+    "payingFor": "Paiement pour {{count}} articles",
+    "amount": "{{amount}} €",
+    "status": {
+      "open": "Disponible",
+      "claimed": "Réclamé",
+      "paid": "Payé"
+    },
+    "messages": {
+      "codeSent": "Code envoyé à {{phone}}",
+      "codeExpired": "Code expiré",
+      "claimed": "Articles réclamés avec succès",
+      "paymentProcessing": "Traitement du paiement...",
+      "paymentComplete": "Paiement effectué!"
+    },
+    "group": {
+      "title": "Partage en Groupe",
+      "organizer": "Organisateur",
+      "participants": "Participants",
+      "invite": "Inviter un Invité",
+      "invitePhone": "Numéro de téléphone de l'invité",
+      "sendInvite": "Envoyer l'Invitation",
+      "joinGroup": "Rejoindre le Groupe",
+      "inviteCode": "Code d'Invitation",
+      "enterCode": "Entrez le code d'invitation"
+    },
+    "tab": {
+      "title": "Payer Plus Tard",
+      "partial": "Payer un Montant Partiel",
+      "payNow": "Payer Maintenant",
+      "amountToPay": "Montant à Payer",
+      "remaining": "Solde Restant",
+      "tabCreated": "Compte créé - vous pouvez payer le reste plus tard"
+    },
+    "errors": {
+      "phoneRequired": "Veuillez entrer votre numéro de téléphone",
+      "codeRequired": "Veuillez entrer votre code de vérification",
+      "invalidCode": "Code de vérification invalide",
+      "noItems": "Veuillez sélectionner au moins un article",
+      "amountRequired": "Veuillez entrer un montant à payer"
+    }
+  }
+}

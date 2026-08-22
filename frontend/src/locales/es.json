@@ -1,0 +1,61 @@
+{
+  "split": {
+    "title": "Dividir Cuenta",
+    "subtitle": "Paga solo tu parte",
+    "yourShare": "Tu Parte",
+    "totalBill": "Cuenta Total",
+    "mode": "Modo de División",
+    "items": "Por Artículos",
+    "equal": "División Equitativa",
+    "selectItems": "Toca artículos para reclamar",
+    "selectedCount": "{{count}} artículos seleccionados",
+    "phone": "Número de Teléfono",
+    "enterPhone": "Ingresa tu número de teléfono",
+    "sendCode": "Enviar Código de Verificación",
+    "code": "Código de Verificación",
+    "enterCode": "Ingresa el código que te enviamos",
+    "verify": "Verificar",
+    "claim": "Reclamar Artículos",
+    "pay": "Pagar Ahora",
+    "payingFor": "Pagando por {{count}} artículos",
+    "amount": "${{amount}}",
+    "status": {
+      "open": "Disponible",
+      "claimed": "Reclamado",
+      "paid": "Pagado"
+    },
+    "messages": {
+      "codeSent": "Código enviado a {{phone}}",
+      "codeExpired": "Código expirado",
+      "claimed": "Artículos reclamados exitosamente",
+      "paymentProcessing": "Procesando pago...",
+      "paymentComplete": "¡Pago completado!"
+    },
+    "group": {
+      "title": "División en Grupo",
+      "organizer": "Organizador",
+      "participants": "Participantes",
+      "invite": "Invitar Invitado",
+      "invitePhone": "Número de teléfono del invitado",
+      "sendInvite": "Enviar Invitación",
+      "joinGroup": "Unirse al Grupo",
+      "inviteCode": "Código de Invitación",
+      "enterCode": "Ingresa el código de invitación"
+    },
+    "tab": {
+      "title": "Pagar Después",
+      "partial": "Pagar Cantidad Parcial",
+      "payNow": "Pagar Ahora",
+      "amountToPay": "Cantidad a Pagar",
+      "remaining": "Saldo Pendiente",
+      "tabCreated": "Pestaña creada - puedes pagar el resto después"
+    },
+    "errors": {
+      "phoneRequired": "Por favor ingresa tu número de teléfono",
+      "codeRequired": "Por favor ingresa tu código de verificación",
+      "invalidCode": "Código de verificación inválido",
+      "noItems": "Por favor selecciona al menos un artículo",
+      "amountRequired": "Por favor ingresa una cantidad a pagar"
+    }
+  }
+}

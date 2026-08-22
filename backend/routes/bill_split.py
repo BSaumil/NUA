@@ -10,12 +10,15 @@ loyalty points a payment earns — are tied to a real phone number, not
 "whoever tapped first."
 """
 from __future__ import annotations
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Request, Depends, WebSocket, WebSocketDisconnect
 from database import db
-from services import bill_split
+from services import bill_split, split_group, split_payment, split_loyalty, split_realtime
 from routes.guest_session import get_guest_session
+import logging
 
+log = logging.getLogger("bill_split")
 router = APIRouter()
+realtime_mgr = split_realtime.get_manager()
 
 
 def _public_view(split: dict) -> dict:
@@ -137,6 +140,196 @@ async def checkout(split_id: str, data: dict, http_request: Request, session: di
 
     if provider == "stripe":
         from routes.integrations import _create_stripe_session
-        return await _create_stripe_session(checkout_data, http_request, cashier=guest_cashier)
-    from routes.crypto_payments import _create_crypto_session
-    return await _create_crypto_session(checkout_data, http_request, cashier=guest_cashier)
+        response = await _create_stripe_session(checkout_data, http_request, cashier=guest_cashier)
+    else:
+        from routes.crypto_payments import _create_crypto_session
+        response = await _create_crypto_session(checkout_data, http_request, cashier=guest_cashier)
+
+    # Award loyalty points for this payment
+    amount = payload.get("amount", 0)
+    points = await split_loyalty.calculate_loyalty_points(amount)
+    await split_loyalty.award_loyalty_points(customer["id"], points, split_id, "guest_split_payment")
+    await realtime_mgr.broadcast_payment(split_id, session["phone"], amount)
+
+    return response
+
+
+# ============================================================================
+# GROUP COORDINATION ENDPOINTS
+# ============================================================================
+
+@router.post("/table/split/{split_id}/group/create")
+async def create_group(split_id: str, session: dict = Depends(get_guest_session)):
+    """Create a group split (current guest is organizer)."""
+    group = await split_group.create_split_group(split_id, session["phone"])
+    await split_group.sync_group_to_split(split_id)
+    await realtime_mgr.broadcast_update(split_id, "group_created", group)
+    return group
+
+
+@router.post("/table/split/{split_id}/group/invite")
+async def send_invite(split_id: str, data: dict, session: dict = Depends(get_guest_session)):
+    """Organizer invites another guest to group split."""
+    invite_phone = data.get("phone")
+    if not invite_phone:
+        raise HTTPException(status_code=400, detail="phone required")
+
+    result = await split_group.invite_guest(split_id, session["phone"], invite_phone)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error"))
+
+    await realtime_mgr.broadcast_group_invite(split_id, invite_phone)
+    return result
+
+
+@router.post("/table/split/{split_id}/group/accept-invite")
+async def accept_group_invite(split_id: str, data: dict, session: dict = Depends(get_guest_session)):
+    """Guest accepts group invite."""
+    invite_token = data.get("inviteToken")
+    if not invite_token:
+        raise HTTPException(status_code=400, detail="inviteToken required")
+
+    result = await split_group.accept_invite(split_id, session["phone"], invite_token)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error"))
+
+    await split_group.sync_group_to_split(split_id)
+    await realtime_mgr.broadcast_update(split_id, "guest_joined_group", {
+        "guestPhone": session["phone"]
+    })
+    return result
+
+
+@router.get("/table/split/{split_id}/group/status")
+async def get_group_status(split_id: str):
+    """Get group coordination status."""
+    status = await split_group.get_group_status(split_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="No group for this split")
+    return status
+
+
+# ============================================================================
+# PARTIAL PAYMENT / TAB ENDPOINTS
+# ============================================================================
+
+@router.post("/table/split/{split_id}/partial-checkout")
+async def partial_checkout(split_id: str, data: dict, session: dict = Depends(get_guest_session)):
+    """Guest pays partial amount, remainder goes on tab."""
+    amount = data.get("amount", 0)
+    if not amount or amount <= 0:
+        raise HTTPException(status_code=400, detail="amount must be > 0")
+
+    # Create guest tab
+    line_ids = data.get("lineIds", [])
+    slot_index = data.get("slotIndex")
+    total_amount = data.get("totalAmount", amount)
+
+    tab = await split_payment.create_guest_tab(split_id, session["phone"], total_amount, line_ids, slot_index)
+
+    # Record partial payment
+    payment_result = await split_payment.record_partial_payment(tab["id"], amount, "card", split_id)
+
+    await realtime_mgr.broadcast_payment(split_id, session["phone"], amount)
+
+    return {
+        "success": payment_result.get("success"),
+        "tabId": tab["id"],
+        "paidAmount": payment_result.get("paidAmount"),
+        "remainingBalance": payment_result.get("remainingBalance"),
+        "status": payment_result.get("status"),
+    }
+
+
+@router.get("/table/split/{split_id}/guest-tabs")
+async def get_guest_tabs(split_id: str, session: dict = Depends(get_guest_session)):
+    """Get all open tabs for current guest."""
+    tabs = await split_payment.get_guest_tabs(session["phone"])
+    return {"tabs": tabs, "guestPhone": session["phone"]}
+
+
+@router.post("/table/split/{split_id}/staff-process-tab")
+async def staff_process_tab(split_id: str, data: dict):
+    """Staff collects remaining tab balance (staff-side only)."""
+    tab_id = data.get("tabId")
+    amount = data.get("amount", 0)
+    method = data.get("method", "cash")
+
+    if not tab_id:
+        raise HTTPException(status_code=400, detail="tabId required")
+
+    result = await split_payment.staff_process_tab_payment(tab_id, amount, method)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error"))
+
+    await realtime_mgr.broadcast_update(split_id, "tab_payment_received", {
+        "tabId": tab_id,
+        "amount": amount,
+    })
+    return result
+
+
+# ============================================================================
+# STAFF REAL-TIME MONITORING
+# ============================================================================
+
+@router.get("/table/{table_number}/split/staff-status")
+async def get_staff_status(table_number: str):
+    """Staff view of split status (all claims, payments, balances)."""
+    split = await db.bill_splits.find_one({"tableNumber": str(table_number), "status": "open"}, {"_id": 0})
+    if not split:
+        raise HTTPException(status_code=404, detail="No active split for this table")
+
+    # Gather all tabs for this split
+    tabs = await db.split_tabs.find({"splitId": split["id"]}, {"_id": 0}).to_list(100)
+
+    # Get group info if exists
+    group = None
+    if split.get("groupMode"):
+        group = await split_group.get_group_status(split["id"])
+
+    return {
+        "split": split,
+        "tabs": tabs,
+        "group": group,
+        "connectedClients": await realtime_mgr.get_connection_count(split["id"]),
+    }
+
+
+# ============================================================================
+# WEBSOCKET REAL-TIME SYNC
+# ============================================================================
+
+@router.websocket("/ws/split/{split_id}")
+async def websocket_split_updates(split_id: str, websocket: WebSocket):
+    """WebSocket endpoint for real-time split updates."""
+    await websocket.accept()
+    await realtime_mgr.register_connection(split_id, websocket)
+
+    try:
+        # Send initial split state
+        split = await db.bill_splits.find_one({"id": split_id}, {"_id": 0})
+        if split:
+            await websocket.send_json({
+                "type": "connected",
+                "splitId": split_id,
+                "split": split,
+            })
+
+        # Listen for client messages and broadcast
+        while True:
+            data = await websocket.receive_json()
+            msg_type = data.get("type")
+
+            if msg_type == "ping":
+                await websocket.send_json({"type": "pong"})
+            elif msg_type == "sync_request":
+                split = await db.bill_splits.find_one({"id": split_id}, {"_id": 0})
+                await websocket.send_json({"type": "sync_response", "split": split})
+
+    except WebSocketDisconnect:
+        await realtime_mgr.unregister_connection(split_id, websocket)
+        log.info(f"Client disconnected from split {split_id}")
+    except Exception as e:
+        log.error(f"WebSocket error: {e}")
+        await realtime_mgr.unregister_connection(split_id, websocket)

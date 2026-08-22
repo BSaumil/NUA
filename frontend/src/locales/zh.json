@@ -1,0 +1,61 @@
+{
+  "split": {
+    "title": "分账",
+    "subtitle": "只需支付您的份额",
+    "yourShare": "您的份额",
+    "totalBill": "总账单",
+    "mode": "分账方式",
+    "items": "按项目",
+    "equal": "平均分账",
+    "selectItems": "点击项目以认领",
+    "selectedCount": "已选择 {{count}} 个项目",
+    "phone": "手机号码",
+    "enterPhone": "输入您的手机号码",
+    "sendCode": "发送验证码",
+    "code": "验证码",
+    "enterCode": "输入我们发送给您的验证码",
+    "verify": "验证",
+    "claim": "认领项目",
+    "pay": "立即支付",
+    "payingFor": "为 {{count}} 个项目支付",
+    "amount": "¥{{amount}}",
+    "status": {
+      "open": "可用",
+      "claimed": "已认领",
+      "paid": "已支付"
+    },
+    "messages": {
+      "codeSent": "验证码已发送至 {{phone}}",
+      "codeExpired": "验证码已过期",
+      "claimed": "项目认领成功",
+      "paymentProcessing": "正在处理支付...",
+      "paymentComplete": "支付完成！"
+    },
+    "group": {
+      "title": "群组分账",
+      "organizer": "组织者",
+      "participants": "参与者",
+      "invite": "邀请客人",
+      "invitePhone": "客人手机号码",
+      "sendInvite": "发送邀请",
+      "joinGroup": "加入群组",
+      "inviteCode": "邀请码",
+      "enterCode": "输入邀请码"
+    },
+    "tab": {
+      "title": "稍后支付",
+      "partial": "支付部分金额",
+      "payNow": "立即支付",
+      "amountToPay": "支付金额",
+      "remaining": "剩余余额",
+      "tabCreated": "账户已创建 - 您可以稍后支付剩余金额"
+    },
+    "errors": {
+      "phoneRequired": "请输入您的手机号码",
+      "codeRequired": "请输入您的验证码",
+      "invalidCode": "验证码无效",
+      "noItems": "请至少选择一个项目",
+      "amountRequired": "请输入要支付的金额"
+    }
+  }
+}
