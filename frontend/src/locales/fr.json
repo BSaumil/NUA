@@ -7,6 +7,7 @@
     "mode": "Mode de Partage",
     "items": "Par Articles",
     "equal": "Partage Équitable",
+    "custom": "Partage Personnalisé",
     "selectItems": "Appuyez sur les articles à réclamer",
     "selectedCount": "{{count}} articles sélectionnés",
     "phone": "Numéro de Téléphone",
@@ -49,6 +50,22 @@
       "amountToPay": "Montant à Payer",
       "remaining": "Solde Restant",
       "tabCreated": "Compte créé - vous pouvez payer le reste plus tard"
+    },
+    "customSplit": {
+      "setupTitle": "Configurer les parts personnalisées",
+      "billTotal": "Montant total : {{amount}} — indiquez la part de chaque personne, la somme doit égaler le total.",
+      "person": "Personne {{number}}",
+      "addPerson": "+ Ajouter une personne",
+      "createShares": "Créer les parts"
+    },
+    "tip": {
+      "title": "Ajouter un pourboire ? (facultatif)",
+      "other": "Autre",
+      "amount": "Montant du pourboire",
+      "summary": "Pourboire : {{tip}} — total avec pourboire : {{total}}"
+    },
+    "receipt": {
+      "emailPlaceholder": "Email pour un reçu (facultatif)"
     },
     "errors": {
       "phoneRequired": "Veuillez entrer votre numéro de téléphone",

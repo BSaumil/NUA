@@ -51,6 +51,7 @@ const buildNavStructure = (vertical) => {
       { path: '/waitlist', label: 'Waitlist', icon: Clock },
       { path: '/booking-settings', label: 'Booking Rules', icon: SlidersHorizontal },
       { path: '/booking-analytics', label: 'Booking Analytics', icon: BarChart3 },
+      { path: '/split-monitor', label: 'Split Bill Monitor', icon: Zap, access: ['owner', 'manager', 'cashier'] },
     ],
   },
   { path: '/appointments', icon: CalendarCheck, label: 'Appointments', access: ['owner', 'manager', 'cashier'], verticals: ['beauty', 'services'] },

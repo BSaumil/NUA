@@ -7,6 +7,7 @@
     "mode": "Modo de División",
     "items": "Por Artículos",
     "equal": "División Equitativa",
+    "custom": "División Personalizada",
     "selectItems": "Toca artículos para reclamar",
     "selectedCount": "{{count}} artículos seleccionados",
     "phone": "Número de Teléfono",
@@ -49,6 +50,22 @@
       "amountToPay": "Cantidad a Pagar",
       "remaining": "Saldo Pendiente",
       "tabCreated": "Pestaña creada - puedes pagar el resto después"
+    },
+    "customSplit": {
+      "setupTitle": "Configurar partes personalizadas",
+      "billTotal": "Total de la cuenta: {{amount}} — ingresa la parte de cada persona, deben sumar el total.",
+      "person": "Persona {{number}}",
+      "addPerson": "+ Añadir persona",
+      "createShares": "Crear partes"
+    },
+    "tip": {
+      "title": "¿Agregar propina? (opcional)",
+      "other": "Otro",
+      "amount": "Monto de propina",
+      "summary": "Propina: {{tip}} — total con propina: {{total}}"
+    },
+    "receipt": {
+      "emailPlaceholder": "Correo para el recibo (opcional)"
     },
     "errors": {
       "phoneRequired": "Por favor ingresa tu número de teléfono",

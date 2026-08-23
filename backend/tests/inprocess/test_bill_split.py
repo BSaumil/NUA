@@ -418,3 +418,256 @@ def test_a_returning_guests_second_split_payment_matches_their_existing_customer
         assert _run(db.customers.count_documents({"phone": phone})) == 1
     finally:
         _run(db.customers.delete_many({"phone": phone}))
+
+
+# ---------------------------------------------------------------- custom split
+
+def test_custom_split_amounts_must_add_up_to_the_bill(client):
+    _seed_table_order("T-916")
+    try:
+        # Bill is 2x$15 burger + $6 fries = $36. These don't add up.
+        r = req(client, "POST", "/api/table/T-916/split/mode",
+                json={"mode": "custom", "customAmounts": [10, 10]})
+        assert r.status_code == 400
+        assert "add up" in r.json()["detail"].lower()
+    finally:
+        _cleanup_table("T-916")
+
+
+def test_custom_split_amounts_create_uneven_claimable_shares(client):
+    _seed_table_order("T-917")
+    try:
+        body = req(client, "POST", "/api/table/T-917/split/mode",
+                    json={"mode": "custom", "customAmounts": [30, 6]}).json()
+        assert body["mode"] == "custom"
+        amounts = sorted(p["amount"] for p in body["equalParts"])
+        assert amounts == [6.0, 30.0]
+    finally:
+        _cleanup_table("T-917")
+
+
+def test_custom_split_percents_convert_to_dollars_and_absorb_rounding_drift(client):
+    _seed_table_order("T-918")
+    try:
+        # $36 total split 33.33/33.33/33.34 by percent.
+        body = req(client, "POST", "/api/table/T-918/split/mode",
+                    json={"mode": "custom", "customPercents": [33.33, 33.33, 33.34]}).json()
+        total = round(sum(p["amount"] for p in body["equalParts"]), 2)
+        assert total == 36.0
+    finally:
+        _cleanup_table("T-918")
+
+
+def test_custom_split_percents_must_add_up_to_100(client):
+    _seed_table_order("T-919")
+    try:
+        r = req(client, "POST", "/api/table/T-919/split/mode",
+                json={"mode": "custom", "customPercents": [50, 40]})
+        assert r.status_code == 400
+    finally:
+        _cleanup_table("T-919")
+
+
+def test_custom_share_is_claimable_and_payable_via_the_shared_slot_endpoints(client, monkeypatch):
+    import services.coinbase_commerce as cc
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": {
+            "id": "charge-uuid-custom1", "code": "CUSTOMCODE1",
+            "hosted_url": "https://commerce.coinbase.com/charges/CUSTOMCODE1",
+            "timeline": [{"status": "NEW"}],
+        }})
+    monkeypatch.setenv("COINBASE_COMMERCE_API_KEY", "cc-test-key")
+    monkeypatch.setattr(cc.httpx, "AsyncClient", _mock_client_factory(handler))
+
+    _seed_table_order("T-920")
+    try:
+        split = req(client, "POST", "/api/table/T-920/split/mode",
+                    json={"mode": "custom", "customAmounts": [30, 6]}).json()
+        split_id = split["id"]
+        slot_index = next(p["index"] for p in split["equalParts"] if p["amount"] == 6.0)
+        token = _guest_token("+61412345020")
+
+        claimed = req(client, "POST", f"/api/table/split/{split_id}/claim-equal",
+                       headers={"Authorization": f"Bearer {token}"}, json={"index": slot_index})
+        assert claimed.status_code == 200
+
+        r = req(client, "POST", f"/api/table/split/{split_id}/checkout",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"provider": "crypto", "slotIndex": slot_index})
+        assert r.status_code == 200, r.text
+
+        from database import db
+        payment = _run(db.payment_transactions.find_one({"sessionId": "CUSTOMCODE1"}, {"_id": 0}))
+        assert payment["splitSlotIndex"] == slot_index
+        assert payment["amount"] == 6.0
+    finally:
+        _cleanup_table("T-920")
+        from database import db
+        _run(db.payment_transactions.delete_many({"sessionId": "CUSTOMCODE1"}))
+        _run(db.customers.delete_many({"phone": "+61412345020"}))
+
+
+# ---------------------------------------------------------------------- tip
+
+def test_checkout_adds_a_tip_on_top_of_the_claimed_amount(client, monkeypatch):
+    import services.coinbase_commerce as cc
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": {
+            "id": "charge-uuid-tip1", "code": "TIPCODE1",
+            "hosted_url": "https://commerce.coinbase.com/charges/TIPCODE1",
+            "timeline": [{"status": "NEW"}],
+        }})
+    monkeypatch.setenv("COINBASE_COMMERCE_API_KEY", "cc-test-key")
+    monkeypatch.setattr(cc.httpx, "AsyncClient", _mock_client_factory(handler))
+
+    _seed_table_order("T-921")
+    try:
+        split_id = req(client, "GET", "/api/table/T-921/split").json()["id"]
+        line = req(client, "GET", "/api/table/T-921/split").json()["lines"][0]
+        token = _guest_token("+61412345021")
+        req(client, "POST", f"/api/table/split/{split_id}/claim",
+            headers={"Authorization": f"Bearer {token}"}, json={"lineIds": [line["id"]]})
+
+        r = req(client, "POST", f"/api/table/split/{split_id}/checkout",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"provider": "crypto", "lineIds": [line["id"]], "tipAmount": 3.5})
+        assert r.status_code == 200, r.text
+
+        from database import db
+        payment = _run(db.payment_transactions.find_one({"sessionId": "TIPCODE1"}, {"_id": 0}))
+        assert payment["amount"] == round(line["unitPrice"] + 3.5, 2)
+        assert payment["salePayload"]["tipAmount"] == 3.5
+        tip_line = next(i for i in payment["salePayload"]["items"] if i["productId"] == "SPLIT-TIP")
+        assert tip_line["price"] == 3.5
+    finally:
+        _cleanup_table("T-921")
+        from database import db
+        _run(db.payment_transactions.delete_many({"sessionId": "TIPCODE1"}))
+        _run(db.customers.delete_many({"phone": "+61412345021"}))
+
+
+def test_checkout_rejects_a_negative_tip(client):
+    _seed_table_order("T-922")
+    try:
+        split_id = req(client, "GET", "/api/table/T-922/split").json()["id"]
+        line_id = req(client, "GET", "/api/table/T-922/split").json()["lines"][0]["id"]
+        token = _guest_token("+61412345022")
+        req(client, "POST", f"/api/table/split/{split_id}/claim",
+            headers={"Authorization": f"Bearer {token}"}, json={"lineIds": [line_id]})
+        r = req(client, "POST", f"/api/table/split/{split_id}/checkout",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"provider": "crypto", "lineIds": [line_id], "tipAmount": -5})
+        assert r.status_code == 400
+    finally:
+        _cleanup_table("T-922")
+
+
+# ------------------------------------------------------------------- receipt
+
+def test_paying_sends_the_guest_a_receipt_for_just_their_own_share(client, monkeypatch):
+    from services import bill_split, split_receipt
+
+    receipts_sent = []
+    async def fake_send_payment_receipt(split, line_ids, slot_index, transaction_id, guest_email=None):
+        receipts_sent.append({"lineIds": line_ids, "slotIndex": slot_index, "email": guest_email})
+        return {"sent": True}
+    monkeypatch.setattr(split_receipt, "send_payment_receipt", fake_send_payment_receipt)
+
+    _seed_table_order("T-923", items=[
+        {"productId": "PROD-FRIES", "productName": "Fries", "category": "Sides", "quantity": 1},
+    ])
+    try:
+        split = req(client, "GET", "/api/table/T-923/split").json()
+        line_id = split["lines"][0]["id"]
+        _run(bill_split.mark_lines_paid(split["id"], [line_id], None, "TXN-RECEIPT-1",
+                                          guest_email="guest@example.com"))
+        assert len(receipts_sent) == 1
+        assert receipts_sent[0]["lineIds"] == [line_id]
+        assert receipts_sent[0]["email"] == "guest@example.com"
+    finally:
+        _cleanup_table("T-923")
+
+
+def test_receipt_failure_never_blocks_marking_the_line_paid(client, monkeypatch):
+    from services import bill_split, split_receipt
+
+    async def broken_receipt(*a, **kw):
+        raise RuntimeError("SMS provider exploded")
+    monkeypatch.setattr(split_receipt, "send_payment_receipt", broken_receipt)
+
+    _seed_table_order("T-924", items=[
+        {"productId": "PROD-FRIES", "productName": "Fries", "category": "Sides", "quantity": 1},
+    ])
+    try:
+        split = req(client, "GET", "/api/table/T-924/split").json()
+        line_id = split["lines"][0]["id"]
+        _run(bill_split.mark_lines_paid(split["id"], [line_id], None, "TXN-RECEIPT-2"))
+        status = req(client, "GET", f"/api/table/split/{split['id']}/status").json()
+        assert status["lines"][0]["status"] == "paid"
+    finally:
+        _cleanup_table("T-924")
+
+
+# --------------------------------------------------------- floor-plan auto-close
+
+def test_settling_a_split_frees_the_table_on_the_floor_plan(client, owner_headers, monkeypatch):
+    from database import db
+    import routes.transactions
+
+    async def fake_create_transaction(payload, user):
+        class T:
+            id = "TXN-SPLIT-FLOORPLAN"
+        return T()
+    monkeypatch.setattr(routes.transactions, "create_transaction", fake_create_transaction)
+
+    plan = req(client, "POST", "/api/floor-plans", headers=owner_headers, json={
+        "name": "Test Floor", "locationId": "loc-1", "sections": [],
+        "tables": [{
+            "id": "TBL-T925", "number": "T-925", "capacity": 4, "maxCovers": 4,
+            "shape": "square", "x": 0, "y": 0, "width": 60, "height": 60, "rotation": 0,
+            "section": None, "status": "occupied", "isActive": True,
+        }],
+    }).json()
+
+    _seed_table_order("T-925", items=[
+        {"productId": "PROD-FRIES", "productName": "Fries", "category": "Sides", "quantity": 1},
+    ])
+    try:
+        split = req(client, "GET", "/api/table/T-925/split").json()
+        line_id = split["lines"][0]["id"]
+        from services import bill_split
+        _run(bill_split.mark_lines_paid(split["id"], [line_id], None, "TXN-SPLIT-FLOORPLAN"))
+
+        status = req(client, "GET", f"/api/table/split/{split['id']}/status").json()
+        assert status["status"] == "settled"
+
+        refreshed_plan = req(client, "GET", f"/api/floor-plans/{plan['id']}", headers=owner_headers).json()
+        table = next(t for t in refreshed_plan["tables"] if t["id"] == "TBL-T925")
+        assert table["status"] == "available"
+    finally:
+        _cleanup_table("T-925")
+        req(client, "DELETE", f"/api/floor-plans/{plan['id']}", headers=owner_headers)
+
+
+# ------------------------------------------------------------- staff dashboard
+
+def test_active_splits_lists_every_open_table_with_claims_and_tabs(client):
+    _seed_table_order("T-926")
+    try:
+        split = req(client, "GET", "/api/table/T-926/split").json()
+        line_id = split["lines"][0]["id"]
+        token = _guest_token("+61412345026")
+        req(client, "POST", f"/api/table/split/{split['id']}/claim",
+            headers={"Authorization": f"Bearer {token}"}, json={"lineIds": [line_id]})
+
+        body = req(client, "GET", "/api/table/active-splits").json()
+        row = next(s for s in body["splits"] if s["id"] == split["id"])
+        assert row["tableNumber"] == "T-926"
+        assert row["totalAmount"] == round(sum(l["unitPrice"] for l in split["lines"]), 2)
+        claim = next(c for c in row["claims"] if c["phone"] == "+61412345026")
+        assert claim["paid"] is False
+        assert row["openTabs"] == []
+    finally:
+        _cleanup_table("T-926")

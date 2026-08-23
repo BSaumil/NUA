@@ -7,6 +7,7 @@
     "mode": "分账方式",
     "items": "按项目",
     "equal": "平均分账",
+    "custom": "自定义分账",
     "selectItems": "点击项目以认领",
     "selectedCount": "已选择 {{count}} 个项目",
     "phone": "手机号码",
@@ -49,6 +50,22 @@
       "amountToPay": "支付金额",
       "remaining": "剩余余额",
       "tabCreated": "账户已创建 - 您可以稍后支付剩余金额"
+    },
+    "customSplit": {
+      "setupTitle": "设置自定义份额",
+      "billTotal": "账单总额：{{amount}} — 请输入每人的份额，总和须等于账单总额。",
+      "person": "第 {{number}} 人",
+      "addPerson": "+ 添加一人",
+      "createShares": "创建份额"
+    },
+    "tip": {
+      "title": "添加小费？（可选）",
+      "other": "其他",
+      "amount": "小费金额",
+      "summary": "小费：{{tip}} — 含小费总计：{{total}}"
+    },
+    "receipt": {
+      "emailPlaceholder": "接收电子收据的邮箱（可选）"
     },
     "errors": {
       "phoneRequired": "请输入您的手机号码",

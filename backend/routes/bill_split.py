@@ -10,6 +10,7 @@ loyalty points a payment earns — are tied to a real phone number, not
 "whoever tapped first."
 """
 from __future__ import annotations
+from typing import Any, Dict
 from fastapi import APIRouter, HTTPException, Request, Depends, WebSocket, WebSocketDisconnect
 from database import db
 from services import bill_split, split_group, split_payment, split_loyalty, split_realtime
@@ -53,7 +54,10 @@ async def get_split(table_number: str):
 async def choose_mode(table_number: str, data: dict):
     split = await bill_split.get_or_create_split(table_number)
     try:
-        updated = await bill_split.set_mode(split["id"], data.get("mode"), data.get("equalCount"))
+        updated = await bill_split.set_mode(
+            split["id"], data.get("mode"), data.get("equalCount"),
+            custom_amounts=data.get("customAmounts"), custom_percents=data.get("customPercents"),
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return _public_view(updated)
@@ -115,6 +119,20 @@ async def checkout(split_id: str, data: dict, http_request: Request, session: di
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
 
+    # Optional tip on top of this guest's own share — added as its own
+    # synthetic line (same pattern as the equal split's SPLIT-SHARE) so it
+    # rides through create_transaction's normal item-priced subtotal
+    # instead of needing a separate code path, and is what the guest is
+    # actually charged via Stripe/Coinbase below.
+    tip_amount = round(float(data.get("tipAmount") or 0), 2)
+    if tip_amount < 0:
+        raise HTTPException(status_code=400, detail="tipAmount can't be negative")
+    items = list(payload["items"])
+    charge_amount = round(payload["amount"] + tip_amount, 2)
+    if tip_amount > 0:
+        items.append({"productId": "SPLIT-TIP", "productName": "Tip", "quantity": 1,
+                       "price": tip_amount, "modifiers": []})
+
     # A verified phone is exactly what grows the customer database here —
     # find_or_create_customer_by_phone resolves-or-creates a real
     # db.customers record from it (not just an identity touchpoint), so
@@ -124,19 +142,22 @@ async def checkout(split_id: str, data: dict, http_request: Request, session: di
     customer = await find_or_create_customer_by_phone(session["phone"], tag="split_bill")
 
     sale = {
-        "items": payload["items"], "paymentMethod": "Card" if provider == "stripe" else "Crypto",
+        "items": items, "paymentMethod": "Card" if provider == "stripe" else "Crypto",
         "location": f"Table {split['tableNumber']} split", "cashier": "Guest self-checkout",
         "orderType": "dine_in", "tableNumber": split["tableNumber"],
-        "customerId": customer["id"],
+        "customerId": customer["id"], "tipAmount": tip_amount,
     }
     guest_cashier = {"id": f"guest:{session['phone']}", "name": "Guest self-checkout", "role": "guest"}
     checkout_data = {
-        "amount": payload["amount"], "orderId": split_id,
+        "amount": charge_amount, "orderId": split_id,
         "originUrl": data.get("originUrl") or str(http_request.base_url).rstrip("/"),
         "sale": sale,
         "splitSessionId": split_id, "splitLineIds": payload["splitLineIds"],
         "splitSlotIndex": payload["splitSlotIndex"],
     }
+    guest_email = (data.get("email") or "").strip()
+    if guest_email:
+        checkout_data["guestEmail"] = guest_email
 
     if provider == "stripe":
         from routes.integrations import _create_stripe_session
@@ -272,6 +293,52 @@ async def staff_process_tab(split_id: str, data: dict):
 # ============================================================================
 # STAFF REAL-TIME MONITORING
 # ============================================================================
+
+def _claims_summary(split: dict) -> list:
+    """One row per guest phone that's claimed something on this split —
+    what SplitBillStaff.jsx's detail panel shows per guest, aggregated from
+    the raw per-line/per-slot claimedByPhone the guest-facing _public_view
+    deliberately hides."""
+    by_phone: Dict[str, Dict[str, Any]] = {}
+    for l in split.get("lines") or []:
+        phone = l.get("claimedByPhone")
+        if not phone:
+            continue
+        row = by_phone.setdefault(phone, {"phone": phone, "items": [], "total": 0.0, "paid": True})
+        row["items"].append(l["productName"])
+        row["total"] = round(row["total"] + l["unitPrice"], 2)
+        row["paid"] = row["paid"] and l["status"] == "paid"
+    for p in split.get("equalParts") or []:
+        phone = p.get("claimedByPhone")
+        if not phone:
+            continue
+        row = by_phone.setdefault(phone, {"phone": phone, "items": [], "total": 0.0, "paid": True})
+        row["items"].append(f"Share #{p['index'] + 1}")
+        row["total"] = round(row["total"] + p["amount"], 2)
+        row["paid"] = row["paid"] and p["status"] == "paid"
+    return list(by_phone.values())
+
+
+@router.get("/table/active-splits")
+async def get_active_splits():
+    """Staff-wide monitoring feed — one row per table with an open split,
+    for SplitBillStaff.jsx's dashboard grid (as opposed to /staff-status
+    below, which is scoped to a single table)."""
+    splits = await db.bill_splits.find({"status": "open"}, {"_id": 0}).to_list(200)
+    out = []
+    for split in splits:
+        tabs = await db.split_tabs.find(
+            {"splitId": split["id"], "status": {"$in": ["open", "partial"]}}, {"_id": 0}
+        ).to_list(50)
+        out.append({
+            **split,
+            "totalAmount": round(sum(l["unitPrice"] for l in split.get("lines") or []), 2),
+            "claims": _claims_summary(split),
+            "openTabs": tabs,
+            "participants": split.get("groupParticipants") or [],
+        })
+    return {"splits": out}
+
 
 @router.get("/table/{table_number}/split/staff-status")
 async def get_staff_status(table_number: str):

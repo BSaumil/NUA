@@ -72,7 +72,7 @@ async def _create_crypto_session(data: dict, http_request: Request, cashier: dic
         payment_doc["kind"] = "pos_sale"
         payment_doc["salePayload"] = sale_payload
         payment_doc["cashierUser"] = cashier
-        for k in ("splitSessionId", "splitLineIds", "splitSlotIndex"):
+        for k in ("splitSessionId", "splitLineIds", "splitSlotIndex", "guestEmail"):
             if k in data:
                 payment_doc[k] = data[k]
     await db.payment_transactions.insert_one(payment_doc)

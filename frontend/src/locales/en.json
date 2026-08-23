@@ -7,6 +7,7 @@
     "mode": "Split Mode",
     "items": "By Items",
     "equal": "Equal Split",
+    "custom": "Custom Split",
     "selectItems": "Tap items to claim",
     "selectedCount": "{{count}} items selected",
     "phone": "Mobile Number",
@@ -49,6 +50,22 @@
       "amountToPay": "Amount to Pay",
       "remaining": "Remaining Balance",
       "tabCreated": "Tab created - you can pay the rest later"
+    },
+    "customSplit": {
+      "setupTitle": "Set up custom shares",
+      "billTotal": "Bill total: {{amount}} — enter each person's share, they must add up to the total.",
+      "person": "Person {{number}}",
+      "addPerson": "+ Add person",
+      "createShares": "Create shares"
+    },
+    "tip": {
+      "title": "Add a tip? (optional)",
+      "other": "Other",
+      "amount": "Tip amount",
+      "summary": "Tip: {{tip}} — total with tip: {{total}}"
+    },
+    "receipt": {
+      "emailPlaceholder": "Email for a receipt (optional)"
     },
     "errors": {
       "phoneRequired": "Please enter your phone number",
