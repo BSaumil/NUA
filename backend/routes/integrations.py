@@ -131,6 +131,7 @@ async def _finalize_pos_sale_if_applicable(session_id: str):
                 await bill_split.mark_lines_paid(
                     claimed["splitSessionId"], claimed.get("splitLineIds"),
                     claimed.get("splitSlotIndex"), txn.id,
+                    guest_email=claimed.get("guestEmail"),
                 )
             except Exception as split_e:
                 logging.getLogger(__name__).error(
@@ -211,7 +212,7 @@ async def _create_stripe_session(data: dict, http_request: Request, cashier: dic
         # it — TransactionCreate doesn't (and shouldn't) know about split
         # sessions, so these live as sibling fields _finalize_pos_sale_
         # if_applicable reads directly off the payment doc.
-        for k in ("splitSessionId", "splitLineIds", "splitSlotIndex"):
+        for k in ("splitSessionId", "splitLineIds", "splitSlotIndex", "guestEmail"):
             if k in data:
                 payment_doc[k] = data[k]
     await db.payment_transactions.insert_one(payment_doc)

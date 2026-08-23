@@ -1,10 +1,19 @@
 import en from '../locales/en.json';
+import es from '../locales/es.json';
+import zh from '../locales/zh.json';
+import fr from '../locales/fr.json';
 
 const SUPPORTED_LANGUAGES = ['en', 'es', 'zh', 'fr'];
 const DEFAULT_LANGUAGE = 'en';
 const LANGUAGE_KEY = 'nua_split_language';
 
-const translations = { en };
+// All four packs are small (a few KB each) and bundled eagerly here rather
+// than genuinely lazy-loaded — t() is called synchronously all over the
+// guest page's render, outside any hook that could await a dynamic
+// import() and re-render once it resolves, so a real lazy load would
+// silently keep rendering English (or the translation key itself) until a
+// second render happened to run after the import settled.
+const translations = { en, es, zh, fr };
 
 export function getLanguage() {
   if (typeof localStorage === 'undefined') return DEFAULT_LANGUAGE;

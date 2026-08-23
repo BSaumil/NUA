@@ -1,35 +1,30 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Eye, RotateCw, Users, Zap, AlertCircle, CheckCircle2, Clock, DollarSign } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { toast } from 'sonner';
+import api from '../services/api';
 
 export function SplitBillStaff() {
   const [splits, setSplits] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [selectedSplit, setSelectedSplit] = useState(null);
-  const [refreshInterval, setRefreshInterval] = useState(3000);
-  const [wsConnections, setWsConnections] = useState({});
+  const [selectedSplitId, setSelectedSplitId] = useState(null);
+  const [refreshInterval] = useState(3000);
+  const [connectedIds, setConnectedIds] = useState({});
+  const wsRef = useRef({});
 
   const pollSplits = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/table/active-splits', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('staff_token') || ''}`,
-        },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setSplits(data.splits || []);
-      } else if (response.status === 401) {
-        toast.error('Session expired, please log in again');
-      }
+      const res = await api.get('/table/active-splits');
+      setSplits(res.data.splits || []);
     } catch (e) {
-      console.error('Failed to fetch splits:', e);
-      toast.error('Failed to load splits');
+      if (e?.response?.status === 401) {
+        toast.error('Session expired, please log in again');
+      } else {
+        console.error('Failed to fetch splits:', e);
+      }
     } finally {
       setLoading(false);
     }
@@ -41,76 +36,70 @@ export function SplitBillStaff() {
     return () => clearInterval(interval);
   }, [pollSplits, refreshInterval]);
 
-  const connectToSplit = useCallback((splitId) => {
-    if (wsConnections[splitId]) return;
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/api/ws/split/${splitId}`;
-
-    try {
-      const ws = new WebSocket(wsUrl);
-
+  // Open one WebSocket per active split, skipping ones already connected —
+  // runs as an effect (not inline during render) so it only fires when the
+  // set of active split ids actually changes, not on every render.
+  useEffect(() => {
+    const ids = splits.map(s => s.id);
+    for (const id of ids) {
+      if (wsRef.current[id]) continue;
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(`${protocol}//${window.location.host}/api/ws/split/${id}`);
+      ws.onopen = () => setConnectedIds(prev => ({ ...prev, [id]: true }));
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          setSplits((prev) =>
-            prev.map((s) =>
-              s._id === splitId ? { ...s, ...data } : s
-            )
-          );
+          if (data.type === 'split_updated' && data.data) {
+            setSplits(prev => prev.map(s => (s.id === id ? { ...s, ...data.data } : s)));
+          } else {
+            pollSplits();
+          }
         } catch (e) {
           console.error('Failed to parse WebSocket message:', e);
         }
       };
-
-      ws.onerror = (e) => {
-        console.error('WebSocket error for split', splitId, e);
-      };
-
       ws.onclose = () => {
-        setWsConnections((prev) => {
-          const updated = { ...prev };
-          delete updated[splitId];
-          return updated;
+        setConnectedIds(prev => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
         });
+        delete wsRef.current[id];
       };
-
-      setWsConnections((prev) => ({ ...prev, [splitId]: ws }));
-    } catch (e) {
-      console.error('Failed to create WebSocket:', e);
+      wsRef.current[id] = ws;
     }
-  }, [wsConnections]);
-
-  const handleProcessTab = async (tabId, amount) => {
-    try {
-      const response = await fetch(`/api/table/split/tabs/${tabId}/process`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('staff_token') || ''}`,
-        },
-        body: JSON.stringify({ amount }),
-      });
-
-      if (response.ok) {
-        toast.success('Tab processed successfully');
-        pollSplits();
-      } else {
-        const error = await response.json();
-        toast.error(error.error || 'Failed to process tab');
+    // Close sockets for splits that dropped off the active list (settled/gone).
+    for (const id of Object.keys(wsRef.current)) {
+      if (!ids.includes(id)) {
+        wsRef.current[id].close();
+        delete wsRef.current[id];
       }
+    }
+  }, [splits, pollSplits]);
+
+  useEffect(() => () => {
+    Object.values(wsRef.current).forEach(ws => ws.close());
+  }, []);
+
+  const handleProcessTab = async (splitId, tabId, amount) => {
+    try {
+      await api.post(`/table/split/${splitId}/staff-process-tab`, { tabId, amount, method: 'cash' });
+      toast.success('Tab processed successfully');
+      pollSplits();
     } catch (e) {
-      toast.error('Failed to process tab');
+      toast.error(e?.response?.data?.detail || 'Failed to process tab');
     }
   };
 
   const calculateStats = (split) => {
     const lines = split.lines || [];
+    const slots = split.equalParts || [];
+    const all = [...lines, ...slots];
     return {
-      open: lines.filter((l) => l.status === 'open').length,
-      claimed: lines.filter((l) => l.status === 'claimed').length,
-      paid: lines.filter((l) => l.status === 'paid').length,
-      total: lines.length,
+      open: all.filter((l) => l.status === 'open').length,
+      claimed: all.filter((l) => l.status === 'claimed').length,
+      paid: all.filter((l) => l.status === 'paid').length,
+      total: all.length,
     };
   };
 
@@ -118,6 +107,8 @@ export function SplitBillStaff() {
     const stats = calculateStats(split);
     return stats.total > 0 ? Math.round((stats.paid / stats.total) * 100) : 0;
   };
+
+  const selectedSplit = splits.find(s => s.id === selectedSplitId) || null;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 md:p-6">
@@ -163,26 +154,22 @@ export function SplitBillStaff() {
             {splits.map((split) => {
               const stats = calculateStats(split);
               const completion = getCompletionPercentage(split);
-              const isConnected = !!wsConnections[split._id];
-
-              if (!isConnected) {
-                connectToSplit(split._id);
-              }
+              const isConnected = !!connectedIds[split.id];
 
               return (
                 <Card
-                  key={split._id}
+                  key={split.id}
                   className={`cursor-pointer transition-shadow hover:shadow-lg ${
-                    selectedSplit?._id === split._id ? 'ring-2 ring-blue-500' : ''
+                    selectedSplitId === split.id ? 'ring-2 ring-blue-500' : ''
                   }`}
-                  onClick={() => setSelectedSplit(split)}
+                  onClick={() => setSelectedSplitId(split.id)}
                 >
                   <CardHeader className="pb-3">
                     <div className="flex items-start justify-between">
                       <div>
                         <CardTitle className="text-lg">Table {split.tableNumber}</CardTitle>
                         <p className="text-xs text-gray-500 mt-1">
-                          {new Date(split.createdAt).toLocaleTimeString()}
+                          {split.createdAt ? new Date(split.createdAt).toLocaleTimeString() : ''}
                         </p>
                       </div>
                       <div className="flex gap-1">
@@ -256,7 +243,7 @@ export function SplitBillStaff() {
                       className="w-full"
                       onClick={(e) => {
                         e.stopPropagation();
-                        setSelectedSplit(split);
+                        setSelectedSplitId(split.id);
                       }}
                     >
                       <Eye size={14} /> View Details
@@ -277,7 +264,7 @@ export function SplitBillStaff() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setSelectedSplit(null)}
+                  onClick={() => setSelectedSplitId(null)}
                 >
                   ✕
                 </Button>
@@ -288,17 +275,14 @@ export function SplitBillStaff() {
                 <div>
                   <h3 className="font-semibold text-sm mb-2">Items</h3>
                   <div className="space-y-1 text-sm">
-                    {selectedSplit.lines?.map((line, i) => (
+                    {(selectedSplit.lines || []).map((line) => (
                       <div
-                        key={i}
+                        key={line.id}
                         className="flex justify-between items-center p-2 bg-gray-50 rounded"
                       >
-                        <div>
-                          <span className="font-medium">{line.productName}</span>
-                          <span className="text-gray-500 text-xs ml-2">x{line.quantity}</span>
-                        </div>
+                        <span className="font-medium">{line.productName}</span>
                         <div className="flex items-center gap-2">
-                          <span className="font-semibold">${line.price.toFixed(2)}</span>
+                          <span className="font-semibold">${line.unitPrice.toFixed(2)}</span>
                           <Badge
                             className={
                               line.status === 'paid'
@@ -309,6 +293,28 @@ export function SplitBillStaff() {
                             }
                           >
                             {line.status}
+                          </Badge>
+                        </div>
+                      </div>
+                    ))}
+                    {(selectedSplit.equalParts || []).map((slot) => (
+                      <div
+                        key={slot.index}
+                        className="flex justify-between items-center p-2 bg-gray-50 rounded"
+                      >
+                        <span className="font-medium">Share #{slot.index + 1}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold">${slot.amount.toFixed(2)}</span>
+                          <Badge
+                            className={
+                              slot.status === 'paid'
+                                ? 'bg-green-100 text-green-800'
+                                : slot.status === 'claimed'
+                                ? 'bg-yellow-100 text-yellow-800'
+                                : 'bg-blue-100 text-blue-800'
+                            }
+                          >
+                            {slot.status}
                           </Badge>
                         </div>
                       </div>
@@ -354,16 +360,16 @@ export function SplitBillStaff() {
                       Open Tabs (Payment Pending)
                     </h3>
                     <div className="space-y-2">
-                      {selectedSplit.openTabs.map((tab, i) => (
+                      {selectedSplit.openTabs.map((tab) => (
                         <div
-                          key={i}
+                          key={tab.id}
                           className="p-2 bg-amber-50 rounded border border-amber-200"
                         >
                           <div className="flex justify-between items-start mb-2">
                             <div>
-                              <div className="font-medium text-sm">{tab.phone}</div>
+                              <div className="font-medium text-sm">{tab.guestPhone}</div>
                               <div className="text-xs text-gray-600">
-                                {tab.claimedItems.length} items claimed
+                                {(tab.claimedLines || []).length} items claimed
                               </div>
                             </div>
                             <Badge className="bg-amber-100 text-amber-800">Open Tab</Badge>
@@ -375,7 +381,7 @@ export function SplitBillStaff() {
                             </div>
                             <Button
                               size="sm"
-                              onClick={() => handleProcessTab(tab._id, tab.remainingBalance)}
+                              onClick={() => handleProcessTab(selectedSplit.id, tab.id, tab.remainingBalance)}
                               className="gap-1"
                             >
                               <DollarSign size={14} />
@@ -392,7 +398,7 @@ export function SplitBillStaff() {
                 <Button
                   variant="outline"
                   className="w-full"
-                  onClick={() => setSelectedSplit(null)}
+                  onClick={() => setSelectedSplitId(null)}
                 >
                   Close
                 </Button>

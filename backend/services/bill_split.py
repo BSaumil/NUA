@@ -23,11 +23,19 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
+import logging
 import uuid
 
 from database import db
 
+log = logging.getLogger("bill_split")
+
 OPEN_ORDER_EXCLUDED_STATUSES = ("served", "cancelled")
+# "equal" and "custom" are both an array of claimable slots priced up front
+# (as opposed to "items", which is per-line) — they share the exact same
+# equalParts shape and claim/pay machinery, differing only in how the
+# amounts were derived.
+SLOT_MODES = ("equal", "custom")
 
 
 def _now() -> str:
@@ -134,12 +142,22 @@ async def get_or_create_split(table_number: str) -> dict:
     return existing
 
 
-async def set_mode(split_id: str, mode: str, equal_count: Optional[int] = None) -> dict:
-    """Whoever asks first decides items-vs-equal for the table — it sticks
+async def set_mode(split_id: str, mode: str, equal_count: Optional[int] = None,
+                    custom_amounts: Optional[List[float]] = None,
+                    custom_percents: Optional[List[float]] = None) -> dict:
+    """Whoever asks first decides the split shape for the table — it sticks
     (idempotent no-op on a repeat call) so a second guest opening the link
-    a moment later sees the same choice instead of resetting it."""
-    if mode not in ("items", "equal"):
-        raise ValueError("mode must be 'items' or 'equal'")
+    a moment later sees the same choice instead of resetting it.
+
+    'custom' is 'equal' with organizer-chosen shares instead of an even
+    divide — e.g. two people order mains and a third only had a drink, so
+    the split isn't 3 equal thirds. Pass either custom_amounts (dollar
+    figures that must sum to the bill) or custom_percents (must sum to
+    100); percents are converted to dollars server-side so the guest-facing
+    math is always in dollars, same as 'equal'.
+    """
+    if mode not in ("items", "equal", "custom"):
+        raise ValueError("mode must be 'items', 'equal', or 'custom'")
     split = await db.bill_splits.find_one({"id": split_id}, {"_id": 0})
     if not split:
         raise LookupError("split not found")
@@ -156,6 +174,35 @@ async def set_mode(split_id: str, mode: str, equal_count: Optional[int] = None) 
             {"index": i, "amount": round(share + (drift if i == 0 else 0), 2),
              "status": "open", "claimedByPhone": None, "transactionId": None}
             for i in range(n)
+        ]
+    elif mode == "custom":
+        total = round(sum(l["unitPrice"] for l in split["lines"]), 2)
+        amounts: List[float]
+        if custom_amounts:
+            if not (1 <= len(custom_amounts) <= 20):
+                raise ValueError("custom split needs 1-20 parts")
+            amounts = [round(float(a), 2) for a in custom_amounts]
+            if any(a < 0 for a in amounts):
+                raise ValueError("custom amounts can't be negative")
+            if abs(round(sum(amounts), 2) - total) > 0.05:
+                raise ValueError(f"custom amounts must add up to the bill total (${total})")
+        elif custom_percents:
+            if not (1 <= len(custom_percents) <= 20):
+                raise ValueError("custom split needs 1-20 parts")
+            percents = [float(p) for p in custom_percents]
+            if any(p < 0 for p in percents):
+                raise ValueError("custom percentages can't be negative")
+            if abs(sum(percents) - 100) > 0.5:
+                raise ValueError("custom percentages must add up to 100")
+            amounts = [round(total * p / 100, 2) for p in percents]
+            drift = round(total - round(sum(amounts), 2), 2)
+            if amounts:
+                amounts[0] = round(amounts[0] + drift, 2)
+        else:
+            raise ValueError("custom split requires customAmounts or customPercents")
+        update["equalParts"] = [
+            {"index": i, "amount": amt, "status": "open", "claimedByPhone": None, "transactionId": None}
+            for i, amt in enumerate(amounts)
         ]
     updated = await db.bill_splits.find_one_and_update(
         {"id": split_id}, {"$set": update}, return_document=True)
@@ -215,14 +262,15 @@ async def build_guest_sale_payload(split_id: str, phone: str, *, line_ids: Optio
     if not split:
         raise LookupError("split not found")
 
-    if split.get("mode") == "equal":
+    if split.get("mode") in SLOT_MODES:
         if slot_index is None:
-            raise ValueError("slot_index required for an equal split")
+            raise ValueError("slot_index required for an equal/custom split")
         slot = next((p for p in split["equalParts"] if p["index"] == slot_index), None)
         if not slot or slot["status"] != "claimed" or slot["claimedByPhone"] != phone:
             raise PermissionError("This share isn't claimed by you")
         amount = slot["amount"]
-        items = [{"productId": "SPLIT-SHARE", "productName": f"Table {split['tableNumber']} — equal share",
+        share_label = "equal share" if split["mode"] == "equal" else "share"
+        items = [{"productId": "SPLIT-SHARE", "productName": f"Table {split['tableNumber']} — {share_label}",
                   "quantity": 1, "price": amount, "modifiers": []}]
         return {"amount": amount, "items": items, "splitLineIds": [], "splitSlotIndex": slot_index}
 
@@ -239,12 +287,21 @@ async def build_guest_sale_payload(split_id: str, phone: str, *, line_ids: Optio
 
 
 async def mark_lines_paid(split_id: str, line_ids: Optional[List[str]], slot_index: Optional[int],
-                            transaction_id: str) -> None:
+                            transaction_id: str, guest_email: Optional[str] = None) -> None:
     """Called from routes/integrations.py's _finalize_pos_sale_if_applicable
     once a guest's payment actually lands as a real Transaction — this is
     bookkeeping on top of money that's already moved, so it deliberately
     never raises into that path; a failure here means the split UI shows
-    stale status, not that the sale itself is at risk."""
+    stale status, not that the sale itself is at risk.
+
+    Also fires two best-effort side effects on top of that bookkeeping,
+    each isolated behind its own try/except so one failing never blocks
+    the other or this function's core job of flipping line/slot status:
+    a digital receipt to the guest who just paid, and — once every line/
+    slot on the split is paid — releasing the table back to the floor
+    plan and closing its kitchen tickets, the same handoff a staff-run
+    checkout gets via services/ticket_lifecycle.settle.
+    """
     for lid in (line_ids or []):
         await db.bill_splits.update_one(
             {"id": split_id, "lines.id": lid},
@@ -259,9 +316,23 @@ async def mark_lines_paid(split_id: str, line_ids: Optional[List[str]], slot_ind
     split = await db.bill_splits.find_one({"id": split_id}, {"_id": 0})
     if not split:
         return
-    if split.get("mode") == "equal":
+    if split.get("mode") in SLOT_MODES:
         fully_paid = bool(split.get("equalParts")) and all(p["status"] == "paid" for p in split["equalParts"])
     else:
         fully_paid = bool(split["lines"]) and all(l["status"] == "paid" for l in split["lines"])
     if fully_paid and split["status"] != "settled":
         await db.bill_splits.update_one({"id": split_id}, {"$set": {"status": "settled", "settledAt": _now()}})
+        split["status"] = "settled"
+
+    try:
+        from services import split_receipt
+        await split_receipt.send_payment_receipt(split, line_ids, slot_index, transaction_id, guest_email)
+    except Exception as e:
+        log.error(f"Receipt send failed for split {split_id} txn {transaction_id}: {e}")
+
+    if fully_paid:
+        try:
+            from services import ticket_lifecycle
+            await ticket_lifecycle.settle(table_number=split["tableNumber"], actor="guest_split_bill")
+        except Exception as e:
+            log.error(f"Table auto-release failed for split {split_id} table {split['tableNumber']}: {e}")

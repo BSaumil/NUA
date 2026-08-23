@@ -14,9 +14,12 @@ import { t } from '../lib/i18n';
 
 const TOKEN_KEY = 'nua_guest_token';
 const PHONE_KEY = 'nua_guest_phone';
+const EMAIL_KEY = 'nua_guest_email';
 const mineKey = (splitId) => `nua_guest_mine_${splitId}`;
+const TIP_PRESETS = [0, 10, 15, 20];
 
 function money(n) { return `$${(n || 0).toFixed(2)}`; }
+function round2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
 
 function loadMine(splitId) {
   try {
@@ -55,6 +58,11 @@ export default function SplitBillGuestEnhanced() {
   const [isOrganizer, setIsOrganizer] = useState(false);
   const [showPartialPayment, setShowPartialPayment] = useState(false);
   const [partialAmount, setPartialAmount] = useState('');
+  const [showCustomSetup, setShowCustomSetup] = useState(false);
+  const [customRows, setCustomRows] = useState(['', '']);
+  const [email, setEmail] = useState(sessionStorage.getItem(EMAIL_KEY) || '');
+  const [tipPercent, setTipPercent] = useState(0);
+  const [customTip, setCustomTip] = useState('');
 
   // WebSocket for real-time updates
   const { connected, error: wsError, requestSync } = useSplitWebSocket(
@@ -190,6 +198,72 @@ export default function SplitBillGuestEnhanced() {
     }
   };
 
+  const addCustomRow = () => setCustomRows(prev => [...prev, '']);
+  const removeCustomRow = (i) => setCustomRows(prev => prev.filter((_, idx) => idx !== i));
+  const updateCustomRow = (i, val) => setCustomRows(prev => prev.map((v, idx) => (idx === i ? val : v)));
+  const billTotal = split?.lines?.reduce((sum, l) => sum + (l.unitPrice || 0), 0) || 0;
+  const customRowsTotal = round2(customRows.reduce((sum, v) => sum + (parseFloat(v) || 0), 0));
+
+  const submitCustomSplit = async () => {
+    const table = split?.tableNumber || tableFromPath;
+    const amounts = customRows.map(v => parseFloat(v) || 0);
+    if (amounts.length < 2 || amounts.some(a => a <= 0)) {
+      toast.error('Enter an amount greater than $0 for each share');
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await billSplitAPI.chooseMode(table, 'custom', null, { customAmounts: amounts });
+      setSplit(r.data);
+      setShowCustomSetup(false);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not set up the custom split');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const claimEqualSlot = async (index) => {
+    if (!token) {
+      toast.error(t('split.errors.verifyFirst'));
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await billSplitAPI.claimEqual(split.id, index, token);
+      setSplit(r.data);
+      rememberMine({ slots: [index] });
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'That share was just taken');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const tipFor = (baseAmount) => {
+    if (tipPercent === 'custom') return round2(parseFloat(customTip) || 0);
+    return round2((baseAmount || 0) * (tipPercent / 100));
+  };
+
+  const pay = async (provider, lineIds, slotIndex, baseAmount) => {
+    if (!token) {
+      toast.error(t('split.errors.verifyFirst'));
+      return;
+    }
+    setBusy(true);
+    try {
+      if (email.trim()) sessionStorage.setItem(EMAIL_KEY, email.trim());
+      const r = await billSplitAPI.checkout(split.id, {
+        provider, lineIds, slotIndex, originUrl: window.location.origin,
+        tipAmount: tipFor(baseAmount), email: email.trim() || undefined,
+      }, token);
+      window.location.href = r.data.url;
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not start checkout');
+      setBusy(false);
+    }
+  };
+
   const toggleLine = (line) => {
     if (line.status !== 'open') return;
     setSelected(prev =>
@@ -239,11 +313,8 @@ export default function SplitBillGuestEnhanced() {
         },
         body: JSON.stringify({
           amount: parseFloat(partialAmount),
-          lineIds: selected,
-          totalAmount: selected.reduce((sum, id) => {
-            const line = split.lines.find(l => l.id === id);
-            return sum + (line?.unitPrice || 0);
-          }, 0),
+          lineIds: myClaimedLines.map(l => l.id),
+          totalAmount: myAmount,
         }),
       });
 
@@ -279,7 +350,10 @@ export default function SplitBillGuestEnhanced() {
 
   const myLines = split?.lines.filter(l => mine.lines.has(l.id)) || [];
   const myClaimedLines = myLines.filter(l => l.status === 'claimed');
-  const myAmount = myClaimedLines.reduce((sum, l) => sum + (l.unitPrice || 0), 0);
+  const myClaimedSlots = (split?.equalParts || []).filter(p => mine.slots.has(p.index) && p.status === 'claimed');
+  const myAmount = myClaimedLines.reduce((sum, l) => sum + (l.unitPrice || 0), 0)
+    + myClaimedSlots.reduce((sum, p) => sum + (p.amount || 0), 0);
+  const isSlotMode = split?.mode === 'equal' || split?.mode === 'custom';
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4">
@@ -324,12 +398,12 @@ export default function SplitBillGuestEnhanced() {
         )}
 
         {/* Split Mode Selection */}
-        {!split?.mode && (
+        {!split?.mode && !showCustomSetup && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">{t('split.mode')}</CardTitle>
             </CardHeader>
-            <CardContent className="grid grid-cols-2 gap-2">
+            <CardContent className="grid grid-cols-3 gap-2">
               <Button
                 variant="outline"
                 onClick={() => chooseMode('items')}
@@ -348,6 +422,66 @@ export default function SplitBillGuestEnhanced() {
                 <Users size={20} />
                 {t('split.equal')}
               </Button>
+              <Button
+                variant="outline"
+                onClick={() => setShowCustomSetup(true)}
+                disabled={busy}
+                className="flex flex-col items-center gap-1 h-auto py-3"
+              >
+                <Users size={20} />
+                {t('split.custom')}
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Custom Split Setup — uneven shares (e.g. "I only had a drink") */}
+        {!split?.mode && showCustomSetup && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">{t('split.customSplit.setupTitle')}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-xs text-gray-500">
+                {t('split.customSplit.billTotal', { amount: money(billTotal) })}
+              </p>
+              {customRows.map((val, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500 w-14">
+                    {t('split.customSplit.person', { number: i + 1 })}
+                  </span>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={val}
+                    onChange={(e) => updateCustomRow(i, e.target.value)}
+                    disabled={busy}
+                  />
+                  {customRows.length > 2 && (
+                    <Button variant="ghost" size="sm" onClick={() => removeCustomRow(i)} disabled={busy}>
+                      <X size={14} />
+                    </Button>
+                  )}
+                </div>
+              ))}
+              <div className="flex items-center justify-between text-sm">
+                <Button variant="outline" size="sm" onClick={addCustomRow} disabled={busy || customRows.length >= 20}>
+                  {t('split.customSplit.addPerson')}
+                </Button>
+                <span className={Math.abs(customRowsTotal - billTotal) < 0.01 ? 'text-green-600' : 'text-amber-600'}>
+                  {money(customRowsTotal)} / {money(billTotal)}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 pt-2">
+                <Button variant="outline" onClick={() => setShowCustomSetup(false)} disabled={busy}>
+                  Cancel
+                </Button>
+                <Button onClick={submitCustomSplit} disabled={busy}>
+                  {busy ? <Loader2 size={16} className="animate-spin" /> : t('split.customSplit.createShares')}
+                </Button>
+              </div>
             </CardContent>
           </Card>
         )}
@@ -415,6 +549,46 @@ export default function SplitBillGuestEnhanced() {
           </Card>
         )}
 
+        {/* Equal / Custom Share Grid — same claimable-slot shape either way */}
+        {isSlotMode && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">
+                {split.mode === 'equal' ? t('split.equal') : t('split.custom')}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-2">
+                {split?.equalParts?.map(part => {
+                  const isMineSlot = mine.slots.has(part.index) && part.status === 'claimed';
+                  return (
+                    <button
+                      key={part.index}
+                      disabled={part.status !== 'open' && !isMineSlot}
+                      onClick={() => part.status === 'open' && claimEqualSlot(part.index)}
+                      className={`p-3 rounded-lg border-2 text-center transition ${
+                        part.status === 'paid'
+                          ? 'bg-gray-100 border-gray-300 cursor-not-allowed opacity-50'
+                          : isMineSlot
+                          ? 'bg-blue-50 border-blue-400'
+                          : part.status === 'claimed'
+                          ? 'bg-yellow-50 border-yellow-300 cursor-not-allowed'
+                          : 'bg-white border-gray-300 hover:border-blue-400'
+                      }`}
+                    >
+                      <div className="font-bold">{money(part.amount)}</div>
+                      <div className="text-xs text-gray-600 uppercase tracking-wide mt-0.5">
+                        {part.status === 'paid' ? t('split.status.paid') : isMineSlot ? 'Yours'
+                          : part.status === 'claimed' ? t('split.status.claimed') : t('split.status.open')}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Phone Verification */}
         {!token && (
           <Card>
@@ -466,7 +640,61 @@ export default function SplitBillGuestEnhanced() {
           />
         )}
 
-        {/* Partial Payment Tab */}
+        {/* Tip + Receipt email — shown once anything is claimed and ready to pay */}
+        {token && (myClaimedLines.length > 0 || myClaimedSlots.length > 0) && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">{t('split.tip.title')}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-5 gap-2">
+                {TIP_PRESETS.map(pct => (
+                  <Button
+                    key={pct}
+                    size="sm"
+                    variant={tipPercent === pct ? 'default' : 'outline'}
+                    onClick={() => setTipPercent(pct)}
+                  >
+                    {pct}%
+                  </Button>
+                ))}
+                <Button
+                  size="sm"
+                  variant={tipPercent === 'custom' ? 'default' : 'outline'}
+                  onClick={() => setTipPercent('custom')}
+                >
+                  {t('split.tip.other')}
+                </Button>
+              </div>
+              {tipPercent === 'custom' && (
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder={t('split.tip.amount')}
+                  value={customTip}
+                  onChange={(e) => setCustomTip(e.target.value)}
+                />
+              )}
+              {tipFor(myAmount) > 0 && (
+                <p className="text-xs text-gray-500">
+                  {t('split.tip.summary', {
+                    tip: money(tipFor(myAmount)),
+                    total: money(round2(myAmount + tipFor(myAmount))),
+                  })}
+                </p>
+              )}
+              <Input
+                type="email"
+                placeholder={t('split.receipt.emailPlaceholder')}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Pay for claimed items (items mode) */}
         {token && myClaimedLines.length > 0 && (
           <Card>
             <CardHeader>
@@ -477,12 +705,25 @@ export default function SplitBillGuestEnhanced() {
             <CardContent className="space-y-3">
               {!showPartialPayment ? (
                 <div className="space-y-2">
-                  <Button onClick={() => setShowPartialPayment(true)} variant="outline" className="w-full">
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      className="gap-1"
+                      disabled={busy}
+                      onClick={() => pay('stripe', myClaimedLines.map(l => l.id), null, myAmount)}
+                    >
+                      <CreditCard size={16} /> Card
+                    </Button>
+                    <Button
+                      className="gap-1"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => pay('crypto', myClaimedLines.map(l => l.id), null, myAmount)}
+                    >
+                      <Bitcoin size={16} /> Crypto
+                    </Button>
+                  </div>
+                  <Button onClick={() => setShowPartialPayment(true)} variant="ghost" size="sm" className="w-full">
                     {t('split.tab.partial')}
-                  </Button>
-                  <Button className="w-full gap-1" onClick={() => {}}>
-                    <CreditCard size={16} />
-                    {t('split.pay')}
                   </Button>
                 </div>
               ) : (
@@ -512,6 +753,40 @@ export default function SplitBillGuestEnhanced() {
                   </div>
                 </div>
               )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Pay for claimed shares (equal/custom mode) — one slot at a time,
+            matching the backend's single-slot checkout */}
+        {token && myClaimedSlots.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">{t('split.pay')}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {myClaimedSlots.map(slot => (
+                <div key={slot.index} className="flex items-center gap-2">
+                  <span className="text-sm font-mono flex-1">{money(slot.amount)}</span>
+                  <Button
+                    size="sm"
+                    className="gap-1"
+                    disabled={busy}
+                    onClick={() => pay('stripe', [], slot.index, slot.amount)}
+                  >
+                    <CreditCard size={14} /> Card
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1"
+                    disabled={busy}
+                    onClick={() => pay('crypto', [], slot.index, slot.amount)}
+                  >
+                    <Bitcoin size={14} /> Crypto
+                  </Button>
+                </div>
+              ))}
             </CardContent>
           </Card>
         )}
