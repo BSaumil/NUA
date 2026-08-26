@@ -190,53 +190,34 @@ async def apply_price_tune(data: dict, user: dict = Depends(require_owner_or_man
 # ============================================================================
 @router.post("/ai/overbooking-check")
 async def overbooking_check(data: dict, _: dict = Depends(get_user)):
-    """Block reservation if seats + buffer exceeds floor capacity for that slot."""
+    """Staff pre-flight advisory before creating a reservation — does the
+    exact same capacity math services.booking_rules_engine now enforces at
+    write time (when Settings > Booking Rules has capacity enforcement
+    turned on), via the same shared capacity_for_slot(), so this warning and
+    what actually gets blocked can't drift apart."""
     date = data.get("date")
     time_str = data.get("time")
     party_size = int(data.get("partySize", 2))
     if not date or not time_str:
         raise HTTPException(status_code=400, detail="date + time required")
 
-    # Capacity = sum of seats across active tables, or 60 if none configured
-    tables = await floor_tables.list_tables()
-    capacity = sum(int(t.get("maxCovers") or t.get("capacity") or t.get("seats") or 4) for t in tables) or 60
-    # Buffer ratio — owner-configurable via settings doc, default 1.10
-    settings = await db.settings.find_one({"id": "overbooking"}, {"_id": 0}) or {}
-    buffer_ratio = float(settings.get("bufferRatio", 1.10))
-    cap_with_buffer = int(capacity * buffer_ratio)
-
-    # Existing covers for that slot ±30min
-    slot_hour, slot_min = map(int, time_str.split(":"))
-    slot_start = slot_hour * 60 + slot_min - 30
-    slot_end = slot_hour * 60 + slot_min + 30
-    same_day = await db.reservations.find(
-        {"date": date, "status": {"$in": ["confirmed", "seated"]}},
-        {"_id": 0, "time": 1, "partySize": 1},
-    ).to_list(1000)
-    booked = 0
-    for r in same_day:
-        try:
-            h, m = map(int, str(r.get("time", "0:0")).split(":"))
-            mins = h * 60 + m
-            if slot_start <= mins <= slot_end:
-                booked += int(r.get("partySize", 0) or 0)
-        except Exception:
-            continue
-
-    available = cap_with_buffer - booked
+    from services.booking_rules_engine import get_rules, capacity_for_slot
+    rules = await get_rules()
+    cap_info = await capacity_for_slot(date, time_str, rules)
+    available = cap_info["available"]
     allow = available >= party_size
     return {
         "allow": allow,
-        "capacity": capacity,
-        "withBuffer": cap_with_buffer,
-        "alreadyBooked": booked,
+        "capacity": cap_info["capacity"],
+        "withBuffer": cap_info["capacity"],
+        "alreadyBooked": cap_info["booked"],
         "requested": party_size,
-        "available": max(0, available),
+        "available": available,
         "reason": (
-            f"Slot has {available} seats left (capacity {capacity}, "
-            f"+10% buffer, {booked} booked)."
+            f"Slot has {available} seats left (capacity {cap_info['capacity']}, "
+            f"{cap_info['booked']} booked)."
             if allow else
-            f"OVERBOOKED — only {max(0, available)} seats left, need {party_size}."
+            f"OVERBOOKED — only {available} seats left, need {party_size}."
         ),
     }
 

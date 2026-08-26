@@ -23,6 +23,25 @@ async def get_public_menu():
 
 @router.get("/public/available-slots")
 async def get_available_slots(date: str, party_size: int = 2):
+    from datetime import date as date_cls
+    from services.booking_rules_engine import get_rules, capacity_for_slot, in_time_range
+
+    rules = await get_rules()
+
+    # A whole-day block (blackout or a blocked weekday) means no slot is
+    # offered at all — matches what POST /public/book would reject anyway,
+    # so the guest sees why up front instead of picking a time and then
+    # hitting a 409.
+    blackout = await db.booking_blackouts.find_one({"date": date}, {"_id": 0})
+    if blackout:
+        return {"date": date, "partySize": party_size, "slots": [], "closed": blackout.get("reason") or "closed"}
+    try:
+        weekday_name = date_cls.fromisoformat(date).strftime("%A")
+    except Exception:
+        weekday_name = None
+    if weekday_name and weekday_name in (rules.get("blockedWeekdays") or []):
+        return {"date": date, "partySize": party_size, "slots": [], "closed": f"Closed on {weekday_name}s"}
+
     floor_plans = await db.floor_plans.find({}, {"_id": 0}).to_list(10)
     all_tables = []
     for fp in floor_plans:
@@ -31,32 +50,89 @@ async def get_available_slots(date: str, party_size: int = 2):
     if not suitable_tables:
         suitable_tables = [{"id": "virtual", "maxCovers": 20}]
     reservations = await db.reservations.find({"date": date}, {"_id": 0}).to_list(500)
+    open_t = rules.get("bookingOpenTime") or "00:00"
+    close_t = rules.get("bookingCloseTime") or "23:59"
+    # If `date` is today, don't offer a time that's already passed — POST
+    # /public/book would reject it anyway (see booking_rules_engine's
+    # "already passed" check, which uses this same naive datetime.now()
+    # convention), so showing it as pickable just sets the guest up for a
+    # confirm-time 409 instead of a clean slot list.
+    now = datetime.now()
+    is_today = date == now.strftime("%Y-%m-%d")
+    now_hhmm = now.strftime("%H:%M")
     slots = []
     for hour in range(11, 22):
         for minute in [0, 30]:
             time_str = f"{hour:02d}:{minute:02d}"
+            if is_today and time_str <= now_hhmm:
+                continue
+            if not in_time_range(time_str, open_t, close_t):
+                continue
             occupied = len([r for r in reservations if r.get("time") == time_str and r.get("status") in ("confirmed", "seated")])
             available = len(suitable_tables) - occupied
-            if available > 0:
-                slots.append({"time": time_str, "available": available})
+            if available <= 0:
+                continue
+            if rules.get("enforceCapacity"):
+                cap_info = await capacity_for_slot(date, time_str, rules)
+                if cap_info["available"] < party_size:
+                    continue
+            slots.append({"time": time_str, "available": available})
     return {"date": date, "partySize": party_size, "slots": slots}
 
 @router.post("/public/book")
 async def public_book_reservation(data: dict):
+    """Customer self-service booking — must run through the exact same
+    booking_rules_engine as staff's POST /reservations. Previously this path
+    had NO rule enforcement at all (not even the blackout-date check the
+    staff path already had), so a guest could book straight through a
+    closed date or a large-party set-menu requirement just by using the
+    public form instead of calling the restaurant."""
     from models.reservation import Reservation
+    from services.booking_rules_engine import validate_and_enrich_booking, BookingRuleViolation
+
+    party_size = int(data.get("partySize") or 2)
+    date = data.get("date", "")
+    time = data.get("time", "")
+    experience_id = data.get("experienceId")
+
+    try:
+        enrichment = await validate_and_enrich_booking(
+            date=date, time=time, party_size=party_size, source="online",
+            experience_id=experience_id,
+        )
+    except BookingRuleViolation as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
     res_obj = Reservation(
         guestName=data.get("guestName", "Guest"),
         guestPhone=data.get("guestPhone", ""),
         guestEmail=data.get("guestEmail", ""),
-        partySize=data.get("partySize", 2),
-        date=data.get("date", ""),
-        time=data.get("time", ""),
+        partySize=party_size,
+        date=date,
+        time=time,
         duration=data.get("duration", 90),
         specialRequests=data.get("specialRequests", ""),
         source="online",
+        **enrichment,
     )
     await db.reservations.insert_one(res_obj.dict())
-    return {"reservationId": res_obj.id, "status": "confirmed", "message": "Reservation booked successfully!"}
+    if res_obj.isLargeBooking:
+        from services import audit_service
+        await audit_service.log_event(
+            entity_type="reservation", entity_id=res_obj.id, action="created",
+            after=res_obj.dict(), memo=f"Large booking ({res_obj.partySize} guests) via online booking — "
+                                        f"tier: {res_obj.bookingTierLabel}",
+            severity="notice", tags=["large_booking"],
+        )
+    message = "Reservation booked successfully!"
+    if res_obj.isLargeBooking:
+        message = f"Booked with {res_obj.experienceName or res_obj.bookingTierLabel}. " + message
+    return {
+        "reservationId": res_obj.id, "status": "confirmed", "message": message,
+        "isLargeBooking": res_obj.isLargeBooking, "bookingTierLabel": res_obj.bookingTierLabel,
+        "experienceName": res_obj.experienceName, "depositRequired": res_obj.depositRequired,
+        "preOrderRequired": res_obj.preOrderRequired, "approvalRequired": res_obj.approvalRequired,
+    }
 
 @router.post("/public/join-waitlist")
 async def public_join_waitlist(data: dict):

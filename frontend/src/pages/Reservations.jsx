@@ -15,7 +15,9 @@ import {
 } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { useTheme } from '../contexts/ThemeContext';
-import { reservationsAPI, floorPlansAPI, aiWave2API, reservationsAIAPI } from '../services/api';
+import { reservationsAPI, floorPlansAPI, aiWave2API, reservationsAIAPI, reservationFeaturesAPI } from '../services/api';
+import { matchTier } from '../lib/bookingTiers';
+import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import BookingsInbox from './BookingsInbox';
 import BookingHeatmap from './BookingHeatmap';
@@ -43,11 +45,12 @@ const emptyForm = {
   guestName: '', guestPhone: '', guestEmail: '', customerId: '', partySize: 2,
   date: new Date().toISOString().split('T')[0], time: '19:00', duration: 90,
   tableId: '', section: '', specialRequests: '', notes: '', tags: [],
-  depositRequired: 0, source: 'phone',
+  depositRequired: 0, source: 'phone', experienceId: null,
 };
 
 export default function Reservations() {
   const { theme } = useTheme();
+  const { user } = useAuth();
   const [reservations, setReservations] = useState([]);
   const [floorPlans, setFloorPlans] = useState([]);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -56,6 +59,15 @@ export default function Reservations() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editId, setEditId] = useState(null);
   const [form, setForm] = useState({ ...emptyForm });
+  const [bookingRules, setBookingRules] = useState(null);
+  const [experiences, setExperiences] = useState([]);
+  // A deliberate rule override — only ever set after the server has
+  // already rejected a save with a rule violation, and only usable by an
+  // owner/manager. Distinct from "no rule was checked" (accidental bypass);
+  // this is "a manager typed a reason and chose to proceed anyway."
+  const [ruleViolation, setRuleViolation] = useState(null);
+  const [overrideReason, setOverrideReason] = useState('');
+  const canOverride = user?.role === 'owner' || user?.role === 'manager';
   // CRM guest lookup — matches on name, phone, or email so staff can pull up
   // a returning guest's details instead of retyping them from scratch.
   const [guestMatches, setGuestMatches] = useState([]);
@@ -80,6 +92,19 @@ export default function Reservations() {
     } catch (e) { console.error(e); toast.error('Could not load bookings'); }
   }, [selectedDate, statusFilter]);
 
+  useEffect(() => {
+    reservationFeaturesAPI.getBookingRules().then(r => setBookingRules(r.data)).catch(() => {});
+    reservationFeaturesAPI.getExperiences().then(r => setExperiences(r.data || [])).catch(() => {});
+  }, []);
+
+  const matchedTier = matchTier(bookingRules?.sizeTiers, form.partySize);
+  const requiresExperience = !!matchedTier?.requiresExperience;
+  const tierExperiences = requiresExperience
+    ? (matchedTier.allowedExperienceIds?.length
+        ? experiences.filter(e => matchedTier.allowedExperienceIds.includes(e.id))
+        : experiences.filter(e => e.active !== false))
+    : [];
+
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const filtered = reservations.filter(r =>
@@ -87,7 +112,11 @@ export default function Reservations() {
     (r.guestPhone && r.guestPhone.includes(search))
   );
 
-  const openNew = () => { setEditId(null); setForm({ ...emptyForm, date: selectedDate }); setGuestMatches([]); setGuestIntel(null); setGuestSearchOpen(false); setDialogOpen(true); };
+  const openNew = () => {
+    setEditId(null); setForm({ ...emptyForm, date: selectedDate });
+    setRuleViolation(null); setOverrideReason('');
+    setGuestMatches([]); setGuestIntel(null); setGuestSearchOpen(false); setDialogOpen(true);
+  };
   const openEdit = (r) => {
     setEditId(r.id);
     setForm({
@@ -96,8 +125,9 @@ export default function Reservations() {
       partySize: r.partySize, date: r.date, time: r.time, duration: r.duration,
       tableId: r.tableId || '', section: r.section || '', specialRequests: r.specialRequests || '',
       notes: r.notes || '', tags: r.tags || [], depositRequired: r.depositRequired || 0,
-      source: r.source || 'phone',
+      source: r.source || 'phone', experienceId: r.experienceId || null,
     });
+    setRuleViolation(null); setOverrideReason('');
     setGuestMatches([]); setGuestSearchOpen(false);
     // Editing a booking that's already linked to a guest — pull their history
     // straight up so the same context is there as when it was first taken.
@@ -155,6 +185,19 @@ export default function Reservations() {
     if (!form.guestName || !form.date || !form.time) {
       toast.error('Guest name, date, and time are required'); return;
     }
+    // Client-side mirror of the same large-booking gate the server
+    // enforces (see BookingPortal.jsx) — UX only. The actual restriction is
+    // POST /reservations re-checking via services.booking_rules_engine, so
+    // staff can't accidentally create a large booking that skipped its
+    // required experience just because this predicted wrong.
+    if (requiresExperience && !form.experienceId && !overrideReason) {
+      toast.error(
+        `For parties of ${matchedTier.minGuests} or more, bookings require our `
+        + `${matchedTier.label || 'Set Menu / Dining Experience'}. Choose one below, or an `
+        + `owner/manager can override with a reason.`
+      );
+      return;
+    }
     try {
       // Wave 2 — Overbooking guardrail (only on create)
       if (!editId) {
@@ -166,16 +209,30 @@ export default function Reservations() {
           }
         } catch { /* fail-open: don't block legitimate bookings */ }
       }
+      const payload = overrideReason ? { ...form, overrideReason } : form;
       if (editId) {
-        await reservationsAPI.update(editId, form);
+        await reservationsAPI.update(editId, payload);
         toast.success('Reservation updated');
       } else {
-        await reservationsAPI.create(form);
+        await reservationsAPI.create(payload);
         toast.success('Reservation created');
       }
+      setRuleViolation(null); setOverrideReason('');
       setDialogOpen(false);
       fetchData();
-    } catch (e) { toast.error('Failed to save reservation'); }
+    } catch (e) {
+      const detail = e?.response?.data?.detail;
+      if (e?.response?.status === 409 && detail) {
+        // A genuine booking-rule rejection from the server — not the
+        // fail-open advisory check above, which never throws. Surface it
+        // inline with an override option instead of a dead-end toast, since
+        // "accidentally blocked" and "deliberately need to override" look
+        // the same from here and only an owner/manager can do the latter.
+        setRuleViolation(detail);
+      } else {
+        toast.error('Failed to save reservation');
+      }
+    }
   };
 
   const handleDelete = async (id) => {
@@ -696,7 +753,11 @@ export default function Reservations() {
               <div>
                 <label className="text-xs font-medium text-gray-500 mb-1 block">Party Size</label>
                 <Input type="number" data-testid="party-size-input" min={1} max={50} value={form.partySize}
-                  onChange={e => setForm(f => ({ ...f, partySize: parseInt(e.target.value) || 1 }))} />
+                  onChange={e => {
+                    const partySize = parseInt(e.target.value) || 1;
+                    setForm(f => ({ ...f, partySize, experienceId: null }));
+                    setRuleViolation(null); setOverrideReason('');
+                  }} />
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 mb-1 block">Duration (min)</label>
@@ -747,6 +808,51 @@ export default function Reservations() {
                   onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Staff notes..." />
               </div>
             </div>
+
+            {requiresExperience && (
+              <div className="mt-4 p-3 rounded-lg bg-amber-50 border border-amber-200" data-testid="res-large-booking-notice">
+                <p className="text-sm font-semibold text-amber-900 mb-1">
+                  Large Booking — {matchedTier.label || 'requires an experience'}
+                </p>
+                <p className="text-xs text-amber-800 mb-2">
+                  Parties of {matchedTier.minGuests}{matchedTier.maxGuests ? `–${matchedTier.maxGuests}` : '+'} require
+                  {matchedTier.requireDeposit ? ' a deposit,' : ''}{matchedTier.requirePreOrder ? ' a pre-order,' : ''}
+                  {matchedTier.requireApproval ? ' owner/manager approval,' : ''} an experience selection below.
+                </p>
+                {tierExperiences.length === 0 ? (
+                  <p className="text-xs text-red-600">No experiences configured for this tier — add one under Marketing &gt; Experiences, or an owner/manager can override below.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {tierExperiences.map(exp => (
+                      <button key={exp.id} type="button" onClick={() => setForm(f => ({ ...f, experienceId: exp.id }))}
+                        data-testid={`res-experience-${exp.id}`}
+                        className={`px-2.5 py-1 text-xs rounded-full font-medium ${form.experienceId === exp.id ? 'bg-gray-900 text-white' : 'bg-white border border-gray-300 text-gray-600'}`}>
+                        {exp.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {ruleViolation && (
+              <div className="mt-4 p-3 rounded-lg bg-red-50 border border-red-200" data-testid="res-rule-violation">
+                <p className="text-sm font-semibold text-red-800 mb-1">Booking rule blocked this reservation</p>
+                <p className="text-xs text-red-700 mb-2">{ruleViolation}</p>
+                {canOverride ? (
+                  <div className="flex gap-2">
+                    <Input placeholder="Reason for override (required, audit-logged)" value={overrideReason}
+                      onChange={e => setOverrideReason(e.target.value)} className="text-xs h-8" data-testid="override-reason-input" />
+                    <Button size="sm" variant="outline" disabled={!overrideReason.trim()}
+                      onClick={handleSave} data-testid="override-save-btn">
+                      Override &amp; Save
+                    </Button>
+                  </div>
+                ) : (
+                  <p className="text-xs text-red-600">Ask an owner or manager to override this rule if this booking is intentional.</p>
+                )}
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)} data-testid="cancel-reservation-btn">Cancel</Button>

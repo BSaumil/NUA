@@ -302,6 +302,17 @@ PUBLIC_API_PATHS = {
     # A browser reporting its own crash — has to work from the login screen
     # and the guest ordering pages, neither of which carries a token.
     "/api/ops/client-errors",
+    # Booking policy the guest booking portal needs to enforce BEFORE
+    # confirming (large-booking size tiers, experience requirements) — a
+    # guest on BookingPortal.jsx has no token, same as the /api/public/
+    # prefix, but these two live outside that prefix. Non-sensitive: booking
+    # window/capacity policy and the experience catalog are guest-relevant
+    # information, not business-internal data (no costs, no other guests'
+    # records). POST /api/booking/rules stays behind its own
+    # Depends(require_owner) at the route level regardless of this
+    # allowlist entry — that's an independent check the middleware doesn't
+    # weaken by letting the request past this layer.
+    "/api/booking/rules", "/api/booking/experiences",
 }
 
 
