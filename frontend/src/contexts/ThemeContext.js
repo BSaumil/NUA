@@ -3,17 +3,17 @@ import { advancedAPI } from '../services/api';
 
 const ThemeContext = createContext();
 
-// NUA Brand Identity (Feb 2026)
-// Primary: #f58c14 (Orange) — energy, action, CTAs, highlights
-// Secondary: #8b5cf6 (Purple) — AI, intelligence, system depth
-// Accent: #ec4899 (Pink) — innovation, alerts, engagement moments
+// NUA POS chrome — see NUA_POS_DESIGN_TOKENS.md.
+// Primary: #750D28 (Burgundy) — chrome: nav, headings, buttons, links
+// Secondary: #8b5cf6 (Purple) — AI/agent data hue only, never chrome
+// Accent: #ec4899 (Pink) — data hue only (alerts/insight marks), never chrome
 const defaultTheme = {
-  primary: '#f58c14',
+  primary: '#750D28',
   secondary: '#8b5cf6',
   accent: '#ec4899',
-  background: '#ffffff',
-  text: '#1f2937',
-  sidebar: '#f6f7fb'
+  background: '#FFFDF9',
+  text: '#29241E',
+  sidebar: '#FAF8F3'
 };
 
 export const ThemeProvider = ({ children }) => {
@@ -22,9 +22,12 @@ export const ThemeProvider = ({ children }) => {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        // Migrate legacy indigo primary to NUA orange brand color
+        // Migrate legacy indigo, then legacy orange, primary to the current
+        // NUA POS chrome burgundy — each business's saved theme upgrades
+        // automatically rather than staying stuck on a retired default.
         if (parsed.primary === '#6366f1') parsed.primary = '#f58c14';
-        if (parsed.sidebar === '#f9fafb') parsed.sidebar = '#f6f7fb';
+        if (parsed.primary === '#f58c14') parsed.primary = '#750D28';
+        if (parsed.sidebar === '#f9fafb' || parsed.sidebar === '#f6f7fb') parsed.sidebar = '#FAF8F3';
         return parsed;
       } catch {
         return defaultTheme;
@@ -40,8 +43,8 @@ export const ThemeProvider = ({ children }) => {
     Object.entries(theme).forEach(([key, value]) => {
       document.documentElement.style.setProperty(`--theme-${key}`, value);
     });
-    // NUA brand palette as CSS vars for global usage
-    document.documentElement.style.setProperty('--nua-primary', '#f58c14');
+    // NUA POS chrome palette as CSS vars for global usage
+    document.documentElement.style.setProperty('--nua-primary', '#750D28');
     document.documentElement.style.setProperty('--nua-secondary', '#8b5cf6');
     document.documentElement.style.setProperty('--nua-accent', '#ec4899');
   }, [theme]);
@@ -59,13 +62,13 @@ export const ThemeProvider = ({ children }) => {
       document.documentElement.style.setProperty('--nua-muted', '#a1a1aa');
     } else {
       document.documentElement.classList.remove('dark');
-      document.body.style.backgroundColor = '#f6f7fb';
-      document.body.style.color = '#1f2937';
-      document.documentElement.style.setProperty('--nua-bg', '#f6f7fb');
-      document.documentElement.style.setProperty('--nua-surface', '#ffffff');
-      document.documentElement.style.setProperty('--nua-card', '#ffffff');
-      document.documentElement.style.setProperty('--nua-text', '#1f2937');
-      document.documentElement.style.setProperty('--nua-muted', '#6b7280');
+      document.body.style.backgroundColor = '#FAF8F3';
+      document.body.style.color = '#29241E';
+      document.documentElement.style.setProperty('--nua-bg', '#FAF8F3');
+      document.documentElement.style.setProperty('--nua-surface', '#FFFDF9');
+      document.documentElement.style.setProperty('--nua-card', '#FFFDF9');
+      document.documentElement.style.setProperty('--nua-text', '#29241E');
+      document.documentElement.style.setProperty('--nua-muted', '#756D67');
     }
     localStorage.setItem('nua_dark', darkMode ? '1' : '0');
   }, [darkMode]);

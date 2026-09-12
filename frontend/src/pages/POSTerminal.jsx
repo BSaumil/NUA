@@ -101,6 +101,14 @@ const POSTerminal = () => {
   // v15: Tabs (Hold/Recall), Loyalty preview, BNPL, Multi-lang
   const [showTabsDialog, setShowTabsDialog] = useState(false);
   const [openTabs, setOpenTabs] = useState([]);
+  // Sales auto-held right before a redirect to Stripe/Coinbase (see
+  // handleStripeCheckout/handleCryptoCheckout) that the guest never
+  // completed — surfaced as a banner so backing out of a hosted checkout
+  // doesn't just silently lose the sale. Checked on every mount, which
+  // covers the actual bug: a browser Back press after leaving for Stripe
+  // is a fresh load of this page, not a route the app can catch via a URL
+  // param the way payment-success can.
+  const [heldCheckoutTabs, setHeldCheckoutTabs] = useState([]);
   // Send-to-table flow: opens a floor picker so the server can attach the
   // current cart to a specific table as an open tab (defers payment).
   const [sendToTableOpen, setSendToTableOpen] = useState(false);
@@ -214,6 +222,49 @@ const POSTerminal = () => {
 
   useEffect(() => { fetchData(); }, []);
   useEffect(() => { posLayoutAPI.get().then(r => setPosLayout(r.data)).catch(() => {}); }, []);
+
+  // Detect a sale abandoned mid-Stripe/Crypto-checkout — see
+  // handleStripeCheckout/handleCryptoCheckout for how these tabs get
+  // created. Checked on mount (a Back press after leaving for a hosted
+  // checkout is a fresh load of /pos) and again on `pageshow` — some
+  // browsers restore this page from the back/forward cache on Back rather
+  // than remounting it, which a mount-only effect would miss entirely.
+  const loadHeldCheckouts = useCallback(async () => {
+    try {
+      const r = await v15API.getTabs();
+      setHeldCheckoutTabs((r.data || []).filter(t => t.autoHold));
+    } catch { /* best-effort — don't block the terminal loading over this */ }
+  }, []);
+  useEffect(() => {
+    loadHeldCheckouts();
+    const onPageShow = () => loadHeldCheckouts();
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, [loadHeldCheckouts]);
+
+  const resumeHeldCheckout = async (tab) => {
+    if (cart.length > 0) {
+      const proceed = window.confirm('This will replace the current cart with the held sale. Continue?');
+      if (!proceed) return;
+    }
+    clearCart();
+    (tab.cart || []).forEach(i => { for (let n = 0; n < i.quantity; n++) addToCart({ ...i }); });
+    if (tab.selectedCustomer) setSelectedCustomer(tab.selectedCustomer);
+    try { await v15API.deleteTab(tab.id); } catch {}
+    setHeldCheckoutTabs(prev => prev.filter(t => t.id !== tab.id));
+    toast({ title: 'Held sale resumed', description: 'Pick a payment method to finish it.' });
+  };
+
+  const cancelHeldCheckout = async (tab) => {
+    const proceed = window.confirm(
+      `Cancel this held sale? If the guest still completes the ${tab.checkoutProvider === 'crypto' ? 'crypto' : 'Stripe'} `
+      + `payment from a re-opened link, it will still ring up automatically — this only clears the hold on this screen.`
+    );
+    if (!proceed) return;
+    try { await v15API.deleteTab(tab.id); } catch {}
+    setHeldCheckoutTabs(prev => prev.filter(t => t.id !== tab.id));
+    toast({ title: 'Hold cancelled' });
+  };
 
   // Floor plan tables, loaded once up front so dine-in table entry can be
   // validated as the server types instead of only when they open the picker.
@@ -1023,16 +1074,38 @@ const POSTerminal = () => {
   // travels WITH the checkout session and gets rung up server-side once
   // Stripe confirms payment, instead of relying on this tab still being
   // open and in the right state when the guest returns.
+  //
+  // But if the guest backs out WITHOUT paying (browser back, closing the
+  // Stripe tab, etc.), there was previously nothing to come back to — the
+  // cart was just gone, indistinguishable from never having rung anything
+  // up, and the cashier had to rebuild it from scratch to charge a
+  // different way. An auto-hold tab (the same pos_tabs mechanism the
+  // manual "Hold" button uses) is created right before the redirect so the
+  // sale can be resumed or explicitly cancelled instead — see the
+  // heldCheckoutTabs banner below. If payment does succeed, the finalize
+  // path (_finalize_pos_sale_if_applicable, integrations.py) deletes this
+  // hold once the real transaction lands, so it never lingers after a
+  // completed sale.
   const handleStripeCheckout = async () => {
     if (tableBlocked) {
       toast({ title: 'Unknown table', description: tableCheck.message, variant: 'destructive' });
       return;
     }
+    if (cart.length === 0) { toast({ title: 'Cart empty', variant: 'destructive' }); return; }
     setLoading(true);
+    let holdTabId = null;
     try {
+      const holdRes = await v15API.createTab({
+        name: `Card (Stripe) — ${new Date().toLocaleTimeString()}`,
+        cart, selectedCustomer, tableNumber: orderType === 'dine-in' ? tableNumber : null,
+        autoHold: true, checkoutProvider: 'stripe',
+      });
+      holdTabId = holdRes.data?.id;
+
       const res = await stripeAPI.createCheckout({
         originUrl: window.location.origin,
         amount: totalNum,
+        heldTabId: holdTabId,
         sale: {
           items: cart.map(item => toTxItem(item, true)),
           paymentMethod: 'Stripe',
@@ -1041,26 +1114,45 @@ const POSTerminal = () => {
           ...buildDiscountPayload(),
         },
       });
-      if (res.data.url) window.location.href = res.data.url;
+      if (res.data.url) {
+        window.location.href = res.data.url;
+        return; // page is unloading — don't fall through to setLoading(false)
+      }
+      throw new Error('No checkout URL returned');
     } catch {
+      // Checkout session never actually started — don't leave an orphaned
+      // hold with nothing to resume it into.
+      if (holdTabId) { try { await v15API.deleteTab(holdTabId); } catch {} }
       toast({ title: "Error", description: "Failed to initiate Stripe checkout.", variant: "destructive" });
-    } finally { setLoading(false); }
+      setLoading(false);
+    }
   };
 
   // ---- Crypto Checkout (Bitcoin + USDC via Coinbase Commerce) ----
   // Same "redirect away, redirect back" shape as Stripe above — the sale
   // payload travels with the checkout charge and gets rung up server-side
-  // once Coinbase confirms payment, not by this tab still being open.
+  // once Coinbase confirms payment, not by this tab still being open. Same
+  // auto-hold-before-redirect as handleStripeCheckout, for the same reason.
   const handleCryptoCheckout = async () => {
     if (tableBlocked) {
       toast({ title: 'Unknown table', description: tableCheck.message, variant: 'destructive' });
       return;
     }
+    if (cart.length === 0) { toast({ title: 'Cart empty', variant: 'destructive' }); return; }
     setLoading(true);
+    let holdTabId = null;
     try {
+      const holdRes = await v15API.createTab({
+        name: `Crypto — ${new Date().toLocaleTimeString()}`,
+        cart, selectedCustomer, tableNumber: orderType === 'dine-in' ? tableNumber : null,
+        autoHold: true, checkoutProvider: 'crypto',
+      });
+      holdTabId = holdRes.data?.id;
+
       const res = await cryptoAPI.createCheckout({
         originUrl: window.location.origin,
         amount: totalNum,
+        heldTabId: holdTabId,
         sale: {
           items: cart.map(item => toTxItem(item, true)),
           paymentMethod: 'Crypto',
@@ -1069,10 +1161,16 @@ const POSTerminal = () => {
           ...buildDiscountPayload(),
         },
       });
-      if (res.data.url) window.location.href = res.data.url;
+      if (res.data.url) {
+        window.location.href = res.data.url;
+        return;
+      }
+      throw new Error('No checkout URL returned');
     } catch (err) {
+      if (holdTabId) { try { await v15API.deleteTab(holdTabId); } catch {} }
       toast({ title: "Error", description: err.response?.data?.detail || "Failed to initiate crypto checkout.", variant: "destructive" });
-    } finally { setLoading(false); }
+      setLoading(false);
+    }
   };
 
   const handleConfirmQRPayment = async () => {
@@ -1429,6 +1527,31 @@ const POSTerminal = () => {
             <div className="mb-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-xs font-medium" data-testid="offline-queue-banner">
               <WifiOff size={14} />
               {queuedCount} sale{queuedCount === 1 ? '' : 's'} saved offline — syncing when back online…
+            </div>
+          )}
+          {/* A sale sent to Stripe/Crypto checkout that came back without
+              paying — held, not lost. See handleStripeCheckout /
+              handleCryptoCheckout and loadHeldCheckouts. */}
+          {heldCheckoutTabs.length > 0 && (
+            <div className="mb-3 space-y-1.5" data-testid="held-checkout-banner">
+              {heldCheckoutTabs.map(tab => (
+                <div key={tab.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-orange-50 border border-orange-300 text-orange-800 text-xs font-medium">
+                  <Clock size={14} className="flex-shrink-0" />
+                  <span className="flex-1">
+                    Held sale pending {tab.checkoutProvider === 'crypto' ? 'crypto' : 'Stripe'} payment —{' '}
+                    {(tab.cart || []).reduce((n, i) => n + (i.quantity || 0), 0)} item(s)
+                    {tab.tableNumber ? ` · table ${tab.tableNumber}` : ''}
+                  </span>
+                  <Button size="sm" className="h-7 px-2.5 text-xs" style={{ backgroundColor: theme.primary }}
+                    onClick={() => resumeHeldCheckout(tab)} data-testid={`resume-held-${tab.id}`}>
+                    Resume
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs text-orange-700 border-orange-300"
+                    onClick={() => cancelHeldCheckout(tab)} data-testid={`cancel-held-${tab.id}`}>
+                    Cancel
+                  </Button>
+                </div>
+              ))}
             </div>
           )}
           <div className="relative mb-3 flex gap-2">
@@ -2533,10 +2656,15 @@ const POSTerminal = () => {
                           (t.cart || []).forEach(i => { for (let n = 0; n < i.quantity; n++) addToCart({ ...i }); });
                           if (t.selectedCustomer) setSelectedCustomer(t.selectedCustomer);
                           await v15API.deleteTab(t.id);
+                          setHeldCheckoutTabs(prev => prev.filter(h => h.id !== t.id));
                           setShowTabsDialog(false);
                           toast({ title: 'Tab recalled' });
                         }} style={{ backgroundColor: theme.primary }} data-testid={`recall-${t.id}`}>Recall</Button>
-                        <Button size="sm" variant="outline" className="text-red-500" onClick={async () => { await v15API.deleteTab(t.id); setOpenTabs(openTabs.filter(o => o.id !== t.id)); }}>×</Button>
+                        <Button size="sm" variant="outline" className="text-red-500" onClick={async () => {
+                          await v15API.deleteTab(t.id);
+                          setOpenTabs(openTabs.filter(o => o.id !== t.id));
+                          setHeldCheckoutTabs(prev => prev.filter(h => h.id !== t.id));
+                        }}>×</Button>
                       </div>
                     )}
                     {tablesDialogMode === 'move' && movingTab !== t.id && (

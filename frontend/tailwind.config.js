@@ -7,13 +7,14 @@ module.exports = {
   ],
   theme: {
   	extend: {
-  		// NUA brand tokens — see brand/BRAND-SPEC.md. `nua-purple` is reserved
-  		// for AI-surfaced features; never use it decoratively.
+  		// NUA POS design tokens — see NUA_POS_DESIGN_TOKENS.md. `nua-purple`
+  		// is a data hue reserved for AI-surfaced features/agent state; never
+  		// use it decoratively.
   		fontFamily: {
   			'nua-wordmark':  ["'Bricolage Grotesque'", 'sans-serif'],
-  			'nua-display':   ["'Space Grotesk'", 'ui-sans-serif', 'system-ui', 'sans-serif'],
+  			'nua-display':   ["'Bricolage Grotesque'", 'ui-sans-serif', 'system-ui', 'sans-serif'],
   			'nua-body':      ['Manrope', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-  			'nua-mono':      ["'IBM Plex Mono'", 'ui-monospace', 'Menlo', 'monospace'],
+  			'nua-mono':      ["'JetBrains Mono'", 'ui-monospace', 'Menlo', 'monospace'],
   			'nua-signature': ['Caveat', 'cursive']
   		},
   		letterSpacing: { tagline: '0.35em' },
@@ -23,13 +24,47 @@ module.exports = {
   			sm: 'calc(var(--radius) - 4px)'
   		},
   		colors: {
+  			// NUA POS colour system — see NUA_POS_DESIGN_TOKENS.md. Chrome
+  			// (nav, headings, buttons, links) is burgundy-on-ivory; the icon
+  			// hues (orange/purple/pink/ink) are reserved for DATA — floor
+  			// plans, kitchen tickets, order states, charts. Don't mix layers.
   			nua: {
+  				// Brand icon hues — Tier 1 data marks. Never used as chrome.
   				orange: '#f58c14',
   				purple: '#8b5cf6',
   				pink:   '#ec4899',
-  				wine:   '#6b2737', // wordmark only, on light backgrounds — never icon/badge/AI/insight
   				ink:    '#1c1917',
-  				paper:  '#fdfcfa'
+  				paper:  '#fdfcfa',
+  				wine:   '#6b2737', // deprecated — use `burgundy`; kept only for old references
+
+  				// Chrome grounds
+  				bg:      '#FAF8F3',
+  				bgAlt:   '#F8F4ED',
+  				surface: '#FFFDF9',
+  				white:   '#FFFFFF',
+
+  				// Chrome brand (wordmark, primary buttons, links, active nav)
+  				burgundy:       '#750D28',
+  				burgundyDark:   '#5F1A23',
+  				burgundyBright: '#8A1433',
+  				burgundyWash:   '#F5ECEA',
+
+  				// Chrome type
+  				chromeInk:  '#29241E',
+  				chromeInk2: '#655D53',
+  				chromeMuted:     '#756D67',
+  				chromeMutedSoft: '#8D847D', // decorative only — fails AA for text
+
+  				// Chrome lines
+  				chromeBorder:        '#E8DED4',
+  				chromeBorderStrong:  '#D9CFC5',
+  				chromeBorderControl: '#9A928B',
+
+  				// Dark chrome surfaces — occasional dark panels only, not a full dark UI
+  				chromeDark:       '#29241E',
+  				chromeDarkText:   '#FAF8F3',
+  				chromeDarkBody:   '#D9D1C8',
+  				chromeDarkAccent: '#E26383',
   			},
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',

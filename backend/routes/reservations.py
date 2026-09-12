@@ -3,7 +3,7 @@ from fastapi.responses import StreamingResponse
 from typing import List, Optional
 from datetime import datetime
 from database import db
-from deps import get_user, require_owner_or_manager
+from deps import get_user, require_owner_or_manager, optional_user
 from services import floor_tables
 from models.reservation import Reservation, ReservationCreate, ReservationUpdate
 from models.floor_plan import FloorPlan, FloorPlanCreate, FloorPlanUpdate
@@ -113,29 +113,40 @@ async def get_reservation(reservation_id: str):
     return Reservation(**res)
 
 @router.post("/reservations", response_model=Reservation)
-async def create_reservation(reservation: ReservationCreate):
-    # Refuse if the target date is under an active blackout (unless the
-    # blackout has an expiry that has already passed).
-    if reservation.date:
-        b = await db.booking_blackouts.find_one({"date": reservation.date}, {"_id": 0})
-        if b:
-            block_until = b.get("blockUntil")
-            expired = False
-            if block_until:
-                try:
-                    exp = datetime.fromisoformat(block_until.replace("Z", "+00:00"))
-                    from datetime import timezone as _tz
-                    if datetime.now(_tz.utc) > exp: expired = True
-                except Exception:
-                    pass
-            if not expired:
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Bookings paused for {reservation.date}: {b.get('reason') or 'closed'}",
-                )
-    res_obj = Reservation(**reservation.dict())
+async def create_reservation(reservation: ReservationCreate, user: Optional[dict] = Depends(optional_user)):
+    # Booking capacity/size/window rules — the same engine
+    # routes/public.py's customer-facing POST /public/book calls, so a rule
+    # enforced on one channel can't be silently skipped by going through the
+    # other. Blackout-date checking used to live here as its own inline
+    # block (and only here — the customer path had none at all); it's now
+    # one of several checks the engine runs for both.
+    from services.booking_rules_engine import validate_and_enrich_booking, BookingRuleViolation
+    try:
+        enrichment = await validate_and_enrich_booking(
+            date=reservation.date, time=reservation.time, party_size=reservation.partySize,
+            source=reservation.source, experience_id=reservation.experienceId,
+            override_reason=reservation.overrideReason, override_actor=user,
+        )
+    except BookingRuleViolation as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    res_obj = Reservation(**{**reservation.dict(), **enrichment})
     doc = res_obj.dict()
     await db.reservations.insert_one(doc)
+    if res_obj.ruleOverrideReason:
+        from services import audit_service
+        await audit_service.log_event(
+            entity_type="reservation", entity_id=res_obj.id, action="created",
+            after=doc, memo=f"Booking rule override: {res_obj.ruleOverrideReason}", severity="warning",
+            tags=["booking_rule_override"],
+        )
+    elif res_obj.isLargeBooking:
+        from services import audit_service
+        await audit_service.log_event(
+            entity_type="reservation", entity_id=res_obj.id, action="created",
+            after=doc, memo=f"Large booking ({res_obj.partySize} guests) — tier: {res_obj.bookingTierLabel}",
+            severity="notice", tags=["large_booking"],
+        )
     if reservation.tableId:
         found = await floor_tables.get_table_by_id(reservation.tableId)
         if found:
@@ -295,6 +306,72 @@ async def cancel_reservation(reservation_id: str, body: dict = None, user: dict 
         before=res, after=updated,
         memo=f"Booking cancelled by {user.get('email', 'staff')}" + (f": {reason}" if reason else ""),
         severity="notice",
+    )
+    return Reservation(**updated)
+
+
+@router.post("/reservations/{reservation_id}/approve", response_model=Reservation)
+async def approve_large_booking(reservation_id: str, user: dict = Depends(require_owner_or_manager)):
+    """Owner/manager sign-off on a large booking whose matched size tier has
+    requireApproval set (services.booking_rules_engine sets approvalStatus
+    to 'pending' at creation time for those)."""
+    res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
+    if not res:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    if not res.get("approvalRequired"):
+        raise HTTPException(status_code=400, detail="This booking doesn't require approval")
+    if res.get("approvalStatus") != "pending":
+        raise HTTPException(status_code=400, detail=f"Approval already {res.get('approvalStatus')}")
+
+    update_data = {
+        "approvalStatus": "approved", "approvedBy": user.get("email") or user.get("id"),
+        "approvedAt": datetime.utcnow().isoformat(), "updatedAt": datetime.utcnow().isoformat(),
+    }
+    await db.reservations.update_one({"id": reservation_id}, {"$set": update_data})
+    updated = {**res, **update_data}
+    from services import audit_service
+    await audit_service.log_event(
+        entity_type="reservation", entity_id=reservation_id, action="updated",
+        before=res, after=updated, memo=f"Large booking approved by {user.get('email', 'staff')}",
+        severity="notice", tags=["large_booking"],
+    )
+    return Reservation(**updated)
+
+
+@router.post("/reservations/{reservation_id}/reject", response_model=Reservation)
+async def reject_large_booking(reservation_id: str, body: dict = None, user: dict = Depends(require_owner_or_manager)):
+    """Reject a pending large booking. Also cancels it — a rejected large
+    booking shouldn't sit on the floor plan reading as a normal confirmed
+    reservation; the guest needs to be told and re-booked under a tier that
+    actually fits, not silently kept as-is."""
+    res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
+    if not res:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    if not res.get("approvalRequired"):
+        raise HTTPException(status_code=400, detail="This booking doesn't require approval")
+    if res.get("approvalStatus") != "pending":
+        raise HTTPException(status_code=400, detail=f"Approval already {res.get('approvalStatus')}")
+
+    reason = (body or {}).get("reason")
+    update_data = {
+        "approvalStatus": "rejected", "approvedBy": user.get("email") or user.get("id"),
+        "approvedAt": datetime.utcnow().isoformat(),
+        "status": "cancelled", "cancellationReason": reason or "Large booking not approved",
+        "updatedAt": datetime.utcnow().isoformat(),
+    }
+    await db.reservations.update_one({"id": reservation_id}, {"$set": update_data})
+    if res.get("tableId"):
+        found = await floor_tables.get_table_by_id(res["tableId"])
+        if found:
+            _, plan_id = found
+            await floor_tables.set_table_status(res["tableId"], plan_id, "available")
+    updated = {**res, **update_data}
+    from services import audit_service
+    await audit_service.log_event(
+        entity_type="reservation", entity_id=reservation_id, action="updated",
+        before=res, after=updated,
+        memo=f"Large booking rejected by {user.get('email', 'staff')}" + (f": {reason}" if reason else ""),
+        severity="warning", tags=["large_booking"],
     )
     return Reservation(**updated)
 

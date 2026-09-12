@@ -300,6 +300,8 @@ export const reservationsAPI = {
   noShow: (id, fee) => api.post(`/reservations/${id}/no-show`, null, { params: { fee } }),
   cancel: (id, reason) => api.post(`/reservations/${id}/cancel`, { reason }),
   restore: (id, status) => api.post(`/reservations/${id}/restore`, status ? { status } : {}),
+  approve: (id) => api.post(`/reservations/${id}/approve`),
+  reject: (id, reason) => api.post(`/reservations/${id}/reject`, { reason }),
   autoAssign: (id) => api.get(`/reservations/auto-assign/${id}`),
   // Booking calendar helpers
   dayCounts: (fromDate, toDate) => api.get('/reservations/day-counts', { params: { fromDate, toDate } }),

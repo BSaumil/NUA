@@ -204,7 +204,8 @@ export default function AshCommandCenter() {
                 <div><p className="text-slate-500">Forecast Revenue</p><p className="font-semibold text-emerald-600">${briefing.data?.forecastRevenue}</p></div>
                 <div><p className="text-slate-500">Bookings Today</p><p className="font-semibold">{briefing.data?.bookingsToday} ({briefing.data?.vipCount} VIP)</p></div>
                 <div><p className="text-slate-500">Rostered Staff</p><p className="font-semibold">{briefing.data?.rosteredStaff}</p></div>
-                <div><p className="text-slate-500">Pending Approvals</p><p className="font-semibold text-amber-600">{briefing.data?.pendingApprovals}</p></div>
+                {/* Purple = NUA Agent approved-pending, per NUA_POS_DESIGN_TOKENS.md §6. */}
+                <div><p className="text-slate-500">Pending Approvals</p><p className="font-semibold text-[#6d28d9]">{briefing.data?.pendingApprovals}</p></div>
               </div>
             </CardContent></Card>
           )}

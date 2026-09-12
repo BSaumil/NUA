@@ -11,8 +11,9 @@ import { Badge } from '../components/ui/badge';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from '../components/ui/select';
-import { publicAPI } from '../services/api';
+import { publicAPI, reservationFeaturesAPI } from '../services/api';
 import { useGuestSession } from '../hooks/useGuestSession';
+import { matchTier } from '../lib/bookingTiers';
 import { toast } from 'sonner';
 
 const STEPS = ['select', 'details', 'confirmed'];
@@ -28,10 +29,25 @@ export default function BookingPortal() {
   const [form, setForm] = useState({
     guestName: '', guestPhone: '', guestEmail: '',
     partySize: 2, date: new Date().toISOString().split('T')[0],
-    time: '', duration: 90, specialRequests: '',
+    time: '', duration: 90, specialRequests: '', experienceId: null,
   });
   const [waitlistForm, setWaitlistForm] = useState({ guestName: '', guestPhone: '', partySize: 2, preferences: '' });
   const [confirmData, setConfirmData] = useState(null);
+  const [bookingRules, setBookingRules] = useState(null);
+  const [experiences, setExperiences] = useState([]);
+
+  useEffect(() => {
+    reservationFeaturesAPI.getBookingRules().then(r => setBookingRules(r.data)).catch(() => {});
+    reservationFeaturesAPI.getExperiences().then(r => setExperiences(r.data || [])).catch(() => {});
+  }, []);
+
+  const matchedTier = matchTier(bookingRules?.sizeTiers, form.partySize);
+  const requiresExperience = !!matchedTier?.requiresExperience;
+  const tierExperiences = requiresExperience
+    ? (matchedTier.allowedExperienceIds?.length
+        ? experiences.filter(e => matchedTier.allowedExperienceIds.includes(e.id))
+        : experiences.filter(e => e.active !== false))
+    : [];
 
   const guest = useGuestSession();
   const [verifyPhone, setVerifyPhone] = useState('');
@@ -93,12 +109,25 @@ export default function BookingPortal() {
 
   const handleBook = async () => {
     if (!form.guestName || !form.date || !form.time) { toast.error('Please fill in all required fields'); return; }
+    // Client-side mirror of the same gate the server enforces — this is
+    // UX only, not the actual restriction. Confirming with an unmet
+    // requirement never reaches the server thinking it's fine; POST
+    // /public/book re-checks and would 409 anyway.
+    if (requiresExperience && !form.experienceId) {
+      toast.error(
+        `For parties of ${matchedTier.minGuests} or more, bookings are available with our `
+        + `${matchedTier.label || 'Set Menu / Dining Experience'} only.`
+      );
+      return;
+    }
     try {
       const res = await publicAPI.book(form);
       setConfirmData(res.data);
       setStep('confirmed');
-      toast.success('Reservation confirmed!');
-    } catch (e) { toast.error('Booking failed. Please try again.'); }
+      toast.success(res.data?.message || 'Reservation confirmed!');
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Booking failed. Please try again.');
+    }
   };
 
   const handleJoinWaitlist = async () => {
@@ -198,7 +227,7 @@ export default function BookingPortal() {
                     </div>
                     <div>
                       <label className="text-xs font-medium text-gray-500 mb-1.5 block">Party Size</label>
-                      <Select value={String(form.partySize)} onValueChange={v => setForm(f => ({ ...f, partySize: parseInt(v) }))}>
+                      <Select value={String(form.partySize)} onValueChange={v => setForm(f => ({ ...f, partySize: parseInt(v), experienceId: null }))}>
                         <SelectTrigger data-testid="portal-party-size"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           {[1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 15, 20].map(n => (
@@ -208,6 +237,13 @@ export default function BookingPortal() {
                       </Select>
                     </div>
                   </div>
+
+                  {requiresExperience && (
+                    <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800" data-testid="portal-large-booking-notice">
+                      For parties of {matchedTier.minGuests} or more, bookings are available with our{' '}
+                      <strong>{matchedTier.label || 'Set Menu / Dining Experience'}</strong> only.
+                    </div>
+                  )}
 
                   <div>
                     <label className="text-xs font-medium text-gray-500 mb-2 block">Available Times</label>
@@ -265,8 +301,37 @@ export default function BookingPortal() {
                         onChange={e => setForm(f => ({ ...f, specialRequests: e.target.value }))}
                         placeholder="Birthday, high chair, dietary needs..." />
                     </div>
+
+                    {requiresExperience && (
+                      <div className="pt-2 border-t" data-testid="portal-experience-picker">
+                        <p className="text-sm font-semibold text-gray-900 mb-1">Choose your {matchedTier.label || 'experience'}</p>
+                        <p className="text-xs text-gray-500 mb-3">
+                          For parties of {matchedTier.minGuests} or more, bookings are available with our{' '}
+                          {matchedTier.label || 'Set Menu / Dining Experience'} only — à la carte isn't available at this size.
+                        </p>
+                        {tierExperiences.length === 0 ? (
+                          <p className="text-sm text-red-600">No experiences are currently available for this party size — please call us to book.</p>
+                        ) : (
+                          <div className="space-y-2">
+                            {tierExperiences.map(exp => (
+                              <button key={exp.id} type="button"
+                                onClick={() => setForm(f => ({ ...f, experienceId: exp.id }))}
+                                data-testid={`portal-experience-${exp.id}`}
+                                className={`w-full text-left px-3 py-2.5 rounded-lg border text-sm transition-all ${
+                                  form.experienceId === exp.id ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'
+                                }`}>
+                                <span className="font-medium">{exp.name}</span>
+                                {exp.pricePerPerson > 0 && <span className="float-right">${exp.pricePerPerson}/pp</span>}
+                                {exp.description && <p className={`text-xs mt-0.5 ${form.experienceId === exp.id ? 'text-gray-300' : 'text-gray-500'}`}>{exp.description}</p>}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <Button className="w-full h-12 bg-gray-900 hover:bg-gray-800 text-white"
+                    disabled={requiresExperience && !form.experienceId}
                     onClick={handleBook} data-testid="portal-confirm-btn">
                     Confirm Reservation
                   </Button>

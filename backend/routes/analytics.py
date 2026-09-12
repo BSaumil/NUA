@@ -353,6 +353,22 @@ async def get_pre_shift_data(_: dict = Depends(get_user)):
         {"guest": r["guestName"], "time": r["time"], "request": r["specialRequests"], "partySize": r["partySize"]}
         for r in reservations if r.get("specialRequests")
     ]
+    # Large bookings — what services.booking_rules_engine flagged at
+    # creation time (isLargeBooking + the tier/experience/deposit/pre-order/
+    # approval fields it set), surfaced here so FOH/kitchen can anticipate
+    # a big party same as they already do for VIPs and dietary alerts.
+    large_bookings = [
+        {
+            "reservationId": r["id"], "guest": r["guestName"], "time": r["time"],
+            "partySize": r["partySize"], "tierLabel": r.get("bookingTierLabel"),
+            "experienceName": r.get("experienceName"),
+            "depositRequired": r.get("depositRequired", 0), "depositPaid": r.get("depositPaid", False),
+            "preOrderRequired": r.get("preOrderRequired", False), "preOrderCompleted": r.get("preOrderCompleted", False),
+            "approvalRequired": r.get("approvalRequired", False), "approvalStatus": r.get("approvalStatus", "not_required"),
+            "specialRequests": r.get("specialRequests"),
+        }
+        for r in reservations if r.get("isLargeBooking") and r.get("status") not in ("cancelled", "no_show")
+    ]
     total_covers = sum(r.get("partySize", 0) for r in reservations)
     confirmed = len([r for r in reservations if r.get("status") == "confirmed"])
     seated = len([r for r in reservations if r.get("status") == "seated"])
@@ -364,6 +380,7 @@ async def get_pre_shift_data(_: dict = Depends(get_user)):
         "date": today, "reservations": reservations, "totalReservations": len(reservations),
         "totalCovers": total_covers, "confirmed": confirmed, "seated": seated,
         "vipGuests": vip_guests, "dietaryAlerts": dietary_alerts, "specialRequests": special_requests,
+        "largeBookings": large_bookings,
         "kitchenPending": kitchen_pending, "waitlistCount": waitlist_count,
         "revenueToday": revenue_today, "transactionsToday": len(txns_today),
     }

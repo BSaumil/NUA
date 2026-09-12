@@ -8,7 +8,7 @@ import { tableCoursesAPI, reservationsAPI } from '../../services/api';
 import { useTheme } from '../../contexts/ThemeContext';
 import { toast } from 'sonner';
 
-const VIP_COLOR = '#8B5CF6';
+const VIP_COLOR = '#db2777'; // NUA_POS_DESIGN_TOKENS.md §6 — VIP is pink, Reserved is purple
 
 /**
  * Slide-in drawer for a table on the floor plan.
@@ -172,7 +172,7 @@ export const TableInfoDrawer = ({ open, onClose, table, states, courses, overdue
                     )}
                   </div>
                   <div className="text-xs text-gray-500 flex items-center gap-1">
-                    <Clock size={11} /> in course {courseMin}m {overdue && <span className="font-semibold" style={{ color: overdueColour || '#F97316' }}>· OVERDUE</span>}
+                    <Clock size={11} /> in course {courseMin}m {overdue && <span className="font-semibold" style={{ color: overdueColour || '#f58c14' }}>· OVERDUE</span>}
                   </div>
                 </div>
                 <div className="text-xs text-gray-600 flex items-center gap-2">

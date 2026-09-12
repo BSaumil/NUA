@@ -215,8 +215,8 @@ const Sidebar = () => {
   const handleLogout = async () => { await logout(); navigate('/'); };
 
   return (
-    <div className="fixed left-0 top-0 h-full w-64 bg-white border-r border-gray-200 flex flex-col z-50" data-testid="sidebar">
-      <div className="p-4 border-b border-gray-200">
+    <div className="fixed left-0 top-0 h-full w-64 bg-[#FFFDF9] border-r border-[#E8DED4] flex flex-col z-50" data-testid="sidebar">
+      <div className="p-4 border-b border-[#E8DED4]">
         <h1 className="text-xl font-bold" style={{ color: theme.primary }}>NUA</h1>
         {user && (
           <div className="flex items-center gap-2 mt-2">
@@ -284,7 +284,7 @@ const Sidebar = () => {
           );
         })}
       </nav>
-      <div className="p-3 border-t border-gray-200">
+      <div className="p-3 border-t border-[#E8DED4]">
         <button onClick={handleLogout} className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm text-gray-500 hover:bg-red-50 hover:text-red-600 transition-colors" data-testid="logout-btn">
           <LogOut size={18} /> Sign Out
         </button>

@@ -1,0 +1,402 @@
+"""Booking capacity / booking-size (large-booking) rules.
+
+Covers the spec's own TEST section end to end: 1-6 guests books normally,
+7+ requires the configured Set Menu/Experience and blocks à la carte, 12 vs
+13+ resolve to the correct tier, neither the customer nor an unauthorised
+staff member can bypass the requirement, capacity blocks overbooking, and
+deposit/pre-order/approval flow through correctly. Runs both the customer
+path (POST /public/book) and the staff path (POST /reservations) through
+the exact same assertions to prove services.booking_rules_engine really is
+the single source of truth for both, not just one of them.
+"""
+import asyncio
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+from database import db
+from tests.inprocess.conftest import req
+
+
+def _run(coro):
+    return asyncio.get_event_loop().run_until_complete(coro)
+
+
+def _future_date(days=14):
+    return (datetime.now(timezone.utc) + timedelta(days=days)).strftime("%Y-%m-%d")
+
+
+def _login_as(client, owner_headers, *, email, role):
+    """Same pattern as test_pulse_role_gating.py's _login_as — register
+    forces `cashier`, so the role is set directly for a deterministic
+    fixture."""
+    client.post("/api/auth/register", headers=owner_headers, json={
+        "name": f"Booking Test {role}", "email": email, "password": "BookingTest2026!",
+    })
+    _run(db.auth_users.update_one({"email": email}, {"$set": {"role": role}}))
+    r = client.post("/api/auth/login", json={"email": email, "password": "BookingTest2026!"})
+    assert r.status_code == 200, f"login as {role} failed: {r.text[:200]}"
+    client.cookies.clear()
+    body = r.json()
+    assert body["user"]["role"] == role
+    return {"Authorization": f"Bearer {body['token']}"}
+
+
+TIERS = [
+    {"id": "tier-standard", "minGuests": 1, "maxGuests": 6, "label": "À La Carte",
+     "requiresExperience": False, "allowedExperienceIds": [],
+     "requireDeposit": False, "requirePreOrder": False, "requireApproval": False},
+    {"id": "tier-setmenu", "minGuests": 7, "maxGuests": 12, "label": "Set Menu",
+     "requiresExperience": True, "allowedExperienceIds": [],
+     "requireDeposit": True, "requirePreOrder": True, "requireApproval": False},
+    {"id": "tier-private", "minGuests": 13, "maxGuests": None, "label": "Private Dining",
+     "requiresExperience": True, "allowedExperienceIds": [],
+     "requireDeposit": True, "requirePreOrder": True, "requireApproval": True},
+]
+
+
+@pytest.fixture
+def tiered_rules(owner_headers, client):
+    """Save the spec's own example tiers (1-6 / 7-12 / 13+) for the
+    duration of one test, then restore booking_rules to its prior value —
+    these tests must not leak configuration into any other test file."""
+    before = req(client, "GET", "/api/booking/rules").json()
+    saved = {**before, "sizeTiers": TIERS, "depositAmount": 50}
+    r = req(client, "POST", "/api/booking/rules", headers=owner_headers, json=saved)
+    assert r.status_code == 200, r.text
+    yield saved
+    req(client, "POST", "/api/booking/rules", headers=owner_headers, json=before)
+
+
+@pytest.fixture
+def experience(owner_headers, client):
+    r = req(client, "POST", "/api/booking/experiences", headers=owner_headers, json={
+        "name": "Chef's Tasting Menu", "description": "5 courses", "pricePerPerson": 85, "active": True,
+    })
+    assert r.status_code == 200, r.text
+    exp = r.json()
+    yield exp
+    req(client, "DELETE", f"/api/booking/experiences/{exp['id']}", headers=owner_headers)
+
+
+def _cleanup_reservations(*names):
+    _run(db.reservations.delete_many({"guestName": {"$in": list(names)}}))
+
+
+# --------------------------------------------------------------- tier match
+
+def test_1_to_6_guests_books_normally_no_experience_needed(tiered_rules, client, owner_headers):
+    try:
+        r = req(client, "POST", "/api/reservations", headers=owner_headers, json={
+            "guestName": "Small Party", "partySize": 4, "date": _future_date(), "time": "19:00", "source": "phone",
+        })
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["isLargeBooking"] is False
+        assert body["bookingTierId"] == "tier-standard"
+    finally:
+        _cleanup_reservations("Small Party")
+
+
+def test_7_guests_online_blocked_without_experience(tiered_rules, client):
+    r = req(client, "POST", "/api/public/book", json={
+        "guestName": "Seven Top", "partySize": 7, "date": _future_date(), "time": "19:00",
+    })
+    assert r.status_code == 409
+    assert "Set Menu" in r.json()["detail"]
+
+
+def test_7_guests_online_with_permitted_experience_works(tiered_rules, experience, client):
+    try:
+        r = req(client, "POST", "/api/public/book", json={
+            "guestName": "Seven Top OK", "partySize": 7, "date": _future_date(), "time": "19:00",
+            "experienceId": experience["id"],
+        })
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["isLargeBooking"] is True
+        assert body["experienceName"] == experience["name"]
+        assert body["depositRequired"] == 50
+        assert body["preOrderRequired"] is True
+        assert body["approvalRequired"] is False
+    finally:
+        _cleanup_reservations("Seven Top OK")
+
+
+def test_12_guests_resolves_to_set_menu_tier(tiered_rules, experience, client):
+    try:
+        r = req(client, "POST", "/api/public/book", json={
+            "guestName": "Twelve Guests", "partySize": 12, "date": _future_date(), "time": "19:00",
+            "experienceId": experience["id"],
+        })
+        assert r.status_code == 200, r.text
+        stored = _run(db.reservations.find_one({"guestName": "Twelve Guests"}, {"_id": 0}))
+        assert stored["bookingTierId"] == "tier-setmenu"
+        assert stored["approvalRequired"] is False
+    finally:
+        _cleanup_reservations("Twelve Guests")
+
+
+def test_13_plus_resolves_to_next_tier_and_requires_approval(tiered_rules, experience, client):
+    try:
+        r = req(client, "POST", "/api/public/book", json={
+            "guestName": "Private Dining Guest", "partySize": 13, "date": _future_date(), "time": "19:00",
+            "experienceId": experience["id"],
+        })
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["approvalRequired"] is True
+        stored = _run(db.reservations.find_one({"guestName": "Private Dining Guest"}, {"_id": 0}))
+        assert stored["bookingTierId"] == "tier-private"
+        assert stored["approvalStatus"] == "pending"
+    finally:
+        _cleanup_reservations("Private Dining Guest")
+
+
+# ------------------------------------------------------- cannot be bypassed
+
+def test_customer_cannot_bypass_by_omitting_experience(tiered_rules, experience, client):
+    """Even with a real, active experience id available, a guest who just
+    doesn't send one is blocked — the requirement isn't optional metadata,
+    it's enforced."""
+    r = req(client, "POST", "/api/public/book", json={
+        "guestName": "Bypass Attempt", "partySize": 8, "date": _future_date(), "time": "19:00",
+    })
+    assert r.status_code == 409
+    assert _run(db.reservations.count_documents({"guestName": "Bypass Attempt"})) == 0
+
+
+def test_customer_cannot_use_an_experience_not_allowed_for_the_tier(tiered_rules, client, owner_headers):
+    other = req(client, "POST", "/api/booking/experiences", headers=owner_headers, json={
+        "name": "Wrong Experience", "active": True,
+    }).json()
+    tiers = [dict(t) for t in TIERS]
+    tiers[1] = {**tiers[1], "allowedExperienceIds": ["some-other-experience-id"]}
+    rules = req(client, "GET", "/api/booking/rules").json()
+    req(client, "POST", "/api/booking/rules", headers=owner_headers, json={**rules, "sizeTiers": tiers})
+    try:
+        r = req(client, "POST", "/api/public/book", json={
+            "guestName": "Wrong Tier Pick", "partySize": 8, "date": _future_date(), "time": "19:00",
+            "experienceId": other["id"],
+        })
+        assert r.status_code == 409
+        assert "isn't available" in r.json()["detail"]
+    finally:
+        req(client, "DELETE", f"/api/booking/experiences/{other['id']}", headers=owner_headers)
+        _cleanup_reservations("Wrong Tier Pick")
+
+
+def test_staff_cannot_bypass_the_rule_accidentally(tiered_rules, client, owner_headers):
+    """Staff hits the exact same engine as the customer path — creating a
+    large booking with no override reason is blocked the same way."""
+    r = req(client, "POST", "/api/reservations", headers=owner_headers, json={
+        "guestName": "Staff Accidental", "partySize": 9, "date": _future_date(), "time": "19:00", "source": "phone",
+    })
+    assert r.status_code == 409
+    assert _run(db.reservations.count_documents({"guestName": "Staff Accidental"})) == 0
+
+
+def test_cashier_cannot_override_even_with_a_reason(tiered_rules, client, owner_headers):
+    cashier = _login_as(client, owner_headers, email="booking.cashier@nua.com", role="cashier")
+    r = req(client, "POST", "/api/reservations", headers=cashier, json={
+        "guestName": "Cashier Override Attempt", "partySize": 9, "date": _future_date(), "time": "19:00",
+        "source": "phone", "overrideReason": "I really want to skip this",
+    })
+    assert r.status_code == 409
+    assert _run(db.reservations.count_documents({"guestName": "Cashier Override Attempt"})) == 0
+
+
+def test_manager_can_deliberately_override_with_a_reason(tiered_rules, client, owner_headers):
+    manager = _login_as(client, owner_headers, email="booking.manager@nua.com", role="manager")
+    try:
+        r = req(client, "POST", "/api/reservations", headers=manager, json={
+            "guestName": "Manager Override", "partySize": 9, "date": _future_date(), "time": "19:00",
+            "source": "phone", "overrideReason": "Regular VIP, seating without set menu by exception",
+        })
+        assert r.status_code == 200, r.text
+        stored = _run(db.reservations.find_one({"guestName": "Manager Override"}, {"_id": 0}))
+        assert stored["ruleOverrideReason"] == "Regular VIP, seating without set menu by exception"
+        assert stored["ruleOverrideBy"] == "booking.manager@nua.com"
+        # Still flagged as a large booking internally, override or not.
+        assert stored["isLargeBooking"] is True
+
+        # The override is itself audit-logged.
+        audit = _run(db.audit_events.find_one(
+            {"entityId": stored["id"], "tags": "booking_rule_override"}, {"_id": 0}))
+        assert audit is not None
+        assert audit["severity"] == "warning"
+    finally:
+        _cleanup_reservations("Manager Override")
+
+
+def test_walkin_is_never_blocked_by_the_booking_window(tiered_rules, client, owner_headers):
+    """A walk-in's date/time is always 'right now' — booking-window checks
+    (advance notice, same-day, hours) must never apply, even with a strict
+    window configured."""
+    rules = req(client, "GET", "/api/booking/rules").json()
+    req(client, "POST", "/api/booking/rules", headers=owner_headers,
+        json={**rules, "minAdvanceHours": 48, "allowSameDay": False})
+    try:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        now_time = datetime.now(timezone.utc).strftime("%H:%M")
+        r = req(client, "POST", "/api/reservations", headers=owner_headers, json={
+            "guestName": "Walkin Now", "partySize": 2, "date": today, "time": now_time, "source": "walk_in",
+        })
+        assert r.status_code == 200, r.text
+    finally:
+        req(client, "POST", "/api/booking/rules", headers=owner_headers, json=rules)
+        _cleanup_reservations("Walkin Now")
+
+
+def test_backdated_staff_entry_for_reporting_is_not_blocked(client, owner_headers):
+    """A phone/staff-entered booking for a past date (data correction,
+    historical import) must not be blocked the way an online booking for a
+    past date is — only the online self-service channel gets that
+    guardrail."""
+    try:
+        r = req(client, "POST", "/api/reservations", headers=owner_headers, json={
+            "guestName": "Backdated Entry", "partySize": 2, "date": "2020-01-01", "time": "19:00", "source": "phone",
+        })
+        assert r.status_code == 200, r.text
+    finally:
+        _cleanup_reservations("Backdated Entry")
+
+
+def test_online_booking_in_the_past_is_rejected(client):
+    r = req(client, "POST", "/api/public/book", json={
+        "guestName": "Past Online Guest", "partySize": 2, "date": "2020-01-01", "time": "19:00",
+    })
+    assert r.status_code == 409
+    assert "already passed" in r.json()["detail"]
+
+
+# ------------------------------------------------------------------ capacity
+
+def test_capacity_prevents_overbooking_when_enforced(client, owner_headers):
+    rules = req(client, "GET", "/api/booking/rules").json()
+    req(client, "POST", "/api/booking/rules", headers=owner_headers,
+        json={**rules, "enforceCapacity": True, "maxCoversPerSlot": 5, "slotBufferMinutes": 30})
+    date = _future_date(20)
+    try:
+        r1 = req(client, "POST", "/api/reservations", headers=owner_headers, json={
+            "guestName": "Cap Guest 1", "partySize": 4, "date": date, "time": "19:00", "source": "phone",
+        })
+        assert r1.status_code == 200, r1.text
+
+        r2 = req(client, "POST", "/api/reservations", headers=owner_headers, json={
+            "guestName": "Cap Guest 2", "partySize": 3, "date": date, "time": "19:15", "source": "phone",
+        })
+        assert r2.status_code == 409
+        assert "fully booked" in r2.json()["detail"]
+        assert _run(db.reservations.count_documents({"guestName": "Cap Guest 2"})) == 0
+    finally:
+        req(client, "POST", "/api/booking/rules", headers=owner_headers, json=rules)
+        _cleanup_reservations("Cap Guest 1", "Cap Guest 2")
+
+
+def test_capacity_is_only_advisory_when_not_enforced(client, owner_headers):
+    """Default (enforceCapacity=False) — a slot over the derived floor
+    capacity still succeeds; only /ai/overbooking-check warns about it.
+    Protects the pre-existing, opt-in nature of this feature."""
+    rules = req(client, "GET", "/api/booking/rules").json()
+    assert rules.get("enforceCapacity") in (False, None)
+    date = _future_date(21)
+    try:
+        for i in range(3):
+            r = req(client, "POST", "/api/reservations", headers=owner_headers, json={
+                "guestName": f"NoEnforce Guest {i}", "partySize": 20, "date": date, "time": "19:00", "source": "phone",
+            })
+            assert r.status_code == 200, r.text
+    finally:
+        _cleanup_reservations(*[f"NoEnforce Guest {i}" for i in range(3)])
+
+
+# --------------------------------------------------------- approval workflow
+
+def test_approve_and_reject_large_booking(tiered_rules, experience, client, owner_headers):
+    r = req(client, "POST", "/api/public/book", json={
+        "guestName": "Approval Flow Guest", "partySize": 14, "date": _future_date(), "time": "19:00",
+        "experienceId": experience["id"],
+    })
+    assert r.status_code == 200, r.text
+    res_id = r.json()["reservationId"]
+    try:
+        # Non-owner/manager cannot approve.
+        cashier = _login_as(client, owner_headers, email="approve.cashier@nua.com", role="cashier")
+        assert req(client, "POST", f"/api/reservations/{res_id}/approve", headers=cashier).status_code == 403
+
+        approved = req(client, "POST", f"/api/reservations/{res_id}/approve", headers=owner_headers)
+        assert approved.status_code == 200, approved.text
+        assert approved.json()["approvalStatus"] == "approved"
+        assert approved.json()["approvedBy"]
+
+        # Can't approve twice.
+        assert req(client, "POST", f"/api/reservations/{res_id}/approve", headers=owner_headers).status_code == 400
+    finally:
+        _cleanup_reservations("Approval Flow Guest")
+
+
+def test_rejecting_a_large_booking_cancels_it(tiered_rules, experience, client, owner_headers):
+    r = req(client, "POST", "/api/public/book", json={
+        "guestName": "Reject Flow Guest", "partySize": 15, "date": _future_date(), "time": "19:00",
+        "experienceId": experience["id"],
+    })
+    res_id = r.json()["reservationId"]
+    try:
+        rejected = req(client, "POST", f"/api/reservations/{res_id}/reject", headers=owner_headers,
+                       json={"reason": "Kitchen can't handle two private groups that night"})
+        assert rejected.status_code == 200, rejected.text
+        body = rejected.json()
+        assert body["approvalStatus"] == "rejected"
+        assert body["status"] == "cancelled"
+        assert "Kitchen can't handle" in body["cancellationReason"]
+    finally:
+        _cleanup_reservations("Reject Flow Guest")
+
+
+# ------------------------------------------------- existing bookings unaffected
+
+def test_changing_rules_later_does_not_retroactively_touch_existing_bookings(client, owner_headers):
+    """A booking made before a tier existed keeps its original (no
+    restriction) shape even after the owner adds tiers that would now
+    match it — only new creates are validated."""
+    date = _future_date(22)
+    r = req(client, "POST", "/api/reservations", headers=owner_headers, json={
+        "guestName": "Pre-Tier Guest", "partySize": 9, "date": date, "time": "19:00", "source": "phone",
+    })
+    assert r.status_code == 200, r.text
+    original = r.json()
+    assert original["isLargeBooking"] is False
+
+    rules = req(client, "GET", "/api/booking/rules").json()
+    req(client, "POST", "/api/booking/rules", headers=owner_headers, json={**rules, "sizeTiers": TIERS})
+    try:
+        stored = _run(db.reservations.find_one({"id": original["id"]}, {"_id": 0}))
+        assert stored["isLargeBooking"] is False
+        # Recorded the tier that applied AT CREATION TIME (none were
+        # configured yet, so the unrestricted fallback) — not re-derived
+        # from the tiers added afterward.
+        assert stored["bookingTierId"] == "default"
+    finally:
+        req(client, "POST", "/api/booking/rules", headers=owner_headers, json=rules)
+        _cleanup_reservations("Pre-Tier Guest")
+
+
+def test_active_blackout_blocks_both_customer_and_staff_paths(client, owner_headers):
+    date = _future_date(25)
+    req(client, "POST", "/api/reservations/blackouts", headers=owner_headers,
+        json={"date": date, "reason": "Private event"})
+    try:
+        r1 = req(client, "POST", "/api/public/book", json={
+            "guestName": "Blackout Guest 1", "partySize": 2, "date": date, "time": "19:00",
+        })
+        assert r1.status_code == 409
+        assert "Private event" in r1.json()["detail"]
+
+        r2 = req(client, "POST", "/api/reservations", headers=owner_headers, json={
+            "guestName": "Blackout Guest 2", "partySize": 2, "date": date, "time": "19:00", "source": "phone",
+        })
+        assert r2.status_code == 409
+    finally:
+        req(client, "DELETE", f"/api/reservations/blackouts/{date}", headers=owner_headers)
+        _cleanup_reservations("Blackout Guest 1", "Blackout Guest 2")

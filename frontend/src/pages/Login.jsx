@@ -44,20 +44,20 @@ function StatusStrip() {
 
   return (
     <div className="mb-5 text-center" data-testid="login-status-strip">
-      <p className="text-2xl font-mono font-bold text-white tracking-wide">
+      <p className="text-2xl font-mono font-bold text-nua-chromeInk tracking-wide">
         {now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
       </p>
-      <p className="text-xs text-gray-400 mb-3">
+      <p className="text-xs text-nua-chromeMuted mb-3">
         {now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}
       </p>
       <div className="flex items-center justify-center gap-3 text-[11px]">
-        <span className={`flex items-center gap-1 ${online ? 'text-emerald-400' : 'text-red-400'}`} data-testid="login-connection-status">
+        <span className={`flex items-center gap-1 ${online ? 'text-[#046C4E]' : 'text-[#B01B1B]'}`} data-testid="login-connection-status">
           {online ? <Wifi size={13} /> : <WifiOff size={13} />} {online ? 'Online' : 'Offline'}
         </span>
-        <span className={`flex items-center gap-1 ${devices?.receiptTemplateConfigured ? 'text-emerald-400' : 'text-gray-500'}`} title="Receipt template">
+        <span className={`flex items-center gap-1 ${devices?.receiptTemplateConfigured ? 'text-[#046C4E]' : 'text-nua-chromeMuted'}`} title="Receipt template">
           <Printer size={13} /> {devices?.receiptTemplateConfigured ? 'Printer ready' : 'Printer not set up'}
         </span>
-        <span className={`flex items-center gap-1 ${devices?.cardReaderConnected ? 'text-emerald-400' : 'text-gray-500'}`} title="Card reader">
+        <span className={`flex items-center gap-1 ${devices?.cardReaderConnected ? 'text-[#046C4E]' : 'text-nua-chromeMuted'}`} title="Card reader">
           <CreditCard size={13} /> {devices?.cardReaderConnected ? `Card reader (${devices.cardReaderCount})` : 'No card reader'}
         </span>
       </div>
@@ -211,14 +211,14 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-gray-950 to-black" data-testid="login-page">
-      <Card className="w-full max-w-sm border-gray-800 bg-gray-900/80 backdrop-blur">
+    <div className="min-h-screen flex items-center justify-center bg-nua-bg" data-testid="login-page">
+      <Card className="w-full max-w-sm border-nua-chromeBorder bg-nua-surface shadow-lg">
         <CardContent className="p-8">
-          {/* Login is a marketing-facing surface, so it gets the full
-              wordmark lockup (BRAND-SPEC §3) — on this dark background the
-              wordmark is orange (BRAND-SPEC §2), never a gradient. */}
+          {/* Login is chrome, so it uses the plain product lockup (no
+              flourish, no gradient) — icon + burgundy Bricolage Grotesque
+              wordmark on the ivory card, per NUA_POS_DESIGN_TOKENS.md §2. */}
           <div className="flex flex-col items-center mb-4">
-            <Logo variant="marketing" background="dark" size={34} />
+            <Logo variant="product" background="light" size={40} />
           </div>
 
           <StatusStrip />
@@ -229,14 +229,14 @@ export default function Login() {
           {needsApproval ? (
             <div data-testid="approval-step">
               <div className="flex flex-col items-center mb-5">
-                <ShieldQuestion size={28} style={{ color: '#f58c14' }} />
-                <p className="text-white font-medium mt-2">{needsApproval.staffName} isn't rostered right now</p>
-                <p className="text-gray-400 text-sm text-center mt-1">
+                <ShieldQuestion size={28} style={{ color: '#750D28' }} />
+                <p className="text-nua-chromeInk font-medium mt-2">{needsApproval.staffName} isn't rostered right now</p>
+                <p className="text-nua-chromeMuted text-sm text-center mt-1">
                   Ask a manager or owner to enter their PIN to authorize this login.
                 </p>
               </div>
               {error && (
-                <div className="flex items-center gap-2 text-red-400 text-sm bg-red-950/50 p-3 rounded-lg mb-4" data-testid="approval-error">
+                <div className="flex items-center gap-2 text-[#B01B1B] text-sm bg-[rgba(176,27,27,0.10)] p-3 rounded-lg mb-4" data-testid="approval-error">
                   <AlertCircle size={16} /> {error}
                 </div>
               )}
@@ -244,32 +244,32 @@ export default function Login() {
                 <div className="flex justify-center">
                   <Input type="password" inputMode="numeric" maxLength={4} placeholder="Manager PIN" value={managerPin}
                     autoFocus onChange={e => setManagerPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                    className="text-center text-3xl tracking-[0.5em] font-mono w-48 h-16 bg-gray-800 border-gray-700 text-white"
+                    className="text-center text-3xl tracking-[0.5em] font-mono w-48 h-16 bg-white border-nua-chromeBorderControl text-nua-chromeInk"
                     data-testid="manager-approval-pin" />
                 </div>
                 <Button type="submit" className="w-full h-11 text-white font-medium hover:opacity-90"
-                  style={{ backgroundColor: '#f58c14' }} disabled={loading || managerPin.length < 2} data-testid="approval-submit">
+                  style={{ backgroundColor: '#750D28' }} disabled={loading || managerPin.length < 2} data-testid="approval-submit">
                   {loading ? 'Checking...' : 'Authorize login'}
                 </Button>
               </form>
               <button onClick={() => { setNeedsApproval(null); setManagerPin(''); setPin(''); setError(''); }}
-                className="mt-5 w-full text-sm text-gray-500 hover:text-gray-300" data-testid="approval-back">
+                className="mt-5 w-full text-sm text-nua-chromeMuted hover:text-nua-chromeInk" data-testid="approval-back">
                 Cancel
               </button>
             </div>
           ) : challenge ? (
             <div data-testid="twofactor-step">
               <div className="flex flex-col items-center mb-5">
-                <ShieldCheck size={28} style={{ color: '#f58c14' }} />
-                <p className="text-white font-medium mt-2">Two-factor check</p>
-                <p className="text-gray-400 text-sm text-center mt-1">
+                <ShieldCheck size={28} style={{ color: '#750D28' }} />
+                <p className="text-nua-chromeInk font-medium mt-2">Two-factor check</p>
+                <p className="text-nua-chromeMuted text-sm text-center mt-1">
                   {challenge.enrolmentRequired
                     ? 'This venue requires a second factor for your role. Open Settings → Security after signing in on a trusted device.'
                     : 'Enter the 6-digit code from your authenticator app'}
                 </p>
               </div>
               {error && (
-                <div className="flex items-center gap-2 text-red-400 text-sm bg-red-950/50 p-3 rounded-lg mb-4" data-testid="twofactor-error">
+                <div className="flex items-center gap-2 text-[#B01B1B] text-sm bg-[rgba(176,27,27,0.10)] p-3 rounded-lg mb-4" data-testid="twofactor-error">
                   <AlertCircle size={16} /> {error}
                 </div>
               )}
@@ -279,27 +279,27 @@ export default function Login() {
                     autoFocus inputMode="numeric" autoComplete="one-time-code"
                     placeholder="000000" value={code}
                     onChange={e => setCode(e.target.value.replace(/[^0-9A-Za-z-]/g, '').slice(0, 11))}
-                    className="text-center text-2xl tracking-[0.4em] font-mono h-14 bg-gray-800 border-gray-700 text-white"
+                    className="text-center text-2xl tracking-[0.4em] font-mono h-14 bg-white border-nua-chromeBorderControl text-nua-chromeInk"
                     data-testid="twofactor-code" />
-                  <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
-                    <input type="checkbox" checked={trustDevice} className="accent-orange-500 w-4 h-4"
+                  <label className="flex items-center gap-2 text-sm text-nua-chromeMuted cursor-pointer">
+                    <input type="checkbox" checked={trustDevice} className="accent-[#750D28] w-4 h-4"
                       onChange={e => setTrustDevice(e.target.checked)} data-testid="twofactor-trust" />
                     Remember this terminal for 30 days
                   </label>
                   <Button type="submit" className="w-full h-11 text-white font-medium hover:opacity-90"
-                    style={{ backgroundColor: '#f58c14' }} disabled={loading || code.length < 6}
+                    style={{ backgroundColor: '#750D28' }} disabled={loading || code.length < 6}
                     data-testid="twofactor-submit">
                     {loading ? 'Checking...' : 'Verify'}
                   </Button>
                   {challenge.recoveryAvailable && (
-                    <p className="text-xs text-gray-500 text-center">
+                    <p className="text-xs text-nua-chromeMuted text-center">
                       Lost your phone? Enter one of your recovery codes instead.
                     </p>
                   )}
                 </form>
               )}
               <button onClick={() => { setChallenge(null); setCode(''); setError(''); }}
-                className="mt-5 w-full text-sm text-gray-500 hover:text-gray-300"
+                className="mt-5 w-full text-sm text-nua-chromeMuted hover:text-nua-chromeInk"
                 data-testid="twofactor-back">
                 Use a different account
               </button>
@@ -307,24 +307,24 @@ export default function Login() {
           ) : mode === 'forgot' ? (
             <div data-testid="forgot-password-step">
               <div className="flex flex-col items-center mb-5">
-                <Lock size={28} style={{ color: '#f58c14' }} />
-                <p className="text-white font-medium mt-2">Reset your password</p>
-                <p className="text-gray-400 text-sm text-center mt-1">
+                <Lock size={28} style={{ color: '#750D28' }} />
+                <p className="text-nua-chromeInk font-medium mt-2">Reset your password</p>
+                <p className="text-nua-chromeMuted text-sm text-center mt-1">
                   Enter your email and we'll send you a link to set a new password.
                 </p>
               </div>
               {error && (
-                <div className="flex items-center gap-2 text-red-400 text-sm bg-red-950/50 p-3 rounded-lg mb-4" data-testid="forgot-error">
+                <div className="flex items-center gap-2 text-[#B01B1B] text-sm bg-[rgba(176,27,27,0.10)] p-3 rounded-lg mb-4" data-testid="forgot-error">
                   <AlertCircle size={16} /> {error}
                 </div>
               )}
               {forgotSent ? (
                 <div>
-                  <div className="flex items-start gap-2 text-emerald-400 text-sm bg-emerald-950/40 p-3 rounded-lg mb-3" data-testid="forgot-sent">
+                  <div className="flex items-start gap-2 text-[#046C4E] text-sm bg-[rgba(16,185,129,0.12)] p-3 rounded-lg mb-3" data-testid="forgot-sent">
                     <CheckCircle2 size={16} className="mt-0.5 flex-shrink-0" />
                     If that email has an account, a reset link is on its way. Check your inbox.
                   </div>
-                  <Button variant="outline" className="w-full h-10 text-sm border-gray-700 text-gray-300 hover:text-white"
+                  <Button variant="outline" className="w-full h-10 text-sm border-nua-chromeBorderControl text-nua-chromeInk2 hover:text-nua-chromeInk"
                     onClick={requestPasswordReset} disabled={loading || resendCooldown > 0} data-testid="forgot-resend">
                     {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : loading ? 'Sending...' : "Didn't get it? Resend"}
                   </Button>
@@ -332,18 +332,18 @@ export default function Login() {
               ) : (
                 <form onSubmit={handleForgotSubmit} className="space-y-4">
                   <div className="relative">
-                    <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                    <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-nua-chromeMuted" />
                     <Input type="email" placeholder="Email" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)}
-                      className="pl-10 bg-gray-800 border-gray-700 text-white" required data-testid="forgot-email" />
+                      className="pl-10 bg-white border-nua-chromeBorderControl text-nua-chromeInk" required data-testid="forgot-email" />
                   </div>
                   <Button type="submit" className="w-full h-11 text-white font-medium hover:opacity-90"
-                    style={{ backgroundColor: '#f58c14' }} disabled={loading} data-testid="forgot-submit">
+                    style={{ backgroundColor: '#750D28' }} disabled={loading} data-testid="forgot-submit">
                     {loading ? 'Sending...' : 'Send Reset Link'}
                   </Button>
                 </form>
               )}
               <button onClick={() => { setMode('email'); setError(''); setForgotSent(false); setForgotEmail(''); setResendCooldown(0); }}
-                className="mt-5 w-full text-sm text-gray-500 hover:text-gray-300"
+                className="mt-5 w-full text-sm text-nua-chromeMuted hover:text-nua-chromeInk"
                 data-testid="forgot-back">
                 Back to sign in
               </button>
@@ -351,21 +351,21 @@ export default function Login() {
           ) : (
           <>
           {/* Mode Toggle — PIN first: the priority login method for staff terminals */}
-          <div className="flex gap-1 mb-6 bg-gray-800 rounded-lg p-1">
+          <div className="flex gap-1 mb-6 bg-nua-bgAlt rounded-lg p-1">
             <button onClick={() => setMode('pin')} data-testid="mode-pin"
-              className={`flex-1 py-2 text-sm rounded-md font-medium transition-colors ${mode === 'pin' ? 'text-white' : 'text-gray-400 hover:text-white'}`}
-              style={mode === 'pin' ? { backgroundColor: '#f58c14' } : {}}>
+              className={`flex-1 py-2 text-sm rounded-md font-medium transition-colors ${mode === 'pin' ? 'text-white' : 'text-nua-chromeMuted hover:text-nua-chromeInk'}`}
+              style={mode === 'pin' ? { backgroundColor: '#750D28' } : {}}>
               <Hash size={14} className="inline mr-1" /> PIN Code
             </button>
             <button onClick={() => setMode('email')} data-testid="mode-email"
-              className={`flex-1 py-2 text-sm rounded-md font-medium transition-colors ${mode === 'email' ? 'text-white' : 'text-gray-400 hover:text-white'}`}
-              style={mode === 'email' ? { backgroundColor: '#f58c14' } : {}}>
+              className={`flex-1 py-2 text-sm rounded-md font-medium transition-colors ${mode === 'email' ? 'text-white' : 'text-nua-chromeMuted hover:text-nua-chromeInk'}`}
+              style={mode === 'email' ? { backgroundColor: '#750D28' } : {}}>
               <Mail size={14} className="inline mr-1" /> Email
             </button>
           </div>
 
           {error && (
-            <div className="flex items-center gap-2 text-red-400 text-sm bg-red-950/50 p-3 rounded-lg mb-4" data-testid="login-error">
+            <div className="flex items-center gap-2 text-[#B01B1B] text-sm bg-[rgba(176,27,27,0.10)] p-3 rounded-lg mb-4" data-testid="login-error">
               <AlertCircle size={16} /> {error}
             </div>
           )}
@@ -373,44 +373,44 @@ export default function Login() {
           {mode === 'email' ? (
             <form onSubmit={handleEmailLogin} className="space-y-4">
               <div className="relative">
-                <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-nua-chromeMuted" />
                 <Input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)}
-                  className="pl-10 bg-gray-800 border-gray-700 text-white" required data-testid="login-email" />
+                  className="pl-10 bg-white border-nua-chromeBorderControl text-nua-chromeInk" required data-testid="login-email" />
               </div>
               <div className="relative">
-                <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-nua-chromeMuted" />
                 <Input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)}
-                  className="pl-10 bg-gray-800 border-gray-700 text-white" required data-testid="login-password" />
+                  className="pl-10 bg-white border-nua-chromeBorderControl text-nua-chromeInk" required data-testid="login-password" />
               </div>
               <div className="text-right">
                 <button type="button" onClick={() => { setMode('forgot'); setError(''); }}
-                  className="text-xs text-gray-500 hover:text-gray-300" data-testid="forgot-password-link">
+                  className="text-xs text-nua-chromeMuted hover:text-nua-chromeInk" data-testid="forgot-password-link">
                   Forgot password?
                 </button>
               </div>
-              <Button type="submit" className="w-full h-11 text-white font-medium hover:opacity-90" style={{ backgroundColor: '#f58c14' }} disabled={loading} data-testid="login-submit">
+              <Button type="submit" className="w-full h-11 text-white font-medium hover:opacity-90" style={{ backgroundColor: '#750D28' }} disabled={loading} data-testid="login-submit">
                 {loading ? 'Signing in...' : 'Sign In'}
               </Button>
             </form>
           ) : (
             <form onSubmit={handlePinLogin} className="space-y-4">
               <div className="text-center mb-2">
-                <p className="text-gray-400 text-sm">Enter your staff PIN code</p>
+                <p className="text-nua-chromeMuted text-sm">Enter your staff PIN code</p>
               </div>
               <div className="flex justify-center">
                 <Input type="password" inputMode="numeric" maxLength={4} placeholder="----" value={pin}
                   onChange={e => { const v = e.target.value.replace(/\D/g, '').slice(0, 4); setPin(v); }}
-                  className="text-center text-3xl tracking-[0.5em] font-mono w-48 h-16 bg-gray-800 border-gray-700 text-white"
+                  className="text-center text-3xl tracking-[0.5em] font-mono w-48 h-16 bg-white border-nua-chromeBorderControl text-nua-chromeInk"
                   data-testid="login-pin" />
               </div>
-              <Button type="submit" className="w-full h-11 text-white font-medium hover:opacity-90" style={{ backgroundColor: '#f58c14' }} disabled={loading || pin.length < 2} data-testid="pin-submit">
+              <Button type="submit" className="w-full h-11 text-white font-medium hover:opacity-90" style={{ backgroundColor: '#750D28' }} disabled={loading || pin.length < 2} data-testid="pin-submit">
                 {loading ? 'Signing in...' : 'Sign In with PIN'}
               </Button>
             </form>
           )}
 
-          <div className="mt-6 pt-4 border-t border-gray-800">
-            <p className="text-xs text-gray-500 text-center">
+          <div className="mt-6 pt-4 border-t border-nua-chromeBorder">
+            <p className="text-xs text-nua-chromeMuted text-center">
               {mode === 'email' ? 'Owner: owner@nua.com' : 'Ask your manager for your PIN code'}
             </p>
           </div>

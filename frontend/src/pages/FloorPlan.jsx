@@ -28,14 +28,16 @@ import useLiveFeed from '../hooks/useLiveFeed';
 // real status internally (still cycled via shift-click, still saved) but
 // renders visually the same as Open, with a small brush badge — there's no
 // separate "needs cleaning" swatch in the legend.
+// Colours per NUA_POS_DESIGN_TOKENS.md §6 (Floor plan / tables) — kept in
+// sync with what nuapos.com.au depicts.
 const TABLE_STATUS_COLORS = {
-  available: { fill: '#FFFFFF', stroke: '#CBD5E1', label: 'Open' },
-  occupied: { fill: '#1E293B', stroke: '#1E293B', label: 'Seated' },
-  reserved: { fill: '#EC4899', stroke: '#DB2777', label: 'Reserved' },
-  cleaning: { fill: '#FFFFFF', stroke: '#CBD5E1', label: 'Open' },
+  available: { fill: '#FFFFFF', stroke: '#D9CFC5', label: 'Open' },
+  occupied: { fill: '#1c1917', stroke: '#1c1917', label: 'Seated' },
+  reserved: { fill: '#7c3aed', stroke: '#6d28d9', label: 'Reserved' },
+  cleaning: { fill: '#FFFFFF', stroke: '#D9CFC5', label: 'Open' },
 };
-const VIP_COLOR = '#8B5CF6';
-const DEFAULT_OVERDUE_COLOR = '#F97316';
+const VIP_COLOR = '#db2777';
+const DEFAULT_OVERDUE_COLOR = '#f58c14';
 
 const SECTIONS_COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#06B6D4'];
 
@@ -123,7 +125,7 @@ export default function FloorPlan() {
       const r = await tableCoursesAPI.listStates();
       setCourseStates(r.data.states || []);
       setCourseDefs(r.data.courses || []);
-      setOverdueColour(r.data.overdueColour || '#7F1D1D');
+      setOverdueColour(r.data.overdueColour || DEFAULT_OVERDUE_COLOR);
     } catch { /* non-fatal */ }
   }, []);
 

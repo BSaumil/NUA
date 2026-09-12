@@ -62,6 +62,16 @@ async def create_tab(data: dict, user: dict = Depends(get_user)):
         "tableNumber": data.get("tableNumber"),
         "serverId": data.get("serverId"),
         "note": data.get("note"),
+        # Auto-created by POSTerminal right before redirecting to a hosted
+        # checkout (Stripe/Coinbase) — see handleStripeCheckout/
+        # handleCryptoCheckout. Distinguishes "cashier deliberately parked
+        # this order" from "a payment redirect is in flight for it", so the
+        # POS screen can prompt to resume/cancel specifically these on
+        # load instead of silently losing the cart when the browser
+        # navigates away and the guest comes back without paying.
+        "autoHold": bool(data.get("autoHold", False)),
+        "checkoutProvider": data.get("checkoutProvider"),
+        "checkoutSessionId": data.get("checkoutSessionId"),
         "status": "open",
         "createdBy": user["id"],
         "createdByName": user["name"],
