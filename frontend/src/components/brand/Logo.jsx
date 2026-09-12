@@ -2,25 +2,25 @@ import React from 'react';
 import Icon from './Icon';
 
 /**
- * NUA logo lockup — see BRAND-SPEC.md §2 (wordmark colour rule) and §4.
+ * NUA logo lockup — see NUA_POS_DESIGN_TOKENS.md §2 (wordmark colour rule).
  *
  * variant="product"   — app headers, nav bars, in-product chrome.
- *                       Space Grotesk wordmark.
+ *                       Bricolage Grotesque wordmark, chrome burgundy/ivory.
  * variant="marketing" — landing hero, login/signup, decks rendered in-app.
  *                       Bold all-caps Bricolage Grotesque wordmark + flourish.
  *
  * background="dark" | "light" | "brand" — picks the wordmark colour. This is
- * purely contrast-driven, NOT a status signal: dark → orange, light → wine,
- * brand (sitting on an orange/purple/pink panel) → white knockout. Never a
- * gradient, never purple or pink on the wordmark itself — those stay
- * exclusively AI/insight colours in the icon and product UI.
- *
- * Never use the marketing variant in functional UI (buttons, nav, in-app
- * headers) — BRAND-SPEC §3.
+ * purely contrast-driven, NOT a status signal: light (ivory/white chrome) →
+ * burgundy #750D28 (measured on the light chrome ground); dark (near-black
+ * surface, e.g. #29241E) → ivory #FAF8F3, because burgundy-on-near-black
+ * measures 1.35:1 and is unreadable there; brand (sitting on an orange/
+ * purple/pink panel) → white knockout. Never a gradient, never purple or
+ * pink on the wordmark itself — those stay exclusively data/AI colours in
+ * the icon and product UI. The icon's four fills never change with this prop.
  */
 const WORDMARK_COLOR = {
-  dark: 'var(--nua-orange, #f58c14)',
-  light: 'var(--nua-wine, #6b2737)',
+  dark: 'var(--nua-chrome-dark-text, #FAF8F3)',
+  light: 'var(--nua-burgundy, #750D28)',
   brand: '#ffffff',
 };
 
@@ -73,7 +73,7 @@ export default function Logo({
               <span
                 className="uppercase"
                 style={{
-                  fontFamily: "var(--nua-font-mono, 'IBM Plex Mono', monospace)",
+                  fontFamily: "var(--nua-font-mono, 'JetBrains Mono', monospace)",
                   letterSpacing: 'var(--nua-tagline-tracking, 0.35em)',
                   fontSize: Math.max(8, size * 0.32),
                   opacity: 0.6,
@@ -88,10 +88,10 @@ export default function Logo({
           <>
             <span
               style={{
-                fontFamily: "var(--nua-font-display, 'Space Grotesk', system-ui, sans-serif)",
+                fontFamily: "var(--nua-font-display, 'Bricolage Grotesque', system-ui, sans-serif)",
                 fontWeight: 700,
                 fontSize: size * 0.82,
-                letterSpacing: '0.02em',
+                letterSpacing: '-0.02em',
                 color: wordmarkColor,
               }}
             >
@@ -101,7 +101,7 @@ export default function Logo({
               <span
                 className="uppercase"
                 style={{
-                  fontFamily: "var(--nua-font-mono, 'IBM Plex Mono', monospace)",
+                  fontFamily: "var(--nua-font-mono, 'JetBrains Mono', monospace)",
                   letterSpacing: 'var(--nua-tagline-tracking, 0.35em)',
                   fontSize: Math.max(8, size * 0.3),
                   opacity: 0.55,

@@ -98,8 +98,9 @@ export default function AgentDashboard() {
                     <div className="flex items-center gap-2 mb-1">
                       <p className="font-medium text-sm">{d.summary}</p>
                       <Badge variant="outline" className="text-[9px]">{d.actionType.replace(/_/g, ' ')}</Badge>
-                      {d.status === 'suggested' && <Badge className="bg-amber-100 text-amber-700 text-[9px]">Suggested</Badge>}
-                      {d.status === 'executed' && <Badge className="bg-green-100 text-green-700 text-[9px]"><CheckCircle2 size={9} className="mr-0.5" /> Executed</Badge>}
+                      {/* Agent tier colours per NUA_POS_DESIGN_TOKENS.md §6 (NUA Agent). */}
+                      {d.status === 'suggested' && <Badge className="bg-[rgba(245,140,20,0.14)] text-[#8a4a00] text-[9px]">Suggested</Badge>}
+                      {d.status === 'executed' && <Badge className="bg-[rgba(16,185,129,0.12)] text-[#046C4E] text-[9px]"><CheckCircle2 size={9} className="mr-0.5" /> Executed</Badge>}
                     </div>
                     <p className="text-[10px] text-gray-400 flex items-center gap-1"><Clock size={10} /> {new Date(d.createdAt).toLocaleString()}</p>
                   </div>
