@@ -491,7 +491,7 @@ def cleanup_test_data():
             for r in res.json():
                 if r.get("guestName", "").startswith("TEST_"):
                     requests.delete(f"{BASE_URL}/api/reservations/{r['id']}")
-    except:
+    except Exception:
         pass
     
     # Cleanup floor plans
@@ -501,7 +501,7 @@ def cleanup_test_data():
             for fp in res.json():
                 if fp.get("name", "").startswith("TEST_"):
                     requests.delete(f"{BASE_URL}/api/floor-plans/{fp['id']}")
-    except:
+    except Exception:
         pass
     
     # Cleanup waitlist
@@ -511,7 +511,7 @@ def cleanup_test_data():
             for w in res.json():
                 if w.get("guestName", "").startswith("TEST_"):
                     requests.delete(f"{BASE_URL}/api/waitlist/{w['id']}")
-    except:
+    except Exception:
         pass
     
     print("\n✓ Test data cleanup completed")

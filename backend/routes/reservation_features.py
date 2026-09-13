@@ -203,7 +203,7 @@ async def get_booking_analytics(_: dict = Depends(require_owner_or_manager)):
             from datetime import datetime as dt
             try:
                 day_name = dt.fromisoformat(day).strftime("%A")
-            except:
+            except Exception:
                 day_name = "Unknown"
             by_day[day_name] = by_day.get(day_name, 0) + 1
 

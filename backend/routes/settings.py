@@ -154,7 +154,7 @@ async def free_table(table_id: str):
 @router.get("/staff/commissions")
 async def get_staff_commissions(period: Optional[str] = None):
     query = {"period": period} if period else {}
-    commissions = await db.staff_commissions.find(query).to_list(1000)
+    commissions = await db.staff_commissions.find(query, {"_id": 0}).to_list(1000)
     return commissions
 
 @router.post("/staff/legacy-clock-in")

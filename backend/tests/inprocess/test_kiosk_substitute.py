@@ -10,7 +10,7 @@ doesn't, since a guest can see this response.
 """
 import asyncio
 
-from conftest import anon, req
+from conftest import req  # `anon` fixture resolved by pytest via parameter name
 
 
 def test_substitute_works_without_a_credential(anon):
