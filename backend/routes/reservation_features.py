@@ -33,17 +33,23 @@ async def delete_table_combination(combo_id: str, _: dict = Depends(require_owne
 # ============ BOOKING RULES & SETTINGS ============
 @router.get("/booking/rules")
 async def get_booking_rules():
-    s = await db.settings.find_one({"key": "booking_rules"}, {"_id": 0})
-    return s.get("value", {}) if s else {
-        "maxOnlinePartySize": 10, "maxAdvanceDays": 60,
-        "bookingWindowMinutes": 30, "autoConfirm": True,
-        "requireDeposit": False, "depositAmount": 0,
-        "noShowFee": 0, "cancellationHours": 2,
-    }
+    # Delegates to booking_rules_engine.get_rules() so this GET (what the
+    # Settings UI reads to populate the form) can never drift out of sync
+    # with the defaults the engine actually enforces on every booking.
+    from services.booking_rules_engine import get_rules
+    return await get_rules()
 
 @router.post("/booking/rules")
-async def save_booking_rules(data: dict, _: dict = Depends(require_owner)):
+async def save_booking_rules(data: dict, user: dict = Depends(require_owner)):
+    before = await db.settings.find_one({"key": "booking_rules"}, {"_id": 0})
     await db.settings.update_one({"key": "booking_rules"}, {"$set": {"key": "booking_rules", "value": data}}, upsert=True)
+    from services import audit_service
+    await audit_service.log_event(
+        entity_type="booking_rules", entity_id="booking_rules", action="updated",
+        before=(before or {}).get("value"), after=data,
+        memo=f"Booking rules updated by {user.get('email', 'owner')}", severity="notice",
+        tags=["booking_rules"],
+    )
     return {"message": "Booking rules saved"}
 
 # ============ BOOKING SCHEDULE (Shifts) ============

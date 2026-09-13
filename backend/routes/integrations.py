@@ -131,10 +131,23 @@ async def _finalize_pos_sale_if_applicable(session_id: str):
                 await bill_split.mark_lines_paid(
                     claimed["splitSessionId"], claimed.get("splitLineIds"),
                     claimed.get("splitSlotIndex"), txn.id,
+                    guest_email=claimed.get("guestEmail"),
                 )
             except Exception as split_e:
                 logging.getLogger(__name__).error(
                     f"Split-bill bookkeeping failed for {session_id} (sale itself succeeded, txn {txn.id}): {split_e}"
+                )
+        if claimed.get("heldTabId"):
+            # The auto-hold created right before the redirect to Stripe/
+            # Coinbase has done its job — the sale is rung up for real now,
+            # so the parked cart is no longer needed. Same "bookkeeping
+            # only, never fail the sale over it" rule as the split-bill
+            # branch above.
+            try:
+                await db.pos_tabs.delete_one({"id": claimed["heldTabId"]})
+            except Exception as hold_e:
+                logging.getLogger(__name__).error(
+                    f"Held-tab cleanup failed for {session_id} (sale itself succeeded, txn {txn.id}): {hold_e}"
                 )
     except Exception as e:
         logging.getLogger(__name__).error(
@@ -210,8 +223,12 @@ async def _create_stripe_session(data: dict, http_request: Request, cashier: dic
         # Split-bill metadata rides alongside salePayload rather than inside
         # it — TransactionCreate doesn't (and shouldn't) know about split
         # sessions, so these live as sibling fields _finalize_pos_sale_
-        # if_applicable reads directly off the payment doc.
-        for k in ("splitSessionId", "splitLineIds", "splitSlotIndex"):
+        # if_applicable reads directly off the payment doc. heldTabId is the
+        # same idea for the POS's auto-hold-before-redirect tab (see
+        # POSTerminal.jsx handleStripeCheckout) — lets finalize clean up the
+        # hold once the sale actually lands, instead of it sitting there
+        # looking unresolved after a successful payment.
+        for k in ("splitSessionId", "splitLineIds", "splitSlotIndex", "guestEmail", "heldTabId"):
             if k in data:
                 payment_doc[k] = data[k]
     await db.payment_transactions.insert_one(payment_doc)

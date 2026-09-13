@@ -22,10 +22,12 @@ import useLiveFeed from '../hooks/useLiveFeed';
 import { loadOpenTicketsResilient } from '../lib/offlineQueue';
 import { toast } from 'sonner';
 
+// Colours per NUA_POS_DESIGN_TOKENS.md — VIP matches the floor plan's VIP
+// pink, RUSH uses the danger fill (both are "pay attention now" signals).
 const PRIORITY_CONFIG = {
   normal: { label: 'Normal', color: '#6B7280' },
-  rush:   { label: 'RUSH',   color: '#EF4444' },
-  vip:    { label: 'VIP',    color: '#F59E0B' },
+  rush:   { label: 'RUSH',   color: '#B01B1B' },
+  vip:    { label: 'VIP',    color: '#db2777' },
 };
 
 const COURSE_LABEL = { 1: 'Starter', 2: 'Main', 3: 'Dessert', 4: 'Coffee', 5: 'Extra' };
@@ -296,12 +298,13 @@ export default function Kitchen() {
             )}
             {/* Minutes since this course was called ready. Food dying under a
                 lamp is the expensive failure, and it's invisible unless the
-                clock is on screen — so it goes amber, then red. */}
+                clock is on screen — so it goes amber, then red (NUA_POS_
+                DESIGN_TOKENS.md warning/danger fills). */}
             {meta.status === 'ready' && meta.readyAt && (
               <span className={`text-[10px] font-bold px-1.5 rounded flex items-center gap-1 ${
-                atPassMinutes(meta.readyAt) >= 5 ? 'bg-red-600 text-white'
-                : atPassMinutes(meta.readyAt) >= 2 ? 'bg-amber-500 text-white'
-                : 'text-emerald-700'}`}
+                atPassMinutes(meta.readyAt) >= 5 ? 'bg-[#B01B1B] text-white'
+                : atPassMinutes(meta.readyAt) >= 2 ? 'bg-[#d97706] text-[#29241E]'
+                : 'text-[#046C4E]'}`}
                 data-testid={`at-pass-${order.id}-${courseNum}`}>
                 <Clock size={10} /> {atPassMinutes(meta.readyAt)}m {t('kitchen.atPass')}
               </span>
@@ -638,13 +641,13 @@ export default function Kitchen() {
         </div>
       </div>
 
-      {/* Stats */}
+      {/* Stats — colours per NUA_POS_DESIGN_TOKENS.md §6 (Kitchen display). */}
       <div className="grid grid-cols-4 gap-4">
         {[
           { label: 'Active Orders', val: stats.total, color: theme.primary },
-          { label: 'New', val: stats.newCount, color: '#3B82F6' },
-          { label: 'Preparing', val: stats.prepCount, color: '#F59E0B' },
-          { label: 'Ready to Serve', val: stats.readyCount, color: '#10B981' },
+          { label: 'New', val: stats.newCount, color: '#7c3aed' },
+          { label: 'Preparing', val: stats.prepCount, color: '#b45309' },
+          { label: 'Ready to Serve', val: stats.readyCount, color: '#047857' },
         ].map((s, i) => (
           <Card key={i} className="border-0 shadow-sm">
             <CardContent className="p-4">

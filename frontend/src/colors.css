@@ -1,10 +1,70 @@
 /* NUA brand colour tokens — NUA AUS PTY LTD.
-   Import once, globally. See BRAND-SPEC.md §3 for usage rules. */
+   Import once, globally. See NUA_POS_DESIGN_TOKENS.md for the full system
+   and brand/BRAND-SPEC.md §3 for the older company-wide usage rules.
+
+   Two layers, don't mix them:
+   - CHROME (nav, headings, buttons, links) → burgundy on ivory.
+   - DATA (floor plans, kitchen tickets, order states, charts, stock) →
+     the icon hues (orange/purple/pink/ink), in three tiers by size. */
+
 :root {
-  --nua-orange: #f58c14;  /* Primary / CTA / core branches / wordmark on dark */
-  --nua-purple: #8b5cf6;  /* AI features ONLY — never decorative */
-  --nua-pink:   #ec4899;  /* Insights / alerts ONLY — never decorative */
-  --nua-wine:   #6b2737;  /* Wordmark ONLY, on light backgrounds — never icon, badge, or AI/insight state */
-  --nua-ink:    #1c1917;  /* Dark mode / reversed */
-  --nua-paper:  #fdfcfa;  /* Background */
+  /* Brand icon hues — Tier 1 data marks (bars, dots, blocks, washes).
+     These four fills ARE the brand icon and must never be themed/darkened. */
+  --nua-orange: #f58c14;
+  --nua-purple: #8b5cf6;
+  --nua-pink:   #ec4899;
+  --nua-ink:    #1c1917;
+  --nua-paper:  #fdfcfa;
+  --nua-wine:   #6b2737; /* deprecated — use --nua-burgundy for chrome/wordmark */
+
+  /* Tier 2 — data fills with a label/number/icon on top */
+  --nua-data-orange-bg: #f58c14; --nua-data-orange-on: #29241E;
+  --nua-data-purple-bg: #7c3aed; --nua-data-purple-on: #FFFFFF;
+  --nua-data-pink-bg:   #db2777; --nua-data-pink-on:   #FFFFFF;
+  --nua-data-ink-bg:    #1c1917; --nua-data-ink-on:    #FFFFFF;
+
+  /* Tier 3 — 1-2px strokes: sparklines, chart lines, thin rules */
+  --nua-line-orange: #b45309;
+  --nua-line-purple: #7c3aed;
+  --nua-line-pink:   #be185d;
+  --nua-line-ink:    #29241E;
+
+  /* Chrome grounds */
+  --nua-bg:      #FAF8F3;
+  --nua-bg-alt:  #F8F4ED;
+  --nua-surface: #FFFDF9;
+
+  /* Chrome brand */
+  --nua-burgundy:        #750D28;
+  --nua-burgundy-dark:   #5F1A23;
+  --nua-burgundy-bright: #8A1433;
+  --nua-burgundy-wash:   #F5ECEA;
+
+  /* Chrome type */
+  --nua-chrome-ink:        #29241E;
+  --nua-chrome-ink-2:      #655D53;
+  --nua-chrome-muted:      #756D67;
+  --nua-chrome-muted-soft: #8D847D; /* decorative only — fails AA for text */
+
+  /* Chrome lines */
+  --nua-chrome-border:         #E8DED4;
+  --nua-chrome-border-strong:  #D9CFC5;
+  --nua-chrome-border-control: #9A928B;
+
+  /* Dark chrome surfaces — occasional dark panels, not a full dark UI */
+  --nua-chrome-dark:        #29241E;
+  --nua-chrome-dark-text:   #FAF8F3;
+  --nua-chrome-dark-body:   #D9D1C8;
+  --nua-chrome-dark-accent: #E26383;
+
+  /* Semantic — success / warning / danger / agent */
+  --nua-success-ink:  #046C4E; --nua-success-fill: #047857; --nua-success-on: #FFFFFF;
+  --nua-warning-ink:  #8a4a00; --nua-warning-fill: #d97706; --nua-warning-on: #29241E;
+  --nua-danger-ink:   #B01B1B; --nua-danger-fill:  #B01B1B; --nua-danger-on:  #FFFFFF;
+  --nua-agent-ink:    #6d28d9; --nua-agent-fill:   #7c3aed; --nua-agent-on:   #FFFFFF;
+
+  --nua-success-wash: rgba(16,185,129,0.12);
+  --nua-agent-wash:   rgba(139,92,246,0.12);
+  --nua-warning-wash: rgba(245,140,20,0.14);
+  --nua-danger-wash:  rgba(176,27,27,0.10);
 }

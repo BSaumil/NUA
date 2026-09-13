@@ -125,14 +125,15 @@ export default function OnlineOrders() {
                     <p className="text-sm font-medium truncate">{(o.customer || {}).name}</p>
                     <p className="text-xs text-gray-500 capitalize">{o.channel} · {o.items.length} items</p>
                     <div className="flex gap-1 flex-wrap">
+                      {/* Order/payment colours per NUA_POS_DESIGN_TOKENS.md §6. */}
                       {o.paymentStatus === 'paid' && (
-                        <Badge className="bg-emerald-100 text-emerald-700 border-0 text-[9px]" data-testid={`order-paid-badge-${o.id}`}>Paid</Badge>
+                        <Badge className="bg-[#047857] text-white border-0 text-[9px]" data-testid={`order-paid-badge-${o.id}`}>Paid</Badge>
                       )}
                       {o.paymentStatus === 'refunded' && (
-                        <Badge variant="outline" className="text-gray-500 text-[9px]" data-testid={`order-refunded-badge-${o.id}`}>Refunded</Badge>
+                        <Badge variant="outline" className="bg-[rgba(176,27,27,0.10)] text-[#B01B1B] border-0 line-through text-[9px]" data-testid={`order-refunded-badge-${o.id}`}>Refunded</Badge>
                       )}
                       {o.paymentStatus === 'refund_failed' && (
-                        <Badge className="bg-red-100 text-red-700 border-0 text-[9px]" data-testid={`order-refund-failed-badge-${o.id}`}>Refund failed</Badge>
+                        <Badge className="bg-[#B01B1B] text-white border-0 text-[9px]" data-testid={`order-refund-failed-badge-${o.id}`}>Refund failed</Badge>
                       )}
                       {o.voucherDiscount > 0 && (
                         <Badge variant="outline" className="text-emerald-700 border-emerald-300 text-[9px]" data-testid={`order-voucher-badge-${o.id}`}>
@@ -168,13 +169,13 @@ export default function OnlineOrders() {
                 </div>
                 <div className="flex items-center gap-2">
                   {opened.paymentStatus === 'paid' && (
-                    <Badge className="bg-emerald-100 text-emerald-700 border-0" data-testid="order-paid-badge">Paid online</Badge>
+                    <Badge className="bg-[#047857] text-white border-0" data-testid="order-paid-badge">Paid online</Badge>
                   )}
                   {opened.paymentStatus === 'refunded' && (
-                    <Badge variant="outline" className="text-gray-500" data-testid="order-refunded-badge">Refunded</Badge>
+                    <Badge variant="outline" className="bg-[rgba(176,27,27,0.10)] text-[#B01B1B] border-0 line-through" data-testid="order-refunded-badge">Refunded</Badge>
                   )}
                   {opened.paymentStatus === 'refund_failed' && (
-                    <Badge className="bg-red-100 text-red-700 border-0" data-testid="order-refund-failed-badge">Refund failed — refund manually</Badge>
+                    <Badge className="bg-[#B01B1B] text-white border-0" data-testid="order-refund-failed-badge">Refund failed — refund manually</Badge>
                   )}
                   {(!opened.paymentStatus || opened.paymentStatus === 'unpaid') && (
                     <Badge variant="outline" className="text-gray-500" data-testid="order-unpaid-badge">Unpaid</Badge>

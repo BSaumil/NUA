@@ -128,12 +128,18 @@ def test_cashier_is_refused_the_pandl_but_keeps_the_kitchen_board(client, owner_
 # ── The guest surface still works ───────────────────────────────────────────
 
 def test_booking_portal_works_for_a_guest(anon):
+    # A booking date has to stay in the future relative to whenever this
+    # suite runs — booking_rules_engine now rejects an online booking for a
+    # date/time that's already passed (see services/booking_rules_engine.py),
+    # so a hardcoded calendar date here would eventually go stale and start
+    # failing this test for a reason unrelated to what it's checking.
+    future_date = (datetime.now(timezone.utc) + timedelta(days=14)).strftime("%Y-%m-%d")
     assert req(anon, "GET", "/api/public/menu").status_code == 200
     assert req(anon, "GET", "/api/public/available-slots",
-               params={"date": "2026-08-10", "party_size": 2}).status_code == 200
+               params={"date": future_date, "party_size": 2}).status_code == 200
     r = req(anon, "POST", "/api/public/book", json={
         "name": "Anon Guest", "phone": "0400999888", "email": "anon@example.com",
-        "date": "2026-08-10", "time": "18:30", "partySize": 2})
+        "date": future_date, "time": "18:30", "partySize": 2})
     assert r.status_code == 200, r.text[:200]
 
 

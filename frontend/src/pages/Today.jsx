@@ -5,7 +5,8 @@ import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
-import { analyticsAPI, preShiftAPI, finalizeAPI } from '../services/api';
+import { analyticsAPI, preShiftAPI, finalizeAPI, reservationsAPI } from '../services/api';
+import { toast } from 'sonner';
 import SyncHistoryCard from '../components/today/SyncHistoryCard';
 import {
   AlertTriangle, AlertOctagon, Info, RefreshCw, ShoppingCart, ChefHat,
@@ -80,6 +81,17 @@ const Today = () => {
     const id = setInterval(load, 60000); // refresh every minute — live pulse, not a report
     return () => clearInterval(id);
   }, []);
+
+  const approveBooking = async (id) => {
+    try { await reservationsAPI.approve(id); toast.success('Booking approved'); load(); }
+    catch (e) { toast.error(e?.response?.data?.detail || 'Could not approve'); }
+  };
+  const rejectBooking = async (id) => {
+    const reason = window.prompt('Reason for rejecting this large booking (guest will need to be re-booked):');
+    if (reason === null) return;
+    try { await reservationsAPI.reject(id, reason); toast.success('Booking rejected and cancelled'); load(); }
+    catch (e) { toast.error(e?.response?.data?.detail || 'Could not reject'); }
+  };
 
   const role = user?.role === 'owner' ? 'owner' : 'manager';
   const actions = QUICK_ACTIONS[role];
@@ -323,6 +335,85 @@ const Today = () => {
               </CardContent>
             </Card>
           </div>
+
+          {(service.largeBookings || []).length > 0 && (
+            <Card className="border-0 shadow-sm" data-testid="today-large-bookings">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Users2 size={16} className="text-purple-600" /> Large Bookings Today
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-gray-50/80">
+                        <th className="text-left px-3 py-2 font-medium text-gray-500">Time</th>
+                        <th className="text-left px-3 py-2 font-medium text-gray-500">Guest</th>
+                        <th className="text-left px-3 py-2 font-medium text-gray-500">Party</th>
+                        <th className="text-left px-3 py-2 font-medium text-gray-500">Tier / Experience</th>
+                        <th className="text-left px-3 py-2 font-medium text-gray-500">Deposit</th>
+                        <th className="text-left px-3 py-2 font-medium text-gray-500">Pre-Order</th>
+                        <th className="text-left px-3 py-2 font-medium text-gray-500">Approval</th>
+                        <th className="text-left px-3 py-2 font-medium text-gray-500">Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {service.largeBookings.map(b => (
+                        <tr key={b.reservationId} className="border-b hover:bg-gray-50/50">
+                          <td className="px-3 py-2 font-mono font-medium">{b.time}</td>
+                          <td className="px-3 py-2 font-medium">{b.guest}</td>
+                          <td className="px-3 py-2"><Users size={10} className="inline mb-0.5" /> {b.partySize}</td>
+                          <td className="px-3 py-2 text-xs">{b.experienceName || b.tierLabel || '—'}</td>
+                          <td className="px-3 py-2">
+                            {b.depositRequired > 0 ? (
+                              <Badge className={`text-[10px] ${b.depositPaid ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                {b.depositPaid ? 'Paid' : `$${b.depositRequired} due`}
+                              </Badge>
+                            ) : <span className="text-gray-300 text-xs">—</span>}
+                          </td>
+                          <td className="px-3 py-2">
+                            {b.preOrderRequired ? (
+                              <Badge className={`text-[10px] ${b.preOrderCompleted ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                {b.preOrderCompleted ? 'Done' : 'Pending'}
+                              </Badge>
+                            ) : <span className="text-gray-300 text-xs">—</span>}
+                          </td>
+                          <td className="px-3 py-2">
+                            {b.approvalRequired ? (
+                              <div className="flex items-center gap-1.5">
+                                <Badge className={`text-[10px] ${
+                                  b.approvalStatus === 'approved' ? 'bg-emerald-100 text-emerald-700'
+                                  : b.approvalStatus === 'rejected' ? 'bg-red-100 text-red-700'
+                                  : 'bg-amber-100 text-amber-700'
+                                }`}>
+                                  {b.approvalStatus === 'approved' ? <CheckCircle2 size={10} className="inline mr-0.5" /> : <AlertTriangle size={10} className="inline mr-0.5" />}
+                                  {b.approvalStatus}
+                                </Badge>
+                                {b.approvalStatus === 'pending' && isOwnerOrManager && (
+                                  <>
+                                    <button onClick={() => approveBooking(b.reservationId)} data-testid={`approve-${b.reservationId}`}
+                                      className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-700">
+                                      Approve
+                                    </button>
+                                    <button onClick={() => rejectBooking(b.reservationId)} data-testid={`reject-${b.reservationId}`}
+                                      className="text-[10px] px-1.5 py-0.5 rounded bg-red-600 text-white hover:bg-red-700">
+                                      Reject
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            ) : <span className="text-gray-300 text-xs">—</span>}
+                          </td>
+                          <td className="px-3 py-2 text-xs text-gray-500 max-w-[160px] truncate">{b.specialRequests || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           <Card className="border-0 shadow-sm">
             <CardHeader className="pb-2">

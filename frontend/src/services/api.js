@@ -300,6 +300,8 @@ export const reservationsAPI = {
   noShow: (id, fee) => api.post(`/reservations/${id}/no-show`, null, { params: { fee } }),
   cancel: (id, reason) => api.post(`/reservations/${id}/cancel`, { reason }),
   restore: (id, status) => api.post(`/reservations/${id}/restore`, status ? { status } : {}),
+  approve: (id) => api.post(`/reservations/${id}/approve`),
+  reject: (id, reason) => api.post(`/reservations/${id}/reject`, { reason }),
   autoAssign: (id) => api.get(`/reservations/auto-assign/${id}`),
   // Booking calendar helpers
   dayCounts: (fromDate, toDate) => api.get('/reservations/day-counts', { params: { fromDate, toDate } }),
@@ -1074,8 +1076,9 @@ export const guestSessionAPI = {
 // staff session) since this runs on a guest's own device.
 export const billSplitAPI = {
   getSplit: (tableNumber) => api.get(`/table/${encodeURIComponent(tableNumber)}/split`),
-  chooseMode: (tableNumber, mode, equalCount) =>
-    api.post(`/table/${encodeURIComponent(tableNumber)}/split/mode`, { mode, equalCount }),
+  chooseMode: (tableNumber, mode, equalCount, { customAmounts, customPercents } = {}) =>
+    api.post(`/table/${encodeURIComponent(tableNumber)}/split/mode`,
+      { mode, equalCount, customAmounts, customPercents }),
   status: (splitId) => api.get(`/table/split/${splitId}/status`),
   claim: (splitId, lineIds, token) =>
     api.post(`/table/split/${splitId}/claim`, { lineIds }, { headers: { Authorization: `Bearer ${token}` } }),
@@ -1083,8 +1086,8 @@ export const billSplitAPI = {
     api.post(`/table/split/${splitId}/claim-equal`, { index }, { headers: { Authorization: `Bearer ${token}` } }),
   release: (splitId, { lineIds, slotIndex }, token) =>
     api.post(`/table/split/${splitId}/release`, { lineIds, slotIndex }, { headers: { Authorization: `Bearer ${token}` } }),
-  checkout: (splitId, { provider, lineIds, slotIndex, originUrl }, token) =>
-    api.post(`/table/split/${splitId}/checkout`, { provider, lineIds, slotIndex, originUrl },
+  checkout: (splitId, { provider, lineIds, slotIndex, originUrl, tipAmount, email }, token) =>
+    api.post(`/table/split/${splitId}/checkout`, { provider, lineIds, slotIndex, originUrl, tipAmount, email },
       { headers: { Authorization: `Bearer ${token}` } }),
 };
 

@@ -79,15 +79,15 @@ const Inventory = () => {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <Card><CardContent className="p-6"><p className="text-sm text-gray-500">Total Items</p><p className="text-3xl font-bold" style={{ color: theme.primary }}>{products.length}</p></CardContent></Card>
         <Card><CardContent className="p-6"><p className="text-sm text-gray-500">Inventory Value</p><p className="text-3xl font-bold" style={{ color: theme.text }}>${totalValue.toFixed(2)}</p></CardContent></Card>
-        <Card><CardContent className="p-6"><p className="text-sm text-gray-500">Low Stock</p><p className="text-3xl font-bold text-orange-500">{lowStockProducts.length}</p></CardContent></Card>
+        <Card><CardContent className="p-6"><p className="text-sm text-gray-500">Low Stock</p><p className="text-3xl font-bold text-[#8a4a00]">{lowStockProducts.length}</p></CardContent></Card>
         <Card><CardContent className="p-6"><p className="text-sm text-gray-500">Total Units</p><p className="text-3xl font-bold" style={{ color: theme.text }}>{totalUnits}</p></CardContent></Card>
       </div>
 
       {lowStockProducts.length > 0 && (
-        <Card className="border-orange-300 bg-orange-50"><CardContent className="p-4">
+        <Card className="border-[#d97706]/40 bg-[rgba(245,140,20,0.14)]"><CardContent className="p-4">
           <div className="flex items-center gap-2 mb-1">
-            <AlertTriangle size={20} className="text-orange-600" />
-            <h3 className="font-semibold text-orange-900">Low Stock Alert</h3>
+            <AlertTriangle size={20} className="text-[#8a4a00]" />
+            <h3 className="font-semibold text-[#8a4a00]">Low Stock Alert</h3>
             <div className="ml-auto flex items-center gap-3">
               <a
                 href={`${process.env.REACT_APP_BACKEND_URL}/api/inventory/low-stock/pdf`}
@@ -109,7 +109,7 @@ const Inventory = () => {
               </a>
             </div>
           </div>
-          <p className="text-sm text-orange-700">{lowStockProducts.map(p => p.name).join(', ')} — consider reordering.</p>
+          <p className="text-sm text-[#8a4a00]">{lowStockProducts.map(p => p.name).join(', ')} — consider reordering.</p>
         </CardContent></Card>
       )}
 
@@ -154,12 +154,16 @@ const Inventory = () => {
                   </div></td>
                   <td className="p-4 font-mono text-sm text-gray-600">{product.sku}</td>
                   <td className="p-4 text-sm">{product.category}</td>
-                  <td className="p-4 text-right font-bold" style={{ color: isLow ? '#f59e0b' : theme.text }}>{product.stock}</td>
+                  <td className="p-4 text-right font-bold" style={{ color: product.stock <= 0 ? '#B01B1B' : isLow ? '#8a4a00' : '#046C4E' }}>{product.stock}</td>
                   <td className="p-4 text-right text-sm">${Number(product.cost).toFixed(2)}</td>
                   <td className="p-4 text-right font-medium" style={{ color: theme.primary }}>${stockValue.toFixed(2)}</td>
                   <td className="p-4 text-center">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${isLow ? 'bg-orange-100 text-orange-800' : 'bg-green-100 text-green-800'}`}>
-                      {isLow ? 'Low Stock' : 'In Stock'}
+                    {/* Stock level colours per NUA_POS_DESIGN_TOKENS.md §6. */}
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                      product.stock <= 0 ? 'bg-[rgba(176,27,27,0.10)] text-[#B01B1B]'
+                      : isLow ? 'bg-[rgba(245,140,20,0.14)] text-[#8a4a00]'
+                      : 'bg-[rgba(16,185,129,0.12)] text-[#046C4E]'}`}>
+                      {product.stock <= 0 ? 'Out of Stock' : isLow ? 'Low Stock' : 'In Stock'}
                     </span>
                   </td>
                   <td className="p-4 text-center">
