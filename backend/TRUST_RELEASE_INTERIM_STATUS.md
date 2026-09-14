@@ -1,10 +1,10 @@
 # NUA POS Trust Release — Interim Status Report
 
-**Date:** 2026-09-14
-**Branch:** `trust-release/p0-security-foundation` (10 commits ahead of `main`, all pushed)
+**Date:** 2026-09-14 (updated — see §6 for the second update)
+**Branch:** `trust-release/p0-security-foundation` (16 commits ahead of `main`, all pushed)
 **Verdict: NO-GO — interim checkpoint, not a final assessment.** This document reports genuine, verified progress on Phase 0-1 (P0) foundational security/safety work only. Phases 2 (payment/offline integrity — partially done, see below), 3-5 (Voice POS, Loyalty 3.0, Booking 3.0 — not started), and 6-7 (reliability, documentation) are not complete. Nothing in this report should be read as clearing the Trust Release Exit Gates.
 
-This is being written now, mid-effort, because the remaining scope (29 more backend route files still needing a tenant-isolation pass, plus three entirely new major product features) is large enough that a status checkpoint is worth more than continuing silently. Work continues after this document is committed.
+This is being written now, mid-effort, because the remaining scope (26 more backend route files still needing a tenant-isolation pass, plus three entirely new major product features) is large enough that a status checkpoint is worth more than continuing silently. Work continues after this document is committed.
 
 ---
 
@@ -57,10 +57,27 @@ a70f961 P0.3 (batch 5): scope reservation_features.py across 6 collections
 
 ## 5. Next steps (in order)
 
-1. Continue P0.3: `table_courses.py`, `table_ordering.py` next (booking/guest data family), then `hq.py` (needs care — it's explicitly a cross-location feature by design), then the rest of the 29, per the priority order in `TENANT_ISOLATION_REMAINING_WORK.md`.
+1. Continue P0.3, per the priority order in `TENANT_ISOLATION_REMAINING_WORK.md`.
 2. Once P0.3 is complete (or judged sufficiently covered), re-run the full Trust Release Exit Gate checklist against the directive's 13 numbered gates before considering any GO/CONDITIONAL-GO language.
 3. Only then: Phase 3-5 (Voice POS, Loyalty 3.0, Booking 3.0) — each a substantial, standalone feature build, not yet scoped or started.
 4. Phase 6-7: reliability/observability hardening, the 12 required documentation files.
 5. The directive's 16-item Required Final Report, with an honest GO/CONDITIONAL-GO/NO-GO verdict backed by evidence, not this interim summary.
 
 No credentials, certifications, or regulatory approvals have been fabricated or implied anywhere in this work. No live customer data has been touched — all testing runs against the in-process mongomock test database. All commits are on a dedicated branch, not pushed to `main`, per the directive's own instruction to prefer a reviewable branch.
+
+## 6. Update — 6 more P0.3 fixes since §1-5 were written
+
+The full in-process suite is now at **515 passing tests** (up from 508). Six more files/sections fixed, three of them **not on the original audit's 34-file list at all** — found by following the same pattern (a raw client-supplied id/number used as a lookup key with no tenant scoping) into adjacent code the audit hadn't specifically named:
+
+- **`routes/table_courses.py`** — `table_states` (live floor-plan seating/course state) was keyed only by `tableId` with no `businessId`: two businesses both seating "Table 5" on a shared deployment collided on one document, so one business's live course progress, guest name, and VIP flag could be silently overwritten by a different business seating a same-numbered table. `dock_notifications` had the same gap.
+- **`routes/reservations.py`'s floor-plans section** (not one of the 34) — found while checking whether the `table_states` collision extended to floor-plan table ids. It did, and worse: `GET/POST/PUT/DELETE /floor-plans` and two more endpoints had **no auth dependency at all**, not just missing tenant scoping.
+- **`routes/hq.py`** — explicitly a cross-location feature by design (franchise/brand roll-ups), but none of its 4 endpoints ever checked which brand a location belonged to, so `/kpi-roll-up` and `/leaderboard` aggregated revenue across every business on the deployment, not just sibling locations under the caller's own brand.
+- **`routes/channel_menus.py`** — zero scoping across all 4 collections it touches (products, channel_menus, kds_orders, transactions); two endpoints also had no auth dependency.
+
+This raises the running tally to **4 confirmed zero-authentication vulnerabilities** found this pass (`bill_split.py`'s 3 staff endpoints, `awards.py`'s 6 endpoints, `reservations.py`'s floor-plan CRUD, and 2 of `channel_menus.py`'s reads) and **1 severe cross-tenant live-data-corruption bug** (`table_states`, on top of the earlier `_stamp_new` root-cause bug that affected every product ever created). The pattern holding across all of these: every one was found by writing a *cross-tenant* test and watching it fail, not by reading the code and reasoning it should be fine — reinforced confidence that the remaining 26 files need the same treatment rather than a lighter-touch review.
+
+**Two files assessed and deliberately deferred, not fixed:**
+- `table_ordering.py` — legitimately public by design, doesn't corrupt data, but its guest-facing product listing has no scoping for a genuinely multi-tenant deployment; properly fixing it needs a `?business=` resolution param added to its request shape (the same pattern `online_orders.py`'s public storefront already uses), which is a feature-level change to a live guest-facing flow, not a mechanical fix.
+- `services/floor_tables.py` and its many callers (kitchen coursing, table pacing, ticket lifecycle) — plausibly lower-risk than the raw-tableNumber collisions fixed elsewhere (floor-plan table ids are 8-hex-char UUID-style strings, not raw display numbers), but not independently verified, and threading `business_id` through this shared service and every call site is real, separate, larger work.
+
+Remaining file count: **26** (was 29). Updated commit list and per-file detail are in `TENANT_ISOLATION_REMAINING_WORK.md`, which remains the source of truth — this section summarizes it rather than duplicating it.
