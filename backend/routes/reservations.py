@@ -8,7 +8,7 @@ from services import floor_tables
 from models.reservation import Reservation, ReservationCreate, ReservationUpdate
 from models.floor_plan import FloorPlan, FloorPlanCreate, FloorPlanUpdate
 from models.waitlist import WaitlistEntry, WaitlistEntryCreate, WaitlistEntryUpdate
-from middleware.actor_context import tenant_scope_filter
+from middleware.actor_context import tenant_scope_filter, tenant_owns
 import asyncio
 import json
 import logging
@@ -500,26 +500,39 @@ async def delete_blackout(date: str):
 
 
 # ============ FLOOR PLANS API ============
+# This whole section had no Depends at all (not even get_user) on the CRUD
+# endpoints, and no businessId scoping either — a floor plan is a real
+# operational asset (table layout, sections, server assignments), and
+# create/update/delete were reachable by anyone holding any valid staff
+# token (this router isn't behind server.py's public-prefix allowlist, so
+# a token is required to get past the global auth middleware — but nothing
+# beyond that: no role check, no ownership check). Fixed with get_user for
+# reads and require_owner_or_manager for writes, plus businessId
+# stamping/scoping throughout.
 @router.get("/floor-plans", response_model=List[FloorPlan])
-async def get_floor_plans():
-    plans = await db.floor_plans.find({}, {"_id": 0}).to_list(100)
+async def get_floor_plans(user: dict = Depends(get_user)):
+    plans = await db.floor_plans.find(tenant_scope_filter(user.get("businessId")), {"_id": 0}).to_list(100)
     return [FloorPlan(**p) for p in plans]
 
 @router.get("/floor-plans/{plan_id}", response_model=FloorPlan)
-async def get_floor_plan(plan_id: str):
+async def get_floor_plan(plan_id: str, user: dict = Depends(get_user)):
     plan = await db.floor_plans.find_one({"id": plan_id}, {"_id": 0})
-    if not plan:
+    if not plan or not tenant_owns(plan.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Floor plan not found")
     return FloorPlan(**plan)
 
 @router.post("/floor-plans", response_model=FloorPlan)
-async def create_floor_plan(plan: FloorPlanCreate):
+async def create_floor_plan(plan: FloorPlanCreate, user: dict = Depends(require_owner_or_manager)):
     plan_obj = FloorPlan(**plan.dict())
-    await db.floor_plans.insert_one(plan_obj.dict())
+    doc = {**plan_obj.dict(), "businessId": user.get("businessId")}
+    await db.floor_plans.insert_one(doc)
     return plan_obj
 
 @router.put("/floor-plans/{plan_id}", response_model=FloorPlan)
-async def update_floor_plan(plan_id: str, update: FloorPlanUpdate):
+async def update_floor_plan(plan_id: str, update: FloorPlanUpdate, user: dict = Depends(require_owner_or_manager)):
+    existing = await db.floor_plans.find_one({"id": plan_id}, {"_id": 0, "businessId": 1})
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Floor plan not found")
     update_data = {k: v for k, v in update.dict().items() if v is not None}
     update_data["updatedAt"] = datetime.utcnow().isoformat()
     result = await db.floor_plans.find_one_and_update(
@@ -536,17 +549,21 @@ async def update_floor_plan(plan_id: str, update: FloorPlanUpdate):
     return FloorPlan(**result)
 
 @router.delete("/floor-plans/{plan_id}")
-async def delete_floor_plan(plan_id: str):
+async def delete_floor_plan(plan_id: str, user: dict = Depends(require_owner_or_manager)):
+    existing = await db.floor_plans.find_one({"id": plan_id}, {"_id": 0, "businessId": 1})
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Floor plan not found")
     result = await db.floor_plans.delete_one({"id": plan_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Floor plan not found")
     return {"message": "Floor plan deleted"}
 
 @router.post("/floor-plans/tables/{table_id}/status")
-async def update_table_status(table_id: str, status: str, plan_id: Optional[str] = None):
+async def update_table_status(table_id: str, status: str, plan_id: Optional[str] = None,
+                                user: dict = Depends(get_user)):
     if plan_id:
         plan = await db.floor_plans.find_one({"id": plan_id}, {"_id": 0})
-        if plan:
+        if plan and tenant_owns(plan.get("businessId"), user.get("businessId")):
             tables = plan.get("tables", [])
             for t in tables:
                 if t.get("id") == table_id:
@@ -637,9 +654,10 @@ async def free_table_by_number(number: str, _: dict = Depends(get_user)):
 
 
 @router.post("/floor-plans/sections/{section_id}/assign")
-async def assign_server_to_section(section_id: str, server_id: str, plan_id: str):
+async def assign_server_to_section(section_id: str, server_id: str, plan_id: str,
+                                     user: dict = Depends(require_owner_or_manager)):
     plan = await db.floor_plans.find_one({"id": plan_id}, {"_id": 0})
-    if not plan:
+    if not plan or not tenant_owns(plan.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Floor plan not found")
     sections = plan.get("sections", [])
     for s in sections:
