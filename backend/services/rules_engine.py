@@ -352,24 +352,43 @@ def _now_iso() -> str:
 # Public API
 # ═════════════════════════════════════════════════════════════════════════
 async def emit_event(event_type: str, payload: Optional[Dict[str, Any]] = None,
-                     entity_id: Optional[str] = None) -> Dict[str, Any]:
+                     entity_id: Optional[str] = None, business_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Fire an event through the rules engine. Every matching, active rule
     is evaluated + executed. Returns a summary { rulesEvaluated, ruleFirings }.
+
+    business_id scopes which business's rules this event can trigger —
+    without it, a POS sale (or any other event) in Business A evaluated
+    and executed every business's active rules for that event type, not
+    just Business A's own, so one business's automation ("VIP-upgrade on
+    big spend", "auto-PO on low stock") fired against another business's
+    customers/inventory. Defaults from the request's actor context, same
+    pattern as notification_service.send() — safe_emit's fire-and-forget
+    asyncio task still sees it, since asyncio.create_task captures the
+    calling context at creation time. Background scanners with no request
+    context (ops_signals.py, predictive_signals.py) fall through to None,
+    which matches every business's rules same as before this fix — a
+    known, separate, documented gap, not one this closes.
     """
+    if business_id is None:
+        from middleware.actor_context import get_actor_context
+        business_id = get_actor_context().get("businessId")
     event = {
         "id": str(uuid.uuid4()),
         "type": event_type,
         "entityId": entity_id,
         "payload": payload or {},
         "ts": _now_iso(),
+        "businessId": business_id,
     }
     try:
         await db.rule_events.insert_one(dict(event))
     except Exception:
         pass
 
-    rules_cursor = db.rules.find({"active": True, "triggerEvent": event_type}, {"_id": 0})
+    from middleware.actor_context import tenant_scope_filter
+    rules_cursor = db.rules.find(
+        {"active": True, "triggerEvent": event_type, **tenant_scope_filter(business_id)}, {"_id": 0})
     rules = await rules_cursor.to_list(200)
     rules.sort(key=lambda r: -(r.get("priority", 0)))
 
@@ -423,6 +442,7 @@ async def emit_event(event_type: str, payload: Optional[Dict[str, Any]] = None,
         "payload": event["payload"],
         "firings": firings,
         "ts": event["ts"],
+        "businessId": business_id,
     }
     try:
         await db.rule_executions.insert_one(dict(execution))
