@@ -206,7 +206,8 @@ async def _apply_due_auto_fires(order: dict, config: dict, actor: str = "auto") 
     from routes.kitchen import fire_course_internal
     for course in due:
         try:
-            order = await fire_course_internal(order["id"], course, actor)
+            order = await fire_course_internal(order["id"], course, actor,
+                                                business_id=order.get("businessId"))
         except Exception:
             break
     return order
@@ -891,6 +892,7 @@ async def auto_fire_tick(_: dict = Depends(get_user)):
             continue
         from routes.kitchen import fire_course_internal
         for course in due:
-            await fire_course_internal(order["id"], course, "auto")
+            await fire_course_internal(order["id"], course, "auto",
+                                        business_id=order.get("businessId"))
             fired.append({"orderId": order["id"], "course": course})
     return {"checked": len(rows), "fired": fired}

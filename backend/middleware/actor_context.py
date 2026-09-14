@@ -106,11 +106,24 @@ class ActorContextMiddleware(BaseHTTPMiddleware):
             except Exception:
                 pass  # Auth will handle its own error on the route
 
-        # X-Tenant-Id/X-Business-Id headers (used by partner/integration
-        # callers that aren't a logged-in staff member) win when present;
-        # otherwise fall back to the businessId already embedded in the
-        # staff member's own access token.
-        business_id = header_business_id or jwt_business_id
+        # Authenticated JWT membership is authoritative — a logged-in staff
+        # member's own businessId always wins, full stop. The header used to
+        # win whenever present, which meant any logged-in user of Business A
+        # could send X-Business-Id: <business-B-id> and have writes/reads
+        # tagged/scoped as Business B (confirmed exploitable via
+        # commerce_v29.py's voucher and wallet-ledger writes, which read this
+        # contextvar for tenant tagging). There's currently no per-user
+        # multi-business membership list in this codebase (each auth_users
+        # doc carries exactly one businessId), so "a business the actor is
+        # authorised to access" is that single value — nothing else to
+        # select among yet. If/when real multi-business membership exists,
+        # this is where a header would validate against that membership set
+        # rather than being trusted outright.
+        #
+        # The header still matters for the case it was originally built for:
+        # a partner/integration caller with no bearer token at all (no JWT
+        # to derive a businessId from).
+        business_id = jwt_business_id or header_business_id
 
         ctx = {
             "email": email,

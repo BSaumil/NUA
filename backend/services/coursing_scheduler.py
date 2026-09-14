@@ -44,7 +44,8 @@ async def _tick_once() -> int:
         from routes.kitchen import fire_course_internal
         for course in due:
             try:
-                await fire_course_internal(order["id"], course, "auto")
+                await fire_course_internal(order["id"], course, "auto",
+                                            business_id=order.get("businessId"))
                 fired += 1
             except Exception as e:
                 logger.warning("[coursing] auto-fire failed for %s c%s: %s", order["id"], course, e)

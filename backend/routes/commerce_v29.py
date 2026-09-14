@@ -128,7 +128,15 @@ def _build_voucher_doc(payload: dict, user: Optional[dict], customer_data: dict)
         issuedBy=(user or {}).get("email"),
         freeItemId=payload.get("freeItemId"),
         metadata=payload.get("metadata") or {},
-        businessId=payload.get("businessId") or (user or {}).get("businessId") or get_actor_context().get("businessId"),
+        # The authenticated caller's own businessId always wins — this used
+        # to check payload.get("businessId") FIRST, meaning any client could
+        # put {"businessId": "<another business's id>"} in the POST body and
+        # have the voucher tagged as belonging to a different tenant than
+        # the one they're actually authenticated as. No current caller
+        # (public /vouchers, /vouchers/bulk, or the internal refund/gift-card
+        # issuers) relies on payload.businessId when a user is present, so
+        # it's now only consulted as a last resort with no user in scope.
+        businessId=(user or {}).get("businessId") or get_actor_context().get("businessId") or payload.get("businessId"),
     )
     return v.dict()
 
