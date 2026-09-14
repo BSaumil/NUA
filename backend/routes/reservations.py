@@ -118,6 +118,27 @@ async def list_blackouts(fromDate: Optional[str] = None, toDate: Optional[str] =
     return docs
 
 
+@router.get("/reservations/cancellation-policy")
+async def get_cancellation_policy_route(user: dict = Depends(get_user)):
+    from services.cancellation_policy import get_policy
+    return await get_policy(user.get("businessId"))
+
+
+@router.put("/reservations/cancellation-policy")
+async def update_cancellation_policy_route(data: dict, user: dict = Depends(require_owner_or_manager)):
+    try:
+        cutoff = float(data.get("cutoffHours"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="cutoffHours must be a number")
+    if cutoff < 0:
+        raise HTTPException(status_code=400, detail="cutoffHours must be non-negative")
+    business_id = user.get("businessId")
+    await db.cancellation_policies.update_one(
+        {"businessId": business_id}, {"$set": {"businessId": business_id, "cutoffHours": cutoff}}, upsert=True,
+    )
+    return {"businessId": business_id, "cutoffHours": cutoff}
+
+
 @router.get("/reservations/{reservation_id}", response_model=Reservation)
 async def get_reservation(reservation_id: str, user: dict = Depends(get_user)):
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
@@ -404,15 +425,24 @@ async def cancel_reservation(reservation_id: str, body: dict = None, user: dict 
 
     reason = (body or {}).get("reason")
     update_data = {"status": "cancelled", "cancellationReason": reason, "updatedAt": datetime.utcnow().isoformat()}
-    # A cancellation (as opposed to a no-show) never forfeits a collected
-    # deposit — refund it for real via the same Stripe session the guest
-    # actually paid through. Best-effort: a failed refund never blocks the
+    # Cancellation-policy engine: a collected deposit is only refunded in
+    # full when this cancellation lands outside the business's configured
+    # cutoff window (default 24h before the booking) — inside it, the
+    # deposit is forfeited as a cancellation fee instead, the same
+    # forfeit-what-was-actually-collected mechanism mark_no_show uses.
+    # Best-effort on the Stripe side: a failed refund never blocks the
     # cancellation itself, but is recorded so it doesn't silently vanish.
+    cancellation_fee_applied = False
     if res.get("depositPaid") and res.get("depositSessionId") and not res.get("depositForfeited"):
-        from routes.integrations import refund_stripe_payment
-        refunded = await refund_stripe_payment(res["depositSessionId"])
-        update_data["depositPaid"] = not refunded
-        update_data["depositRefunded"] = refunded
+        from services.cancellation_policy import is_within_free_cancellation_window
+        if await is_within_free_cancellation_window(res, user.get("businessId")):
+            from routes.integrations import refund_stripe_payment
+            refunded = await refund_stripe_payment(res["depositSessionId"])
+            update_data["depositPaid"] = not refunded
+            update_data["depositRefunded"] = refunded
+        else:
+            update_data["depositForfeited"] = True
+            cancellation_fee_applied = True
     await db.reservations.update_one({"id": reservation_id}, {"$set": update_data})
 
     if res.get("tableId"):
@@ -422,11 +452,13 @@ async def cancel_reservation(reservation_id: str, body: dict = None, user: dict 
             await floor_tables.set_table_status(res["tableId"], plan_id, "available")
 
     updated = {**res, **update_data}
+    fee_memo = (f" — outside the cancellation window, ${res.get('depositRequired', 0):.2f} deposit forfeited as a cancellation fee"
+                if cancellation_fee_applied else "")
     from services import audit_service
     await audit_service.log_event(
         entity_type="reservation", entity_id=reservation_id, action="updated",
         before=res, after=updated,
-        memo=f"Booking cancelled by {user.get('email', 'staff')}" + (f": {reason}" if reason else ""),
+        memo=f"Booking cancelled by {user.get('email', 'staff')}" + (f": {reason}" if reason else "") + fee_memo,
         severity="notice",
     )
     return Reservation(**updated)
@@ -852,7 +884,7 @@ async def add_to_waitlist(entry: WaitlistEntryCreate, user: dict = Depends(get_u
 
 @router.put("/waitlist/{entry_id}", response_model=WaitlistEntry)
 async def update_waitlist_entry(entry_id: str, update: WaitlistEntryUpdate, user: dict = Depends(get_user)):
-    guard = await db.waitlist.find_one({"id": entry_id}, {"_id": 0, "businessId": 1})
+    guard = await db.waitlist.find_one({"id": entry_id}, {"_id": 0})
     if not guard or not tenant_owns(guard.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Waitlist entry not found")
     update_data = {k: v for k, v in update.dict().items() if v is not None}
@@ -862,6 +894,22 @@ async def update_waitlist_entry(entry_id: str, update: WaitlistEntryUpdate, user
     if not result:
         raise HTTPException(status_code=404, detail="Waitlist entry not found")
     result.pop("_id", None)
+
+    # Real waitlist SMS: a "Notified" status used to be pure record-keeping
+    # — the Waitlist.jsx "Notify" button already claimed "Guest notified"
+    # in a toast with nothing actually sent. Fires once, only on the
+    # waiting -> notified transition (not on a redundant re-save), and
+    # only if the entry has a phone number. Best-effort: send_sms no-ops
+    # (and logs) when Twilio isn't configured, same as every other SMS
+    # send in this codebase — never blocks the status change on delivery.
+    if update_data.get("status") == "notified" and guard.get("status") != "notified" and result.get("guestPhone"):
+        from utils.notifications import send_sms
+        biz = await db.businesses.find_one({"id": result.get("businessId")}, {"_id": 0, "name": 1})
+        biz_name = (biz or {}).get("name") or "NUA"
+        await send_sms(
+            result["guestPhone"],
+            f"Hi {result.get('guestName', 'there')}, your table at {biz_name} is ready! Please head to the host stand.",
+        )
     return WaitlistEntry(**result)
 
 @router.post("/waitlist/{entry_id}/seat")

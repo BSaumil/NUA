@@ -304,6 +304,8 @@ export const reservationsAPI = {
   approve: (id) => api.post(`/reservations/${id}/approve`),
   reject: (id, reason) => api.post(`/reservations/${id}/reject`, { reason }),
   autoAssign: (id) => api.get(`/reservations/auto-assign/${id}`),
+  getCancellationPolicy: () => api.get('/reservations/cancellation-policy'),
+  updateCancellationPolicy: (data) => api.put('/reservations/cancellation-policy', data),
   // Booking calendar helpers
   dayCounts: (fromDate, toDate) => api.get('/reservations/day-counts', { params: { fromDate, toDate } }),
   createBlackout: (data) => api.post('/reservations/blackouts', data),
