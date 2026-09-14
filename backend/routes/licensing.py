@@ -369,24 +369,28 @@ async def stripe_webhook(request: Request, stripe_signature: Optional[str] = Hea
     invoice.paid, invoice.payment_failed, customer.subscription.updated, customer.subscription.deleted."""
     payload = await request.body()
     secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+    if not secret:
+        # Fail closed. This endpoint is public/unauthenticated and drives
+        # real tenant license/subscription state transitions (activation,
+        # suspension) — accepting an unsigned payload here means anyone who
+        # can reach this URL can flip any tenant's billing state. There is
+        # no safe dev-fallback for a security-critical verification step;
+        # if a deployment needs to exercise this path without real Stripe
+        # webhooks, it must set STRIPE_WEBHOOK_SECRET to a test value and
+        # sign requests with stripe.Webhook.generate_test_header, exactly
+        # as tests/inprocess/test_licensing_webhook_signature.py does.
+        logger.error("STRIPE_WEBHOOK_SECRET not set; rejecting webhook instead of skipping signature verification")
+        raise HTTPException(status_code=503, detail="Webhook signature verification is not configured")
     try:
-        if secret:
-            # construct_event returns a stripe.Event — a StripeObject, not a
-            # plain dict. It supports [] and attribute access but NOT
-            # .get(), which raises AttributeError rather than falling back
-            # to a default the way dict.get() does. Every call below uses
-            # .get() (an intentional, defensive style for a webhook payload
-            # whose exact shape isn't guaranteed) — so without this
-            # conversion, every correctly-signed, real webhook delivery
-            # crashed with a 500 immediately on the first `event.get(...)`.
-            # The insecure dev-fallback path below never hit this because
-            # json.loads() already produces a plain dict.
-            event = stripe.Webhook.construct_event(payload, stripe_signature, secret).to_dict()
-        else:
-            # Dev fallback — skip signature verification but log a warning
-            import json
-            event = json.loads(payload)
-            logger.warning("STRIPE_WEBHOOK_SECRET not set; signature verification skipped")
+        # construct_event returns a stripe.Event — a StripeObject, not a
+        # plain dict. It supports [] and attribute access but NOT .get(),
+        # which raises AttributeError rather than falling back to a default
+        # the way dict.get() does. Every call below uses .get() (an
+        # intentional, defensive style for a webhook payload whose exact
+        # shape isn't guaranteed) — so without this conversion, every
+        # correctly-signed, real webhook delivery crashed with a 500
+        # immediately on the first `event.get(...)`.
+        event = stripe.Webhook.construct_event(payload, stripe_signature, secret).to_dict()
     except (ValueError, stripe.error.SignatureVerificationError) as e:
         raise HTTPException(status_code=400, detail=f"Webhook verification failed: {e}")
 

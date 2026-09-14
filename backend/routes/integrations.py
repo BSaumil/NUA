@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from typing import Optional
 from datetime import datetime, timedelta
 from database import db
@@ -308,33 +308,61 @@ async def get_stripe_checkout_status(session_id: str, http_request: Request):
     }
 
 @router.post("/webhook/stripe")
-async def stripe_webhook(request: Request):
-    """Handle Stripe webhook events"""
-    from emergentintegrations.payments.stripe.checkout import StripeCheckout
+async def stripe_webhook(request: Request, stripe_signature: Optional[str] = Header(None, alias="Stripe-Signature")):
+    """Handle Stripe webhook events for POS/online-order checkout sessions.
+
+    Previously delegated verification to emergentintegrations.payments.stripe
+    .checkout.StripeCheckout.handle_webhook — an opaque third-party wrapper
+    that isn't installed in this environment (not in requirements.txt) and
+    whose verification internals can't be inspected or trusted. Worse, the
+    bare `except Exception` around it turned ANY failure — including a
+    rejected/invalid signature — into an HTTP 200 {"received": True}, which
+    is exactly the "silently return success" failure mode this endpoint must
+    not have: it marks online orders and POS sales as paid. Now verified
+    directly with the official `stripe` SDK (the same package and pattern
+    already used by refund_stripe_payment in this file and by
+    routes/licensing.py's webhook), and fails closed — 503 when no secret is
+    configured, 400 on a bad/missing signature — instead of ever reporting
+    received:true for something that wasn't verified.
+    """
+    import stripe
 
     api_key = os.environ.get("STRIPE_API_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="Stripe not configured")
+    stripe.api_key = api_key
 
-    host_url = str(request.base_url).rstrip("/")
-    webhook_url = f"{host_url}/api/webhook/stripe"
-    stripe_checkout = StripeCheckout(api_key=api_key, webhook_url=webhook_url)
+    # Reuses STRIPE_WEBHOOK_SECRET rather than a dedicated var: today only
+    # one Stripe webhook secret is documented/configured for this deployment
+    # (README.md). If this checkout endpoint and routes/licensing.py's
+    # billing endpoint are ever registered with Stripe as two separate
+    # webhook endpoints in production, Stripe issues a distinct signing
+    # secret per endpoint URL and this should split into its own
+    # STRIPE_CHECKOUT_WEBHOOK_SECRET rather than sharing one.
+    secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+    if not secret:
+        logging.getLogger(__name__).error("STRIPE_WEBHOOK_SECRET not set; rejecting checkout webhook instead of skipping signature verification")
+        raise HTTPException(status_code=503, detail="Webhook signature verification is not configured")
 
     body = await request.body()
-    signature = request.headers.get("Stripe-Signature", "")
-
     try:
-        event = await stripe_checkout.handle_webhook(body, signature)
-        if event.payment_status == "paid":
-            await db.payment_transactions.update_one(
-                {"sessionId": event.session_id},
-                {"$set": {"status": "completed", "paymentStatus": "paid", "updatedAt": datetime.utcnow().isoformat()}}
-            )
-            await _mark_online_order_paid_if_applicable(event.session_id)
-            await _finalize_pos_sale_if_applicable(event.session_id)
-        return {"received": True}
-    except Exception as e:
-        return {"received": True, "note": str(e)}
+        # .to_dict() converts the stripe.Event (a StripeObject) to a plain
+        # dict — StripeObject supports [] and attribute access but not
+        # .get(), which the checks below rely on.
+        event = stripe.Webhook.construct_event(body, stripe_signature, secret).to_dict()
+    except (ValueError, stripe.error.SignatureVerificationError) as e:
+        raise HTTPException(status_code=400, detail=f"Webhook verification failed: {e}")
+
+    obj = (event.get("data") or {}).get("object") or {}
+    if event.get("type") == "checkout.session.completed" and obj.get("payment_status") == "paid":
+        session_id = obj.get("id")
+        await db.payment_transactions.update_one(
+            {"sessionId": session_id},
+            {"$set": {"status": "completed", "paymentStatus": "paid", "updatedAt": datetime.utcnow().isoformat()}}
+        )
+        await _mark_online_order_paid_if_applicable(session_id)
+        await _finalize_pos_sale_if_applicable(session_id)
+    return {"received": True}
 
 # ============ NUA CONNECT — INTEGRATIONS HUB API ============
 # Real registry-driven integration hub. Status is never faked: a provider is
