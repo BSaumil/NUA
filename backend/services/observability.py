@@ -58,7 +58,8 @@ def _actor_from_request(request) -> Optional[dict]:
     try:
         import jwt
         payload = jwt.decode(token, os.environ["JWT_SECRET"], algorithms=["HS256"])
-        return {"userId": payload.get("sub"), "role": payload.get("role")}
+        return {"userId": payload.get("sub"), "role": payload.get("role"),
+                "businessId": payload.get("businessId")}
     except Exception:
         return None
 
@@ -85,6 +86,7 @@ async def record_error(request_id: str, request, exc: Exception) -> None:
                                                            # write megabytes per row
             "at": now,
             "expiresAt": now + timedelta(days=ERROR_RETENTION_DAYS),
+            "businessId": (actor or {}).get("businessId"),
         })
     except Exception:
         log.exception("failed to record error %s (secondary failure, not the original)", request_id)
@@ -114,6 +116,7 @@ async def record_client_error(payload: dict, actor: Optional[dict]) -> None:
             "actor": actor,
             "at": now,
             "expiresAt": now + timedelta(days=CLIENT_ERROR_RETENTION_DAYS),
+            "businessId": (actor or {}).get("businessId"),
         })
     except Exception:
         log.exception("failed to record client error (non-fatal)")
