@@ -136,6 +136,14 @@ async def public_book_reservation(data: dict):
 
 @router.post("/public/join-waitlist")
 async def public_join_waitlist(data: dict):
+    # Deliberately unscoped, same category as table_ordering.py's public
+    # endpoints: this form carries no business/table signal at all (no
+    # slug, no header, nothing in `data`) to resolve a businessId from, so
+    # the created entry is untagged — it still surfaces correctly to every
+    # business's staff waitlist view via tenant_scope_filter's safe
+    # default (untagged docs always match), it just isn't excluded from
+    # any OTHER business's view either. Not attempted here; would need a
+    # venue-identifying param threaded through from the caller first.
     from models.waitlist import WaitlistEntry
     last = await db.waitlist.find({"status": "waiting"}).sort("position", -1).to_list(1)
     next_pos = (last[0]["position"] + 1) if last else 1

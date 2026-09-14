@@ -671,27 +671,50 @@ async def assign_server_to_section(section_id: str, server_id: str, plan_id: str
     return {"message": "Server assigned to section"}
 
 # ============ WAITLIST API ============
+# Tenant isolation + Silver+ "Priority waitlist" perk (found + fixed together
+# while building the tier-perk enforcement half of Loyalty 3.0 — the whole
+# staff-facing waitlist had zero businessId scoping or auth at all before
+# this). See TENANT_ISOLATION_REMAINING_WORK.md for the full writeup.
 @router.get("/waitlist", response_model=List[WaitlistEntry])
-async def get_waitlist(status: Optional[str] = None):
-    query = {}
-    if status:
-        query["status"] = status
-    else:
-        query["status"] = {"$in": ["waiting", "notified"]}
-    entries = await db.waitlist.find(query, {"_id": 0}).sort("position", 1).to_list(1000)
+async def get_waitlist(status: Optional[str] = None, user: dict = Depends(get_user)):
+    scope = tenant_scope_filter(user.get("businessId"))
+    status_filter = {"status": status} if status else {"status": {"$in": ["waiting", "notified"]}}
+    query = {"$and": [scope, status_filter]}
+    entries = await db.waitlist.find(query, {"_id": 0}).sort([("priority", -1), ("position", 1)]).to_list(1000)
     return [WaitlistEntry(**e) for e in entries]
 
 @router.post("/waitlist", response_model=WaitlistEntry)
-async def add_to_waitlist(entry: WaitlistEntryCreate):
-    last = await db.waitlist.find({"status": "waiting"}).sort("position", -1).to_list(1)
+async def add_to_waitlist(entry: WaitlistEntryCreate, user: dict = Depends(get_user)):
+    business_id = user.get("businessId")
+    scope = tenant_scope_filter(business_id)
+    last = await db.waitlist.find({"$and": [scope, {"status": "waiting"}]}).sort("position", -1).to_list(1)
     next_pos = (last[0]["position"] + 1) if last else 1
-    entry_obj = WaitlistEntry(**entry.dict(), position=next_pos)
+
+    # Silver+ tier perk: a recognised member (matched by phone, within this
+    # business) with "Priority waitlist" among their tier's perks jumps the
+    # queue ahead of non-members — see WaitlistEntry.priority and
+    # _public_waitlist_view below for how the ordering/ahead-count honours it.
+    priority = False
+    phone = (entry.guestPhone or "").strip()
+    if phone:
+        cust = await db.customers.find_one(
+            {"$and": [scope, {"phone": phone}]}, {"_id": 0, "membershipTier": 1})
+        if cust:
+            tier_doc = await db.loyalty_tiers.find_one(
+                {"$and": [scope, {"name": cust.get("membershipTier", "Bronze")}]}, {"_id": 0})
+            if tier_doc and "Priority waitlist" in (tier_doc.get("perks") or []):
+                priority = True
+
+    entry_obj = WaitlistEntry(**entry.dict(), position=next_pos, businessId=business_id, priority=priority)
     doc = entry_obj.dict()
     await db.waitlist.insert_one(doc)
     return entry_obj
 
 @router.put("/waitlist/{entry_id}", response_model=WaitlistEntry)
-async def update_waitlist_entry(entry_id: str, update: WaitlistEntryUpdate):
+async def update_waitlist_entry(entry_id: str, update: WaitlistEntryUpdate, user: dict = Depends(get_user)):
+    guard = await db.waitlist.find_one({"id": entry_id}, {"_id": 0, "businessId": 1})
+    if not guard or not tenant_owns(guard.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Waitlist entry not found")
     update_data = {k: v for k, v in update.dict().items() if v is not None}
     result = await db.waitlist.find_one_and_update(
         {"id": entry_id}, {"$set": update_data}, return_document=True
@@ -702,9 +725,9 @@ async def update_waitlist_entry(entry_id: str, update: WaitlistEntryUpdate):
     return WaitlistEntry(**result)
 
 @router.post("/waitlist/{entry_id}/seat")
-async def seat_waitlist_guest(entry_id: str, table_id: Optional[str] = None):
+async def seat_waitlist_guest(entry_id: str, table_id: Optional[str] = None, user: dict = Depends(get_user)):
     entry = await db.waitlist.find_one({"id": entry_id}, {"_id": 0})
-    if not entry:
+    if not entry or not tenant_owns(entry.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Waitlist entry not found")
     update_data = {"status": "seated", "seatedTime": datetime.utcnow().isoformat()}
     if table_id:
@@ -713,7 +736,10 @@ async def seat_waitlist_guest(entry_id: str, table_id: Optional[str] = None):
     return {"message": "Guest seated from waitlist"}
 
 @router.delete("/waitlist/{entry_id}")
-async def remove_from_waitlist(entry_id: str):
+async def remove_from_waitlist(entry_id: str, user: dict = Depends(get_user)):
+    guard = await db.waitlist.find_one({"id": entry_id}, {"_id": 0, "businessId": 1})
+    if not guard or not tenant_owns(guard.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Entry not found")
     result = await db.waitlist.delete_one({"id": entry_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Entry not found")
@@ -732,12 +758,28 @@ WAITLIST_SSE_MAX_SECONDS = float(os.environ.get('TRACK_SSE_MAX_SECONDS', '600'))
 async def _public_waitlist_view(entry: dict) -> dict:
     """Position is recomputed live against everyone still actually waiting,
     not the value stamped at join time — that value goes stale the moment
-    anyone ahead gets seated, cancels, or leaves."""
+    anyone ahead gets seated, cancels, or leaves.
+
+    Scoped to the entry's own business, and priority-aware: a Silver+ member
+    (entry.priority) is only ever queued behind an earlier-joined fellow
+    priority member, never behind a non-member; a non-member is behind every
+    currently-waiting priority member plus any earlier-joined non-member."""
     ahead = None
     if entry.get("status") == "waiting":
-        ahead = await db.waitlist.count_documents({
-            "status": "waiting", "position": {"$lt": entry.get("position", 0)},
-        })
+        scope = tenant_scope_filter(entry.get("businessId"))
+        if entry.get("priority"):
+            ahead_query = {"$and": [scope, {
+                "status": "waiting", "priority": True, "position": {"$lt": entry.get("position", 0)},
+            }]}
+        else:
+            ahead_query = {"$and": [scope, {
+                "status": "waiting",
+                "$or": [
+                    {"priority": True},
+                    {"priority": {"$ne": True}, "position": {"$lt": entry.get("position", 0)}},
+                ],
+            }]}
+        ahead = await db.waitlist.count_documents(ahead_query)
     return {
         "id": entry["id"], "guestName": entry.get("guestName"),
         "partySize": entry.get("partySize"), "status": entry.get("status"),
