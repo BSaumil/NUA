@@ -286,7 +286,15 @@ async def _action_mark_dish_86(rule, event, params):
     pid = params.get("productId") or _path_value(event["payload"], "productId")
     if not pid:
         return {"error": "no productId"}
-    r = await db.products.update_one({"id": pid}, {"$set": {"is86ed": True, "eightySixReason": params.get("reason", "auto")}})
+    # Was writing is86ed/eightySixReason — fields the product schema (and
+    # every reader of it: POS, kitchen display, online ordering, the
+    # low-stock/oos endpoints) has never had. This silently 86'd nothing
+    # anywhere visible; the real field is eightySixed (models/product.py).
+    r = await db.products.update_one(
+        {"id": pid},
+        {"$set": {"eightySixed": True, "eightySixedAt": datetime.now(timezone.utc).isoformat(),
+                   "eightySixedBy": "rules_engine", "eightySixedReason": params.get("reason", "auto")}},
+    )
     return {"productId": pid, "matched": r.matched_count}
 
 

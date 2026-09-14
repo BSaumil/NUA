@@ -26,14 +26,51 @@ from datetime import datetime, timezone
 from dataclasses import dataclass
 from database import db
 from services import audit_service, approval_service
+from pymongo import ReturnDocument
+import asyncio
 import uuid
 import logging
 
 logger = logging.getLogger(__name__)
 
+HIGH_RISK_TIERS = {"high", "critical"}  # never allowed to auto-execute, regardless of config
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Global kill switch — halts every mutating/auto tool execution regardless
+# of entry point (chat agent, planner, direct API, approval execution).
+# Stored in db.settings (same singleton-doc pattern as trust settings)
+# rather than per-tool config, since it's meant to be one lever, not 23.
+# ═════════════════════════════════════════════════════════════════════════
+async def get_kill_switch() -> dict:
+    s = await db.settings.find_one({"key": "ash_kill_switch"}, {"_id": 0})
+    value = (s or {}).get("value") or {}
+    return {
+        "enabled": bool(value.get("enabled")),
+        "reason": value.get("reason"),
+        "setBy": value.get("setBy"),
+        "setAt": value.get("setAt"),
+    }
+
+
+async def set_kill_switch(enabled: bool, actor: str, reason: Optional[str] = None) -> dict:
+    """Owner-only at the route layer (see routes/nua.py) — this function
+    itself doesn't re-check role, callers must gate it. Every toggle is
+    audited so 'who paused Ash and when' is always answerable."""
+    value = {"enabled": bool(enabled), "reason": reason, "setBy": actor, "setAt": _now()}
+    await db.settings.update_one(
+        {"key": "ash_kill_switch"}, {"$set": {"key": "ash_kill_switch", "value": value}}, upsert=True
+    )
+    await audit_service.log_event(
+        entity_type="ash_kill_switch", entity_id="global", action="updated",
+        after=value, memo=f"Ash global kill switch {'ENGAGED' if enabled else 'released'} by {actor}",
+        severity="high" if enabled else "notice", tags=["ash_agent", "kill_switch"],
+    )
+    return value
 
 
 @dataclass
@@ -142,6 +179,15 @@ async def _tx_create_purchase_order(a):
     return {"purchaseOrderId": po["id"], "quantity": qty, "estimatedCost": est}
 
 
+async def _rollback_purchase_order(outcome):
+    """Soft-cancel, not delete — a PO already sent to a supplier shouldn't
+    vanish from the record just because it was undone after the fact."""
+    await db.purchase_orders.update_one(
+        {"id": outcome["purchaseOrderId"]},
+        {"$set": {"status": "cancelled", "cancelledBy": "ash-agent-rollback", "cancelledAt": _now()}},
+    )
+
+
 async def _tx_add_customer_note(a):
     """customers.notes is a plain free-text string everywhere else in this
     codebase (seed data, the CRM UI, guest_intel.py), not an array — append
@@ -160,19 +206,48 @@ async def _tx_add_customer_note(a):
 async def _tx_add_wallet_credit(a):
     cid = a["customerId"]; amount = float(a["amount"])
     r = await db.customers.update_one({"id": cid}, {"$inc": {"storeCredit": amount}})
+    ledger_id = None
     if r.matched_count:
+        ledger_id = str(uuid.uuid4())
         await db.wallet_ledger.insert_one({
-            "id": str(uuid.uuid4()), "customerId": cid, "type": "credit_grant",
+            "id": ledger_id, "customerId": cid, "type": "credit_grant",
             "amount": amount, "sourceType": "ash_agent", "createdAt": _now(),
             "description": a.get("reason", "Ash credit"),
         })
-    return {"customerId": cid, "credit": amount, "matched": r.matched_count}
+    return {"customerId": cid, "credit": amount, "matched": r.matched_count, "ledgerId": ledger_id}
+
+
+async def _rollback_wallet_credit(outcome):
+    """Reverses the $inc with an equal-and-opposite one, and records a
+    compensating ledger entry rather than deleting the original — deleting
+    would leave storeCredit and wallet_ledger's own running total
+    disagreeing with each other."""
+    if not outcome.get("matched"):
+        return
+    cid = outcome["customerId"]; amount = float(outcome["credit"])
+    await db.customers.update_one({"id": cid}, {"$inc": {"storeCredit": -amount}})
+    await db.wallet_ledger.insert_one({
+        "id": str(uuid.uuid4()), "customerId": cid, "type": "credit_reversal",
+        "amount": -amount, "sourceType": "ash_agent_rollback", "createdAt": _now(),
+        "description": f"Rollback of ledger entry {outcome.get('ledgerId')}",
+        "reversalOf": outcome.get("ledgerId"),
+    })
 
 
 async def _tx_upgrade_customer_tier(a):
     cid = a["customerId"]; tier = a["tier"]
+    before = await db.customers.find_one({"id": cid}, {"_id": 0, "membershipTier": 1})
+    if not before:
+        return {"error": "customer not found"}
     r = await db.customers.update_one({"id": cid}, {"$set": {"membershipTier": tier, "vipUpgradedAt": _now()}})
-    return {"customerId": cid, "newTier": tier, "matched": r.matched_count}
+    return {"customerId": cid, "oldTier": before.get("membershipTier"), "newTier": tier, "matched": r.matched_count}
+
+
+async def _rollback_customer_tier(outcome):
+    if not outcome.get("matched"):
+        return
+    await db.customers.update_one({"id": outcome["customerId"]},
+                                   {"$set": {"membershipTier": outcome.get("oldTier")}})
 
 
 async def _tx_mark_waste(a):
@@ -184,10 +259,44 @@ async def _tx_mark_waste(a):
     return {"wasteId": doc["id"], "productId": pid, "quantity": qty}
 
 
+async def _rollback_waste(outcome):
+    """Restores the deducted stock and marks the waste record reversed —
+    kept, not deleted, so the audit trail still shows the original entry
+    plus the fact it was undone."""
+    await db.products.update_one({"id": outcome["productId"]}, {"$inc": {"stock": outcome["quantity"]}})
+    await db.waste_events.update_one({"id": outcome["wasteId"]},
+                                      {"$set": {"reversed": True, "reversedAt": _now()}})
+
+
 async def _tx_mark_dish_86(a):
-    r = await db.products.update_one({"id": a["productId"]},
-                                     {"$set": {"is86ed": True, "eightySixReason": a.get("reason", "ash-agent")}})
-    return {"productId": a["productId"], "matched": r.matched_count}
+    """Field names must match models/product.py (eightySixed/eightySixedAt/
+    eightySixedBy) — an earlier version of this used is86ed/eightySixReason,
+    fields nothing else in the codebase (POS, kitchen display, online
+    ordering, low-stock/OOS endpoints) has ever read, so it silently 86'd
+    nothing anywhere visible. services/rules_engine.py's identical action
+    had the same bug, fixed alongside this one."""
+    pid = a["productId"]
+    before = await db.products.find_one({"id": pid})
+    if before is None:
+        return {"error": "product not found"}
+    r = await db.products.update_one(
+        {"id": pid},
+        {"$set": {"eightySixed": True, "eightySixedAt": _now(), "eightySixedBy": "ash-agent",
+                   "eightySixedReason": a.get("reason", "ash-agent")}},
+    )
+    return {"productId": pid, "matched": r.matched_count,
+            "wasAlready86ed": bool(before.get("eightySixed")), "oldReason": before.get("eightySixedReason")}
+
+
+async def _rollback_dish_86(outcome):
+    if not outcome.get("matched"):
+        return
+    was_86ed = outcome.get("wasAlready86ed", False)
+    await db.products.update_one(
+        {"id": outcome["productId"]},
+        {"$set": {"eightySixed": was_86ed, "eightySixedReason": outcome.get("oldReason"),
+                   "eightySixedAt": _now() if was_86ed else None}},
+    )
 
 
 async def _tx_cancel_reservation(a):
@@ -249,6 +358,11 @@ async def _tx_create_task(a):
     return {"taskId": doc["id"]}
 
 
+async def _rollback_task(outcome):
+    await db.tasks.update_one({"id": outcome["taskId"]},
+                               {"$set": {"status": "cancelled", "cancelledBy": "ash-agent-rollback"}})
+
+
 async def _tx_check_promo_voucher(a):
     """Read-only: look up a venue promo/voucher code (e.g. one embedded in an
     email campaign) and report whether it's still redeemable. Staff can ask
@@ -282,6 +396,11 @@ async def _tx_create_promotion(a):
            "createdAt": _now(), "productId": a.get("productId")}
     await db.promotions.insert_one(dict(doc))
     return {"promotionId": doc["id"]}
+
+
+async def _rollback_promotion(outcome):
+    await db.promotions.update_one({"id": outcome["promotionId"]},
+                                    {"$set": {"active": False, "deactivatedBy": "ash-agent-rollback"}})
 
 
 async def _tx_run_ash_scan(a):
@@ -432,17 +551,17 @@ _TOOL_DEFS: List[Dict[str, Any]] = [
                                  "supplierId": {"type": "string"}, "unitCost": {"type": "number"},
                                  "estimatedCost": {"type": "number"}},
                  "required": ["productId", "quantity"]},
-     "fn": _tx_create_purchase_order, "impact": "cost"},
+     "fn": _tx_create_purchase_order, "rollback": _rollback_purchase_order, "impact": "cost"},
     {"n": "mark_waste", "l": "Log a waste event & deduct stock", "m": "Inventory", "r": "medium", "p": "approval",
      "params": {"type": "object",
                  "properties": {"productId": {"type": "string"}, "quantity": {"type": "number"},
                                  "reason": {"type": "string"}}, "required": ["productId", "quantity"]},
-     "fn": _tx_mark_waste, "impact": "cost"},
+     "fn": _tx_mark_waste, "rollback": _rollback_waste, "impact": "cost"},
     {"n": "mark_dish_86", "l": "Mark a dish as 86'd", "m": "Inventory", "r": "medium", "p": "approval",
      "params": {"type": "object",
                  "properties": {"productId": {"type": "string"}, "reason": {"type": "string"}},
                  "required": ["productId"]},
-     "fn": _tx_mark_dish_86, "impact": "revenue"},
+     "fn": _tx_mark_dish_86, "rollback": _rollback_dish_86, "impact": "revenue"},
     {"n": "adjust_menu_price", "l": "Change a product price", "m": "Inventory", "r": "high", "p": "approval",
      "params": {"type": "object",
                  "properties": {"productId": {"type": "string"}, "newPrice": {"type": "number"},
@@ -461,7 +580,7 @@ _TOOL_DEFS: List[Dict[str, Any]] = [
                  "properties": {"customerId": {"type": "string"}, "amount": {"type": "number"},
                                  "reason": {"type": "string"}},
                  "required": ["customerId", "amount"]},
-     "fn": _tx_add_wallet_credit, "impact": "cost"},
+     "fn": _tx_add_wallet_credit, "rollback": _rollback_wallet_credit, "impact": "cost"},
     {"n": "issue_voucher", "l": "Issue a voucher to a customer", "m": "Customers", "r": "medium", "p": "approval",
      "params": {"type": "object",
                  "properties": {"customerId": {"type": "string"}, "value": {"type": "number"},
@@ -472,7 +591,7 @@ _TOOL_DEFS: List[Dict[str, Any]] = [
      "params": {"type": "object",
                  "properties": {"customerId": {"type": "string"}, "tier": {"type": "string"}},
                  "required": ["customerId", "tier"]},
-     "fn": _tx_upgrade_customer_tier, "impact": "csat"},
+     "fn": _tx_upgrade_customer_tier, "rollback": _rollback_customer_tier, "impact": "csat"},
 
     # ── Reservations ──
     {"n": "cancel_reservation", "l": "Cancel a reservation", "m": "Reservations", "r": "medium", "p": "approval",
@@ -507,7 +626,7 @@ _TOOL_DEFS: List[Dict[str, Any]] = [
                  "properties": {"name": {"type": "string"}, "discount": {"type": "number"},
                                  "type": {"type": "string"}, "productId": {"type": "string"}},
                  "required": ["name"]},
-     "fn": _tx_create_promotion, "impact": "revenue"},
+     "fn": _tx_create_promotion, "rollback": _rollback_promotion, "impact": "revenue"},
     {"n": "check_promo_voucher", "l": "Check whether a promo/voucher code is still redeemable", "m": "Marketing",
      "r": "low", "p": "auto",
      "params": {"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]},
@@ -519,7 +638,7 @@ _TOOL_DEFS: List[Dict[str, Any]] = [
                  "properties": {"title": {"type": "string"}, "assignee": {"type": "string"},
                                  "priority": {"type": "string"}, "dueAt": {"type": "string"}},
                  "required": ["title"]},
-     "fn": _tx_create_task},
+     "fn": _tx_create_task, "rollback": _rollback_task},
 ]
 
 for d in _TOOL_DEFS:
@@ -535,32 +654,107 @@ for d in _TOOL_DEFS:
 # Permission resolution & execution
 # ═════════════════════════════════════════════════════════════════════════
 async def resolve_permission(tool_name: str) -> str:
-    """Look up owner override, else fall back to tool default."""
+    """Look up owner override, else fall back to tool default.
+
+    A hard floor: high/critical-risk tools can never resolve to "auto", no
+    matter what's stored in db.ash_tool_config. This used to be enforced
+    only by convention (every high-risk tool happened to default to
+    "approval") — a manager could still flip one straight to auto via
+    PUT /tools/{name}/permission with nothing to stop it. The write-side
+    also rejects that now (routes/nua.py's set_tool_permission), but this
+    read-side floor is the one that actually matters: it holds even if a
+    bad value ever ends up in the database by some other path.
+    """
     tool = TOOLS.get(tool_name)
     if not tool:
         return "disabled"
     override = await db.ash_tool_config.find_one({"toolName": tool_name}, {"_id": 0})
-    return (override or {}).get("permission") or tool.default_permission
+    perm = (override or {}).get("permission") or tool.default_permission
+    if perm == "auto" and tool.risk in HIGH_RISK_TIERS:
+        return "approval"
+    return perm
 
 
-async def execute_tool(tool_name: str, args: Dict[str, Any], *, actor: str = "ash-agent") -> Dict[str, Any]:
-    """Run a tool through the permission gate. Always returns a dict."""
+async def execute_tool(tool_name: str, args: Dict[str, Any], *, actor: str = "ash-agent",
+                        idempotency_key: Optional[str] = None) -> Dict[str, Any]:
+    """Run a tool through the permission gate. Always returns a dict.
+
+    idempotency_key, when supplied, dedups repeated calls (a retry, a
+    replayed chat message, two near-simultaneous requests) so a mutating
+    tool never runs twice for what is really the same request. Omitting it
+    preserves the old at-most-once-per-call behavior — callers that don't
+    have a natural key (nothing here forces one) just don't get dedup.
+    """
     tool = TOOLS.get(tool_name)
     if not tool:
+        await audit_service.log_event(
+            entity_type="ash_tool:unknown", entity_id=tool_name, action="blocked",
+            after={"reason": "unknown_tool", "args": args},
+            memo=f"Blocked call to unknown Ash tool '{tool_name}'",
+            severity="warning", tags=["ash_agent", "blocked"],
+        )
         return {"status": "error", "error": f"Unknown tool: {tool_name}"}
+
+    if idempotency_key:
+        prior = await db.ash_tool_idempotency.find_one_and_update(
+            {"toolName": tool_name, "idempotencyKey": idempotency_key},
+            {"$setOnInsert": {"toolName": tool_name, "idempotencyKey": idempotency_key,
+                               "createdAt": _now(), "result": None}},
+            upsert=True, return_document=ReturnDocument.BEFORE,
+        )
+        if prior is not None:
+            # A doc already existed before this call — this is a retry,
+            # replay, or a concurrent duplicate racing the first caller.
+            # Wait briefly for that first call to finish and reuse its
+            # result instead of re-running a mutating action.
+            existing = prior
+            for _ in range(20):  # ~2s total
+                if existing.get("result") is not None:
+                    return existing["result"]
+                await asyncio.sleep(0.1)
+                existing = await db.ash_tool_idempotency.find_one(
+                    {"toolName": tool_name, "idempotencyKey": idempotency_key}, {"_id": 0})
+            return {"status": "duplicate_in_progress", "tool": tool_name,
+                     "reason": "An identical request is already being processed"}
+
+    async def _finish(result: Dict[str, Any]) -> Dict[str, Any]:
+        if idempotency_key:
+            await db.ash_tool_idempotency.update_one(
+                {"toolName": tool_name, "idempotencyKey": idempotency_key},
+                {"$set": {"result": result}},
+            )
+        return result
+
+    kill_switch = await get_kill_switch()
+    if kill_switch["enabled"]:
+        await audit_service.log_event(
+            entity_type=f"ash_tool:{tool.module}", entity_id=tool_name, action="blocked",
+            after={"reason": "kill_switch_engaged", "args": args, "killSwitchReason": kill_switch.get("reason")},
+            memo=f"Blocked '{tool_name}' — Ash is globally paused",
+            severity="warning", tags=["ash_agent", "blocked", "kill_switch"],
+        )
+        return await _finish({"status": "blocked", "reason": f"Ash is globally paused: {kill_switch.get('reason') or 'no reason given'}",
+                 "tool": tool_name, "killSwitch": True})
+
     perm = await resolve_permission(tool_name)
     if perm == "disabled":
-        return {"status": "blocked", "reason": f"Tool '{tool_name}' is disabled by policy",
-                 "tool": tool_name, "permission": perm}
+        await audit_service.log_event(
+            entity_type=f"ash_tool:{tool.module}", entity_id=tool_name, action="blocked",
+            after={"reason": "disabled_by_policy", "args": args},
+            memo=f"Blocked call to disabled tool '{tool_name}'",
+            severity="notice", tags=["ash_agent", "blocked", f"risk_{tool.risk}"],
+        )
+        return await _finish({"status": "blocked", "reason": f"Tool '{tool_name}' is disabled by policy",
+                 "tool": tool_name, "permission": perm})
     if perm == "approval":
         appr = await approval_service.enqueue_approval(
             action_type=tool_name, params=args, requested_by=actor,
             source="ash_agent",
             context={"toolName": tool_name, "label": tool.label, "risk": tool.risk},
         )
-        return {"status": "pending_approval", "approvalId": appr["id"],
+        return await _finish({"status": "pending_approval", "approvalId": appr["id"],
                  "tool": tool_name, "permission": perm, "expectedImpact": tool.expected_impact,
-                 "risk": tool.risk}
+                 "risk": tool.risk})
     # auto
     try:
         outcome = await tool.execute(args)
@@ -576,9 +770,9 @@ async def execute_tool(tool_name: str, args: Dict[str, Any], *, actor: str = "as
         severity="notice",
         tags=["ash_agent", f"risk_{tool.risk}"],
     )
-    return {"status": "executed", "tool": tool_name, "outcome": outcome,
+    return await _finish({"status": "executed", "tool": tool_name, "outcome": outcome,
              "risk": tool.risk, "expectedImpact": tool.expected_impact,
-             "rollbackAvailable": tool.rollback is not None}
+             "rollbackAvailable": tool.rollback is not None})
 
 
 # ═════════════════════════════════════════════════════════════════════════

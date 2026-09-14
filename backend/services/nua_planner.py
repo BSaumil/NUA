@@ -227,7 +227,12 @@ async def _execute_step(plan_id: str, idx: int, *, actor: str) -> Dict[str, Any]
     step = plan["steps"][idx]
     if step["status"] not in ("pending", "approved"):
         return {"error": f"step already {step['status']}"}
-    outcome = await nua_tools.execute_tool(step["tool"], step.get("args") or {}, actor=actor)
+    # plan_id+idx also guards against a race between two near-simultaneous
+    # calls to execute the same step (the status check above only catches
+    # a *second*, later call — not one that reads "pending" before the
+    # first call's own status update has committed).
+    outcome = await nua_tools.execute_tool(step["tool"], step.get("args") or {}, actor=actor,
+                                             idempotency_key=f"plan:{plan_id}:{idx}:{step['tool']}")
     new_status = ("pending_approval" if outcome.get("status") == "pending_approval"
                   else ("blocked" if outcome.get("status") == "blocked"
                         else ("executed" if outcome.get("status") == "executed" else "error")))

@@ -467,8 +467,11 @@ async def tool_catalog(_: dict = Depends(get_user)):
 
 @router.post("/tools/{tool_name}/execute")
 async def execute_tool(tool_name: str, body: dict, user: dict = Depends(require_owner_or_manager)):
-    """Manual tool invocation with permission enforcement."""
-    return await nua_tools.execute_tool(tool_name, body.get("args") or {}, actor=user.get("email"))
+    """Manual tool invocation with permission enforcement. Accepts an
+    optional idempotencyKey so a retried/duplicated request doesn't run a
+    mutating tool twice."""
+    return await nua_tools.execute_tool(tool_name, body.get("args") or {}, actor=user.get("email"),
+                                          idempotency_key=body.get("idempotencyKey"))
 
 
 @router.put("/tools/{tool_name}/permission")
@@ -477,8 +480,12 @@ async def set_tool_permission(tool_name: str, body: dict, _: dict = Depends(requ
     perm = (body.get("permission") or "").lower()
     if perm not in ("auto", "approval", "disabled"):
         raise HTTPException(400, "permission must be auto|approval|disabled")
-    if tool_name not in nua_tools.TOOLS:
+    tool = nua_tools.TOOLS.get(tool_name)
+    if not tool:
         raise HTTPException(404, "Unknown tool")
+    if perm == "auto" and tool.risk in nua_tools.HIGH_RISK_TIERS:
+        raise HTTPException(400, f"'{tool_name}' is risk={tool.risk} — high/critical-risk tools can never be "
+                                  f"set to auto-execute, regardless of who requests it")
     await db.ash_tool_config.update_one(
         {"toolName": tool_name},
         {"$set": {"toolName": tool_name, "permission": perm,
@@ -486,6 +493,21 @@ async def set_tool_permission(tool_name: str, body: dict, _: dict = Depends(requ
         upsert=True,
     )
     return {"toolName": tool_name, "permission": perm}
+
+
+@router.get("/kill-switch")
+async def get_kill_switch(_: dict = Depends(get_user)):
+    """Current state of the global Ash kill switch."""
+    return await nua_tools.get_kill_switch()
+
+
+@router.post("/kill-switch")
+async def set_kill_switch(body: dict, user: dict = Depends(require_owner)):
+    """Owner-only: halt (or resume) every mutating/auto Ash tool execution
+    across every entry point — chat, planner, direct API, and approved
+    queue items — until explicitly released. Every toggle is audited."""
+    enabled = bool(body.get("enabled"))
+    return await nua_tools.set_kill_switch(enabled, actor=user.get("email") or "owner", reason=body.get("reason"))
 
 
 # ═════════════════════════════════════════════════════════════════════════

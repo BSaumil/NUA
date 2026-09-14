@@ -41,10 +41,32 @@ async def _execute_action(params: dict, action_type: str, rule_id: Optional[str]
     so we only redirect when we know the approval actually came from the agent.
     """
     if source == "ash_agent":
-        from services import nua_tools
+        from services import nua_tools, audit_service
         tool = nua_tools.TOOLS.get(action_type)
         if not tool:
             return {"error": f"Unknown agent tool: {action_type}"}
+        # An approval can sit in the queue for a while before someone acts
+        # on it — re-check the kill switch and the tool's current
+        # permission at the moment of execution, not just at the moment it
+        # was queued. Without this, an owner disabling a tool (or engaging
+        # the global kill switch) after an approval was already enqueued
+        # would not actually stop it from running once approved.
+        kill_switch = await nua_tools.get_kill_switch()
+        if kill_switch["enabled"]:
+            await audit_service.log_event(
+                entity_type=f"ash_tool:{tool.module}", entity_id=action_type, action="blocked",
+                after={"reason": "kill_switch_engaged", "args": params}, memo=f"Blocked approved execution of '{action_type}' — Ash is globally paused",
+                severity="warning", tags=["ash_agent", "blocked", "kill_switch"],
+            )
+            return {"error": "Ash is globally paused; this approved action was not executed", "blocked": True}
+        perm = await nua_tools.resolve_permission(action_type)
+        if perm == "disabled":
+            await audit_service.log_event(
+                entity_type=f"ash_tool:{tool.module}", entity_id=action_type, action="blocked",
+                after={"reason": "disabled_by_policy", "args": params}, memo=f"Blocked approved execution of '{action_type}' — tool has since been disabled",
+                severity="notice", tags=["ash_agent", "blocked", f"risk_{tool.risk}"],
+            )
+            return {"error": f"Tool '{action_type}' has since been disabled; this approved action was not executed", "blocked": True}
         return await tool.execute(params)
     if action_type == "marketing.launch_campaign":
         from routes.v25_suite import create_and_send_campaign_from_approval
