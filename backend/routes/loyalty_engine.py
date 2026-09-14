@@ -9,8 +9,9 @@ Loyalty rules (user spec):
 from fastapi import APIRouter, HTTPException, Request, Depends
 from deps import get_user, require_owner, require_owner_or_manager
 from database import db
-from middleware.actor_context import tenant_owns
+from middleware.actor_context import tenant_owns, tenant_scope_filter
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 import uuid
 import os
 import json
@@ -83,12 +84,15 @@ async def update_loyalty_config(data: dict, _: dict = Depends(require_owner)):
 # one). Not dead code to delete on sight; genuinely unused today, kept on
 # purpose.
 @router.post("/loyalty/earn")
-async def earn_points(data: dict, _: dict = Depends(get_user)):
+async def earn_points(data: dict, user: dict = Depends(get_user)):
     customer_id = data.get("customerId")
     items = data.get("items", [])  # [{ category, price, quantity }]
     transaction_id = data.get("transactionId")
     if not customer_id or not items:
         raise HTTPException(status_code=400, detail="customerId + items required")
+    customer = await db.customers.find_one({"id": customer_id}, {"_id": 0, "businessId": 1})
+    if not customer or not tenant_owns(customer.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Customer not found")
     # Idempotency: skip if we already credited this transaction
     if transaction_id:
         existing = await db.loyalty_ledger.find_one({"transactionId": transaction_id, "type": "earn"})
@@ -118,6 +122,7 @@ async def earn_points(data: dict, _: dict = Depends(get_user)):
         "type": "earn",
         "points": earned_int,
         "breakdown": breakdown,
+        "businessId": user.get("businessId"),
         "createdAt": datetime.now(timezone.utc).isoformat(),
     }
     await db.loyalty_ledger.insert_one(entry)
@@ -134,13 +139,15 @@ async def earn_points(data: dict, _: dict = Depends(get_user)):
 # REDEEM (points-and-pay at checkout)
 # =============================================================================
 @router.post("/loyalty/redeem")
-async def redeem_points(data: dict, _: dict = Depends(get_user)):
+async def redeem_points(data: dict, user: dict = Depends(get_user)):
     customer_id = data.get("customerId")
     points = int(data.get("points", 0))
     transaction_id = data.get("transactionId")
     if not customer_id or points <= 0:
         raise HTTPException(status_code=400, detail="customerId + points (>0) required")
-    locked_check = await db.customers.find_one({"id": customer_id}, {"_id": 0, "loyaltyLocked": 1})
+    locked_check = await db.customers.find_one({"id": customer_id}, {"_id": 0, "loyaltyLocked": 1, "businessId": 1})
+    if not locked_check or not tenant_owns(locked_check.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Customer not found")
     if locked_check and locked_check.get("loyaltyLocked"):
         raise HTTPException(status_code=403, detail="Loyalty account locked pending fraud review")
     cfg = await get_config()
@@ -167,6 +174,7 @@ async def redeem_points(data: dict, _: dict = Depends(get_user)):
         "type": "redeem",
         "points": -points,
         "value": value,
+        "businessId": user.get("businessId"),
         "createdAt": datetime.now(timezone.utc).isoformat(),
     }
     await db.loyalty_ledger.insert_one(entry)
@@ -202,7 +210,7 @@ async def get_ledger(customer_id: str, user: dict = Depends(get_user)):
 # REPORTS — outstanding liability + fraud signals
 # =============================================================================
 @router.get("/loyalty/reports/liability")
-async def get_liability_report(_: dict = Depends(require_owner_or_manager)):
+async def get_liability_report(user: dict = Depends(require_owner_or_manager)):
     """Points sitting on customer balances are a real liability — the
     business owes that $ value in future discounts the moment it's earned,
     same accounting posture as gratuity being tracked as a liability rather
@@ -210,7 +218,10 @@ async def get_liability_report(_: dict = Depends(require_owner_or_manager)):
     existed implicitly as a sum nobody had run."""
     cfg = await get_config()
     redeem_rate = float(cfg.get("redeemRate", 0.01))
-    customers = await db.customers.find({"points": {"$gt": 0}}, {"_id": 0, "id": 1, "name": 1, "points": 1}).to_list(20000)
+    scope = tenant_scope_filter(user.get("businessId"))
+    customers = await db.customers.find(
+        {"$and": [scope, {"points": {"$gt": 0}}]}, {"_id": 0, "id": 1, "name": 1, "points": 1}
+    ).to_list(20000)
     total_points = sum(int(c.get("points", 0)) for c in customers)
     top_holders = sorted(customers, key=lambda c: c.get("points", 0), reverse=True)[:20]
     return {
@@ -223,20 +234,115 @@ async def get_liability_report(_: dict = Depends(require_owner_or_manager)):
     }
 
 
+@router.get("/loyalty/reports/roi")
+async def get_loyalty_roi_report(user: dict = Depends(require_owner_or_manager)):
+    """Redemption cost vs incremental spend — the other half of the
+    liability picture above. Liability says what the business currently
+    OWES in unredeemed points; this says what the program has actually
+    PAID OUT so far (real, already-redeemed value) and whether members
+    are worth it.
+
+    Methodology, stated plainly because this is a directional proxy, not
+    a certified ROI figure: NUA has no A/B control group and doesn't
+    reliably capture per-visit spend timestamped against each customer's
+    loyalty join date, so a true before/after cohort study isn't possible
+    from data that exists today. "Incremental spend" here instead means
+    the gap in average totalSpent between customers who have EVER earned
+    or redeemed a loyalty point ("engaged") and those who never have
+    ("never engaged"), both drawn from the same business at the same
+    point in time — a same-business snapshot comparison, not causal
+    attribution. Read the ratio as a signal worth investigating, not a
+    number to put in a board deck unqualified.
+    """
+    business_id = user.get("businessId")
+    scope = tenant_scope_filter(business_id)
+
+    cost_row = None
+    async for row in db.loyalty_ledger.aggregate([
+        {"$match": {"$and": [scope, {"type": "redeem"}]}},
+        {"$group": {
+            "_id": None,
+            "totalValue": {"$sum": "$value"},
+            "totalPointsRedeemed": {"$sum": {"$multiply": ["$points", -1]}},
+            "redemptionCount": {"$sum": 1},
+        }},
+    ]):
+        cost_row = row
+    program_cost = round(float((cost_row or {}).get("totalValue") or 0), 2)
+    points_redeemed_total = int(round((cost_row or {}).get("totalPointsRedeemed") or 0))
+    redemption_count = int((cost_row or {}).get("redemptionCount") or 0)
+
+    engaged_ids = set()
+    async for row in db.loyalty_ledger.aggregate([
+        {"$match": scope},
+        {"$group": {"_id": "$customerId"}},
+    ]):
+        if row["_id"]:
+            engaged_ids.add(row["_id"])
+
+    all_customers = await db.customers.find(
+        scope, {"_id": 0, "id": 1, "totalSpent": 1, "visits": 1, "membershipTier": 1}
+    ).to_list(50000)
+    engaged = [c for c in all_customers if c["id"] in engaged_ids]
+    never_engaged = [c for c in all_customers if c["id"] not in engaged_ids]
+
+    def _avg(rows, field):
+        vals = [float(r.get(field, 0) or 0) for r in rows]
+        return round(sum(vals) / len(vals), 2) if vals else 0.0
+
+    avg_spend_engaged = _avg(engaged, "totalSpent")
+    avg_spend_never_engaged = _avg(never_engaged, "totalSpent")
+    incremental_per_engaged = round(avg_spend_engaged - avg_spend_never_engaged, 2)
+    # Only credit the program with a positive gap — a negative gap is a real,
+    # reportable finding (engaged customers spending less on average), not
+    # something to floor at zero and hide.
+    estimated_incremental_spend = round(incremental_per_engaged * len(engaged), 2) if incremental_per_engaged > 0 else 0.0
+    roi_multiple = round(estimated_incremental_spend / program_cost, 2) if program_cost > 0 else None
+
+    by_tier: dict = {}
+    for c in all_customers:
+        tier = c.get("membershipTier") or "Bronze"
+        by_tier.setdefault(tier, []).append(c)
+    tier_breakdown = [
+        {"tier": tier, "customerCount": len(rows), "avgSpend": _avg(rows, "totalSpent"), "avgVisits": _avg(rows, "visits")}
+        for tier, rows in sorted(by_tier.items())
+    ]
+
+    return {
+        "programCost": program_cost,
+        "pointsRedeemedTotal": points_redeemed_total,
+        "redemptionCount": redemption_count,
+        "engagedCustomers": len(engaged),
+        "neverEngagedCustomers": len(never_engaged),
+        "avgSpendEngaged": avg_spend_engaged,
+        "avgSpendNeverEngaged": avg_spend_never_engaged,
+        "incrementalSpendPerEngagedCustomer": incremental_per_engaged,
+        "estimatedIncrementalSpend": estimated_incremental_spend,
+        "roiMultiple": roi_multiple,
+        "byTier": tier_breakdown,
+        "methodology": (
+            "\"Engaged\" = has ever earned or redeemed a loyalty point. Incremental "
+            "spend = avg totalSpent(engaged) - avg totalSpent(never engaged), a "
+            "same-business snapshot comparison, not a before/after cohort study."
+        ),
+    }
+
+
 @router.get("/loyalty/reports/locked-accounts")
-async def get_locked_accounts(_: dict = Depends(require_owner_or_manager)):
+async def get_locked_accounts(user: dict = Depends(require_owner_or_manager)):
     """Confirming a point-farming flag locks the account, but nothing ever
     listed who's currently locked — the only way to find out was to already
     know the customerId and check their profile. This is the other half of
     that action: see who's locked, so the unlock endpoint has somewhere to
     be driven from."""
+    scope = tenant_scope_filter(user.get("businessId"))
     customers = await db.customers.find(
-        {"loyaltyLocked": True}, {"_id": 0, "id": 1, "name": 1, "email": 1, "points": 1}
+        {"$and": [scope, {"loyaltyLocked": True}]}, {"_id": 0, "id": 1, "name": 1, "email": 1, "points": 1}
     ).to_list(500)
     return {"accounts": customers, "count": len(customers)}
 
 
-async def _compute_fraud_signals() -> list:
+async def _compute_fraud_signals(business_id: Optional[str] = None) -> list:
     """Two concrete, computable signals from data that already exists —
     not a general fraud model, just the two patterns explicitly called out
     in the loyalty engine spec's fraud-prevention section that had nothing
@@ -250,10 +356,11 @@ async def _compute_fraud_signals() -> list:
       staying with whoever it was issued to).
     """
     window_start = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    scope = tenant_scope_filter(business_id)
 
     signals = []
     pipeline = [
-        {"$match": {"type": "earn", "createdAt": {"$gte": window_start}}},
+        {"$match": {"$and": [scope, {"type": "earn", "createdAt": {"$gte": window_start}}]}},
         {"$group": {"_id": "$customerId", "count": {"$sum": 1}, "totalPoints": {"$sum": "$points"}}},
         {"$match": {"count": {"$gte": 5}}},
     ]
@@ -271,7 +378,7 @@ async def _compute_fraud_signals() -> list:
         })
 
     recent_vouchers = await db.vouchers.find(
-        {"redemptions.1": {"$exists": True}}, {"_id": 0, "id": 1, "code": 1, "redemptions": 1}
+        {"$and": [scope, {"redemptions.1": {"$exists": True}}]}, {"_id": 0, "id": 1, "code": 1, "redemptions": 1}
     ).to_list(2000)
     for v in recent_vouchers:
         redemptions = sorted(v.get("redemptions") or [], key=lambda r: r.get("at", ""))
@@ -304,16 +411,18 @@ def _flag_dedup_key(signal: dict) -> dict:
     return {"type": "voucher_sharing", "voucherId": signal["voucherId"]}
 
 
-async def _persist_fraud_flags(signals: list) -> int:
+async def _persist_fraud_flags(signals: list, business_id: Optional[str] = None) -> int:
     created = 0
     for signal in signals:
         key = _flag_dedup_key(signal)
-        existing = await db.loyalty_fraud_flags.find_one({**key, "status": "open"}, {"_id": 0, "id": 1})
+        existing = await db.loyalty_fraud_flags.find_one(
+            {"$and": [tenant_scope_filter(business_id), {**key, "status": "open"}]}, {"_id": 0, "id": 1})
         if existing:
             continue
         await db.loyalty_fraud_flags.insert_one({
             "id": f"FLAG-{str(uuid.uuid4())[:8].upper()}",
             **signal,
+            "businessId": business_id,
             "status": "open",
             "reviewedBy": None, "reviewedAt": None, "reviewReason": None,
             "createdAt": datetime.now(timezone.utc).isoformat(),
@@ -323,11 +432,15 @@ async def _persist_fraud_flags(signals: list) -> int:
 
 
 @router.get("/loyalty/reports/fraud-flags")
-async def get_fraud_flags(status: str = "open", _: dict = Depends(require_owner_or_manager)):
-    signals = await _compute_fraud_signals()
-    await _persist_fraud_flags(signals)
-    query = {} if status == "all" else {"status": status}
-    flags = await db.loyalty_fraud_flags.find(query, {"_id": 0}).sort("createdAt", -1).to_list(500)
+async def get_fraud_flags(status: str = "open", user: dict = Depends(require_owner_or_manager)):
+    business_id = user.get("businessId")
+    signals = await _compute_fraud_signals(business_id)
+    await _persist_fraud_flags(signals, business_id)
+    scope = tenant_scope_filter(business_id)
+    status_filter = {} if status == "all" else {"status": status}
+    flags = await db.loyalty_fraud_flags.find(
+        {"$and": [scope, status_filter]}, {"_id": 0}
+    ).sort("createdAt", -1).to_list(500)
     return {"flags": flags, "checkedAt": datetime.now(timezone.utc).isoformat()}
 
 
@@ -341,7 +454,7 @@ async def resolve_fraud_flag(flag_id: str, data: dict, user: dict = Depends(requ
     if new_status not in ("reviewed_ok", "confirmed_abuse"):
         raise HTTPException(status_code=400, detail="status must be reviewed_ok or confirmed_abuse")
     flag = await db.loyalty_fraud_flags.find_one({"id": flag_id}, {"_id": 0})
-    if not flag:
+    if not flag or not tenant_owns(flag.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Flag not found")
     if flag["status"] != "open":
         raise HTTPException(status_code=400, detail=f"Flag already {flag['status']}")
@@ -381,9 +494,10 @@ async def unlock_loyalty_account(customer_id: str, user: dict = Depends(require_
     """Reverse a loyaltyLocked from a confirmed_abuse flag — owner only,
     since re-enabling redemption after a fraud confirmation is a judgment
     call worth restricting more tightly than reviewing the flag itself."""
-    result = await db.customers.update_one({"id": customer_id}, {"$set": {"loyaltyLocked": False}})
-    if result.matched_count == 0:
+    customer = await db.customers.find_one({"id": customer_id}, {"_id": 0, "businessId": 1})
+    if not customer or not tenant_owns(customer.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Customer not found")
+    await db.customers.update_one({"id": customer_id}, {"$set": {"loyaltyLocked": False}})
     return {"ok": True}
 
 

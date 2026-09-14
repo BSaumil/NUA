@@ -328,6 +328,7 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
                 "type": "redeem",
                 "points": -points_redeemed,
                 "value": points_discount,
+                "businessId": user.get("businessId"),
                 "createdAt": datetime.utcnow().isoformat(),
             })
         except Exception:
@@ -407,7 +408,8 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
     # Update customer stats
     if transaction.customerId:
         from services.sale_recorder import credit_loyalty_points
-        await credit_loyalty_points(transaction.customerId, points_earned, total, txn_dict["id"])
+        await credit_loyalty_points(transaction.customerId, points_earned, total, txn_dict["id"],
+                                     business_id=user.get("businessId"))
         # Free base identity layer — a repeat contact match at POS checkout is
         # an identity touchpoint (skipped automatically for base-only venues).
         try:
@@ -451,6 +453,7 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
                         "id": f"LP-{str(uuid.uuid4())[:8].upper()}",
                         "customerId": part.customerId, "transactionId": txn_dict["id"],
                         "type": "earn", "points": part_points,
+                        "businessId": user.get("businessId"),
                         "createdAt": datetime.utcnow().isoformat(),
                     })
                 except Exception:
@@ -540,6 +543,7 @@ async def _reverse_loyalty_for_refund(original_txn: dict, refund_amount: float) 
             "customerId": customer_id, "transactionId": original_txn["id"],
             "type": "refund_reversal", "points": net,
             "earnClawedBack": actual_clawback, "redeemRestored": redeem_restore,
+            "businessId": original_txn.get("businessId"),
             "createdAt": datetime.utcnow().isoformat(),
         })
         reversed_for.append({"customerId": customer_id, "earnClawedBack": actual_clawback, "redeemRestored": redeem_restore})

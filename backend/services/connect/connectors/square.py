@@ -280,7 +280,7 @@ class SquareConnector(BaseConnector):
         run.bump("created")
 
         if customer_id:
-            await credit_loyalty_points(customer_id, points_earned, total, txn_dict["id"])
+            await credit_loyalty_points(customer_id, points_earned, total, txn_dict["id"], business_id=business_id)
         await record_sale_side_effects(txn_dict, memo=f"Square sale synced (order {order_id})")
 
     # ----------------------------------------------------------- customers
