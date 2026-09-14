@@ -476,6 +476,7 @@ async def update_status(order_id: str, data: dict, user: dict = Depends(get_user
                 guest_name=(order.get("customer") or {}).get("name"),
                 notes=order.get("notes"),
                 actor=user.get("name") or "Online",
+                business_id=user.get("businessId"),
             )
             if ticket:
                 order["kitchenOrderId"] = ticket["id"]

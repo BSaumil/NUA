@@ -227,6 +227,25 @@ async def auto_publish_roster(data: dict, request: Request, user: dict = Depends
 # =============================================================================
 # F1 — AI PHONE AGENT (inbound voice agent)
 # =============================================================================
+def _match_product_by_name(products: list, name: str) -> Optional[dict]:
+    """Best-effort match of a spoken item name against this business's own
+    catalogue — exact (case-insensitive) match first, then a substring
+    match either direction ("latte" matches "Iced Latte" and vice versa).
+    Returns None rather than guessing when nothing reasonable matches."""
+    n = name.strip().lower()
+    if not n:
+        return None
+    for p in products:
+        if (p.get("name") or "").strip().lower() == n:
+            return p
+    for p in products:
+        pn = (p.get("name") or "").strip().lower()
+        if pn and (n in pn or pn in n):
+            return p
+    return None
+
+
+
 @router.get("/phone-agent/calls")
 async def get_calls(user: dict = Depends(require_owner_or_manager)):
     calls = await db.phone_calls.find(tenant_scope_filter(user.get("businessId")), {"_id": 0}).sort("startedAt", -1).to_list(200)
@@ -339,8 +358,50 @@ async def simulate_call(data: dict, user: dict = Depends(get_user)):
             await queue_sms(caller, r["guestName"], f"Booking confirmed: {r['date']} at {r['time']} for {r['partySize']} at NUA.",
                              "phone_agent", business_id=user.get("businessId"))
         elif parsed.get("intent") == "order":
-            items = details.get("items", [])
-            intent_result["actions"].append({"action": "order_drafted", "items": items})
+            # Previously this only appended a logged {"action":
+            # "order_drafted", "items": [...]} entry — no real order was
+            # ever created, regardless of the UI copy implying the phone
+            # agent drafts real orders from live calls. Match each spoken
+            # item name against this business's own real catalogue and,
+            # for whatever matches, actually send it to the kitchen —
+            # same mechanism a kiosk or accepted online order uses
+            # (services/channel_orders.create_ticket), so a phone-in order
+            # shows up on the KDS like any other. Unmatched items are
+            # reported, never silently dropped or guessed at.
+            raw_items = details.get("items", [])
+            business_id = user.get("businessId")
+            catalogue = await db.products.find(
+                {"$and": [tenant_scope_filter(business_id), {"active": {"$ne": False}}]},
+                {"_id": 0, "id": 1, "name": 1, "price": 1},
+            ).to_list(2000)
+            matched, unmatched = [], []
+            for raw in raw_items:
+                name = (raw.get("name") or "").strip()
+                if not name:
+                    continue
+                qty = int(raw.get("qty") or 1)
+                prod = _match_product_by_name(catalogue, name)
+                if prod:
+                    matched.append({
+                        "productId": prod["id"], "productName": prod["name"],
+                        "quantity": qty, "price": prod.get("price", 0), "modifiers": [],
+                    })
+                else:
+                    unmatched.append(name)
+            ticket = None
+            if matched:
+                from services import channel_orders
+                ticket = await channel_orders.create_ticket(
+                    matched, order_type="takeaway", source="phone_agent",
+                    guest_name=details.get("name") or (known_guest or {}).get("name") or caller,
+                    external_id=call["id"], actor="AI Phone Agent",
+                    business_id=business_id,
+                )
+            intent_result["actions"].append({
+                "action": "order_created" if ticket else "order_drafted",
+                "items": matched, "unmatchedItems": unmatched,
+                "kitchenOrderId": (ticket or {}).get("id"),
+            })
         elif parsed.get("intent") == "inquiry":
             intent_result["actions"].append({"action": "inquiry_logged", "question": details.get("question", "")})
         intent_result["details"] = details
