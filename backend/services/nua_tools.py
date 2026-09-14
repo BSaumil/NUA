@@ -25,6 +25,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from database import db
+from middleware.actor_context import tenant_scope_filter, get_actor_context
 from services import audit_service, approval_service
 from pymongo import ReturnDocument
 import asyncio
@@ -655,7 +656,7 @@ for d in _TOOL_DEFS:
 # ═════════════════════════════════════════════════════════════════════════
 # Permission resolution & execution
 # ═════════════════════════════════════════════════════════════════════════
-async def resolve_permission(tool_name: str) -> str:
+async def resolve_permission(tool_name: str, business_id: Optional[str] = None) -> str:
     """Look up owner override, else fall back to tool default.
 
     A hard floor: high/critical-risk tools can never resolve to "auto", no
@@ -666,11 +667,21 @@ async def resolve_permission(tool_name: str) -> str:
     also rejects that now (routes/nua.py's set_tool_permission), but this
     read-side floor is the one that actually matters: it holds even if a
     bad value ever ends up in the database by some other path.
+
+    The override lookup is scoped to the caller's own business (defaulting
+    from the request's actor context, same pattern as
+    notification_service.send()) — without this, one business's tool
+    permission override (e.g. disabling issue_voucher, or promoting a
+    low-risk tool to auto) silently applied to every other business on the
+    deployment too.
     """
     tool = TOOLS.get(tool_name)
     if not tool:
         return "disabled"
-    override = await db.ash_tool_config.find_one({"toolName": tool_name}, {"_id": 0})
+    if business_id is None:
+        business_id = get_actor_context().get("businessId")
+    override = await db.ash_tool_config.find_one(
+        {"toolName": tool_name, **tenant_scope_filter(business_id)}, {"_id": 0})
     perm = (override or {}).get("permission") or tool.default_permission
     if perm == "auto" and tool.risk in HIGH_RISK_TIERS:
         return "approval"

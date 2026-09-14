@@ -23,6 +23,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 from database import db
+from middleware.actor_context import get_actor_context, tenant_owns
 from services import nua_tools, nua_personas, audit_service
 import json
 import logging
@@ -202,6 +203,7 @@ Propose the plan now (JSON only)."""
         "createdBy": actor,
         "createdAt": _now(),
         "updatedAt": _now(),
+        "businessId": get_actor_context().get("businessId"),
     }
     await db.ash_plans.insert_one(dict(plan))
     try:
@@ -220,7 +222,7 @@ Propose the plan now (JSON only)."""
 async def _execute_step(plan_id: str, idx: int, *, actor: str) -> Dict[str, Any]:
     """Run one step through the tool permission gate."""
     plan = await db.ash_plans.find_one({"id": plan_id}, {"_id": 0})
-    if not plan:
+    if not plan or not tenant_owns(plan.get("businessId"), get_actor_context().get("businessId")):
         return {"error": "plan not found"}
     if idx < 0 or idx >= len(plan["steps"]):
         return {"error": "step out of range"}
@@ -261,7 +263,7 @@ async def _execute_step(plan_id: str, idx: int, *, actor: str) -> Dict[str, Any]
 async def approve_plan(plan_id: str, *, actor: str) -> Dict[str, Any]:
     """Walk every pending step. Each may execute directly, enqueue an approval, or be blocked."""
     plan = await db.ash_plans.find_one({"id": plan_id}, {"_id": 0})
-    if not plan:
+    if not plan or not tenant_owns(plan.get("businessId"), get_actor_context().get("businessId")):
         return {"error": "plan not found"}
     if plan["status"] in ("completed", "rejected"):
         return {"error": f"plan already {plan['status']}"}
@@ -287,6 +289,9 @@ async def approve_plan(plan_id: str, *, actor: str) -> Dict[str, Any]:
 
 
 async def reject_plan(plan_id: str, *, actor: str, reason: Optional[str] = None) -> Dict[str, Any]:
+    existing = await db.ash_plans.find_one({"id": plan_id}, {"_id": 0, "businessId": 1})
+    if not existing or not tenant_owns(existing.get("businessId"), get_actor_context().get("businessId")):
+        return {"error": "plan not found"}
     r = await db.ash_plans.update_one(
         {"id": plan_id},
         {"$set": {"status": "rejected", "rejectedBy": actor,
@@ -313,7 +318,7 @@ async def approve_step(plan_id: str, idx: int, *, actor: str) -> Dict[str, Any]:
 
 async def reject_step(plan_id: str, idx: int, *, actor: str, reason: Optional[str] = None) -> Dict[str, Any]:
     plan = await db.ash_plans.find_one({"id": plan_id}, {"_id": 0})
-    if not plan:
+    if not plan or not tenant_owns(plan.get("businessId"), get_actor_context().get("businessId")):
         return {"error": "plan not found"}
     if idx < 0 or idx >= len(plan["steps"]):
         return {"error": "step out of range"}
@@ -349,7 +354,7 @@ async def simulate_plan(plan_id: str, *, actor: str) -> Dict[str, Any]:
     • The LLM writes a projected-outcome narrative.
     """
     plan = await db.ash_plans.find_one({"id": plan_id}, {"_id": 0})
-    if not plan:
+    if not plan or not tenant_owns(plan.get("businessId"), get_actor_context().get("businessId")):
         return {"error": "plan not found"}
     tool_map = {t.name: t for t in nua_tools.TOOLS.values()}
     simulated_steps: List[Dict[str, Any]] = []

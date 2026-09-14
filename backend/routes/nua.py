@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 from database import db
 from deps import get_user, require_owner_or_manager, require_owner, require_permission
+from middleware.actor_context import tenant_scope_filter, tenant_owns
 from services import nua_intelligence
 
 logger = logging.getLogger(__name__)
@@ -21,9 +22,9 @@ async def list_insights(
     severity: Optional[str] = None,
     include_resolved: bool = False,
     limit: int = 200,
-    _: dict = Depends(require_owner_or_manager),
+    user: dict = Depends(require_owner_or_manager),
 ):
-    q = {}
+    q = tenant_scope_filter(user.get("businessId"))
     if category: q["category"] = category
     if severity: q["severity"] = severity
     if not include_resolved:
@@ -33,10 +34,10 @@ async def list_insights(
 
 
 @router.get("/insights/summary")
-async def insights_summary(_: dict = Depends(require_owner_or_manager)):
+async def insights_summary(user: dict = Depends(require_owner_or_manager)):
     """Grouped counts for the dashboard."""
     pipeline = [
-        {"$match": {"resolvedAt": None}},
+        {"$match": {"resolvedAt": None, **tenant_scope_filter(user.get("businessId"))}},
         {"$group": {"_id": {"category": "$category", "severity": "$severity"}, "count": {"$sum": 1}}},
     ]
     rows = await db.ash_insights.aggregate(pipeline).to_list(200)
@@ -52,14 +53,17 @@ async def insights_summary(_: dict = Depends(require_owner_or_manager)):
 
 
 @router.post("/run")
-async def run(include_summary: bool = False, _: dict = Depends(require_owner_or_manager)):
+async def run(include_summary: bool = False, user: dict = Depends(require_owner_or_manager)):
     """Manually trigger a full Ash pass — normally run on a cadence."""
-    return await nua_intelligence.run_all_insights(include_summary=include_summary)
+    return await nua_intelligence.run_all_insights(include_summary=include_summary, business_id=user.get("businessId"))
 
 
 @router.post("/insights/{iid}/dismiss")
-async def dismiss_insight(iid: str, _: dict = Depends(require_owner_or_manager)):
+async def dismiss_insight(iid: str, user: dict = Depends(require_owner_or_manager)):
     from datetime import datetime, timezone
+    existing = await db.ash_insights.find_one({"id": iid}, {"_id": 0, "businessId": 1})
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+        raise HTTPException(404, "Insight not found")
     r = await db.ash_insights.update_one({"id": iid}, {"$set": {"resolvedAt": datetime.now(timezone.utc).isoformat(), "resolvedBy": "manual"}})
     if r.matched_count == 0:
         raise HTTPException(404, "Insight not found")
@@ -127,10 +131,12 @@ async def chat(body: dict, user: dict = Depends(require_permission("ash"))):
     session_id = body.get("sessionId") or f"ash-chat-{_uuid.uuid4()}"
 
     # ── Pull grounding context (small enough to fit in a single prompt) ──
-    recent_audit = await db.audit_events.find({}, {"_id": 0}).sort("ts", -1).limit(30).to_list(30)
-    open_insights = await db.ash_insights.find({"resolvedAt": None}, {"_id": 0}).sort("createdAt", -1).limit(20).to_list(20)
-    pending_approvals = await db.approvals.count_documents({"status": "pending"})
-    kpis_txn = await db.transactions.count_documents({})
+    biz_scope = tenant_scope_filter(user.get("businessId"))
+    recent_audit = await db.audit_events.find(biz_scope, {"_id": 0}).sort("ts", -1).limit(30).to_list(30)
+    open_insights = await db.ash_insights.find(
+        {"resolvedAt": None, **biz_scope}, {"_id": 0}).sort("createdAt", -1).limit(20).to_list(20)
+    pending_approvals = await db.approvals.count_documents({"status": "pending", **biz_scope})
+    kpis_txn = await db.transactions.count_documents(biz_scope)
 
     system_prompt = f"""You are Ash, NUA's autonomous hospitality operating layer.
 
@@ -183,6 +189,7 @@ OPEN INSIGHTS:
         "reply": reply,
         "context": {"auditRows": len(recent_audit), "openInsights": len(open_insights), "pendingApprovals": pending_approvals},
         "ts": datetime.now(timezone.utc).isoformat(),
+        "businessId": user.get("businessId"),
     }
     try:
         await db.ash_chat_log.insert_one(dict(doc))
@@ -192,8 +199,9 @@ OPEN INSIGHTS:
 
 
 @router.get("/chat/history/{session_id}")
-async def chat_history(session_id: str, limit: int = 40, _: dict = Depends(require_permission("ash"))):
-    rows = await db.ash_chat_log.find({"sessionId": session_id}, {"_id": 0}).sort("ts", 1).limit(limit).to_list(limit)
+async def chat_history(session_id: str, limit: int = 40, user: dict = Depends(require_permission("ash"))):
+    q = {"sessionId": session_id, **tenant_scope_filter(user.get("businessId"))}
+    rows = await db.ash_chat_log.find(q, {"_id": 0}).sort("ts", 1).limit(limit).to_list(limit)
     return rows
 
 
@@ -259,17 +267,17 @@ async def generate_plan(body: dict, user: dict = Depends(require_owner_or_manage
 
 
 @router.get("/plans")
-async def list_plans(status: Optional[str] = None, limit: int = 50, _: dict = Depends(get_user)):
-    q: dict = {}
+async def list_plans(status: Optional[str] = None, limit: int = 50, user: dict = Depends(get_user)):
+    q: dict = tenant_scope_filter(user.get("businessId"))
     if status: q["status"] = status
     rows = await db.ash_plans.find(q, {"_id": 0}).sort("createdAt", -1).limit(limit).to_list(limit)
     return rows
 
 
 @router.get("/plans/{plan_id}")
-async def get_plan(plan_id: str, _: dict = Depends(get_user)):
+async def get_plan(plan_id: str, user: dict = Depends(get_user)):
     plan = await db.ash_plans.find_one({"id": plan_id}, {"_id": 0})
-    if not plan:
+    if not plan or not tenant_owns(plan.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "plan not found")
     return plan
 
@@ -317,13 +325,14 @@ async def draft_campaign(body: dict, user: dict = Depends(require_owner_or_manag
     context = body.get("context") or {}
 
     # ── Gather grounding data ──
+    biz_scope = tenant_scope_filter(user.get("businessId"))
     try:
-        churning = await db.customers.count_documents({"visits": {"$gte": 3}})
+        churning = await db.customers.count_documents({"visits": {"$gte": 3}, **biz_scope})
     except Exception:
         churning = 0
     try:
         slow_products = await db.products.find(
-            {"stock": {"$gt": 0}}, {"_id": 0, "name": 1, "stock": 1, "category": 1},
+            {"stock": {"$gt": 0}, **biz_scope}, {"_id": 0, "name": 1, "stock": 1, "category": 1},
         ).sort("stock", -1).limit(5).to_list(5)
     except Exception:
         slow_products = []
@@ -435,6 +444,7 @@ async def agent(body: dict, user: dict = Depends(require_permission("ash"))):
         "toolResults": result.get("toolResults"),
         "trace": result.get("trace"),
         "ts": datetime.now(timezone.utc).isoformat(),
+        "businessId": user.get("businessId"),
     }
     try:
         await db.ash_agent_log.insert_one(dict(doc))
@@ -444,11 +454,12 @@ async def agent(body: dict, user: dict = Depends(require_permission("ash"))):
 
 
 @router.get("/tools")
-async def tool_catalog(_: dict = Depends(get_user)):
+async def tool_catalog(user: dict = Depends(get_user)):
     """Enumerate available agent tools with current effective permissions."""
     from services import nua_trust
     catalog = nua_tools.catalog()
-    overrides = {c["toolName"]: c for c in await db.ash_tool_config.find({}, {"_id": 0}).to_list(200)}
+    overrides = {c["toolName"]: c for c in await db.ash_tool_config.find(
+        tenant_scope_filter(user.get("businessId")), {"_id": 0}).to_list(200)}
     trust_settings = await nua_trust.get_settings()
     for t in catalog:
         cfg = overrides.get(t["name"]) or {}
@@ -475,7 +486,7 @@ async def execute_tool(tool_name: str, body: dict, user: dict = Depends(require_
 
 
 @router.put("/tools/{tool_name}/permission")
-async def set_tool_permission(tool_name: str, body: dict, _: dict = Depends(require_owner_or_manager)):
+async def set_tool_permission(tool_name: str, body: dict, user: dict = Depends(require_owner_or_manager)):
     """Owner sets per-tool permission — 'auto' | 'approval' | 'disabled'."""
     perm = (body.get("permission") or "").lower()
     if perm not in ("auto", "approval", "disabled"):
@@ -486,9 +497,10 @@ async def set_tool_permission(tool_name: str, body: dict, _: dict = Depends(requ
     if perm == "auto" and tool.risk in nua_tools.HIGH_RISK_TIERS:
         raise HTTPException(400, f"'{tool_name}' is risk={tool.risk} — high/critical-risk tools can never be "
                                   f"set to auto-execute, regardless of who requests it")
+    biz = user.get("businessId")
     await db.ash_tool_config.update_one(
-        {"toolName": tool_name},
-        {"$set": {"toolName": tool_name, "permission": perm,
+        {"toolName": tool_name, **tenant_scope_filter(biz)},
+        {"$set": {"toolName": tool_name, "permission": perm, "businessId": biz,
                     "updatedAt": datetime.now(timezone.utc).isoformat()}},
         upsert=True,
     )
@@ -595,34 +607,36 @@ async def flag_execution(audit_id: str, body: dict, user: dict = Depends(require
 
 
 @router.get("/health-score")
-async def get_health_score(_: dict = Depends(require_owner_or_manager)):
+async def get_health_score(user: dict = Depends(require_owner_or_manager)):
     # Owner/manager only — the payload carries gross and net margin.
     # POST /briefing/regenerate below was already gated this way; these read
     # endpoints were simply missed, which let any authenticated account (a
     # cashier or kitchen login) pull the venue's margins straight from the API.
-    return await health_score.compute_health()
+    return await health_score.compute_health(business_id=user.get("businessId"))
 
 
 @router.get("/briefing")
-async def get_briefing(force: bool = False, _: dict = Depends(require_owner_or_manager)):
+async def get_briefing(force: bool = False, user: dict = Depends(require_owner_or_manager)):
     """Return today's briefing — cached in db.ash_briefings, regenerate if force=true.
 
     Owner/manager only: the narrative quotes revenue, forecast and margin.
     """
     today = datetime.now(timezone.utc).date().isoformat()
+    biz = user.get("businessId")
     if not force:
-        existing = await db.ash_briefings.find_one({"date": today}, {"_id": 0})
+        existing = await db.ash_briefings.find_one({"date": today, "businessId": biz}, {"_id": 0})
         if existing:
             return existing
-    return await nua_briefing.generate_briefing()
+    return await nua_briefing.generate_briefing(business_id=biz)
 
 
 @router.post("/briefing/regenerate")
-async def regenerate_briefing(_: dict = Depends(require_owner_or_manager)):
-    return await nua_briefing.generate_briefing()
+async def regenerate_briefing(user: dict = Depends(require_owner_or_manager)):
+    return await nua_briefing.generate_briefing(business_id=user.get("businessId"))
 
 
 @router.get("/agent/trace/{session_id}")
-async def get_agent_trace(session_id: str, limit: int = 50, _: dict = Depends(require_permission("ash"))):
-    rows = await db.ash_agent_traces.find({"sessionId": session_id}, {"_id": 0}).sort("ts", 1).limit(limit).to_list(limit)
+async def get_agent_trace(session_id: str, limit: int = 50, user: dict = Depends(require_permission("ash"))):
+    q = {"sessionId": session_id, **tenant_scope_filter(user.get("businessId"))}
+    rows = await db.ash_agent_traces.find(q, {"_id": 0}).sort("ts", 1).limit(limit).to_list(limit)
     return rows
