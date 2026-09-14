@@ -41,8 +41,24 @@ def _stamp_new(doc: Dict[str, Any]) -> Dict[str, Any]:
     doc.setdefault("updatedAt", doc["createdAt"])
     doc.setdefault("device", ctx.get("device"))
     doc.setdefault("ip", ctx.get("ip"))
-    doc.setdefault("businessId", ctx.get("businessId"))
-    doc.setdefault("locationId", ctx.get("locationId"))
+    # NOT setdefault: every BaseEntity-derived model (Product, etc.) declares
+    # businessId/locationId as real fields defaulting to None, so a caller
+    # that builds a full model instance and passes model.dict() here already
+    # has an explicit "businessId": None key in the dict — setdefault is a
+    # no-op against an EXISTING key, even one whose value is None, so the
+    # actor's real businessId never got applied. Every document created
+    # through a caller that shaped its dict from such a model (confirmed:
+    # routes/products.py's create_product, likely others) was silently
+    # stamped with businessId=None regardless of who created it or which
+    # business they belonged to — universally visible to every tenant via
+    # tenant_scope_filter's "missing/null businessId = visible to everyone"
+    # backward-compat default. A caller that deliberately supplies a real,
+    # truthy businessId (e.g. an explicit cross-tenant/system write) still
+    # wins; only a falsy one is overwritten.
+    if not doc.get("businessId"):
+        doc["businessId"] = ctx.get("businessId")
+    if not doc.get("locationId"):
+        doc["locationId"] = ctx.get("locationId")
     doc.setdefault("version", 1)
     doc.setdefault("deletedAt", None)
     return doc
