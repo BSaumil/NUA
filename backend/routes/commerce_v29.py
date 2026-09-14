@@ -68,7 +68,7 @@ router = APIRouter()
 # Signing helpers (HMAC-SHA256 with JWT_SECRET, base64url with no padding)
 # ═════════════════════════════════════════════════════════════════════════
 def _secret() -> bytes:
-    return (os.environ.get("JWT_SECRET") or "nua-fallback-please-set-jwt-secret").encode()
+    return os.environ["JWT_SECRET"].encode()
 
 def _sign_payload(payload: dict) -> str:
     body = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).rstrip(b"=").decode()

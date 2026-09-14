@@ -193,7 +193,7 @@ async def update_day_rule(weekday: int, body: DayRuleIn, user: dict = Depends(ge
 # ═════════════════════════════════════════════════════════════════════════
 def _sign_qr(payload: dict) -> str:
     """Sign a QR payload with the JWT secret so scans can be verified."""
-    secret = os.environ.get("JWT_SECRET", "dev-secret").encode()
+    secret = os.environ["JWT_SECRET"].encode()
     raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
     sig = hmac.new(secret, raw, hashlib.sha256).hexdigest()[:16]
     b64 = base64.urlsafe_b64encode(raw).decode().rstrip("=")

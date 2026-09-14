@@ -98,7 +98,7 @@ class ActorContextMiddleware(BaseHTTPMiddleware):
             try:
                 import jwt
                 import os
-                secret = os.environ.get("JWT_SECRET") or "nua-fallback-please-set-jwt-secret"
+                secret = os.environ["JWT_SECRET"]
                 data = jwt.decode(token, secret, algorithms=["HS256"], options={"verify_exp": False})
                 email = data.get("email") or data.get("sub")
                 role = data.get("role")

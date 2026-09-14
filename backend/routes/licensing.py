@@ -57,7 +57,7 @@ def _uid(prefix: str) -> str: return f"{prefix}-{uuid.uuid4().hex[:10].upper()}"
 
 def _sign_entitlement(tenant_id: str, device_id: str, state: str, expires_at: datetime) -> str:
     """Sign a short-lived entitlement token. POS devices cache this and revalidate periodically."""
-    secret = os.environ.get("JWT_SECRET", "nua-secret")
+    secret = os.environ["JWT_SECRET"]
     payload = {
         "tenantId": tenant_id, "deviceId": device_id, "state": state,
         "iat": int(_now().timestamp()), "exp": int(expires_at.timestamp()),
@@ -328,9 +328,15 @@ async def request_abn_change(data: dict, user: dict = Depends(require_owner)):
 async def approve_abn_change(req_id: str, request: Request, user: dict = Depends(require_owner)):
     """Per spec: 'do not allow to change ABN, once license is issued'.
     We retain the endpoint so support can override, but it is closed by default."""
-    # Hard-gated: requires SUPPORT_OVERRIDE_KEY env or operator action
+    # Hard-gated: requires SUPPORT_OVERRIDE_KEY to be configured AND matched.
+    # No hardcoded fallback — a default value here would be a documented,
+    # source-visible backdoor around the "ABN cannot change" guarantee.
+    # `not override_key` also covers the case where the env var is unset and
+    # the header is unset too (both None): without that check, None == None
+    # would pass the comparison and grant the override to anyone.
+    override_key = os.environ.get("SUPPORT_OVERRIDE_KEY")
     override = request.headers.get("X-Support-Override")
-    if override != os.environ.get("SUPPORT_OVERRIDE_KEY", "nua-support-2026"):
+    if not override_key or override != override_key:
         raise HTTPException(status_code=403, detail="ABN changes are not permitted once a license is issued. Contact support.")
     req = await db.abn_change_requests.find_one({"id": req_id}, {"_id": 0})
     if not req: raise HTTPException(status_code=404, detail="Request not found")

@@ -19,6 +19,13 @@ import pytest
 os.environ.setdefault("MONGO_URL", "mongodb://localhost:27017")
 os.environ.setdefault("DB_NAME", "inprocess_tests")
 os.environ.setdefault("JWT_SECRET", "test-secret-not-for-production")
+os.environ.setdefault("ADMIN_EMAIL", "owner@nua.com")
+# Matches the OWNER constant below — these used to be hardcoded defaults in
+# routes/auth.py itself; moved here so production code has no built-in
+# fallback password while this suite's fixtures keep working unchanged.
+os.environ.setdefault("ADMIN_PASSWORD", "NuaOwner2026!")
+os.environ.setdefault("DEMO_STAFF_PASSWORD", "Staff2026!")
+os.environ.setdefault("SUPPORT_OVERRIDE_KEY", "test-only-support-override-key")
 
 # Swap the Mongo driver for an in-memory one before anything imports database.py.
 import mongomock_motor                     # noqa: E402
