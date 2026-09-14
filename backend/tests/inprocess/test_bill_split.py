@@ -653,7 +653,7 @@ def test_settling_a_split_frees_the_table_on_the_floor_plan(client, owner_header
 
 # ------------------------------------------------------------- staff dashboard
 
-def test_active_splits_lists_every_open_table_with_claims_and_tabs(client):
+def test_active_splits_lists_every_open_table_with_claims_and_tabs(client, owner_headers):
     _seed_table_order("T-926")
     try:
         split = req(client, "GET", "/api/table/T-926/split").json()
@@ -662,7 +662,8 @@ def test_active_splits_lists_every_open_table_with_claims_and_tabs(client):
         req(client, "POST", f"/api/table/split/{split['id']}/claim",
             headers={"Authorization": f"Bearer {token}"}, json={"lineIds": [line_id]})
 
-        body = req(client, "GET", "/api/table/active-splits").json()
+        # active-splits is a staff-only monitoring feed — requires auth.
+        body = req(client, "GET", "/api/table/active-splits", headers=owner_headers).json()
         row = next(s for s in body["splits"] if s["id"] == split["id"])
         assert row["tableNumber"] == "T-926"
         assert row["totalAmount"] == round(sum(l["unitPrice"] for l in split["lines"]), 2)
@@ -671,3 +672,26 @@ def test_active_splits_lists_every_open_table_with_claims_and_tabs(client):
         assert row["openTabs"] == []
     finally:
         _cleanup_table("T-926")
+
+
+# --------------------------------------------------------- staff-endpoint auth
+# Regression coverage for a real vulnerability: this whole router rides
+# server.py's "/api/table/" public prefix (for the genuinely guest-facing
+# endpoints above), which doesn't distinguish "guest-facing" from
+# "staff-only" — active-splits, staff-status and staff-process-tab were all
+# reachable with no credential at all before Depends(get_user) was added.
+
+def test_active_splits_rejects_an_unauthenticated_caller(anon):
+    r = req(anon, "GET", "/api/table/active-splits")
+    assert r.status_code in (401, 403), r.text
+
+
+def test_staff_status_rejects_an_unauthenticated_caller(anon):
+    r = req(anon, "GET", "/api/table/T-999/split/staff-status")
+    assert r.status_code in (401, 403), r.text
+
+
+def test_staff_process_tab_rejects_an_unauthenticated_caller(anon):
+    r = req(anon, "POST", "/api/table/split/some-split-id/staff-process-tab",
+            json={"tabId": "does-not-matter", "amount": 10})
+    assert r.status_code in (401, 403), r.text

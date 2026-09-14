@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any, Dict
 from fastapi import APIRouter, HTTPException, Request, Depends, WebSocket, WebSocketDisconnect
 from database import db
+from deps import get_user
 from services import bill_split, split_group, split_payment, split_loyalty, split_realtime
 from routes.guest_session import get_guest_session
 import logging
@@ -270,8 +271,17 @@ async def get_guest_tabs(split_id: str, session: dict = Depends(get_guest_sessio
 
 
 @router.post("/table/split/{split_id}/staff-process-tab")
-async def staff_process_tab(split_id: str, data: dict):
-    """Staff collects remaining tab balance (staff-side only)."""
+async def staff_process_tab(split_id: str, data: dict, user: dict = Depends(get_user)):
+    """Staff collects remaining tab balance (staff-side only).
+
+    This whole router is mounted under /api/table/, which server.py's
+    RequireAuthMiddleware treats as a public prefix wholesale (it exists
+    for the genuinely guest-facing QR-ordering/split endpoints elsewhere in
+    this file). That prefix match doesn't distinguish "guest-facing" from
+    "staff-only" — without an explicit Depends here, this endpoint
+    (recording a real payment against a tab) was reachable by anyone on the
+    internet with no credential at all, not merely unscoped to a tenant.
+    """
     tab_id = data.get("tabId")
     amount = data.get("amount", 0)
     method = data.get("method", "cash")
@@ -320,10 +330,19 @@ def _claims_summary(split: dict) -> list:
 
 
 @router.get("/table/active-splits")
-async def get_active_splits():
+async def get_active_splits(user: dict = Depends(get_user)):
     """Staff-wide monitoring feed — one row per table with an open split,
     for SplitBillStaff.jsx's dashboard grid (as opposed to /staff-status
-    below, which is scoped to a single table)."""
+    below, which is scoped to a single table).
+
+    Same /api/table/ public-prefix issue as staff-process-tab below: with
+    no Depends here, this returned every open split across every business
+    on the deployment — guest phone numbers, item details, running
+    totals — to anyone on the internet with no credential. Auth added;
+    still not businessId-scoped (db.bill_splits carries no businessId field
+    at all — see FINANCIAL_OFFLINE_INTEGRITY_REMAINING_WORK.md), so any
+    logged-in staff member of any business can still see every business's
+    open splits. That's a smaller, real gap left for a schema-level fix."""
     splits = await db.bill_splits.find({"status": "open"}, {"_id": 0}).to_list(200)
     out = []
     for split in splits:
@@ -341,8 +360,10 @@ async def get_active_splits():
 
 
 @router.get("/table/{table_number}/split/staff-status")
-async def get_staff_status(table_number: str):
-    """Staff view of split status (all claims, payments, balances)."""
+async def get_staff_status(table_number: str, user: dict = Depends(get_user)):
+    """Staff view of split status (all claims, payments, balances). Same
+    /api/table/ public-prefix issue as the two endpoints above — was
+    reachable with no credential; auth added."""
     split = await db.bill_splits.find_one({"tableNumber": str(table_number), "status": "open"}, {"_id": 0})
     if not split:
         raise HTTPException(status_code=404, detail="No active split for this table")
