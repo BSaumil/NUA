@@ -5,26 +5,29 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 from database import db
 from deps import get_user, require_owner_or_manager
+from middleware.actor_context import tenant_scope_filter, tenant_owns
 from services import approval_service, rules_engine as re_svc
 
 router = APIRouter(prefix="/approvals")
 
 
 @router.get("")
-async def list_approvals(status: Optional[str] = None, limit: int = 100, _: dict = Depends(get_user)):
+async def list_approvals(status: Optional[str] = None, limit: int = 100, user: dict = Depends(get_user)):
     q = {"status": status} if status else {}
+    q.update(tenant_scope_filter(user.get("businessId")))
     return await db.approvals.find(q, {"_id": 0}).sort("createdAt", -1).limit(limit).to_list(limit)
 
 
 @router.get("/pending/count")
-async def pending_count(_: dict = Depends(get_user)):
-    return {"count": await db.approvals.count_documents({"status": "pending"})}
+async def pending_count(user: dict = Depends(get_user)):
+    q = {"status": "pending", **tenant_scope_filter(user.get("businessId"))}
+    return {"count": await db.approvals.count_documents(q)}
 
 
 @router.get("/{aid}")
-async def get_approval(aid: str, _: dict = Depends(get_user)):
+async def get_approval(aid: str, user: dict = Depends(get_user)):
     doc = await db.approvals.find_one({"id": aid}, {"_id": 0})
-    if not doc:
+    if not doc or not tenant_owns(doc.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Approval not found")
     return doc
 
@@ -87,7 +90,7 @@ async def _execute_action(params: dict, action_type: str, rule_id: Optional[str]
 @router.post("/{aid}/approve")
 async def approve(aid: str, user: dict = Depends(require_owner_or_manager)):
     doc = await db.approvals.find_one({"id": aid}, {"_id": 0})
-    if not doc:
+    if not doc or not tenant_owns(doc.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Approval not found")
 
     async def exec_fn(params):
@@ -101,6 +104,9 @@ async def approve(aid: str, user: dict = Depends(require_owner_or_manager)):
 
 @router.post("/{aid}/reject")
 async def reject(aid: str, body: dict, user: dict = Depends(require_owner_or_manager)):
+    doc = await db.approvals.find_one({"id": aid}, {"_id": 0})
+    if not doc or not tenant_owns(doc.get("businessId"), user.get("businessId")):
+        raise HTTPException(404, "Approval not found")
     try:
         return await approval_service.reject(aid, actor=user["email"], reason=body.get("reason"))
     except ValueError as e:

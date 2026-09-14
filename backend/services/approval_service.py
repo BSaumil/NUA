@@ -72,7 +72,17 @@ async def enqueue_approval(*, action_type: str, params: Dict[str, Any],
                            requested_by: str = "system",
                            source: str = "rules_engine",
                            source_ref: Optional[str] = None,
-                           context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                           context: Optional[Dict[str, Any]] = None,
+                           business_id: Optional[str] = None) -> Dict[str, Any]:
+    # None of the current callers (nua.py's marketing-approval route,
+    # nua_tools.py's agent-tool gate, rules_engine.py's rule-action gate)
+    # pass business_id explicitly — every one of them runs inside a request
+    # that has an actor context, so this defaults to that the same way
+    # notification_service.send() does, rather than requiring each call
+    # site to be updated individually.
+    if business_id is None:
+        from middleware.actor_context import get_actor_context
+        business_id = get_actor_context().get("businessId")
     doc = {
         "id": str(uuid.uuid4()),
         "actionType": action_type,
@@ -87,6 +97,7 @@ async def enqueue_approval(*, action_type: str, params: Dict[str, Any],
         "resolvedBy": None,
         "resolution": None,
         "outcome": None,
+        "businessId": business_id,
     }
     await db.approvals.insert_one(dict(doc))
     await audit_service.log_event(
