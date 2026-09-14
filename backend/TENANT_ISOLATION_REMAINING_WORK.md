@@ -51,6 +51,8 @@ Tracks progress against the audit's finding that 38 of 58 backend route files ha
 
 | `routes/social_media.py` | Zero businessId scoping across social account connections, posts, and the AI weekly-plan pipeline. Any business could list, edit, delete, or "publish" any other business's draft/scheduled social media post — a brand/reputation risk, not just a data leak (imagine a competitor's caption going out under this business's connected account, or a malicious actor silently deleting a scheduled campaign). This file's own `db.social_accounts` CRUD (`list_accounts`/`connect_account`/`disconnect_account`) was a *second, separate, still-unscoped path* into the same collection `routes/reservation_features.py` already fixed earlier in this pass — fixing one file's endpoints didn't close the other's. `ai_generate`/`ai_weekly_plan` also read `products`/`promotions`/`transactions` (for top-seller and peak-hour mining) unscoped, leaking another business's catalogue and sales patterns into generated captions and auto-scheduled posts. All scoped/stamped/owned-checked now, including the `BackgroundTasks`-deferred weekly-plan worker (`business_id` passed explicitly rather than relied on via context propagation, since a `BackgroundTasks` callback isn't the same mechanism as `asyncio.create_task`'s context-capture guarantee used elsewhere in this pass). |
 
+| `routes/super.py` | The Superannuation Guarantee (SG) ledger — `db.super_weekly_runs`, real staff gross pay/OTE/contribution amounts, feeding directly into BAS statutory reporting — had zero businessId scoping. `commit_weekly_run` never stamped one; `list_weekly_runs`/`bas_line`/`yearly_summary` read every business's committed runs unscoped, mixing every business's superannuation totals into one BAS "Superannuation payable" figure and one FY summary; `mark_paid` had no ownership check at all, so any owner could flip another business's committed run to `paid`/`reversed`, corrupting their statutory compliance record. All scoped/stamped/owned-checked now. |
+
 Full backend suite re-verified green after every file above (`python -m pytest tests/inprocess -q`).
 
 ## A deeper, separate finding surfaced while fixing payroll/gamification/preshift
@@ -63,9 +65,9 @@ Full backend suite re-verified green after every file above (`python -m pytest t
 
 After finding three unauthenticated "staff" endpoints hiding behind the `/api/table/` public prefix, every route across the codebase whose path matches one of server.py's `PUBLIC_API_PREFIXES` (`/api/public/`, `/api/table/`, `/api/online/orders/track/`, `/api/waitlist/track/`, `/api/v25/kiosk/session/`, the three `/api/voice/...` Twilio callback paths) was enumerated and read. `routes/bill_split.py`'s three were the only genuine mismatch — the rest (`public.py`, `table_ordering.py`, the two `track/` endpoints, the kiosk session endpoint, the Twilio callbacks) are all intentionally public by design and consistent with their own docstrings/naming. Recorded here so this doesn't need re-deriving: it was a real but isolated bug, not a systemic one.
 
-## NOT yet scoped — 5 files remaining, by the audit's original count of 34
+## NOT yet scoped — 4 files remaining, by the audit's original count of 34
 
-`super.py`, `table_ordering.py` (assessed, deliberately deferred — see above), `temperature.py`, `v25_suite.py`, `voice_calls.py`.
+`table_ordering.py` (assessed, deliberately deferred — see above), `temperature.py`, `v25_suite.py`, `voice_calls.py`.
 
 `repo_sync.py` assessed and needs no fix: it syncs the shared deployment's own codebase from GitHub (a genuine platform/infra operation, logged to `db.repo_sync_log`), not tenant data — same category as `changelog.py`.
 
