@@ -289,8 +289,8 @@ async def approve_plan(plan_id: str, *, actor: str) -> Dict[str, Any]:
 
 
 async def reject_plan(plan_id: str, *, actor: str, reason: Optional[str] = None) -> Dict[str, Any]:
-    existing = await db.ash_plans.find_one({"id": plan_id}, {"_id": 0, "businessId": 1})
-    if not existing or not tenant_owns(existing.get("businessId"), get_actor_context().get("businessId")):
+    existing = await db.ash_plans.find_one({"id": plan_id}, {"_id": 0, "id": 1, "businessId": 1})
+    if existing is None or not tenant_owns(existing.get("businessId"), get_actor_context().get("businessId")):
         return {"error": "plan not found"}
     r = await db.ash_plans.update_one(
         {"id": plan_id},

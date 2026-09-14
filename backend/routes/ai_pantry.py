@@ -257,8 +257,8 @@ async def apply_invoice(invoice_id: str, data: dict, user: dict = Depends(requir
         # this business's own catalogue, but re-checking ownership here means
         # a crafted request can't reprice another business's product even if
         # it somehow got a matchedProductId that isn't really this business's.
-        product = await db.products.find_one({"id": pid}, {"_id": 0, "businessId": 1})
-        if not product or not tenant_owns(product.get("businessId"), user.get("businessId")):
+        product = await db.products.find_one({"id": pid}, {"_id": 0, "id": 1, "businessId": 1})
+        if product is None or not tenant_owns(product.get("businessId"), user.get("businessId")):
             continue
         upd["updatedAt"] = datetime.utcnow().isoformat()
         await db.products.update_one({"id": pid}, {"$set": upd})

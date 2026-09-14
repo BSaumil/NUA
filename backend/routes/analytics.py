@@ -266,8 +266,9 @@ async def create_supplier(supplier: SupplierCreate, user: dict = Depends(require
 # canonical GET endpoint lives in phase_ef.py; this strict-model variant is kept
 # here only for legacy POST (creating supplier-linked POs with GST math).
 @router.post("/purchase-orders", response_model=PurchaseOrder)
-async def create_purchase_order(po: PurchaseOrderCreate):
-    supplier = await db.suppliers.find_one({"id": po.supplierId})
+async def create_purchase_order(po: PurchaseOrderCreate, user: dict = Depends(require_owner_or_manager)):
+    supplier = await db.suppliers.find_one(
+        {"id": po.supplierId, **tenant_scope_filter(user.get("businessId"))})
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
     subtotal = sum(item["quantity"] * item["price"] for item in po.items)
@@ -276,7 +277,8 @@ async def create_purchase_order(po: PurchaseOrderCreate):
     po_obj = PurchaseOrder(
         supplierId=po.supplierId, supplierName=supplier["name"],
         expectedDelivery=po.expectedDelivery, items=po.items,
-        subtotal=subtotal, gst=gst, total=total, notes=po.notes
+        subtotal=subtotal, gst=gst, total=total, notes=po.notes,
+        businessId=user.get("businessId"),
     )
     await db.purchase_orders.insert_one(po_obj.dict())
     return po_obj

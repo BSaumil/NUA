@@ -61,8 +61,8 @@ async def run(include_summary: bool = False, user: dict = Depends(require_owner_
 @router.post("/insights/{iid}/dismiss")
 async def dismiss_insight(iid: str, user: dict = Depends(require_owner_or_manager)):
     from datetime import datetime, timezone
-    existing = await db.ash_insights.find_one({"id": iid}, {"_id": 0, "businessId": 1})
-    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+    existing = await db.ash_insights.find_one({"id": iid}, {"_id": 0, "id": 1, "businessId": 1})
+    if existing is None or not tenant_owns(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Insight not found")
     r = await db.ash_insights.update_one({"id": iid}, {"$set": {"resolvedAt": datetime.now(timezone.utc).isoformat(), "resolvedBy": "manual"}})
     if r.matched_count == 0:

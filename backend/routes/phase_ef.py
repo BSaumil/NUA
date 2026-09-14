@@ -7,6 +7,7 @@ F: AI Phone Agent, auto-PO generation, live menu A/B testing, guest 'your usual'
 from fastapi import APIRouter, HTTPException, Request, Response, Depends
 from deps import get_user, require_owner, require_owner_or_manager
 from database import db
+from middleware.actor_context import tenant_scope_filter, tenant_owns
 from datetime import datetime, timezone
 from typing import Optional
 from collections import Counter, defaultdict
@@ -49,10 +50,10 @@ async def update_autonomy(data: dict, _: dict = Depends(require_owner)):
 # =============================================================================
 # E1 — AUTO-VIP TAGGING
 # =============================================================================
-async def auto_tag_vips():
+async def auto_tag_vips(business_id: str = None):
     cfg = await db.agent_autonomy.find_one({"id": "default"}, {"_id": 0}) or DEFAULT_AUTONOMY
     promoted = []
-    customers = await db.customers.find({}, {"_id": 0}).to_list(5000)
+    customers = await db.customers.find(tenant_scope_filter(business_id), {"_id": 0}).to_list(5000)
     for c in customers:
         spend = float(c.get("totalSpent", 0) or 0)
         visits = int(c.get("visits", 0) or 0)
@@ -68,17 +69,18 @@ async def auto_tag_vips():
 # E2 — AUTO-CONFIRM SMS QUEUE
 # =============================================================================
 @router.get("/comms/sms-queue")
-async def get_sms_queue(_: dict = Depends(require_owner_or_manager)):
-    q = await db.sms_queue.find({}, {"_id": 0}).sort("createdAt", -1).to_list(200)
+async def get_sms_queue(user: dict = Depends(require_owner_or_manager)):
+    q = await db.sms_queue.find(tenant_scope_filter(user.get("businessId")), {"_id": 0}).sort("createdAt", -1).to_list(200)
     return q
 
 
-async def queue_sms(to: str, name: str, body: str, kind: str = "manual"):
+async def queue_sms(to: str, name: str, body: str, kind: str = "manual", business_id: str = None):
     msg = {
         "id": f"SMS-{str(uuid.uuid4())[:8].upper()}",
         "to": to, "name": name, "body": body, "kind": kind,
         "status": "queued",  # will be 'sent' after Twilio integration
         "createdAt": datetime.now(timezone.utc).isoformat(),
+        "businessId": business_id,
     }
     await db.sms_queue.insert_one(msg)
     msg.pop("_id", None)
@@ -86,9 +88,9 @@ async def queue_sms(to: str, name: str, body: str, kind: str = "manual"):
 
 
 @router.post("/comms/auto-confirm/{reservation_id}")
-async def auto_confirm_reservation(reservation_id: str, _: dict = Depends(get_user)):
+async def auto_confirm_reservation(reservation_id: str, user: dict = Depends(get_user)):
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res:
+    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     phone = res.get("guestPhone") or res.get("phone") or res.get("customerPhone") or ""
     if not phone:
@@ -96,7 +98,7 @@ async def auto_confirm_reservation(reservation_id: str, _: dict = Depends(get_us
     name = res.get("guestName") or res.get("customerName") or "guest"
     body = (f"Hi {name}, your booking for {res.get('partySize','?')} on "
             f"{res.get('date','?')} at {res.get('time','?')} is confirmed at NUA. Reply C to cancel.")
-    msg = await queue_sms(phone, name, body, "reservation_confirm")
+    msg = await queue_sms(phone, name, body, "reservation_confirm", business_id=user.get("businessId"))
     await db.reservations.update_one({"id": reservation_id}, {"$set": {"confirmationSent": True, "confirmationAt": msg["createdAt"]}})
     return msg
 
@@ -138,8 +140,12 @@ async def voice_extended(data: dict, user: dict = Depends(get_user)):
             # Plain number — if integer < 10 assume dollars, otherwise cents
             amount = n if n < 100 else n / 100
         delta = direction * amount
-        # Find product
-        product = await db.products.find_one({"name": {"$regex": f"^{product_name}", "$options": "i"}}, {"_id": 0})
+        # Find product — scoped to the caller's own business, so a voice
+        # command can never reprice another business's product of the
+        # same name.
+        biz_scope = tenant_scope_filter(user.get("businessId"))
+        product = await db.products.find_one(
+            {"name": {"$regex": f"^{product_name}", "$options": "i"}, **biz_scope}, {"_id": 0})
         if not product:
             return {"intent": "price_change", "error": f"Product '{product_name}' not found"}
         new_price = max(0.01, round(float(product.get("price", 0)) + delta, 2))
@@ -152,6 +158,7 @@ async def voice_extended(data: dict, user: dict = Depends(get_user)):
                 "payload": {"productId": product["id"], "delta": delta, "newPrice": new_price, "by": "voice"},
                 "status": "executed",
                 "createdAt": datetime.now(timezone.utc).isoformat(),
+                "businessId": user.get("businessId"),
             })
             return {"intent": "price_change", "productId": product["id"], "productName": product["name"], "oldPrice": product["price"], "newPrice": new_price}
         return {"intent": "price_change", "error": "Owner/Manager only"}
@@ -160,7 +167,9 @@ async def voice_extended(data: dict, user: dict = Depends(get_user)):
     m = re.search(r"\b86\s+(the\s+)?(.+?)$", text)
     if m:
         product_name = m.group(2).strip().rstrip("s")
-        product = await db.products.find_one({"name": {"$regex": f"^{product_name}", "$options": "i"}}, {"_id": 0})
+        product = await db.products.find_one(
+            {"name": {"$regex": f"^{product_name}", "$options": "i"}, **tenant_scope_filter(user.get("businessId"))},
+            {"_id": 0})
         if product and user["role"] in ("owner", "manager"):
             await db.products.update_one({"id": product["id"]}, {"$set": {"stock": 0, "eightySixed": True, "eightySixedAt": datetime.now(timezone.utc).isoformat()}})
             return {"intent": "eighty_six", "productId": product["id"], "productName": product["name"]}
@@ -172,7 +181,7 @@ async def voice_extended(data: dict, user: dict = Depends(get_user)):
 # E4 — AUTO-PUBLISH ROSTER (within budget cap)
 # =============================================================================
 @router.post("/agent/auto-publish-roster")
-async def auto_publish_roster(data: dict, request: Request, _: dict = Depends(require_owner_or_manager)):
+async def auto_publish_roster(data: dict, request: Request, user: dict = Depends(require_owner_or_manager)):
     cfg = await db.agent_autonomy.find_one({"id": "default"}, {"_id": 0}) or DEFAULT_AUTONOMY
     if not cfg.get("autoPublishRoster", False):
         raise HTTPException(status_code=400, detail="Auto-publish roster disabled in autonomy config")
@@ -182,8 +191,10 @@ async def auto_publish_roster(data: dict, request: Request, _: dict = Depends(re
     from routes.v15_features import auto_roster
     proposal = await auto_roster({"weekStart": week_start}, request)
     shifts = proposal.get("suggestions", []) if isinstance(proposal, dict) else []
-    # Estimate cost
-    staff_pay = {s["id"]: s.get("payRate", 0) for s in await db.auth_users.find({}, {"_id": 0}).to_list(500)}
+    # Estimate cost — scoped to this business's own staff, so budget-cap
+    # math is never contaminated by another business's pay rates.
+    staff_pay = {s["id"]: s.get("payRate", 0) for s in
+                 await db.auth_users.find(tenant_scope_filter(user.get("businessId")), {"_id": 0}).to_list(500)}
     cost = 0.0
     for s in shifts:
         start = list(map(int, s.get("startTime", "0:0").split(":")))
@@ -197,7 +208,8 @@ async def auto_publish_roster(data: dict, request: Request, _: dict = Depends(re
 
     # Commit
     for s in shifts:
-        shift = {**s, "id": f"SHIFT-{str(uuid.uuid4())[:8].upper()}", "createdAt": datetime.now(timezone.utc).isoformat(), "autoPublished": True}
+        shift = {**s, "id": f"SHIFT-{str(uuid.uuid4())[:8].upper()}", "createdAt": datetime.now(timezone.utc).isoformat(),
+                 "autoPublished": True, "businessId": user.get("businessId")}
         shift.pop("aiGenerated", None)
         await db.roster_shifts.insert_one(shift)
     await db.agent_decisions.insert_one({
@@ -207,6 +219,7 @@ async def auto_publish_roster(data: dict, request: Request, _: dict = Depends(re
         "payload": {"shiftCount": len(shifts), "cost": cost},
         "status": "executed",
         "createdAt": datetime.now(timezone.utc).isoformat(),
+        "businessId": user.get("businessId"),
     })
     return {"published": True, "shifts": len(shifts), "estimatedCost": cost}
 
@@ -215,13 +228,13 @@ async def auto_publish_roster(data: dict, request: Request, _: dict = Depends(re
 # F1 — AI PHONE AGENT (inbound voice agent)
 # =============================================================================
 @router.get("/phone-agent/calls")
-async def get_calls(_: dict = Depends(require_owner_or_manager)):
-    calls = await db.phone_calls.find({}, {"_id": 0}).sort("startedAt", -1).to_list(200)
+async def get_calls(user: dict = Depends(require_owner_or_manager)):
+    calls = await db.phone_calls.find(tenant_scope_filter(user.get("businessId")), {"_id": 0}).sort("startedAt", -1).to_list(200)
     return calls
 
 
 @router.post("/phone-agent/simulate")
-async def simulate_call(data: dict, _: dict = Depends(get_user)):
+async def simulate_call(data: dict, user: dict = Depends(get_user)):
     """Simulate an inbound call. Sends transcript to LLM, returns intent + actions taken."""
     caller = data.get("caller", "Unknown")
     transcript = data.get("transcript", "").strip()
@@ -231,6 +244,7 @@ async def simulate_call(data: dict, _: dict = Depends(get_user)):
         "id": f"CALL-{str(uuid.uuid4())[:8].upper()}",
         "caller": caller, "transcript": transcript,
         "startedAt": datetime.now(timezone.utc).isoformat(),
+        "businessId": user.get("businessId"),
     }
 
     # Resolve the caller ID against the CRM before doing anything else, so a
@@ -305,6 +319,7 @@ async def simulate_call(data: dict, _: dict = Depends(get_user)):
                 "status": "confirmed",
                 "source": "ai_phone_agent",
                 "createdAt": datetime.now(timezone.utc).isoformat(),
+                "businessId": user.get("businessId"),
             }
             if known_guest:
                 # Link it to the profile so this booking joins their history.
@@ -321,7 +336,8 @@ async def simulate_call(data: dict, _: dict = Depends(get_user)):
                 "recognisedGuest": bool(known_guest),
             })
             # Auto-confirm SMS
-            await queue_sms(caller, r["guestName"], f"Booking confirmed: {r['date']} at {r['time']} for {r['partySize']} at NUA.", "phone_agent")
+            await queue_sms(caller, r["guestName"], f"Booking confirmed: {r['date']} at {r['time']} for {r['partySize']} at NUA.",
+                             "phone_agent", business_id=user.get("businessId"))
         elif parsed.get("intent") == "order":
             items = details.get("items", [])
             intent_result["actions"].append({"action": "order_drafted", "items": items})
@@ -342,8 +358,8 @@ async def simulate_call(data: dict, _: dict = Depends(get_user)):
 # F2 — AUTO PO GENERATION
 # =============================================================================
 @router.get("/purchase-orders")
-async def get_pos_list(_: dict = Depends(require_owner_or_manager)):
-    pos = await db.purchase_orders.find({}, {"_id": 0}).sort("createdAt", -1).to_list(200)
+async def get_pos_list(user: dict = Depends(require_owner_or_manager)):
+    pos = await db.purchase_orders.find(tenant_scope_filter(user.get("businessId")), {"_id": 0}).sort("createdAt", -1).to_list(200)
     return pos
 
 
@@ -352,7 +368,9 @@ async def generate_po(user: dict = Depends(require_owner_or_manager)):
     """Auto-generate purchase orders from low-stock products grouped by supplier."""
     cfg = await db.agent_autonomy.find_one({"id": "default"}, {"_id": 0}) or DEFAULT_AUTONOMY
     threshold = int(cfg.get("autoReorderThreshold", 5))
-    low = await db.products.find({"stock": {"$lte": threshold}, "active": {"$ne": False}}, {"_id": 0}).to_list(500)
+    low = await db.products.find(
+        {"stock": {"$lte": threshold}, "active": {"$ne": False}, **tenant_scope_filter(user.get("businessId"))},
+        {"_id": 0}).to_list(500)
 
     # Group by supplier (fallback "Default Supplier")
     by_supplier = defaultdict(list)
@@ -377,6 +395,7 @@ async def generate_po(user: dict = Depends(require_owner_or_manager)):
             "status": "draft",
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "createdBy": user["id"],
+            "businessId": user.get("businessId"),
         }
         await db.purchase_orders.insert_one(po)
         po.pop("_id", None)
@@ -389,6 +408,7 @@ async def generate_po(user: dict = Depends(require_owner_or_manager)):
             "payload": {"supplierCount": len(pos_list), "itemCount": len(low)},
             "status": "executed",
             "createdAt": datetime.now(timezone.utc).isoformat(),
+            "businessId": user.get("businessId"),
         })
     return {"created": len(pos_list), "purchaseOrders": pos_list}
 
@@ -399,14 +419,15 @@ async def _resolve_supplier_email(po: dict) -> Optional[dict]:
     real supplierId, phase_ef's own auto-generate only ever had a raw
     supplier NAME string. Try the id first, fall back to a name match, so
     "send" works for a PO regardless of which flow created it."""
+    biz_scope = tenant_scope_filter(po.get("businessId"))
     supplier_id = po.get("supplierId")
     if supplier_id:
-        supplier = await db.suppliers.find_one({"id": supplier_id}, {"_id": 0})
+        supplier = await db.suppliers.find_one({"id": supplier_id, **biz_scope}, {"_id": 0})
         if supplier:
             return supplier
     supplier_name = po.get("supplier") or po.get("supplierName")
     if supplier_name:
-        return await db.suppliers.find_one({"name": supplier_name}, {"_id": 0})
+        return await db.suppliers.find_one({"name": supplier_name, **biz_scope}, {"_id": 0})
     return None
 
 
@@ -423,9 +444,12 @@ def _po_email_body(po: dict) -> str:
 
 
 @router.post("/purchase-orders/{po_id}/{action}")
-async def update_po(po_id: str, action: str, _: dict = Depends(require_owner_or_manager)):
+async def update_po(po_id: str, action: str, user: dict = Depends(require_owner_or_manager)):
     if action not in ("approve", "send", "receive", "cancel"):
         raise HTTPException(status_code=400, detail="Invalid action")
+    guard = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0, "id": 1, "businessId": 1})
+    if guard is None or not tenant_owns(guard.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="PO not found")
     status_map = {"approve": "approved", "send": "sent", "receive": "received", "cancel": "cancelled"}
     update = {"status": status_map[action], f"{action}dAt": datetime.now(timezone.utc).isoformat()}
 
@@ -471,7 +495,7 @@ async def edit_po(po_id: str, data: dict, user: dict = Depends(require_owner)):
     has already acted on the original numbers, so editing in place would
     silently disagree with what actually happened."""
     po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
-    if not po:
+    if not po or not tenant_owns(po.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="PO not found")
     if po["status"] not in ("draft", "approved"):
         raise HTTPException(status_code=409, detail=f"Can't edit a PO that's already {po['status']}")
@@ -504,7 +528,7 @@ async def edit_po(po_id: str, data: dict, user: dict = Depends(require_owner)):
 
 
 @router.get("/purchase-orders/{po_id}/pdf")
-async def po_pdf(po_id: str, _: dict = Depends(require_owner_or_manager)):
+async def po_pdf(po_id: str, user: dict = Depends(require_owner_or_manager)):
     """Category-grouped order sheet — a supplier rep (or whoever's packing
     the van) works off one category at a time, not a flat alphabetical
     dump, so items are grouped and subtotalled by category with the grand
@@ -514,7 +538,7 @@ async def po_pdf(po_id: str, _: dict = Depends(require_owner_or_manager)):
     quantity/name."""
     from routes.finalize import _pdf_from_lines
     po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
-    if not po:
+    if not po or not tenant_owns(po.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="PO not found")
 
     by_category = defaultdict(list)
@@ -550,13 +574,13 @@ async def po_pdf(po_id: str, _: dict = Depends(require_owner_or_manager)):
 # F3 — LIVE MENU A/B TESTING
 # =============================================================================
 @router.get("/ab-tests")
-async def get_ab_tests(_: dict = Depends(require_owner_or_manager)):
-    tests = await db.ab_tests.find({}, {"_id": 0}).sort("createdAt", -1).to_list(100)
+async def get_ab_tests(user: dict = Depends(require_owner_or_manager)):
+    tests = await db.ab_tests.find(tenant_scope_filter(user.get("businessId")), {"_id": 0}).sort("createdAt", -1).to_list(100)
     return tests
 
 
 @router.post("/ab-tests")
-async def create_ab_test(data: dict, _: dict = Depends(require_owner_or_manager)):
+async def create_ab_test(data: dict, user: dict = Depends(require_owner_or_manager)):
     test = {
         "id": f"AB-{str(uuid.uuid4())[:8].upper()}",
         "productId": data.get("productId"),
@@ -568,6 +592,7 @@ async def create_ab_test(data: dict, _: dict = Depends(require_owner_or_manager)
         "conversions": {"A": 0, "B": 0},
         "revenue": {"A": 0.0, "B": 0.0},
         "createdAt": datetime.now(timezone.utc).isoformat(),
+        "businessId": user.get("businessId"),
     }
     await db.ab_tests.insert_one(test)
     test.pop("_id", None)
@@ -596,9 +621,9 @@ async def record_conversion(test_id: str, data: dict):
 
 
 @router.post("/ab-tests/{test_id}/conclude")
-async def conclude_test(test_id: str, _: dict = Depends(require_owner_or_manager)):
+async def conclude_test(test_id: str, user: dict = Depends(require_owner_or_manager)):
     test = await db.ab_tests.find_one({"id": test_id}, {"_id": 0})
-    if not test:
+    if not test or not tenant_owns(test.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Not found")
     # Winner = higher conversion rate
     ea, eb = max(test["exposures"]["A"], 1), max(test["exposures"]["B"], 1)
@@ -613,9 +638,12 @@ async def conclude_test(test_id: str, _: dict = Depends(require_owner_or_manager
 # F4 — GUEST PREDICTIVE "YOUR USUAL"
 # =============================================================================
 @router.get("/customers/{customer_id}/your-usual")
-async def your_usual(customer_id: str, _: dict = Depends(get_user)):
+async def your_usual(customer_id: str, user: dict = Depends(get_user)):
+    biz_scope = tenant_scope_filter(user.get("businessId"))
     # Find customer's most-frequent items from transactions
-    tx = await db.transactions.find({"customerId": customer_id}, {"_id": 0, "items": 1, "createdAt": 1}).sort("createdAt", -1).limit(20).to_list(20)
+    tx = await db.transactions.find(
+        {"customerId": customer_id, **biz_scope}, {"_id": 0, "items": 1, "createdAt": 1}
+    ).sort("createdAt", -1).limit(20).to_list(20)
     if not tx:
         return {"items": [], "reason": "no purchase history"}
     counter = Counter()
@@ -627,7 +655,7 @@ async def your_usual(customer_id: str, _: dict = Depends(get_user)):
     top_ids = [pid for pid, _ in counter.most_common(3)]
     products = []
     for pid in top_ids:
-        p = await db.products.find_one({"id": pid}, {"_id": 0})
+        p = await db.products.find_one({"id": pid, **biz_scope}, {"_id": 0})
         if p:
             products.append({"id": pid, "name": p.get("name"), "price": p.get("price"), "image": p.get("image"), "category": p.get("category"), "frequency": counter[pid]})
     return {"items": products, "basedOn": len(tx), "reason": f"Most-frequent items from last {len(tx)} orders"}
@@ -637,13 +665,15 @@ async def your_usual(customer_id: str, _: dict = Depends(get_user)):
 # Hook into Ash agent tick — add E+F autonomous rules
 # =============================================================================
 @router.post("/agent/tick-extended")
-async def tick_extended(request: Request, _: dict = Depends(require_owner_or_manager)):
+async def tick_extended(request: Request, user: dict = Depends(require_owner_or_manager)):
     """Runs Phase E + F autonomous decisions in addition to base tick."""
     cfg = await db.agent_autonomy.find_one({"id": "default"}, {"_id": 0}) or DEFAULT_AUTONOMY
+    biz = user.get("businessId")
+    biz_scope = tenant_scope_filter(biz)
     out = {"decisions": []}
 
     # 1. Auto-VIP tagging
-    promoted = await auto_tag_vips()
+    promoted = await auto_tag_vips(biz)
     if promoted:
         d = {
             "id": f"AGT-{str(uuid.uuid4())[:8].upper()}",
@@ -652,16 +682,25 @@ async def tick_extended(request: Request, _: dict = Depends(require_owner_or_man
             "payload": {"promoted": promoted},
             "status": "executed",
             "createdAt": datetime.now(timezone.utc).isoformat(),
+            "businessId": biz,
         }
         await db.agent_decisions.insert_one(d)
         out["decisions"].append({**d})
 
     # 2. Auto-confirm SMS for pending reservations
     if cfg.get("autoConfirmSMS", True):
-        pending = await db.reservations.find({"confirmationSent": {"$ne": True}, "phone": {"$exists": True, "$ne": ""}}, {"_id": 0}).to_list(50)
+        pending = await db.reservations.find(
+            {"confirmationSent": {"$ne": True}, "phone": {"$exists": True, "$ne": ""}, **biz_scope},
+            {"_id": 0}).to_list(50)
         for r in pending:
             try:
-                await auto_confirm_reservation(r["id"], request)
+                # A plain dict standing in for the user object — this runs
+                # as a background tick, not a real HTTP call, so there's no
+                # request to derive one from (the previous code passed the
+                # raw Request object here, which auto_confirm_reservation
+                # never actually used until this pass added a businessId
+                # check to it).
+                await auto_confirm_reservation(r["id"], {"businessId": biz})
             except Exception:
                 pass
         if pending:
@@ -672,16 +711,17 @@ async def tick_extended(request: Request, _: dict = Depends(require_owner_or_man
                 "payload": {"count": len(pending)},
                 "status": "executed",
                 "createdAt": datetime.now(timezone.utc).isoformat(),
+                "businessId": biz,
             }
             await db.agent_decisions.insert_one(d)
             out["decisions"].append({**d})
 
     # 3. Auto-PO generation when many low-stock items
     threshold = int(cfg.get("autoReorderThreshold", 5))
-    low_count = await db.products.count_documents({"stock": {"$lte": threshold}, "active": {"$ne": False}})
+    low_count = await db.products.count_documents({"stock": {"$lte": threshold}, "active": {"$ne": False}, **biz_scope})
     if low_count >= 3:  # auto-generate when 3+ low
         try:
-            r = await generate_po(request)
+            r = await generate_po(user)
             out["decisions"].append({"actionType": "po_generated", "summary": f"Auto-generated {r['created']} POs for {low_count} low-stock items"})
         except Exception:
             pass
