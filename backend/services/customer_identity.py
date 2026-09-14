@@ -137,7 +137,21 @@ async def ensure_loyalty_account(customer_id: str) -> dict:
 
 
 async def ensure_punch_card(customer_id: str, reward_threshold: int = 10) -> dict:
-    """punch-card-loyalty add-on. Same rule: FK to Customer only."""
+    """punch-card-loyalty add-on. Same rule: FK to Customer only.
+
+    KNOWN GAP, found while unifying the guest-facing loyalty view
+    (LoyaltyGuestPortal.jsx) across the loyalty engine/badges/subscriptions
+    systems: nothing anywhere in the codebase ever increments `punches`
+    after this creates the card at 0 — there's no "add a punch" action on
+    a POS sale or any other trigger. The card, the migration path
+    (routes/identity.py's migrate-legacy-crm), and the IdentitySettings.jsx
+    toggle are all real, but the feature can't actually be earned by a
+    guest. Deliberately left OUT of the unified guest passport rather than
+    shown as a permanently-stuck "0 punches" — showing a dead progress
+    bar would be actively misleading. Wiring a real earn trigger is a
+    separate, larger feature decision (how many punches per visit, which
+    categories qualify) not attempted here.
+    """
     existing = await db.punch_cards.find_one({"customer_id": customer_id}, {"_id": 0})
     if existing:
         return existing
