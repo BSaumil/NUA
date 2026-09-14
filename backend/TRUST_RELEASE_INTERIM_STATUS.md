@@ -1,10 +1,10 @@
 # NUA POS Trust Release — Interim Status Report
 
-**Date:** 2026-09-14 (updated — see §6 for the second update)
-**Branch:** `trust-release/p0-security-foundation` (16 commits ahead of `main`, all pushed)
+**Date:** 2026-09-14 (updated — see §6 and §7)
+**Branch:** `trust-release/p0-security-foundation` (19 commits ahead of `main`, all pushed)
 **Verdict: NO-GO — interim checkpoint, not a final assessment.** This document reports genuine, verified progress on Phase 0-1 (P0) foundational security/safety work only. Phases 2 (payment/offline integrity — partially done, see below), 3-5 (Voice POS, Loyalty 3.0, Booking 3.0 — not started), and 6-7 (reliability, documentation) are not complete. Nothing in this report should be read as clearing the Trust Release Exit Gates.
 
-This is being written now, mid-effort, because the remaining scope (26 more backend route files still needing a tenant-isolation pass, plus three entirely new major product features) is large enough that a status checkpoint is worth more than continuing silently. Work continues after this document is committed.
+This is being written now, mid-effort, because the remaining scope (24 more backend route files still needing a tenant-isolation pass, plus three entirely new major product features) is large enough that a status checkpoint is worth more than continuing silently. Work continues after this document is committed.
 
 ---
 
@@ -81,3 +81,18 @@ This raises the running tally to **4 confirmed zero-authentication vulnerabiliti
 - `services/floor_tables.py` and its many callers (kitchen coursing, table pacing, ticket lifecycle) — plausibly lower-risk than the raw-tableNumber collisions fixed elsewhere (floor-plan table ids are 8-hex-char UUID-style strings, not raw display numbers), but not independently verified, and threading `business_id` through this shared service and every call site is real, separate, larger work.
 
 Remaining file count: **26** (was 29). Updated commit list and per-file detail are in `TENANT_ISOLATION_REMAINING_WORK.md`, which remains the source of truth — this section summarizes it rather than duplicating it.
+
+## 7. Update — 3 more fixes: hq.py, channel_menus.py, loyalty.py, and a systemic notification leak
+
+The full in-process suite is now at **521 passing tests** (up from 515). Three more files fixed, plus one cross-cutting service-level fix:
+
+- **`routes/hq.py`** — explicitly a cross-location feature by design (franchise/brand roll-ups), but none of its 4 endpoints ever checked which brand a location belonged to, so revenue rolled up across every business on the deployment, not just sibling locations under the caller's own brand. Fixed with a brand-scope resolver rather than the usual single-business filter, since this feature's whole point is aggregating multiple locations — just only the caller's own group of them.
+- **`routes/channel_menus.py`** — zero scoping across all 4 collections it touches (products, channel_menus, kds_orders, transactions); 2 of 8 endpoints also had no auth dependency at all.
+- **`routes/loyalty.py`** — `update_loyalty_reward` and the whole events CRUD (create/update/book) had **no auth dependency at all** — any valid staff token, any business, could modify another business's reward pricing or create/edit/book any business's events.
+- **`services/notification_service.py`** (not on the original 34-file list — the shared notification bell used by 6 other route files) — the most structurally interesting finding of this update. Role/topic-broadcast notifications (`send(role="owner", ...)` for critical pulse alerts, `send(role="marketing", ...)` for loyalty milestones, `send(role="server", topic="kitchen.ready", ...)` for kitchen pings — 8 call sites across 5 files) carried no `businessId` at all: an owner of Business A saw Business B's critical alerts and kitchen pings, with no way to tell they weren't their own. Fixed at the root — `send()` now defaults `business_id` from the current request's actor context when a caller doesn't pass it explicitly, which fixes all 8 existing call sites automatically rather than requiring 8 separate edits.
+
+**A genuine test-hygiene near-miss, worth recording plainly**: this update's own first-draft test for `hq.py`/`loyalty.py` (`test_two_businesses_get_independent_seeded_loyalty_tiers`) mutated `owner_headers`' real, shared "default"-business Bronze-tier discount to 42% and never reverted it. That field feeds live checkout discount math read by dozens of other tests in this shared-DB suite. The new test passed every time in isolation; it silently broke an unrelated, already-passing test five files later in the full run, deterministically. It was caught only because every fix in this pass is validated against the full 500+ test suite before committing, never the touched file's own tests alone — and it's now fixed by mutating a freshly-created, unshared business instead. Flagging this not to claim credit for catching my own mistake, but because it's a concrete demonstration of why the "always run the full suite" rule in this pass's own methodology matters, and a caution for whoever continues this work: a new cross-tenant test that mutates *shared* fixture state (`owner_headers`, the "default" business) rather than a business it created itself is a trap this codebase's shared-DB test architecture makes easy to fall into.
+
+**Running tally across the whole P0.3 effort this session**: 5 confirmed zero-authentication vulnerabilities (`bill_split.py` ×3, `awards.py` ×6, `reservations.py` floor-plan CRUD, `channel_menus.py` ×2, `loyalty.py` ×4), 2 severe cross-tenant live-data/leak bugs found beyond simple missing filters (`table_states` collision, and the notification role-broadcast leak), and 1 root-cause bug (`_stamp_new`'s businessId stamping) that had silently exposed every product ever created to every business on the deployment. Every one of these nine-plus findings was surfaced by writing a cross-tenant test and watching it fail, not by code review alone.
+
+Remaining file count: **24** (was 26). Next in the recommended order: `crypto_payments.py` and `guest_session.py` (payment/guest-identity data), then the rest per `TENANT_ISOLATION_REMAINING_WORK.md`.
