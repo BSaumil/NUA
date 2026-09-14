@@ -33,7 +33,7 @@ async def get_approval(aid: str, user: dict = Depends(get_user)):
 
 
 async def _execute_action(params: dict, action_type: str, rule_id: Optional[str] = None,
-                           source: Optional[str] = None) -> dict:
+                           source: Optional[str] = None, business_id: Optional[str] = None) -> dict:
     """Look up a rule action (rules engine) or an NUA agent tool and execute it.
 
     Agent-tool approvals (source="ash_agent") are dispatched to nua_tools.TOOLS
@@ -73,7 +73,8 @@ async def _execute_action(params: dict, action_type: str, rule_id: Optional[str]
         return await tool.execute(params)
     if action_type == "marketing.launch_campaign":
         from routes.v25_suite import create_and_send_campaign_from_approval
-        return await create_and_send_campaign_from_approval(params, created_by=source or "ash")
+        return await create_and_send_campaign_from_approval(params, created_by=source or "ash",
+                                                              business_id=business_id)
     action_meta = re_svc.ACTION_LIBRARY.get(action_type)
     if not action_meta:
         return {"error": f"Unknown action {action_type}"}
@@ -94,7 +95,8 @@ async def approve(aid: str, user: dict = Depends(require_owner_or_manager)):
         raise HTTPException(404, "Approval not found")
 
     async def exec_fn(params):
-        return await _execute_action(params, doc["actionType"], doc.get("sourceRef"), doc.get("source"))
+        return await _execute_action(params, doc["actionType"], doc.get("sourceRef"), doc.get("source"),
+                                      business_id=doc.get("businessId"))
 
     try:
         return await approval_service.approve(aid, actor=user["email"], execute_fn=exec_fn)

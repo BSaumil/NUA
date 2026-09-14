@@ -14,6 +14,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 from database import db
+from middleware.actor_context import tenant_scope_filter, get_actor_context
 
 
 def _digits(s: Optional[str]) -> str:
@@ -21,16 +22,29 @@ def _digits(s: Optional[str]) -> str:
 
 
 async def find_matching_customer(*, name: Optional[str] = None, phone: Optional[str] = None,
-                                   email: Optional[str] = None) -> Optional[dict]:
+                                   email: Optional[str] = None,
+                                   business_id: Optional[str] = None) -> Optional[dict]:
     """Best-effort match against db.customers, most-confident signal first.
 
     Phone/email are checked before name because first names collide
     constantly ("John") — matching on those first would misattribute a
     stranger's booking to an existing customer's history.
+
+    Scoped to the caller's own business (default: whichever business the
+    current request's JWT belongs to) so a returning-guest match can never
+    pull in — and leak the profile, allergies, VIP status and history of —
+    another business's customer. When no business signal is available at
+    all (e.g. an unauthenticated guest flow), falls back to matching across
+    every business, same as before this was scoped.
     """
+    if business_id is None:
+        business_id = get_actor_context().get("businessId")
+    scope = tenant_scope_filter(business_id)
+
     if email:
         row = await db.customers.find_one(
-            {"email": {"$regex": f"^{re.escape(email.strip())}$", "$options": "i"}}, {"_id": 0})
+            {"$and": [scope, {"email": {"$regex": f"^{re.escape(email.strip())}$", "$options": "i"}}]},
+            {"_id": 0})
         if row:
             return row
 
@@ -40,14 +54,15 @@ async def find_matching_customer(*, name: Optional[str] = None, phone: Optional[
         # without a country code / leading 0 still matches how it was
         # originally entered into the CRM.
         tail = phone_digits[-8:]
-        candidates = await db.customers.find({}, {"_id": 0}).to_list(5000)
+        candidates = await db.customers.find(scope, {"_id": 0}).to_list(5000)
         for row in candidates:
             if _digits(row.get("phone")).endswith(tail):
                 return row
 
     if name and name.strip():
         row = await db.customers.find_one(
-            {"name": {"$regex": re.escape(name.strip()), "$options": "i"}}, {"_id": 0})
+            {"$and": [scope, {"name": {"$regex": re.escape(name.strip()), "$options": "i"}}]},
+            {"_id": 0})
         if row:
             return row
 
