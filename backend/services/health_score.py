@@ -44,10 +44,9 @@ async def _score_revenue(biz: dict) -> Dict[str, Any]:
 
 
 async def _score_profit(biz: dict) -> Dict[str, Any]:
-    # NOTE: services/accounting_service.py's profit_and_loss() has no
-    # business scoping of its own yet (a separate, larger gap flagged in
-    # TENANT_ISOLATION_REMAINING_WORK.md) — this subscore inherits that
-    # gap until accounting_service.py is fixed directly.
+    # profit_and_loss() now scopes itself via the request's actor context
+    # (services/accounting_service.py), so no business_id needs threading
+    # through here explicitly.
     try:
         from services.accounting_service import profit_and_loss
         d = datetime.now(timezone.utc).date()
@@ -123,7 +122,7 @@ async def _score_inventory(biz: dict) -> Dict[str, Any]:
 
 
 async def _score_cash_flow(biz: dict) -> Dict[str, Any]:
-    # Same inherited accounting_service.py gap as _score_profit above.
+    # Same actor-context self-scoping as _score_profit above.
     try:
         from services.accounting_service import cash_flow, balance_sheet
         d = datetime.now(timezone.utc).date()

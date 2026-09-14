@@ -505,10 +505,15 @@ async def startup():
         await _apply_persisted_wallet_credentials()
     except Exception as exc:
         logger.warning("Wallet credentials preload skipped: %s", exc)
-    # Seed Enterprise Chart of Accounts (idempotent)
+    # Seed Enterprise Chart of Accounts for the default business (idempotent).
+    # Explicit business_id="default": at startup there is no request/actor
+    # context to default from, and an untagged chart of accounts would be
+    # treated as "visible to every business" by tenant_scope_filter's safe
+    # default — defeating the whole point of accounts being scoped per
+    # business. Other businesses seed their own via POST /accounting/seed.
     try:
         from services.accounting_service import seed_chart_of_accounts
-        r = await seed_chart_of_accounts()
+        r = await seed_chart_of_accounts(business_id="default")
         if r.get("seeded"):
             logger.info("Chart of Accounts seeded: %s new accounts", r["seeded"])
     except Exception as exc:
