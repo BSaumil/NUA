@@ -77,6 +77,21 @@ async def _get_license(tenant_id: str) -> Optional[dict]:
     return await db.tenant_licenses.find_one({"tenantId": tenant_id}, {"_id": 0})
 
 
+def _own_tenant_id(user: dict, data: Optional[dict] = None) -> str:
+    """The tenantId for every licensing action is always the caller's own
+    businessId — `user` carries no separate "tenantId" field (it never has;
+    reading it was always None), and a client-supplied tenantId in the
+    request body must never be trusted to pick which tenant's license gets
+    onboarded, read, modified, or billed. A request-body tenantId is
+    accepted only when it agrees with the caller's own business, for
+    backward-compatible clients that still send it."""
+    tenant_id = (user.get("businessId") or "default").strip()
+    requested = ((data or {}).get("tenantId") or "").strip()
+    if requested and requested != tenant_id:
+        raise HTTPException(status_code=403, detail="tenantId must match your own business")
+    return tenant_id
+
+
 def _grace_end(failed_at_iso: str) -> str:
     failed = datetime.fromisoformat(failed_at_iso.replace("Z", "+00:00"))
     return _iso(failed + timedelta(days=GRACE_PERIOD_DAYS))
@@ -104,7 +119,7 @@ async def onboard(data: dict, user: dict = Depends(require_owner)):
     Calls ABR live; refuses to issue without a verified Active ABN.
     """
 
-    tenant_id = (data.get("tenantId") or user.get("tenantId") or "default").strip()
+    tenant_id = _own_tenant_id(user, data)
     abn = (data.get("abn") or "").strip()
     plan = data.get("plan", "standard")
     max_devices = int(data.get("maxDevices", 3))
@@ -241,7 +256,7 @@ def _build_warnings(lic: dict) -> list[str]:
 async def activate_device(data: dict, user: dict = Depends(require_owner_or_manager)):
     """First-time device registration. The POS device generates a stable
     deviceId and submits it with an owner/manager auth header."""
-    tenant_id = data.get("tenantId") or user.get("tenantId") or "default"
+    tenant_id = _own_tenant_id(user, data)
     device_id = data.get("deviceId")
     name = data.get("name", f"Device {device_id[:6] if device_id else '?'}")
     if not device_id:
@@ -264,7 +279,7 @@ async def activate_device(data: dict, user: dict = Depends(require_owner_or_mana
 
 @router.post("/device/revoke")
 async def revoke_device(data: dict, user: dict = Depends(require_owner)):
-    tenant_id = data.get("tenantId") or user.get("tenantId") or "default"
+    tenant_id = _own_tenant_id(user, data)
     device_id = data.get("deviceId")
     res = await db.tenant_licenses.update_one(
         {"tenantId": tenant_id},
@@ -288,7 +303,7 @@ async def request_abn_change(data: dict, user: dict = Depends(require_owner)):
     if not twofa or len(twofa) < 4:
         raise HTTPException(status_code=400, detail="2FA code required for ABN change")
 
-    tenant_id = data.get("tenantId") or user.get("tenantId") or "default"
+    tenant_id = _own_tenant_id(user, data)
     new_abn = (data.get("newAbn") or "").strip()
     reason = data.get("reason", "")
     if not checksum_valid(new_abn):
@@ -464,7 +479,7 @@ async def stripe_webhook(request: Request, stripe_signature: Optional[str] = Hea
 # ============================================================================
 @router.get("/me")
 async def my_license(user: dict = Depends(get_user)):
-    tenant_id = user.get("tenantId") or "default"
+    tenant_id = _own_tenant_id(user)
     lic = await _get_license(tenant_id)
     if not lic:
         return {"hasLicense": False, "tenantId": tenant_id}
@@ -473,7 +488,7 @@ async def my_license(user: dict = Depends(get_user)):
 
 @router.get("/audit")
 async def list_audit(user: dict = Depends(require_owner_or_manager)):
-    tenant_id = user.get("tenantId") or "default"
+    tenant_id = _own_tenant_id(user)
     rows = await db.license_audit.find({"tenantId": tenant_id}, {"_id": 0}).sort("createdAt", -1).to_list(200)
     return rows
 
@@ -481,7 +496,7 @@ async def list_audit(user: dict = Depends(require_owner_or_manager)):
 @router.post("/billing/recovery-link")
 async def billing_recovery_link(data: dict, user: dict = Depends(require_owner)):
     """Generate a Stripe Billing Portal session URL so the owner can update their card."""
-    tenant_id = user.get("tenantId") or "default"
+    tenant_id = _own_tenant_id(user, data)
     lic = await _get_license(tenant_id)
     if not lic or not lic.get("stripeCustomerId"):
         raise HTTPException(status_code=404, detail="No Stripe customer linked")
@@ -496,7 +511,7 @@ async def billing_recovery_link(data: dict, user: dict = Depends(require_owner))
 # Dev-only manual state forcing — useful for QA / demos. Owner-gated.
 @router.post("/dev/force-state")
 async def force_state(data: dict, user: dict = Depends(require_owner)):
-    tenant_id = user.get("tenantId") or "default"
+    tenant_id = _own_tenant_id(user, data)
     state = data.get("state")
     allowed = {STATE_ACTIVE, STATE_PAST_DUE, STATE_GRACE, STATE_SUSPENDED, STATE_CANCELLED, STATE_ABN_REVIEW}
     if state not in allowed:
