@@ -298,6 +298,7 @@ export const reservationsAPI = {
   seat: (id, tableId) => api.post(`/reservations/${id}/seat`, null, { params: { table_id: tableId } }),
   complete: (id) => api.post(`/reservations/${id}/complete`),
   noShow: (id, fee) => api.post(`/reservations/${id}/no-show`, null, { params: { fee } }),
+  requestDeposit: (id, originUrl) => api.post(`/reservations/${id}/request-deposit`, { originUrl }),
   cancel: (id, reason) => api.post(`/reservations/${id}/cancel`, { reason }),
   restore: (id, status) => api.post(`/reservations/${id}/restore`, status ? { status } : {}),
   approve: (id) => api.post(`/reservations/${id}/approve`),

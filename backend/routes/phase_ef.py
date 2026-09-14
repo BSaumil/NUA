@@ -274,7 +274,8 @@ async def simulate_call(data: dict, user: dict = Depends(get_user)):
     known_guest = None
     try:
         from services.guest_intel import lookup as guest_lookup
-        found = await guest_lookup(phone=caller, limit=1, with_intel=True)
+        found = await guest_lookup(phone=caller, limit=1, with_intel=True,
+                                    business_id=user.get("businessId"))
         known_guest = found[0] if found else None
     except Exception:
         known_guest = None

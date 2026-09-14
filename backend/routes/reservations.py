@@ -17,10 +17,18 @@ import os
 router = APIRouter()
 
 # ============ GUEST LOOKUP (booking desk + NUA phone agent) ============
+# This endpoint (staff booking-dialog lookup) and the phone agent both go
+# through services.guest_intel.lookup, but only this HTTP route needs an
+# auth dependency — the phone agent (routes/phase_ef.py's simulate_call)
+# calls the service function directly, never over HTTP, and passes its own
+# business_id. find_customers()/build_guest_intel() previously had zero
+# businessId scoping at all — any authenticated staff member of any
+# business could search and read booking-desk intel (name, phone, email,
+# spend, standing requests) for every other business's customers.
 @router.get("/reservations/guest-lookup")
 async def guest_lookup(q: Optional[str] = None, phone: Optional[str] = None,
                        email: Optional[str] = None, limit: int = 8,
-                       intel: bool = True):
+                       intel: bool = True, user: dict = Depends(get_user)):
     """Resolve a caller/typed guest to CRM records, with the booking-desk
     summary attached (last booking, last visit, what they had, what they
     order most, standing requests).
@@ -33,18 +41,19 @@ async def guest_lookup(q: Optional[str] = None, phone: Optional[str] = None,
     if not any([q, phone, email]):
         return {"matches": []}
     matches = await lookup(query=q or "", phone=phone or "", email=email or "",
-                           limit=max(1, min(limit, 25)), with_intel=intel)
+                           limit=max(1, min(limit, 25)), with_intel=intel,
+                           business_id=user.get("businessId"))
     return {"matches": matches}
 
 
 @router.get("/reservations/guest-intel/{customer_id}")
-async def guest_intel(customer_id: str):
+async def guest_intel(customer_id: str, user: dict = Depends(get_user)):
     """Full booking-desk summary for one known guest."""
     from services.guest_intel import build_guest_intel
     customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
-    if not customer:
+    if not customer or not tenant_owns(customer.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Customer not found")
-    return await build_guest_intel(customer)
+    return await build_guest_intel(customer, business_id=user.get("businessId"))
 
 
 # ============ RESERVATIONS API ============
@@ -68,15 +77,16 @@ async def get_reservations(date: Optional[str] = None, status: Optional[str] = N
 # NOTE: these two GET routes MUST come before /reservations/{reservation_id}
 # — otherwise FastAPI treats "day-counts" / "blackouts" as a reservation id.
 @router.get("/reservations/day-counts")
-async def day_counts(fromDate: str, toDate: str):
+async def day_counts(fromDate: str, toDate: str, user: dict = Depends(get_user)):
     """Return {date: count} for the calendar dots + blackout state per date.
     Range is inclusive; capped at ~120 days to keep the response small."""
     from datetime import date as _date
     d0 = _date.fromisoformat(fromDate); d1 = _date.fromisoformat(toDate)
     if (d1 - d0).days > 120:
         raise HTTPException(status_code=400, detail="Range too wide (max 120 days)")
+    scope = tenant_scope_filter(user.get("businessId"))
     reservations = await db.reservations.find(
-        {"date": {"$gte": fromDate, "$lte": toDate}},
+        {"$and": [scope, {"date": {"$gte": fromDate, "$lte": toDate}}]},
         {"_id": 0, "date": 1, "status": 1, "partySize": 1},
     ).to_list(5000)
     counts: dict = {}
@@ -87,7 +97,7 @@ async def day_counts(fromDate: str, toDate: str):
         counts[d] = counts.get(d, 0) + 1
         covers[d] = covers.get(d, 0) + int(r.get("partySize") or 0)
     blackouts = await db.booking_blackouts.find(
-        {"date": {"$gte": fromDate, "$lte": toDate}},
+        {"$and": [scope, {"date": {"$gte": fromDate, "$lte": toDate}}]},
         {"_id": 0},
     ).to_list(500)
     black_map = {b["date"]: {"reason": b.get("reason"), "blockUntil": b.get("blockUntil")} for b in blackouts}
@@ -95,20 +105,23 @@ async def day_counts(fromDate: str, toDate: str):
 
 
 @router.get("/reservations/blackouts")
-async def list_blackouts(fromDate: Optional[str] = None, toDate: Optional[str] = None):
+async def list_blackouts(fromDate: Optional[str] = None, toDate: Optional[str] = None,
+                         user: dict = Depends(get_user)):
     q: dict = {}
     if fromDate or toDate:
         q["date"] = {}
         if fromDate: q["date"]["$gte"] = fromDate
         if toDate:   q["date"]["$lte"] = toDate
-    docs = await db.booking_blackouts.find(q, {"_id": 0}).sort("date", 1).to_list(1000)
+    docs = await db.booking_blackouts.find(
+        {"$and": [tenant_scope_filter(user.get("businessId")), q]}, {"_id": 0}
+    ).sort("date", 1).to_list(1000)
     return docs
 
 
 @router.get("/reservations/{reservation_id}", response_model=Reservation)
-async def get_reservation(reservation_id: str):
+async def get_reservation(reservation_id: str, user: dict = Depends(get_user)):
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res:
+    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     return Reservation(**res)
 
@@ -131,7 +144,7 @@ async def create_reservation(reservation: ReservationCreate, user: Optional[dict
     except BookingRuleViolation as e:
         raise HTTPException(status_code=409, detail=str(e))
 
-    res_obj = Reservation(**{**reservation.dict(), **enrichment})
+    res_obj = Reservation(**{**reservation.dict(), **enrichment, "businessId": (user or {}).get("businessId")})
     doc = res_obj.dict()
     await db.reservations.insert_one(doc)
     if res_obj.ruleOverrideReason:
@@ -188,9 +201,9 @@ async def create_reservation(reservation: ReservationCreate, user: Optional[dict
     return res_obj
 
 @router.put("/reservations/{reservation_id}", response_model=Reservation)
-async def update_reservation(reservation_id: str, update: ReservationUpdate):
+async def update_reservation(reservation_id: str, update: ReservationUpdate, user: dict = Depends(get_user)):
     existing = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not existing:
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     update_data = {k: v for k, v in update.dict().items() if v is not None}
     update_data["updatedAt"] = datetime.utcnow().isoformat()
@@ -210,9 +223,9 @@ async def update_reservation(reservation_id: str, update: ReservationUpdate):
     return Reservation(**result)
 
 @router.delete("/reservations/{reservation_id}")
-async def delete_reservation(reservation_id: str):
+async def delete_reservation(reservation_id: str, user: dict = Depends(require_owner_or_manager)):
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res:
+    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     if res.get("tableId"):
         found = await floor_tables.get_table_by_id(res["tableId"])
@@ -228,9 +241,9 @@ async def delete_reservation(reservation_id: str):
     return {"message": "Reservation deleted"}
 
 @router.post("/reservations/{reservation_id}/seat")
-async def seat_reservation(reservation_id: str, table_id: Optional[str] = None):
+async def seat_reservation(reservation_id: str, table_id: Optional[str] = None, user: dict = Depends(get_user)):
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res:
+    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     tid = table_id or res.get("tableId")
     update_data = {"status": "seated", "seatedAt": datetime.utcnow().isoformat(), "updatedAt": datetime.utcnow().isoformat()}
@@ -244,9 +257,9 @@ async def seat_reservation(reservation_id: str, table_id: Optional[str] = None):
     return {"message": "Guest seated", "tableId": tid}
 
 @router.post("/reservations/{reservation_id}/complete")
-async def complete_reservation(reservation_id: str):
+async def complete_reservation(reservation_id: str, user: dict = Depends(get_user)):
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res:
+    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     await db.reservations.update_one(
         {"id": reservation_id},
@@ -259,15 +272,99 @@ async def complete_reservation(reservation_id: str):
             await floor_tables.set_table_status(res["tableId"], plan_id, "cleaning", clear_reservation=True)
     return {"message": "Reservation completed"}
 
-@router.post("/reservations/{reservation_id}/no-show")
-async def mark_no_show(reservation_id: str, fee: float = 0):
+
+# ============ DEPOSITS — real Stripe Checkout collection ============
+# Same pattern as routes/online_orders.py's create_online_order_checkout:
+# its own Stripe Checkout session, tagged kind="booking_deposit" on the
+# payment_transactions doc so the shared webhook/poll handlers in
+# routes/integrations.py know to flip THIS reservation's depositPaid, not
+# just the generic payment ledger. Before this, depositPaid was a bare
+# staff-ticked checkbox (ReservationUpdate.depositPaid) with no real money
+# behind it — mark_no_show's fee was pure record-keeping. This is what
+# makes the deposit (and therefore a no-show fee capture — see
+# mark_no_show below) real.
+@router.post("/reservations/{reservation_id}/request-deposit")
+async def request_deposit(reservation_id: str, data: dict, http_request: Request, user: dict = Depends(get_user)):
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res:
+    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
-    await db.reservations.update_one(
-        {"id": reservation_id},
-        {"$set": {"status": "no_show", "noShowFee": fee, "updatedAt": datetime.utcnow().isoformat()}}
+    amount = float(res.get("depositRequired") or 0)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="This booking has no deposit amount set")
+    if res.get("depositPaid"):
+        raise HTTPException(status_code=400, detail="Deposit already paid")
+
+    api_key = os.environ.get("STRIPE_API_KEY")
+    if not api_key:
+        # Not a hard failure — same graceful degradation as online-order
+        # checkout: staff falls back to collecting the deposit by whatever
+        # means they used before this endpoint existed (card reader, cash).
+        return {"configured": False, "url": None}
+
+    from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
+    import uuid
+
+    origin_url = data.get("originUrl", str(http_request.base_url).rstrip("/"))
+    host_url = str(http_request.base_url).rstrip("/")
+    webhook_url = f"{host_url}/api/webhook/stripe"
+    stripe_checkout = StripeCheckout(api_key=api_key, webhook_url=webhook_url)
+
+    success_url = f"{origin_url}/reservations?depositPaid={reservation_id}&session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{origin_url}/reservations"
+
+    checkout_request = CheckoutSessionRequest(
+        amount=amount, currency="aud",
+        success_url=success_url, cancel_url=cancel_url,
+        metadata={"reservationId": reservation_id, "source": "nua_pos", "kind": "booking_deposit"},
     )
+    session = await stripe_checkout.create_checkout_session(checkout_request)
+
+    payment_doc = {
+        "id": f"SPAY-{uuid.uuid4().hex[:8].upper()}",
+        "sessionId": session.session_id,
+        "reservationId": reservation_id,
+        "amount": amount, "currency": "aud",
+        "status": "initiated", "paymentStatus": "pending",
+        "provider": "stripe", "kind": "booking_deposit",
+        "businessId": res.get("businessId"),
+        "createdAt": datetime.utcnow().isoformat(),
+    }
+    await db.payment_transactions.insert_one(payment_doc)
+    await db.reservations.update_one(
+        {"id": reservation_id}, {"$set": {"depositSessionId": session.session_id}}
+    )
+    return {"configured": True, "url": session.url, "sessionId": session.session_id}
+
+
+@router.post("/reservations/{reservation_id}/no-show")
+async def mark_no_show(reservation_id: str, fee: float = 0, user: dict = Depends(get_user)):
+    """Real payment capture, not just record-keeping: if a deposit was
+    actually collected through a genuine Stripe Checkout session (see
+    request_deposit below) rather than staff hand-ticking "deposit paid",
+    it's forfeited here — kept by the business instead of ever being
+    refunded — which IS the no-show fee actually landing.
+
+    Without a real collected deposit there is nothing to capture. NUA has
+    no saved-card/off-session-charge capability (only Stripe's hosted
+    Checkout, a one-time redirect flow — see routes/integrations.py), so a
+    walk-in/phone/online booking that never had a deposit collected can't
+    have a no-show fee actually charged after the fact; `fee` stays
+    record-keeping only for that case, same as it always was. The response
+    says plainly which happened — never silently reports a fee as
+    collected when nothing was actually captured.
+    """
+    res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
+    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Reservation not found")
+
+    update_data = {"status": "no_show", "noShowFee": fee, "updatedAt": datetime.utcnow().isoformat()}
+    captured = bool(res.get("depositPaid") and res.get("depositSessionId") and not res.get("depositForfeited"))
+    forfeited_amount = 0.0
+    if captured:
+        update_data["depositForfeited"] = True
+        forfeited_amount = float(res.get("depositRequired") or 0)
+
+    await db.reservations.update_one({"id": reservation_id}, {"$set": update_data})
     if res.get("customerId"):
         await db.customers.update_one({"id": res["customerId"]}, {"$inc": {"noShowCount": 1}})
     if res.get("tableId"):
@@ -275,7 +372,22 @@ async def mark_no_show(reservation_id: str, fee: float = 0):
         if found:
             _, plan_id = found
             await floor_tables.set_table_status(res["tableId"], plan_id, "available")
-    return {"message": "Marked as no-show"}
+
+    from services import audit_service
+    await audit_service.log_event(
+        entity_type="reservation", entity_id=reservation_id, action="updated",
+        before=res, after={**res, **update_data},
+        memo=(f"Marked no-show by {user.get('email', 'staff')}" + (
+            f" — ${forfeited_amount:.2f} deposit forfeited as the no-show fee" if captured
+            else (f" — ${fee:.2f} fee recorded (no deposit was collected to capture)" if fee else "")
+        )),
+        severity="notice",
+    )
+    return {
+        "message": "Marked as no-show",
+        "depositForfeited": captured,
+        "forfeitedAmount": forfeited_amount,
+    }
 
 
 @router.post("/reservations/{reservation_id}/cancel", response_model=Reservation)
@@ -285,13 +397,22 @@ async def cancel_reservation(reservation_id: str, body: dict = None, user: dict 
     endpoint is for genuinely removing a record, not everyday cancellation.
     """
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res:
+    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     if res.get("status") in ("cancelled", "no_show", "completed"):
         raise HTTPException(status_code=400, detail=f"Booking is already {res.get('status')}")
 
     reason = (body or {}).get("reason")
     update_data = {"status": "cancelled", "cancellationReason": reason, "updatedAt": datetime.utcnow().isoformat()}
+    # A cancellation (as opposed to a no-show) never forfeits a collected
+    # deposit — refund it for real via the same Stripe session the guest
+    # actually paid through. Best-effort: a failed refund never blocks the
+    # cancellation itself, but is recorded so it doesn't silently vanish.
+    if res.get("depositPaid") and res.get("depositSessionId") and not res.get("depositForfeited"):
+        from routes.integrations import refund_stripe_payment
+        refunded = await refund_stripe_payment(res["depositSessionId"])
+        update_data["depositPaid"] = not refunded
+        update_data["depositRefunded"] = refunded
     await db.reservations.update_one({"id": reservation_id}, {"$set": update_data})
 
     if res.get("tableId"):
@@ -317,7 +438,7 @@ async def approve_large_booking(reservation_id: str, user: dict = Depends(requir
     requireApproval set (services.booking_rules_engine sets approvalStatus
     to 'pending' at creation time for those)."""
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res:
+    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     if not res.get("approvalRequired"):
         raise HTTPException(status_code=400, detail="This booking doesn't require approval")
@@ -346,7 +467,7 @@ async def reject_large_booking(reservation_id: str, body: dict = None, user: dic
     reservation; the guest needs to be told and re-booked under a tier that
     actually fits, not silently kept as-is."""
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res:
+    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     if not res.get("approvalRequired"):
         raise HTTPException(status_code=400, detail="This booking doesn't require approval")
@@ -388,7 +509,7 @@ async def restore_reservation(reservation_id: str, body: dict = None, user: dict
     the guest still needs seating.
     """
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res:
+    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     prior_status = res.get("status")
     if prior_status not in ("cancelled", "no_show"):
@@ -399,6 +520,15 @@ async def restore_reservation(reservation_id: str, body: dict = None, user: dict
         raise HTTPException(status_code=400, detail="Can only restore to confirmed or seated")
 
     update_data = {"status": restored_status, "cancellationReason": None, "updatedAt": datetime.utcnow().isoformat()}
+    # A no-show that forfeited a real deposit gets that money genuinely
+    # refunded on restore — "this was a mistake" must undo the actual
+    # capture, not just the status label. Best-effort, same as cancel's.
+    if prior_status == "no_show" and res.get("depositForfeited") and res.get("depositSessionId"):
+        from routes.integrations import refund_stripe_payment
+        refunded = await refund_stripe_payment(res["depositSessionId"])
+        if refunded:
+            update_data["depositForfeited"] = False
+            update_data["depositRefunded"] = True
     await db.reservations.update_one({"id": reservation_id}, {"$set": update_data})
 
     # Reverse the no-show penalty this booking caused, if any.
@@ -416,9 +546,9 @@ async def restore_reservation(reservation_id: str, body: dict = None, user: dict
     return Reservation(**updated)
 
 @router.get("/reservations/auto-assign/{reservation_id}")
-async def auto_assign_table(reservation_id: str):
+async def auto_assign_table(reservation_id: str, user: dict = Depends(get_user)):
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res:
+    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     party = res.get("partySize", 2)
     section_pref = res.get("section")
@@ -456,9 +586,16 @@ async def auto_assign_table(reservation_id: str):
 
 
 @router.post("/reservations/blackouts")
-async def create_blackout(data: dict):
-    """Create a blackout for a single date OR a `fromDate`→`toDate` inclusive range."""
+async def create_blackout(data: dict, user: dict = Depends(require_owner_or_manager)):
+    """Create a blackout for a single date OR a `fromDate`→`toDate` inclusive range.
+
+    The upsert key includes businessId, not just date — it didn't before,
+    so two businesses blacking out the same calendar date would collide
+    into one shared document, with whichever business wrote second
+    silently overwriting the first business's reason/blockUntil.
+    """
     import uuid
+    business_id = user.get("businessId")
     reason = str(data.get("reason") or "Bookings paused").strip()
     now_iso = datetime.utcnow().isoformat()
     from datetime import date as _date, timedelta as _td
@@ -471,9 +608,10 @@ async def create_blackout(data: dict):
         created = []
         cur = d0
         while cur <= d1:
-            doc = {"id": str(uuid.uuid4()), "date": cur.isoformat(), "reason": reason, "blockUntil": data.get("blockUntil"), "createdAt": now_iso}
+            doc = {"id": str(uuid.uuid4()), "date": cur.isoformat(), "reason": reason,
+                   "blockUntil": data.get("blockUntil"), "businessId": business_id, "createdAt": now_iso}
             await db.booking_blackouts.update_one(
-                {"date": cur.isoformat()},
+                {"date": cur.isoformat(), "businessId": business_id},
                 {"$set": {k: v for k, v in doc.items() if k != "id"},
                  "$setOnInsert": {"id": doc["id"]}},
                 upsert=True,
@@ -484,9 +622,10 @@ async def create_blackout(data: dict):
     single = str(data.get("date") or "").strip()
     if not single:
         raise HTTPException(status_code=400, detail="Provide 'date' or 'fromDate'+'toDate'")
-    doc = {"id": str(uuid.uuid4()), "date": single, "reason": reason, "blockUntil": data.get("blockUntil"), "createdAt": now_iso}
+    doc = {"id": str(uuid.uuid4()), "date": single, "reason": reason,
+           "blockUntil": data.get("blockUntil"), "businessId": business_id, "createdAt": now_iso}
     await db.booking_blackouts.update_one(
-        {"date": single},
+        {"date": single, "businessId": business_id},
         {"$set": {k: v for k, v in doc.items() if k != "id"},
          "$setOnInsert": {"id": doc["id"]}},
         upsert=True,
@@ -495,8 +634,9 @@ async def create_blackout(data: dict):
 
 
 @router.delete("/reservations/blackouts/{date}")
-async def delete_blackout(date: str):
-    r = await db.booking_blackouts.delete_one({"date": date})
+async def delete_blackout(date: str, user: dict = Depends(require_owner_or_manager)):
+    scope = tenant_scope_filter(user.get("businessId"))
+    r = await db.booking_blackouts.delete_many({"$and": [scope, {"date": date}]})
     return {"deleted": r.deleted_count, "date": date}
 
 
@@ -838,7 +978,7 @@ async def track_waitlist_stream(code: str, request: Request):
 
 # ============ AI TABLE AUTO-ASSIGN ============
 @router.post("/reservations/{reservation_id}/ai-assign-table")
-async def ai_assign_table(reservation_id: str):
+async def ai_assign_table(reservation_id: str, user: dict = Depends(get_user)):
     """Auto-pick the best table for a reservation based on:
       • party size fits seats (smallest fit wins to save large tables for big parties)
       • current table status (prefer available > reserved-for-different-party > occupied later)
@@ -846,7 +986,7 @@ async def ai_assign_table(reservation_id: str):
       • time conflict avoidance (skip tables booked within ±90min of this slot)
     """
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res:
+    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     party = int(res.get("partySize", 2) or 2)
 
@@ -903,7 +1043,7 @@ async def ai_assign_table(reservation_id: str):
     }
 
 @router.post("/walkins/ai-assign")
-async def ai_assign_walkin(body: dict):
+async def ai_assign_walkin(body: dict, user: dict = Depends(get_user)):
     """Walk-in helper: recommend tables for an unscheduled walk-in right now.
 
     This only recommends — it does not seat anyone. The Walk-in AI Seat
@@ -936,6 +1076,8 @@ async def ai_assign_walkin(body: dict):
     customer_id = body.get("customerId")
     if customer_id:
         cust = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+        if cust and not tenant_owns(cust.get("businessId"), user.get("businessId")):
+            cust = None
         if cust:
             guest = {
                 "id": cust.get("id"), "name": cust.get("name"),
@@ -967,7 +1109,7 @@ async def ai_assign_walkin(body: dict):
 
 
 @router.post("/walkins/seat")
-async def seat_walkin(body: dict):
+async def seat_walkin(body: dict, user: dict = Depends(get_user)):
     """Commit a walk-in to a specific table — the confirm step after
     /walkins/ai-assign recommends one.
 

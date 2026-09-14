@@ -34,6 +34,21 @@ async def _mark_online_order_paid_if_applicable(session_id: str):
     )
 
 
+async def _mark_reservation_deposit_paid_if_applicable(session_id: str):
+    """A payment_transactions doc tagged kind='booking_deposit' (set by
+    routes/reservations.py's request_deposit) means this Stripe session paid
+    a booking's deposit — flip depositPaid on the reservation itself so it's
+    genuinely collected money, not a staff-ticked checkbox, and something
+    mark_no_show can actually forfeit."""
+    payment = await db.payment_transactions.find_one({"sessionId": session_id}, {"_id": 0})
+    if not payment or payment.get("kind") != "booking_deposit" or not payment.get("reservationId"):
+        return
+    await db.reservations.update_one(
+        {"id": payment["reservationId"]},
+        {"$set": {"depositPaid": True, "updatedAt": datetime.utcnow().isoformat()}},
+    )
+
+
 async def refund_stripe_payment(session_id: str) -> bool:
     """Refund, in full, the Stripe payment behind a Checkout Session.
 
@@ -290,6 +305,7 @@ async def get_stripe_checkout_status(session_id: str, http_request: Request):
             if status.payment_status == "paid":
                 await _mark_online_order_paid_if_applicable(session_id)
                 await _finalize_pos_sale_if_applicable(session_id)
+                await _mark_reservation_deposit_paid_if_applicable(session_id)
 
     # Split-bill payments carry a splitSessionId on the payment doc — a
     # guest's own PaymentSuccess screen uses this to route back to their
@@ -362,6 +378,7 @@ async def stripe_webhook(request: Request, stripe_signature: Optional[str] = Hea
         )
         await _mark_online_order_paid_if_applicable(session_id)
         await _finalize_pos_sale_if_applicable(session_id)
+        await _mark_reservation_deposit_paid_if_applicable(session_id)
     return {"received": True}
 
 # ============ NUA CONNECT — INTEGRATIONS HUB API ============

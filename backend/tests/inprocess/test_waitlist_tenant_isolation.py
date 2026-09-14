@@ -83,6 +83,17 @@ def test_priority_waitlist_perk_orders_members_ahead(client, owner_headers):
         "membershipTier": "Silver", "businessId": biz,
     }
     try:
+        # routes/public.py's POST /public/join-waitlist is deliberately left
+        # unscoped (no business signal in that guest-facing form — see
+        # TENANT_ISOLATION_REMAINING_WORK.md), so other test files that hit
+        # it (test_waitlist_tracking.py) leave untagged "waiting" entries
+        # behind that tenant_scope_filter's safe default correctly still
+        # surfaces to every business's "ahead of you" count — including
+        # this fresh one. Clear them first so this test's own two entries
+        # are the only "waiting" ones in scope for a deterministic count,
+        # same pattern as test_loyalty_v2_tenant_isolation.py's untagged
+        # badge/milestone cleanup.
+        _run(db.waitlist.delete_many({"businessId": None, "status": "waiting"}))
         _run(db.customers.insert_one(dict(member)))
         # Ensure this business's tier catalog exists with the real perk list
         # (routes/loyalty.py seeds it lazily on first GET, same as loyalty_v2).

@@ -115,6 +115,13 @@ class Reservation(BaseModel):
     # reservation itself afterward.
     ruleOverrideReason: Optional[str] = None
     ruleOverrideBy: Optional[str] = None
+    businessId: Optional[str] = None
+    # Real payment capture behind depositRequired/depositPaid above — see
+    # routes/reservations.py's mark_no_show for how this is actually
+    # collected/forfeited.
+    depositSessionId: Optional[str] = None
+    depositForfeited: bool = False
+    depositRefunded: bool = False
 
     @model_validator(mode="before")
     @classmethod
@@ -127,6 +134,14 @@ class Reservation(BaseModel):
                 data["guestPhone"] = data.get("customerPhone") or data.get("phone")
             if not data.get("guestEmail"):
                 data["guestEmail"] = data.get("customerEmail") or data.get("email")
+            # Some table-assignment paths (auto-assign, ai-assign, walk-in
+            # seating) copy a floor-plan table's own `number` field through
+            # verbatim, and that field isn't consistently stored as a
+            # string across every floor plan — coerce here rather than
+            # crash response_model validation on an otherwise-valid
+            # reservation.
+            if isinstance(data.get("tableNumber"), (int, float)):
+                data["tableNumber"] = str(data["tableNumber"])
         return data
 
     def __init__(self, **data):
