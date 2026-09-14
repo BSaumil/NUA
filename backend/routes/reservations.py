@@ -169,19 +169,27 @@ async def create_reservation(reservation: ReservationCreate, user: Optional[dict
     doc = res_obj.dict()
     await db.reservations.insert_one(doc)
     if res_obj.ruleOverrideReason:
-        from services import audit_service
-        await audit_service.log_event(
-            entity_type="reservation", entity_id=res_obj.id, action="created",
-            after=doc, memo=f"Booking rule override: {res_obj.ruleOverrideReason}", severity="warning",
-            tags=["booking_rule_override"],
-        )
+        try:
+            from services import audit_service
+            await audit_service.log_event(
+                entity_type="reservation", entity_id=res_obj.id, action="created",
+                after=doc, memo=f"Booking rule override: {res_obj.ruleOverrideReason}", severity="warning",
+                tags=["booking_rule_override"],
+            )
+        except Exception as e:
+            from utils.errors import log_and_continue
+            log_and_continue(logging.getLogger(__name__), f"Audit log failed for override on reservation {res_obj.id} (booking itself succeeded)", e)
     elif res_obj.isLargeBooking:
-        from services import audit_service
-        await audit_service.log_event(
-            entity_type="reservation", entity_id=res_obj.id, action="created",
-            after=doc, memo=f"Large booking ({res_obj.partySize} guests) — tier: {res_obj.bookingTierLabel}",
-            severity="notice", tags=["large_booking"],
-        )
+        try:
+            from services import audit_service
+            await audit_service.log_event(
+                entity_type="reservation", entity_id=res_obj.id, action="created",
+                after=doc, memo=f"Large booking ({res_obj.partySize} guests) — tier: {res_obj.bookingTierLabel}",
+                severity="notice", tags=["large_booking"],
+            )
+        except Exception as e:
+            from utils.errors import log_and_continue
+            log_and_continue(logging.getLogger(__name__), f"Audit log failed for large booking {res_obj.id} (booking itself succeeded)", e)
     if reservation.tableId:
         found = await floor_tables.get_table_by_id(reservation.tableId)
         if found:
@@ -394,16 +402,20 @@ async def mark_no_show(reservation_id: str, fee: float = 0, user: dict = Depends
             _, plan_id = found
             await floor_tables.set_table_status(res["tableId"], plan_id, "available")
 
-    from services import audit_service
-    await audit_service.log_event(
-        entity_type="reservation", entity_id=reservation_id, action="updated",
-        before=res, after={**res, **update_data},
-        memo=(f"Marked no-show by {user.get('email', 'staff')}" + (
-            f" — ${forfeited_amount:.2f} deposit forfeited as the no-show fee" if captured
-            else (f" — ${fee:.2f} fee recorded (no deposit was collected to capture)" if fee else "")
-        )),
-        severity="notice",
-    )
+    try:
+        from services import audit_service
+        await audit_service.log_event(
+            entity_type="reservation", entity_id=reservation_id, action="updated",
+            before=res, after={**res, **update_data},
+            memo=(f"Marked no-show by {user.get('email', 'staff')}" + (
+                f" — ${forfeited_amount:.2f} deposit forfeited as the no-show fee" if captured
+                else (f" — ${fee:.2f} fee recorded (no deposit was collected to capture)" if fee else "")
+            )),
+            severity="notice",
+        )
+    except Exception as e:
+        from utils.errors import log_and_continue
+        log_and_continue(logging.getLogger(__name__), f"Audit log failed for no-show on reservation {reservation_id} (status change itself succeeded)", e)
     return {
         "message": "Marked as no-show",
         "depositForfeited": captured,
@@ -454,13 +466,17 @@ async def cancel_reservation(reservation_id: str, body: dict = None, user: dict 
     updated = {**res, **update_data}
     fee_memo = (f" — outside the cancellation window, ${res.get('depositRequired', 0):.2f} deposit forfeited as a cancellation fee"
                 if cancellation_fee_applied else "")
-    from services import audit_service
-    await audit_service.log_event(
-        entity_type="reservation", entity_id=reservation_id, action="updated",
-        before=res, after=updated,
-        memo=f"Booking cancelled by {user.get('email', 'staff')}" + (f": {reason}" if reason else "") + fee_memo,
-        severity="notice",
-    )
+    try:
+        from services import audit_service
+        await audit_service.log_event(
+            entity_type="reservation", entity_id=reservation_id, action="updated",
+            before=res, after=updated,
+            memo=f"Booking cancelled by {user.get('email', 'staff')}" + (f": {reason}" if reason else "") + fee_memo,
+            severity="notice",
+        )
+    except Exception as e:
+        from utils.errors import log_and_continue
+        log_and_continue(logging.getLogger(__name__), f"Audit log failed for cancel on reservation {reservation_id} (cancellation itself succeeded)", e)
     return Reservation(**updated)
 
 
@@ -483,12 +499,16 @@ async def approve_large_booking(reservation_id: str, user: dict = Depends(requir
     }
     await db.reservations.update_one({"id": reservation_id}, {"$set": update_data})
     updated = {**res, **update_data}
-    from services import audit_service
-    await audit_service.log_event(
-        entity_type="reservation", entity_id=reservation_id, action="updated",
-        before=res, after=updated, memo=f"Large booking approved by {user.get('email', 'staff')}",
-        severity="notice", tags=["large_booking"],
-    )
+    try:
+        from services import audit_service
+        await audit_service.log_event(
+            entity_type="reservation", entity_id=reservation_id, action="updated",
+            before=res, after=updated, memo=f"Large booking approved by {user.get('email', 'staff')}",
+            severity="notice", tags=["large_booking"],
+        )
+    except Exception as e:
+        from utils.errors import log_and_continue
+        log_and_continue(logging.getLogger(__name__), f"Audit log failed for approve on reservation {reservation_id} (approval itself succeeded)", e)
     return Reservation(**updated)
 
 
@@ -520,13 +540,17 @@ async def reject_large_booking(reservation_id: str, body: dict = None, user: dic
             _, plan_id = found
             await floor_tables.set_table_status(res["tableId"], plan_id, "available")
     updated = {**res, **update_data}
-    from services import audit_service
-    await audit_service.log_event(
-        entity_type="reservation", entity_id=reservation_id, action="updated",
-        before=res, after=updated,
-        memo=f"Large booking rejected by {user.get('email', 'staff')}" + (f": {reason}" if reason else ""),
-        severity="warning", tags=["large_booking"],
-    )
+    try:
+        from services import audit_service
+        await audit_service.log_event(
+            entity_type="reservation", entity_id=reservation_id, action="updated",
+            before=res, after=updated,
+            memo=f"Large booking rejected by {user.get('email', 'staff')}" + (f": {reason}" if reason else ""),
+            severity="warning", tags=["large_booking"],
+        )
+    except Exception as e:
+        from utils.errors import log_and_continue
+        log_and_continue(logging.getLogger(__name__), f"Audit log failed for reject on reservation {reservation_id} (rejection itself succeeded)", e)
     return Reservation(**updated)
 
 
@@ -568,13 +592,17 @@ async def restore_reservation(reservation_id: str, body: dict = None, user: dict
         await db.customers.update_one({"id": res["customerId"]}, {"$inc": {"noShowCount": -1}})
 
     updated = {**res, **update_data}
-    from services import audit_service
-    await audit_service.log_event(
-        entity_type="reservation", entity_id=reservation_id, action="restored",
-        before=res, after=updated,
-        memo=f"Booking restored from {prior_status} to {restored_status} by {user.get('email', 'staff')}",
-        severity="notice",
-    )
+    try:
+        from services import audit_service
+        await audit_service.log_event(
+            entity_type="reservation", entity_id=reservation_id, action="restored",
+            before=res, after=updated,
+            memo=f"Booking restored from {prior_status} to {restored_status} by {user.get('email', 'staff')}",
+            severity="notice",
+        )
+    except Exception as e:
+        from utils.errors import log_and_continue
+        log_and_continue(logging.getLogger(__name__), f"Audit log failed for restore on reservation {reservation_id} (restore itself succeeded)", e)
     return Reservation(**updated)
 
 @router.get("/reservations/auto-assign/{reservation_id}")
