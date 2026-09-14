@@ -256,6 +256,8 @@ async def _tx_mark_waste(a):
            "recordedBy": "ash-agent", "createdAt": _now()}
     await db.waste_events.insert_one(dict(doc))
     await db.products.update_one({"id": pid}, {"$inc": {"stock": -qty}})
+    from utils.stock_ops import clamp_negative_stock
+    await clamp_negative_stock([pid])
     return {"wasteId": doc["id"], "productId": pid, "quantity": qty}
 
 

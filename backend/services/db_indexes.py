@@ -28,6 +28,16 @@ async def ensure_indexes() -> None:
         await db.transactions.create_index("timestamp")
         await db.transactions.create_index("customerId")
         await db.transactions.create_index("tableNumber")
+        # sparse: most transactions have no clientOpId at all (only the
+        # offline queue's replayed sales set one) — sparse excludes those
+        # from the uniqueness constraint entirely rather than treating a
+        # missing field as a colliding null. This is what actually enforces
+        # the offline-replay dedup in routes/transactions.py's
+        # create_transaction — the index, not application logic, is the
+        # atomic guard (a race between two concurrent inserts of the same
+        # clientOpId is decided by MongoDB rejecting the second one, not by
+        # a Python-side check that could itself race).
+        await db.transactions.create_index("clientOpId", unique=True, sparse=True)
 
         # Kitchen board: filtered by status constantly (KDS polling/SSE), and
         # sorted by createdAt within a status.

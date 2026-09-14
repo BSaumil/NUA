@@ -138,12 +138,17 @@ async def _adjust_stock_for_items(items: list, sign: int):
     now does (mirroring routes/transactions.py's create_transaction), and
     cancelling a previously-accepted paid order reverses it — the same
     deduct-on-sale/restore-on-refund pairing the POS already has."""
+    touched = []
     for item in items or []:
         pid = item.get("productId") or item.get("id")
         qty = int(item.get("quantity", 1))
         if not pid or qty <= 0:
             continue
         await db.products.update_one({"id": pid}, {"$inc": {"stock": sign * qty}})
+        touched.append(pid)
+    if sign < 0 and touched:
+        from utils.stock_ops import clamp_negative_stock
+        await clamp_negative_stock(touched)
 
 
 def _append_event(order: dict, kind: str, message: str, actor: Optional[str] = None) -> dict:
@@ -407,6 +412,33 @@ async def update_status(order_id: str, data: dict, user: dict = Depends(get_user
         raise HTTPException(status_code=400, detail=f"Invalid status. Allowed: {_STATUS_ORDER}")
     order = await db.online_orders.find_one({"id": order_id}, {"_id": 0})
     if not order: raise HTTPException(status_code=404, detail="Order not found")
+
+    # Atomically claim this exact transition before doing any side effects.
+    # This used to be read order -> mutate a Python dict -> blind $set at
+    # the very end, which let two near-simultaneous requests (two staff
+    # both hitting Accept, or an accept racing a cancel) both read the same
+    # pre-transition order, both pass every guard below (stockDeducted was
+    # checked against each request's own stale in-memory copy, not the
+    # database), and both apply side effects — double stock deduction being
+    # the sharpest edge — with whichever request's final update_one landed
+    # last silently overwriting the other's status/event/refund outcome.
+    # The filter re-verifies the order is still at the exact status this
+    # request read; a request that loses the race gets a clean 409 instead
+    # of proceeding to recompute and clobber. Tradeoff: status flips here,
+    # before the derived side effects (stock, kitchen ticket, notifications)
+    # are computed and persisted a few lines down — a crash in that narrow
+    # window would leave the order's status updated without those side
+    # effects applied. Accepted as strictly safer than the prior
+    # no-protection-at-all state; see FINANCIAL_OFFLINE_INTEGRITY_REMAINING_WORK.md.
+    claimed = await db.online_orders.find_one_and_update(
+        {"id": order_id, "status": order["status"]},
+        {"$set": {"status": new_status}},
+        projection={"_id": 0},
+    )
+    if not claimed:
+        raise HTTPException(status_code=409,
+                             detail="Order status was just changed by another request — reload and try again")
+    order = claimed
     # Append event + notification with a status-specific message
     cust_name = (order.get("customer") or {}).get("name", "")
     ch = order.get("channel")
