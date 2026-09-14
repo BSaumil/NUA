@@ -192,7 +192,7 @@ async def apply_price_tune(data: dict, user: dict = Depends(require_owner_or_man
 # E7 — OVERBOOKING GUARDRAIL
 # ============================================================================
 @router.post("/ai/overbooking-check")
-async def overbooking_check(data: dict, _: dict = Depends(get_user)):
+async def overbooking_check(data: dict, user: dict = Depends(get_user)):
     """Staff pre-flight advisory before creating a reservation — does the
     exact same capacity math services.booking_rules_engine now enforces at
     write time (when Settings > Booking Rules has capacity enforcement
@@ -206,7 +206,7 @@ async def overbooking_check(data: dict, _: dict = Depends(get_user)):
 
     from services.booking_rules_engine import get_rules, capacity_for_slot
     rules = await get_rules()
-    cap_info = await capacity_for_slot(date, time_str, rules)
+    cap_info = await capacity_for_slot(date, time_str, rules, business_id=user.get("businessId"))
     available = cap_info["available"]
     allow = available >= party_size
     return {

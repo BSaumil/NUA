@@ -73,7 +73,22 @@ def req(client, method, path, **kw):
     sweeps a few hundred routes blows through that and every answer comes back
     429, which is not an authorisation result. A distinct tenant header per
     probe keeps what we read as the auth decision.
+
+    Skipped for /api/public/* and /api/table/* — server.py's own
+    RateLimitMiddleware already exempts these paths entirely (guest-facing,
+    can't be bucketed per-tenant the same way), so the header serves no
+    rate-limit purpose there. Worse, ActorContextMiddleware reads the same
+    X-Tenant-Id header as a genuine (if low-priority, JWT-beats-it) business
+    identity — for a partner/integration caller with no bearer token, which
+    is a real, intentional feature. Injecting a synthetic "probe-N" value on
+    every call made these two genuinely-anonymous-by-design path prefixes
+    look, to any code that reads the actor context for tenant scoping, like
+    a rapid string of different "businesses" instead of no business at all —
+    surfaced by services/booking_rules_engine.py's guest-booking path once
+    it started actually consulting tenant scope on these routes.
     """
+    if path.startswith("/api/public") or path.startswith("/api/table"):
+        return client.request(method, path, **kw)
     _probe[0] += 1
     headers = dict(kw.pop("headers", {}))
     headers.setdefault("X-Tenant-Id", f"probe-{_probe[0]}")

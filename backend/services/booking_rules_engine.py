@@ -23,6 +23,33 @@ these checks — that's the difference between "staff can't bypass a rule
 accidentally" (the default, checks run for staff same as guests) and "staff
 can never override" (too rigid for a real dining room, where a manager
 sometimes needs to seat an exception).
+
+Tenant isolation: every real per-business read this module does (blackout
+dates, shift definitions, reservations counted toward capacity, booking
+experiences) is scoped by an optional `business_id`, threaded through
+explicitly by each caller — deliberately NOT defaulted from the request's
+actor context the way most of this codebase's other tenant-isolation fixes
+are (see `validate_and_enrich_booking`'s own comment for why: this module
+is reachable from a genuinely anonymous guest endpoint, where the actor
+context's header-based businessId fallback isn't a trustworthy signal).
+Before this, a blackout date or a full slot on one business's calendar
+could silently block bookings on a completely different business sharing
+the same deployment, and vice versa: capacity checks pooled every
+business's covers into one ceiling.
+
+`db.settings["booking_rules"]` itself (the config `get_rules()` reads) is
+deliberately left as a global singleton, same as `business_settings`/
+`print_routing` elsewhere — re-keying settings documents by business is a
+separate, larger migration, not attempted here.
+
+The guest-facing caller (`routes/public.py`'s `POST /public/book`) has no
+business signal at all today (no JWT, no `?business=` param) — that's a
+known, separately-documented gap (see `TENANT_ISOLATION_REMAINING_WORK.md`)
+this module can't close on its own. `business_id` simply stays `None` for
+that caller, which resolves to the same "visible/counted for everyone" safe
+default this module already had before this fix — no behavior change for
+the guest path, but the staff-authenticated path (`routes/reservations.py`,
+`routes/phase_ef_wave2.py`) now gets real isolation.
 """
 from __future__ import annotations
 from datetime import datetime, date as date_cls, timezone
@@ -30,6 +57,7 @@ from typing import Any, Dict, List, Optional
 
 from database import db
 from services import floor_tables
+from middleware.actor_context import tenant_scope_filter
 
 DEFAULT_RULES: Dict[str, Any] = {
     # Pre-existing (previously unread) settings
@@ -104,8 +132,9 @@ def match_tier(tiers: List[Dict[str, Any]], party_size: int) -> Dict[str, Any]:
     return dict(_BASE_TIER)
 
 
-async def _active_blackout(date_str: str) -> Optional[dict]:
-    b = await db.booking_blackouts.find_one({"date": date_str}, {"_id": 0})
+async def _active_blackout(date_str: str, business_id: Optional[str] = None) -> Optional[dict]:
+    query = {"$and": [tenant_scope_filter(business_id), {"date": date_str}]}
+    b = await db.booking_blackouts.find_one(query, {"_id": 0})
     if not b:
         return None
     block_until = b.get("blockUntil")
@@ -119,8 +148,8 @@ async def _active_blackout(date_str: str) -> Optional[dict]:
     return b
 
 
-async def _session_for_time(time_str: str) -> Optional[Dict[str, Any]]:
-    shifts = await db.booking_shifts.find({}, {"_id": 0}).to_list(50)
+async def _session_for_time(time_str: str, business_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    shifts = await db.booking_shifts.find(tenant_scope_filter(business_id), {"_id": 0}).to_list(50)
     candidates = [s for s in shifts if s.get("enabled", True)] if shifts else DEFAULT_SHIFTS
     try:
         h, m = map(int, time_str.split(":"))
@@ -139,7 +168,8 @@ async def _session_for_time(time_str: str) -> Optional[Dict[str, Any]]:
 
 
 async def capacity_for_slot(date_str: str, time_str: str, rules: dict,
-                              exclude_reservation_id: Optional[str] = None) -> Dict[str, Any]:
+                              exclude_reservation_id: Optional[str] = None,
+                              business_id: Optional[str] = None) -> Dict[str, Any]:
     """Covers already booked within the slot's buffer window vs the ceiling.
 
     The ceiling is the owner's maxCoversPerSlot if they set one — an
@@ -169,8 +199,10 @@ async def capacity_for_slot(date_str: str, time_str: str, rules: dict,
     slot_mins = h * 60 + m
     slot_start, slot_end = slot_mins - buffer_minutes, slot_mins + buffer_minutes
 
+    same_day_query = {"$and": [tenant_scope_filter(business_id),
+                                {"date": date_str, "status": {"$in": ["confirmed", "seated"]}}]}
     same_day = await db.reservations.find(
-        {"date": date_str, "status": {"$in": ["confirmed", "seated"]}},
+        same_day_query,
         {"_id": 0, "id": 1, "time": 1, "partySize": 1},
     ).to_list(2000)
     booked = 0
@@ -199,6 +231,7 @@ async def validate_and_enrich_booking(
     reservation_id_to_exclude: Optional[str] = None,
     override_reason: Optional[str] = None,
     override_actor: Optional[Dict[str, Any]] = None,
+    business_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Raises BookingRuleViolation (message is guest-facing) on any hard
     violation. Returns a dict of fields to merge onto the Reservation being
@@ -227,12 +260,23 @@ async def validate_and_enrich_booking(
     if party_size < 1:
         raise BookingRuleViolation("Party size must be at least 1")
 
+    # Deliberately no actor-context fallback here (unlike most of this
+    # codebase's other tenant-isolation fixes): this function is reachable
+    # from routes/public.py's genuinely anonymous guest booking endpoint,
+    # where ActorContextMiddleware's header-based businessId fallback is
+    # meant for a different case (a partner/integration caller with no
+    # bearer token) — trusting it here would let a client-supplied header
+    # steer which business's blackout dates/capacity/experiences a guest
+    # booking is checked against. Staff callers (routes/reservations.py,
+    # routes/phase_ef_wave2.py) already pass their own authenticated
+    # user's businessId explicitly; the guest path passes nothing, same as
+    # before this module had any tenant scoping at all.
     rules = await get_rules()
     is_override = bool(override_reason) and bool(override_actor) and \
         (override_actor.get("role") in ("owner", "manager"))
 
     # --- Blackout dates ---
-    blackout = await _active_blackout(date)
+    blackout = await _active_blackout(date, business_id)
     if blackout and not is_override:
         raise BookingRuleViolation(f"Bookings paused for {date}: {blackout.get('reason') or 'closed'}")
 
@@ -317,7 +361,8 @@ async def validate_and_enrich_booking(
                 f"For parties of {tier.get('minGuests')} or more, bookings are available with our "
                 f"{tier.get('label') or 'Set Menu / Dining Experience'} only."
             )
-        experience = await db.booking_experiences.find_one({"id": experience_id, "active": True}, {"_id": 0})
+        exp_query = {"$and": [tenant_scope_filter(business_id), {"id": experience_id, "active": True}]}
+        experience = await db.booking_experiences.find_one(exp_query, {"_id": 0})
         if not experience:
             raise BookingRuleViolation("Selected experience isn't available")
         allowed_ids = tier.get("allowedExperienceIds") or []
@@ -327,13 +372,15 @@ async def validate_and_enrich_booking(
                 f"please choose one of the {tier.get('label')} options"
             )
     elif experience_id:
-        experience = await db.booking_experiences.find_one({"id": experience_id, "active": True}, {"_id": 0})
+        exp_query = {"$and": [tenant_scope_filter(business_id), {"id": experience_id, "active": True}]}
+        experience = await db.booking_experiences.find_one(exp_query, {"_id": 0})
         if not experience and not is_override:
             raise BookingRuleViolation("Selected experience isn't available")
 
     # --- Capacity (opt-in — see DEFAULT_RULES["enforceCapacity"]) ---
     if rules.get("enforceCapacity") and not is_override:
-        cap_info = await capacity_for_slot(date, time, rules, exclude_reservation_id=reservation_id_to_exclude)
+        cap_info = await capacity_for_slot(date, time, rules, exclude_reservation_id=reservation_id_to_exclude,
+                                            business_id=business_id)
         if cap_info["available"] < party_size:
             raise BookingRuleViolation(
                 f"That time is fully booked — only {cap_info['available']} seats left "
@@ -343,10 +390,13 @@ async def validate_and_enrich_booking(
     # --- Max large bookings per session ---
     max_large_per_session = int(rules.get("maxLargeBookingsPerSession") or 0)
     if is_large and max_large_per_session > 0 and not is_override:
-        session = await _session_for_time(time)
+        session = await _session_for_time(time, business_id)
         if session:
+            existing_query = {"$and": [tenant_scope_filter(business_id),
+                                        {"date": date, "status": {"$in": ["confirmed", "seated"]},
+                                         "isLargeBooking": True}]}
             existing = await db.reservations.find(
-                {"date": date, "status": {"$in": ["confirmed", "seated"]}, "isLargeBooking": True},
+                existing_query,
                 {"_id": 0, "id": 1, "time": 1},
             ).to_list(500)
             try:

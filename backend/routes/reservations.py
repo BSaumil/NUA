@@ -126,6 +126,7 @@ async def create_reservation(reservation: ReservationCreate, user: Optional[dict
             date=reservation.date, time=reservation.time, party_size=reservation.partySize,
             source=reservation.source, experience_id=reservation.experienceId,
             override_reason=reservation.overrideReason, override_actor=user,
+            business_id=(user or {}).get("businessId"),
         )
     except BookingRuleViolation as e:
         raise HTTPException(status_code=409, detail=str(e))
