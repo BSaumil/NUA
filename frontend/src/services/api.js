@@ -719,6 +719,13 @@ export const agentAPI = {
   getSegments: () => api.get('/agent/segments'),
   getDecisions: (limit = 100) => api.get('/agent/decisions', { params: { limit } }),
   tick: () => api.post('/agent/tick'),
+  // audioBase64: a data: URL as produced by FileReader.readAsDataURL(blob)
+  // (same convention v15API.voiceOrder uses — the backend strips the
+  // "data:...;base64," prefix itself either way).
+  voiceCommand: (audioBase64, mime = 'audio/webm') =>
+    api.post('/agent/voice-command', { audioBase64, mime }),
+  voiceCommandText: (text) => api.post('/agent/voice-command', { text }),
+  voiceCatalog: () => api.get('/agent/voice-catalog'),
 };
 // Phase E+F — Autonomy config, Phone Agent, POs, A/B tests, Your Usual
 export const phaseEFAPI = {
