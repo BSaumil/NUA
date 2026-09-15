@@ -702,3 +702,44 @@ def test_editing_only_metadata_does_not_touch_rule_fields(client, owner_headers)
         assert r.json()["date"] == date
     finally:
         _cleanup_reservations("Metadata Only Guest")
+
+
+# ---------------------------------------------------------------- timezone
+# Remediation of the final readiness audit's finding: the "already passed" /
+# same-day / advance-notice checks compared a reservation's date/time (meant
+# to be read as VENUE-local wall clock) against datetime.now() — the
+# server's own clock, UTC in this sandbox and in production. A guest in a
+# timezone far from UTC booking a time that's genuinely in the near future
+# at their venue could be wrongly rejected as "already passed" (or vice
+# versa) purely because the server's clock reads a different wall-clock
+# hour than the venue's.
+
+def test_booking_validity_is_judged_by_the_venues_own_timezone_not_the_servers(client):
+    """Honolulu is UTC-10 with no DST, so the gap between it and this
+    sandbox's UTC-clock server is large, fixed, and easy to reason about.
+    A time 20 minutes from now in Honolulu is, read naively against this
+    server's own UTC clock, about 9h40m in the PAST — exactly the false
+    "already passed" rejection the pre-fix naive datetime.now() comparison
+    would produce. Booking it must succeed once the check is venue-aware."""
+    from zoneinfo import ZoneInfo
+    biz_id = "tz-test-honolulu-biz"
+    _run(db.businesses.insert_one({
+        "id": biz_id, "slug": biz_id, "name": "Honolulu Test Biz", "status": "active",
+        "timezone": "Pacific/Honolulu",
+    }))
+    try:
+        hi_now = datetime.now(ZoneInfo("Pacific/Honolulu")).replace(tzinfo=None)
+        target = hi_now + timedelta(minutes=20)
+
+        r = req(client, "POST", "/api/public/book", json={
+            "guestName": "Honolulu Near Future Guest", "partySize": 2,
+            "date": target.strftime("%Y-%m-%d"), "time": target.strftime("%H:%M"),
+            "business": biz_id,
+        })
+        assert r.status_code == 200, (
+            f"a time 20 minutes from now in the venue's own timezone must not be rejected "
+            f"as already passed just because the server's clock reads a different hour: {r.text[:300]}"
+        )
+    finally:
+        _run(db.reservations.delete_many({"guestName": "Honolulu Near Future Guest"}))
+        _run(db.businesses.delete_one({"id": biz_id}))

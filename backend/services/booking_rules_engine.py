@@ -380,7 +380,8 @@ async def validate_and_enrich_booking(
             target = datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
         except Exception:
             raise BookingRuleViolation("Invalid date/time")
-        now = datetime.now()
+        from services.venue_time import venue_now_for_business
+        now = await venue_now_for_business(business_id)
         delta_seconds = (target - now).total_seconds()
         if source == "online":
             # 5-minute grace so "book for right now" doesn't trip on clock

@@ -89,10 +89,11 @@ async def get_available_slots(date: str, party_size: int = 2, business: Optional
     close_t = rules.get("bookingCloseTime") or "23:59"
     # If `date` is today, don't offer a time that's already passed — POST
     # /public/book would reject it anyway (see booking_rules_engine's
-    # "already passed" check, which uses this same naive datetime.now()
-    # convention), so showing it as pickable just sets the guest up for a
-    # confirm-time 409 instead of a clean slot list.
-    now = datetime.now()
+    # "already passed" check, which uses this same venue-local-time
+    # convention, services.venue_time), so showing it as pickable just sets
+    # the guest up for a confirm-time 409 instead of a clean slot list.
+    from services.venue_time import venue_now_for_business
+    now = await venue_now_for_business(business_id)
     is_today = date == now.strftime("%Y-%m-%d")
     now_hhmm = now.strftime("%H:%M")
     slots = []

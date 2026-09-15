@@ -241,6 +241,7 @@ async def _greeting_and_context(to_number: str) -> dict:
         "resolved": True,
         "businessId": biz.get("id"),
         "locationId": biz.get("inboundVoiceLocationId"),
+        "timezone": biz.get("timezone"),
         "businessName": name,
         "greeting": inbound.get("greeting")
                     or f"Thanks for calling {name}. I can help you book a table — how many people?",
@@ -251,11 +252,12 @@ async def _greeting_and_context(to_number: str) -> dict:
     }
 
 
-def _is_open_now(open_hours: dict) -> bool:
+def _is_open_now(open_hours: dict, tz_name: Optional[str] = None) -> bool:
     if not open_hours:
         return True
+    from services.venue_time import venue_now
     weekdays = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-    now = datetime.now(timezone.utc)  # NOTE: assumes venue TZ ≈ UTC for MVP
+    now = venue_now(tz_name)
     today = open_hours.get(weekdays[now.weekday()], {})
     if today.get("closed"):
         return False
@@ -394,7 +396,7 @@ async def voice_inbound(request: Request):
     await _audit("business_resolved", call_id, ctx["businessId"],
                  f"Resolved to business {ctx['businessId']} ({ctx.get('businessName')})")
 
-    if ctx["hoursCheckEnabled"] and not _is_open_now(ctx["openHours"]):
+    if ctx["hoursCheckEnabled"] and not _is_open_now(ctx["openHours"], ctx.get("timezone")):
         return _end_call_twiml(ctx["closedMessage"])
 
     doc = {

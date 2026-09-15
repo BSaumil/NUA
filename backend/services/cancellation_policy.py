@@ -81,4 +81,6 @@ async def is_within_free_cancellation_window(res: dict, business_id: Optional[st
         policy = await get_policy(business_id)
         cutoff_hours = float(policy.get("cutoffHours", DEFAULT_CUTOFF_HOURS))
     cutoff = timedelta(hours=cutoff_hours)
-    return (when - datetime.utcnow()) >= cutoff
+    from services.venue_time import venue_now_for_business
+    now = await venue_now_for_business(business_id)
+    return (when - now) >= cutoff
