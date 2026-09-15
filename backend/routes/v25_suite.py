@@ -449,6 +449,11 @@ async def kiosk_checkout(sid: str):
     s = await db.kiosk_sessions.find_one({"id": sid}, {"_id": 0})
     if not s: raise HTTPException(status_code=404, detail="Session not found")
     cart = s.get("cart") or []
+    # No loyalty-tier discount here either — same structural reason as
+    # routes/online_orders.py's place_order: a kiosk session only ever
+    # carries guestName (freeform), never a resolved customerId, so there is
+    # no membershipTier to discount against. See
+    # tests/inprocess/test_loyalty_tier_discount_channel_consistency.py.
     total = sum(float(i.get("price", 0) or 0) * int(i.get("quantity", 1) or 1) for i in cart)
 
     # Checkout used to write a total and stop, so kiosk food never reached the

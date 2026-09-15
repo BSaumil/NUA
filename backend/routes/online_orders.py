@@ -259,6 +259,19 @@ async def place_order(data: dict):
     # Menu prices are GST-inclusive — the listed price is what the customer
     # pays, GST is disclosed as the component within it, not added on top.
     subtotal = sum(float(i.get("price", 0)) * int(i.get("quantity", 1)) for i in items)
+    # No loyalty-tier discount is applied here, unlike routes/transactions.py's
+    # POS checkout (which reads db.loyalty_tiers off transaction.customerId).
+    # This is a deliberate, structural limitation, not an oversight: `customer`
+    # above is freeform guest contact info (name/phone/email typed into the
+    # storefront form), never resolved to an actual db.customers record —
+    # there is no customerId here to look a tier up against. Giving online
+    # ordering the same tier-discount behavior POS has would mean building
+    # real guest-to-customer identification at checkout (matching/creating a
+    # db.customers row, then trusting its membershipTier) — a new feature,
+    # not a bug fix, and out of scope here. See
+    # tests/inprocess/test_loyalty_tier_discount_channel_consistency.py for
+    # the contract this currently holds to.
+    #
     # Voucher discount is re-validated server-side here, not trusted from the
     # client — same voucher document commerce_v29's staff-facing apply uses.
     voucher_code = (data.get("voucherCode") or "").strip()
