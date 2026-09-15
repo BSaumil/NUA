@@ -5,7 +5,7 @@ cohort retention, booking heatmap, 2FA, GDPR.
 from fastapi import APIRouter, HTTPException, Depends
 from deps import get_user, require_owner, require_owner_or_manager, require_permission
 from database import db
-from middleware.actor_context import tenant_scope_filter
+from middleware.actor_context import tenant_scope_filter, tenant_owns
 from routes.gamification import compute_staff_performance
 from datetime import datetime, timezone, timedelta
 import logging
@@ -787,27 +787,107 @@ async def save_2fa_policy(data: dict, _: dict = Depends(require_owner)):
 # GDPR — data export & erase
 # =============================================================================
 @router.get("/customers/{customer_id}/gdpr-export")
-async def gdpr_export(customer_id: str, _: dict = Depends(require_owner_or_manager)):
+async def gdpr_export(customer_id: str, user: dict = Depends(require_owner_or_manager)):
+    """Every place this session's own work (Trust Release remediation)
+    added a NEW guest-identifiable data store — loyalty_ledger (customerId),
+    db.voice_calls (phone, transcript), db.bill_splits/db.split_tabs
+    (claimedByPhone/guestPhone) — landed with no path into this export at
+    all, so a GDPR Article 15 access request would silently omit them.
+    Also fixed here: the customer lookup had no tenant check whatsoever —
+    any owner/manager of ANY business could export another business's
+    customer's full personal data by customer_id alone."""
     customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
-    if not customer: raise HTTPException(status_code=404, detail="not found")
+    if not customer or not tenant_owns(customer.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="not found")
+    business_id = user.get("businessId")
     tx = await db.transactions.find({"customerId": customer_id}, {"_id": 0}).to_list(5000)
     res = await db.reservations.find({"customerId": customer_id}, {"_id": 0}).to_list(1000)
     feedback = await db.feedback.find({"customerId": customer_id}, {"_id": 0}).to_list(500)
+    loyalty_history = await db.loyalty_ledger.find({"customerId": customer_id}, {"_id": 0}).to_list(2000)
+
+    phone = customer.get("phone")
+    voice_calls, split_lines_claimed, guest_tabs = [], [], []
+    if phone:
+        voice_calls = await db.voice_calls.find(
+            {"phone": phone, "businessId": business_id}, {"_id": 0}
+        ).to_list(500)
+        splits = await db.bill_splits.find(
+            {"businessId": business_id, "$or": [
+                {"lines.claimedByPhone": phone}, {"equalParts.claimedByPhone": phone},
+            ]}, {"_id": 0},
+        ).to_list(500)
+        for split in splits:
+            claimed_lines = [l for l in split.get("lines", []) if l.get("claimedByPhone") == phone]
+            claimed_slots = [p for p in split.get("equalParts", []) if p.get("claimedByPhone") == phone]
+            if claimed_lines or claimed_slots:
+                split_lines_claimed.append({
+                    "splitId": split["id"], "tableNumber": split.get("tableNumber"),
+                    "lines": claimed_lines, "equalParts": claimed_slots,
+                })
+        # split_tabs itself carries no businessId (see services/split_payment.py) —
+        # guestPhone alone isn't tenant-exclusive, so tabs are additionally
+        # filtered to ones whose OWNING split belongs to this business,
+        # rather than exporting another business's guest's tab data just
+        # because they happen to share a phone number.
+        own_split_ids = {s["id"] for s in
+                          await db.bill_splits.find({"businessId": business_id}, {"_id": 0, "id": 1}).to_list(2000)}
+        candidate_tabs = await db.split_tabs.find({"guestPhone": phone}, {"_id": 0}).to_list(500)
+        guest_tabs = [t for t in candidate_tabs if t.get("splitId") in own_split_ids]
+
     return {
         "exportedAt": datetime.now(timezone.utc).isoformat(),
         "customer": customer,
         "transactions": tx,
         "reservations": res,
         "feedback": feedback,
+        "loyaltyHistory": loyalty_history,
+        "voiceCalls": voice_calls,
+        "billSplitClaims": split_lines_claimed,
+        "guestTabs": guest_tabs,
         "noticeText": "This export contains all personal data we hold on you in accordance with GDPR Article 15.",
     }
 
 @router.delete("/customers/{customer_id}/gdpr-erase")
 async def gdpr_erase(customer_id: str, user: dict = Depends(require_owner)):
+    existing = await db.customers.find_one({"id": customer_id}, {"_id": 0, "businessId": 1, "phone": 1})
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="not found")
     # Anonymize rather than hard-delete to preserve financial records
     anon = {"name": "[REDACTED]", "email": "redacted@nua.local", "phone": "[REDACTED]", "notes": "", "erasedAt": datetime.now(timezone.utc).isoformat(), "erasedBy": user["id"]}
     await db.customers.update_one({"id": customer_id}, {"$set": anon})
     await db.feedback.update_many({"customerId": customer_id}, {"$set": {"customerName": "[REDACTED]"}})
+
+    phone = existing.get("phone")
+    business_id = user.get("businessId")
+    if phone:
+        await db.voice_calls.update_many(
+            {"phone": phone, "businessId": business_id}, {"$set": {"phone": "[REDACTED]"}})
+
+        # Redacted line-by-line in Python rather than a single array-filter
+        # update — mongomock (this codebase's fast in-process test double,
+        # see tests/inprocess/conftest.py) doesn't implement MongoDB's
+        # array-filter updates at all, which would make this path
+        # untestable; a real production MongoDB supports both equally well.
+        own_splits = await db.bill_splits.find({"businessId": business_id}, {"_id": 0}).to_list(2000)
+        for split in own_splits:
+            changed = False
+            for l in split.get("lines", []):
+                if l.get("claimedByPhone") == phone:
+                    l["claimedByPhone"] = "[REDACTED]"
+                    changed = True
+            for p in split.get("equalParts", []):
+                if p.get("claimedByPhone") == phone:
+                    p["claimedByPhone"] = "[REDACTED]"
+                    changed = True
+            if changed:
+                await db.bill_splits.update_one(
+                    {"id": split["id"]},
+                    {"$set": {"lines": split["lines"], "equalParts": split["equalParts"]}})
+
+        own_split_ids = [s["id"] for s in own_splits]
+        await db.split_tabs.update_many(
+            {"guestPhone": phone, "splitId": {"$in": own_split_ids}},
+            {"$set": {"guestPhone": "[REDACTED]"}})
     return {"message": "Customer data anonymized (financial records preserved per regulation)"}
 
 
