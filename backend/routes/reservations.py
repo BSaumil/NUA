@@ -246,9 +246,45 @@ async def update_reservation(reservation_id: str, update: ReservationUpdate, use
         await db.customers.update_one(
             {"id": new_customer_id}, {"$push": {"reservationIds": reservation_id}}
         )
-    result = await db.reservations.find_one_and_update(
-        {"id": reservation_id}, {"$set": update_data}, return_document=True
-    )
+
+    # Re-run the same booking-rules engine creation goes through whenever an
+    # edit touches a field the rules actually depend on — previously this
+    # was a bare $set with no re-validation at all, so moving a confirmed
+    # booking onto a blacked-out date, past the booking window, or to a
+    # party size that overflows the slot's capacity (or crosses into a
+    # different size tier, silently keeping the OLD tier's deposit/pre-
+    # order/approval flags) all went straight through unchecked.
+    rule_dependent_fields = ("date", "time", "partySize", "experienceId")
+    if any(f in update_data for f in rule_dependent_fields):
+        from services.booking_rules_engine import (
+            validate_and_enrich_booking, BookingRuleViolation, capacity_lock)
+        business_id = existing.get("businessId")
+        new_date = update_data.get("date", existing.get("date"))
+        new_time = update_data.get("time", existing.get("time"))
+        new_party_size = update_data.get("partySize", existing.get("partySize"))
+        new_experience_id = update_data.get("experienceId", existing.get("experienceId"))
+        try:
+            async with capacity_lock(business_id, new_date):
+                enrichment = await validate_and_enrich_booking(
+                    date=new_date, time=new_time, party_size=new_party_size,
+                    source=existing.get("source") or "phone",
+                    experience_id=new_experience_id,
+                    reservation_id_to_exclude=reservation_id,
+                    override_reason=update.overrideReason, override_actor=user,
+                    business_id=business_id,
+                )
+                update_data.update(enrichment)
+                result = await db.reservations.find_one_and_update(
+                    {"id": reservation_id}, {"$set": update_data}, return_document=True
+                )
+        except BookingRuleViolation as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        except TimeoutError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+    else:
+        result = await db.reservations.find_one_and_update(
+            {"id": reservation_id}, {"$set": update_data}, return_document=True
+        )
     if not result:
         raise HTTPException(status_code=404, detail="Reservation not found")
     result.pop("_id", None)

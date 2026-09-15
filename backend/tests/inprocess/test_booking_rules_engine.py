@@ -486,3 +486,145 @@ def test_active_blackout_blocks_both_customer_and_staff_paths(client, owner_head
     finally:
         req(client, "DELETE", f"/api/reservations/blackouts/{date}", headers=owner_headers)
         _cleanup_reservations("Blackout Guest 1", "Blackout Guest 2")
+
+
+# ------------------------------------------------------------ modifications
+# Remediation of the final readiness audit's finding: PUT /reservations/{id}
+# was a bare $set with no re-validation at all — moving a confirmed booking
+# onto a blacked-out date, past capacity, or across a size-tier boundary all
+# went straight through unchecked, even though the exact same change made at
+# creation time would have been rejected or correctly enriched.
+
+def test_editing_a_booking_onto_a_blackout_date_is_rejected(client, owner_headers):
+    good_date = _future_date(26)
+    blackout_date = _future_date(27)
+    req(client, "POST", "/api/reservations/blackouts", headers=owner_headers,
+        json={"date": blackout_date, "reason": "Kitchen closed"})
+    rid = None
+    try:
+        r = req(client, "POST", "/api/reservations", headers=owner_headers, json={
+            "guestName": "Edit Blackout Guest", "partySize": 2, "date": good_date, "time": "19:00",
+            "source": "phone",
+        })
+        assert r.status_code == 200, r.text
+        rid = r.json()["id"]
+
+        r = req(client, "PUT", f"/api/reservations/{rid}", headers=owner_headers,
+                json={"date": blackout_date})
+        assert r.status_code == 409, r.text
+        assert "Kitchen closed" in r.json()["detail"]
+
+        unchanged = req(client, "GET", f"/api/reservations/{rid}", headers=owner_headers).json()
+        assert unchanged["date"] == good_date, "a rejected edit must not partially apply"
+    finally:
+        req(client, "DELETE", f"/api/reservations/blackouts/{blackout_date}", headers=owner_headers)
+        _cleanup_reservations("Edit Blackout Guest")
+
+
+def test_editing_party_size_past_capacity_is_rejected(client, owner_headers):
+    rules = req(client, "GET", "/api/booking/rules").json()
+    req(client, "POST", "/api/booking/rules", headers=owner_headers,
+        json={**rules, "enforceCapacity": True, "maxCoversPerSlot": 6, "slotBufferMinutes": 30})
+    date = _future_date(28)
+    rid = None
+    try:
+        req(client, "POST", "/api/reservations", headers=owner_headers, json={
+            "guestName": "Edit Capacity Filler", "partySize": 4, "date": date, "time": "19:00",
+            "source": "phone",
+        })
+        r = req(client, "POST", "/api/reservations", headers=owner_headers, json={
+            "guestName": "Edit Capacity Guest", "partySize": 2, "date": date, "time": "19:15",
+            "source": "phone",
+        })
+        assert r.status_code == 200, r.text
+        rid = r.json()["id"]
+
+        # Growing this booking from 2 to 4 would push the slot to 8/6 —
+        # must be rejected, not silently allowed through a bare $set.
+        r = req(client, "PUT", f"/api/reservations/{rid}", headers=owner_headers,
+                json={"partySize": 4})
+        assert r.status_code == 409, r.text
+
+        unchanged = req(client, "GET", f"/api/reservations/{rid}", headers=owner_headers).json()
+        assert unchanged["partySize"] == 2
+    finally:
+        req(client, "POST", "/api/booking/rules", headers=owner_headers, json=rules)
+        _cleanup_reservations("Edit Capacity Filler", "Edit Capacity Guest")
+
+
+def test_editing_a_bookings_own_time_slightly_does_not_trip_capacity_against_itself(client, owner_headers):
+    """reservation_id_to_exclude must be passed through on the modification
+    path too, or a booking's own already-counted covers would double-count
+    against itself the moment its time (or any other rule-relevant field)
+    is edited without changing its party size."""
+    rules = req(client, "GET", "/api/booking/rules").json()
+    req(client, "POST", "/api/booking/rules", headers=owner_headers,
+        json={**rules, "enforceCapacity": True, "maxCoversPerSlot": 6, "slotBufferMinutes": 30})
+    date = _future_date(29)
+    rid = None
+    try:
+        r = req(client, "POST", "/api/reservations", headers=owner_headers, json={
+            "guestName": "Self Exclude Guest", "partySize": 6, "date": date, "time": "19:00",
+            "source": "phone",
+        })
+        assert r.status_code == 200, r.text
+        rid = r.json()["id"]
+
+        r = req(client, "PUT", f"/api/reservations/{rid}", headers=owner_headers,
+                json={"time": "19:10"})
+        assert r.status_code == 200, (
+            f"editing a booking's own time must not count its own covers against itself: {r.text[:200]}"
+        )
+        assert r.json()["time"] == "19:10"
+    finally:
+        req(client, "POST", "/api/booking/rules", headers=owner_headers, json=rules)
+        _cleanup_reservations("Self Exclude Guest")
+
+
+def test_editing_party_size_across_a_tier_boundary_re_enriches_the_booking(tiered_rules, experience, client, owner_headers):
+    """Growing a booking from the standard tier into the large-booking tier
+    via an edit must pick up that tier's deposit/pre-order/approval flags —
+    not keep whatever the ORIGINAL, smaller party size resolved to at
+    creation time."""
+    date = _future_date(30)
+    rid = None
+    try:
+        r = req(client, "POST", "/api/reservations", headers=owner_headers, json={
+            "guestName": "Tier Growth Guest", "partySize": 4, "date": date, "time": "19:00",
+            "source": "phone",
+        })
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["isLargeBooking"] is False
+        rid = body["id"]
+
+        r = req(client, "PUT", f"/api/reservations/{rid}", headers=owner_headers,
+                json={"partySize": 8, "experienceId": experience["id"]})
+        assert r.status_code == 200, r.text
+        updated = r.json()
+        assert updated["isLargeBooking"] is True
+        assert updated["depositRequired"] > 0, "growing into the Set Menu tier must now require a deposit"
+    finally:
+        _cleanup_reservations("Tier Growth Guest")
+
+
+def test_editing_only_metadata_does_not_touch_rule_fields(client, owner_headers):
+    """A pure notes/tags edit must not re-run (or be blocked by) booking
+    rules at all — confirms the fast path for non-rule-relevant fields."""
+    date = _future_date(31)
+    rid = None
+    try:
+        r = req(client, "POST", "/api/reservations", headers=owner_headers, json={
+            "guestName": "Metadata Only Guest", "partySize": 2, "date": date, "time": "19:00",
+            "source": "phone",
+        })
+        assert r.status_code == 200, r.text
+        rid = r.json()["id"]
+
+        r = req(client, "PUT", f"/api/reservations/{rid}", headers=owner_headers,
+                json={"notes": "Allergic to peanuts"})
+        assert r.status_code == 200, r.text
+        assert r.json()["notes"] == "Allergic to peanuts"
+        assert r.json()["date"] == date
+    finally:
+        _cleanup_reservations("Metadata Only Guest")
