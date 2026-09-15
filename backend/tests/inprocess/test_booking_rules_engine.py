@@ -294,6 +294,92 @@ def test_capacity_prevents_overbooking_when_enforced(client, owner_headers):
         _cleanup_reservations("Cap Guest 1", "Cap Guest 2")
 
 
+def test_capacity_lock_serializes_two_holders_for_the_same_business_and_date():
+    """Direct proof of the mutual-exclusion primitive itself, independent of
+    the full booking flow's own request timing (which the harness here
+    can't reliably force into a genuine interleave — see
+    test_two_concurrent_bookings_for_the_last_slot_never_both_succeed's
+    docstring): while one caller holds services.booking_rules_engine.
+    capacity_lock for a given business+date, a second acquire attempt for
+    that SAME business+date must not succeed until the first releases —
+    proving this is a real mutex, not a no-op context manager — while a
+    different business or a different date must acquire immediately,
+    proving the lock doesn't over-serialize unrelated bookings."""
+    import asyncio
+    from services import booking_rules_engine as bre
+
+    async def _scenario():
+        entered_together = False
+        other_date_acquired = False
+        other_business_acquired = False
+        async with bre.capacity_lock("lock-test-biz", "2099-01-01"):
+            try:
+                async with asyncio.timeout(0.3):
+                    async with bre.capacity_lock("lock-test-biz", "2099-01-01"):
+                        entered_together = True
+            except TimeoutError:
+                pass
+            async with asyncio.timeout(1):
+                async with bre.capacity_lock("lock-test-biz", "2099-01-02"):
+                    other_date_acquired = True
+                async with bre.capacity_lock("some-other-biz", "2099-01-01"):
+                    other_business_acquired = True
+        return entered_together, other_date_acquired, other_business_acquired
+
+    entered_together, other_date_acquired, other_business_acquired = _run(_scenario())
+    assert not entered_together, (
+        "a second caller must never be inside the lock for the same business+date "
+        "while the first still holds it"
+    )
+    assert other_date_acquired, "a different date for the same business must not be blocked by this lock"
+    assert other_business_acquired, "a different business must not be blocked by this lock"
+
+
+def test_two_concurrent_bookings_for_the_last_slot_never_both_succeed(client, owner_headers):
+    """End-to-end companion to test_capacity_lock_serializes_two_holders_
+    for_the_same_business_and_date above: proves the lock is actually wired
+    into POST /reservations correctly (right business_id, right date) and
+    that the final state is exactly one reservation. This harness's request
+    execution doesn't reliably force the underlying read-then-write race
+    into a genuine interleave even with the lock removed (mongomock's
+    in-memory operations resolve too fast for a naive thread-timing race to
+    catch reliably) — the mutual-exclusion guarantee itself is proven
+    directly and deterministically by the lock-level test above instead."""
+    rules = req(client, "GET", "/api/booking/rules").json()
+    req(client, "POST", "/api/booking/rules", headers=owner_headers,
+        json={**rules, "enforceCapacity": True, "maxCoversPerSlot": 6, "slotBufferMinutes": 30})
+    date = _future_date(22)
+    try:
+        import time
+        from concurrent.futures import ThreadPoolExecutor
+
+        def _book(name, party_size):
+            return req(client, "POST", "/api/reservations", headers=owner_headers, json={
+                "guestName": name, "partySize": party_size, "date": date, "time": "19:00",
+                "source": "phone",
+            })
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            f1 = pool.submit(_book, "Race Guest A", 5)
+            f2 = pool.submit(_book, "Race Guest B", 5)
+            r1, r2 = f1.result(), f2.result()
+
+        successes = [r for r in (r1, r2) if r.status_code == 200]
+        assert len(successes) == 1, (
+            f"only one of two concurrent bookings that together exceed capacity may succeed — "
+            f"got statuses {[r1.status_code, r2.status_code]}, bodies {[r.text[:150] for r in (r1, r2)]}"
+        )
+        loser = r1 if r1.status_code != 200 else r2
+        assert loser.status_code == 409, loser.text[:200]
+
+        total_booked = _run(db.reservations.count_documents(
+            {"date": date, "guestName": {"$in": ["Race Guest A", "Race Guest B"]}}))
+        assert total_booked == 1, f"exactly one reservation must have actually landed, found {total_booked}"
+    finally:
+        req(client, "POST", "/api/booking/rules", headers=owner_headers, json=rules)
+        _cleanup_reservations("Race Guest A", "Race Guest B")
+
+
 def test_capacity_is_only_advisory_when_not_enforced(client, owner_headers):
     """Default (enforceCapacity=False) — a slot over the derived floor
     capacity still succeeds; only /ai/overbooking-check warns about it.

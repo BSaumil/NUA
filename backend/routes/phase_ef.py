@@ -340,42 +340,49 @@ async def simulate_call(data: dict, user: dict = Depends(get_user)):
             # during the Trust Release final readiness audit: this was the
             # one other place (besides the real inbound-call webhook) that
             # created a reservation with none of those checks.
-            from services.booking_rules_engine import validate_and_enrich_booking, BookingRuleViolation
+            from services.booking_rules_engine import (
+                validate_and_enrich_booking, BookingRuleViolation, capacity_lock)
             party_size = int(details.get("partySize", 2) or 2)
             booking_time = details.get("time", "19:00")
+            enrichment = None
+            r = None
             try:
-                enrichment = await validate_and_enrich_booking(
-                    date=details["date"], time=booking_time, party_size=party_size,
-                    source="phone", business_id=user.get("businessId"),
-                )
+                async with capacity_lock(user.get("businessId"), details["date"]):
+                    enrichment = await validate_and_enrich_booking(
+                        date=details["date"], time=booking_time, party_size=party_size,
+                        source="phone", business_id=user.get("businessId"),
+                    )
+                    r = {
+                        "id": f"RES-{str(uuid.uuid4())[:8].upper()}",
+                        # A recognised caller keeps their CRM name even if the
+                        # transcript never spelled it out.
+                        "guestName": details.get("name") or (known_guest or {}).get("name") or caller,
+                        "guestPhone": caller,
+                        "partySize": party_size,
+                        "date": details["date"],
+                        "time": booking_time,
+                        "status": "confirmed",
+                        "source": "ai_phone_agent",
+                        "createdAt": datetime.now(timezone.utc).isoformat(),
+                        "businessId": user.get("businessId"),
+                        **enrichment,
+                    }
+                    if known_guest:
+                        # Link it to the profile so this booking joins their history.
+                        r["customerId"] = known_guest["customerId"]
+                        r["guestEmail"] = known_guest.get("email") or None
+                        await db.customers.update_one(
+                            {"id": known_guest["customerId"]},
+                            {"$push": {"reservationIds": r["id"]}},
+                        )
+                    await db.reservations.insert_one(r)
             except BookingRuleViolation as e:
                 intent_result["actions"].append({"action": "reservation_rejected", "reason": str(e)})
-                enrichment = None
-            if enrichment is not None:
-                r = {
-                    "id": f"RES-{str(uuid.uuid4())[:8].upper()}",
-                    # A recognised caller keeps their CRM name even if the
-                    # transcript never spelled it out.
-                    "guestName": details.get("name") or (known_guest or {}).get("name") or caller,
-                    "guestPhone": caller,
-                    "partySize": party_size,
-                    "date": details["date"],
-                    "time": booking_time,
-                    "status": "confirmed",
-                    "source": "ai_phone_agent",
-                    "createdAt": datetime.now(timezone.utc).isoformat(),
-                    "businessId": user.get("businessId"),
-                    **enrichment,
-                }
-                if known_guest:
-                    # Link it to the profile so this booking joins their history.
-                    r["customerId"] = known_guest["customerId"]
-                    r["guestEmail"] = known_guest.get("email") or None
-                    await db.customers.update_one(
-                        {"id": known_guest["customerId"]},
-                        {"$push": {"reservationIds": r["id"]}},
-                    )
-                await db.reservations.insert_one(r)
+                r = None
+            except TimeoutError as e:
+                intent_result["actions"].append({"action": "reservation_rejected", "reason": str(e)})
+                r = None
+            if r is not None:
                 intent_result["actions"].append({
                     "action": "reservation_created", "id": r["id"],
                     "customerId": r.get("customerId"),

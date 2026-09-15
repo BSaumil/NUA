@@ -130,7 +130,7 @@ async def public_book_reservation(data: dict):
     business default. Absent or unresolved, this is unchanged from before:
     an untagged reservation checked against the pooled rules/capacity."""
     from models.reservation import Reservation
-    from services.booking_rules_engine import validate_and_enrich_booking, BookingRuleViolation
+    from services.booking_rules_engine import validate_and_enrich_booking, BookingRuleViolation, capacity_lock
     from routes.online_orders import _resolve_business_id
 
     business_id = await _resolve_business_id(data.get("business"))
@@ -140,27 +140,29 @@ async def public_book_reservation(data: dict):
     experience_id = data.get("experienceId")
 
     try:
-        enrichment = await validate_and_enrich_booking(
-            date=date, time=time, party_size=party_size, source="online",
-            experience_id=experience_id, business_id=business_id,
-        )
+        async with capacity_lock(business_id, date):
+            enrichment = await validate_and_enrich_booking(
+                date=date, time=time, party_size=party_size, source="online",
+                experience_id=experience_id, business_id=business_id,
+            )
+            res_obj = Reservation(
+                guestName=data.get("guestName", "Guest"),
+                guestPhone=data.get("guestPhone", ""),
+                guestEmail=data.get("guestEmail", ""),
+                partySize=party_size,
+                date=date,
+                time=time,
+                duration=data.get("duration", 90),
+                specialRequests=data.get("specialRequests", ""),
+                source="online",
+                businessId=business_id,
+                **enrichment,
+            )
+            await db.reservations.insert_one(res_obj.dict())
     except BookingRuleViolation as e:
         raise HTTPException(status_code=409, detail=str(e))
-
-    res_obj = Reservation(
-        guestName=data.get("guestName", "Guest"),
-        guestPhone=data.get("guestPhone", ""),
-        guestEmail=data.get("guestEmail", ""),
-        partySize=party_size,
-        date=date,
-        time=time,
-        duration=data.get("duration", 90),
-        specialRequests=data.get("specialRequests", ""),
-        source="online",
-        businessId=business_id,
-        **enrichment,
-    )
-    await db.reservations.insert_one(res_obj.dict())
+    except TimeoutError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     if res_obj.isLargeBooking:
         from services import audit_service
         await audit_service.log_event(

@@ -52,12 +52,84 @@ the guest path, but the staff-authenticated path (`routes/reservations.py`,
 `routes/phase_ef_wave2.py`) now gets real isolation.
 """
 from __future__ import annotations
-from datetime import datetime, date as date_cls, timezone
+import asyncio
+import time
+import uuid
+from contextlib import asynccontextmanager
+from datetime import datetime, date as date_cls, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from database import db
 from services import floor_tables
 from middleware.actor_context import tenant_scope_filter
+
+_LOCK_TTL_SECONDS = 10
+_LOCK_MAX_WAIT_SECONDS = 5
+_LOCK_POLL_INTERVAL_SECONDS = 0.05
+
+
+@asynccontextmanager
+async def capacity_lock(business_id: Optional[str], date_str: str):
+    """Serializes reservation creation for one business's given date.
+
+    capacity_for_slot's covers-booked count is a read (aggregate query
+    across db.reservations), not a single document — unlike the atomic
+    compare-and-swap this codebase uses elsewhere for a single-document race
+    (services/wallet_service.py, routes/commerce_v29.py's voucher redemption),
+    there's no one document to pin a filter to here. Two simultaneous
+    requests for the last remaining slot on the same date would otherwise
+    both read "capacity available" before either commits its insert, both
+    pass validate_and_enrich_booking, and both land — overbooking despite
+    enforceCapacity being on.
+
+    Every caller of validate_and_enrich_booking that goes on to actually
+    insert a reservation wraps that whole check-then-insert sequence in
+    `async with capacity_lock(business_id, date):` — this is the atomic
+    primitive that closes the race, not a change to the capacity math
+    itself (which stays exactly the sliding ±slotBufferMinutes window it
+    always was).
+
+    Held for a bounded time (LOCK_TTL_SECONDS) so a crashed holder can never
+    wedge every future booking on that date; a waiter gives up after
+    LOCK_MAX_WAIT_SECONDS with a clear, retryable error rather than hanging.
+    """
+    lock_id = f"{business_id or 'unscoped'}:{date_str}"
+    token = uuid.uuid4().hex
+    deadline = time.monotonic() + _LOCK_MAX_WAIT_SECONDS
+    acquired = False
+    try:
+        while True:
+            now = datetime.now(timezone.utc)
+            try:
+                result: Optional[dict] = await db.booking_capacity_locks.find_one_and_update(
+                    {"_id": lock_id, "$or": [
+                        {"expiresAt": {"$exists": False}},
+                        {"expiresAt": {"$lte": now.isoformat()}},
+                    ]},
+                    {"$set": {"token": token,
+                              "expiresAt": (now + timedelta(seconds=_LOCK_TTL_SECONDS)).isoformat()}},
+                    upsert=True, return_document=True,
+                )
+            except Exception:
+                # Two racing upserts on the same not-yet-existing _id can
+                # surface as a DuplicateKeyError on the loser depending on
+                # driver/server version rather than a clean re-match — treat
+                # any failure here the same as "someone else holds it right
+                # now" and just retry, instead of assuming this loop's own
+                # bug.
+                result = None
+            if result and result.get("token") == token:
+                acquired = True
+                break
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    "Another booking for this date is being confirmed — please try again")
+            await asyncio.sleep(_LOCK_POLL_INTERVAL_SECONDS)
+        yield
+    finally:
+        if acquired:
+            await db.booking_capacity_locks.delete_one({"_id": lock_id, "token": token})
+
 
 DEFAULT_RULES: Dict[str, Any] = {
     # Pre-existing (previously unread) settings

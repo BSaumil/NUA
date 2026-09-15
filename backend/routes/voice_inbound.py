@@ -296,34 +296,34 @@ async def _finalise_booking(state: dict, call_id: str, caller: str) -> dict:
     {"ok": False, "reason": "<guest-facing rejection message>"}."""
     ctx = state.get("_ctx", {}) or {}
     business_id = ctx.get("businessId")
-    from services.booking_rules_engine import validate_and_enrich_booking, BookingRuleViolation
+    from services.booking_rules_engine import validate_and_enrich_booking, BookingRuleViolation, capacity_lock
     try:
-        enrichment = await validate_and_enrich_booking(
-            date=state["date"], time=state["time"], party_size=int(state["partySize"]),
-            source="phone", business_id=business_id,
-        )
+        async with capacity_lock(business_id, state["date"]):
+            enrichment = await validate_and_enrich_booking(
+                date=state["date"], time=state["time"], party_size=int(state["partySize"]),
+                source="phone", business_id=business_id,
+            )
+            res_id = f"RES-{uuid.uuid4().hex[:8].upper()}"
+            booking = {
+                "id": res_id,
+                "businessId": business_id,
+                "locationId": ctx.get("locationId"),
+                "date": state["date"],
+                "time": state["time"],
+                "partySize": int(state["partySize"]),
+                "guestName": state.get("name") or "Phone booking",
+                "guestPhone": caller,
+                "status": "confirmed",
+                "source": "phone",
+                "callId": call_id,
+                "createdAt": _now(),
+                **enrichment,
+            }
+            await db.reservations.insert_one(booking)
     except BookingRuleViolation as e:
         return {"ok": False, "reason": str(e)}
-    except Exception as e:
+    except Exception:
         return {"ok": False, "reason": "Sorry, I couldn't complete that booking. A team member will call you back."}
-
-    res_id = f"RES-{uuid.uuid4().hex[:8].upper()}"
-    booking = {
-        "id": res_id,
-        "businessId": business_id,
-        "locationId": ctx.get("locationId"),
-        "date": state["date"],
-        "time": state["time"],
-        "partySize": int(state["partySize"]),
-        "guestName": state.get("name") or "Phone booking",
-        "guestPhone": caller,
-        "status": "confirmed",
-        "source": "phone",
-        "callId": call_id,
-        "createdAt": _now(),
-        **enrichment,
-    }
-    await db.reservations.insert_one(booking)
     return {"ok": True, "reservationId": res_id}
 
 

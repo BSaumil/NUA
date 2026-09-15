@@ -154,20 +154,23 @@ async def create_reservation(reservation: ReservationCreate, user: Optional[dict
     # other. Blackout-date checking used to live here as its own inline
     # block (and only here — the customer path had none at all); it's now
     # one of several checks the engine runs for both.
-    from services.booking_rules_engine import validate_and_enrich_booking, BookingRuleViolation
+    from services.booking_rules_engine import validate_and_enrich_booking, BookingRuleViolation, capacity_lock
+    business_id = (user or {}).get("businessId")
     try:
-        enrichment = await validate_and_enrich_booking(
-            date=reservation.date, time=reservation.time, party_size=reservation.partySize,
-            source=reservation.source, experience_id=reservation.experienceId,
-            override_reason=reservation.overrideReason, override_actor=user,
-            business_id=(user or {}).get("businessId"),
-        )
+        async with capacity_lock(business_id, reservation.date):
+            enrichment = await validate_and_enrich_booking(
+                date=reservation.date, time=reservation.time, party_size=reservation.partySize,
+                source=reservation.source, experience_id=reservation.experienceId,
+                override_reason=reservation.overrideReason, override_actor=user,
+                business_id=business_id,
+            )
+            res_obj = Reservation(**{**reservation.dict(), **enrichment, "businessId": business_id})
+            doc = res_obj.dict()
+            await db.reservations.insert_one(doc)
     except BookingRuleViolation as e:
         raise HTTPException(status_code=409, detail=str(e))
-
-    res_obj = Reservation(**{**reservation.dict(), **enrichment, "businessId": (user or {}).get("businessId")})
-    doc = res_obj.dict()
-    await db.reservations.insert_one(doc)
+    except TimeoutError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     if res_obj.ruleOverrideReason:
         try:
             from services import audit_service
