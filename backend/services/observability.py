@@ -78,7 +78,7 @@ async def record_error(request_id: str, request, exc: Exception) -> None:
         await db.error_log.insert_one({
             "requestId": request_id,
             "method": request.method,
-            "path": request.url.path,
+            "path": request.scope["path"],  # not request.url.path — see server.py's RequireAuthMiddleware comment on why
             "actor": actor,
             "error": f"{type(exc).__name__}: {exc}",
             "traceback": traceback.format_exc()[-4000:],  # bounded — a runaway
@@ -150,7 +150,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         except Exception as exc:
             await record_error(request_id, request, exc)
             log.error("unhandled exception [%s] %s %s: %s",
-                     request_id, request.method, request.url.path, exc, exc_info=True)
+                     request_id, request.method, request.scope["path"], exc, exc_info=True)
             response = JSONResponse(
                 status_code=500,
                 content={"detail": "Something went wrong on our end.", "requestId": request_id},
@@ -161,7 +161,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         log.info(json.dumps({
             "requestId": request_id,
             "method": request.method,
-            "path": request.url.path,
+            "path": request.scope["path"],
             "status": status_code,
             "durationMs": duration_ms,
             "actor": actor.get("userId") if actor else None,

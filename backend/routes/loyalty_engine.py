@@ -11,7 +11,7 @@ from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from middleware.actor_context import tenant_owns, tenant_scope_filter
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Optional, Dict, List
 import uuid
 import os
 import json
@@ -510,7 +510,7 @@ async def unlock_loyalty_account(customer_id: str, user: dict = Depends(require_
 # =============================================================================
 # AUTONOMOUS AI AGENT (Ash) — observes, decides, acts
 # =============================================================================
-async def _segment_customers():
+async def _segment_customers(business_id: Optional[str] = None):
     """Auto-segment customers: VIP / regular / at-risk / first-timer.
 
     Was reading totalVisits/totalSpend/lastVisit — none of which exist on
@@ -520,10 +520,10 @@ async def _segment_customers():
     them, since totalVisits was always 0) — this has been mis-segmenting
     every customer since the field was added.
     """
-    customers = await db.customers.find({}, {"_id": 0}).to_list(5000)
+    customers = await db.customers.find(tenant_scope_filter(business_id), {"_id": 0}).to_list(5000)
     now = datetime.now(timezone.utc)
     sixty_days_ago = (now - timedelta(days=60)).date().isoformat()
-    segments = {"vip": [], "regular": [], "at_risk": [], "first_timer": []}
+    segments: Dict[str, List[str]] = {"vip": [], "regular": [], "at_risk": [], "first_timer": []}
     for c in customers:
         visits = int(c.get("visits", 0) or 0)
         spend = float(c.get("totalSpent", 0) or 0)
@@ -539,13 +539,15 @@ async def _segment_customers():
     return segments
 
 
-async def _record_decision(action_type: str, summary: str, payload: dict, status: str = "executed"):
+async def _record_decision(action_type: str, summary: str, payload: dict, status: str = "executed",
+                            business_id: Optional[str] = None):
     rec = {
         "id": f"AGT-{str(uuid.uuid4())[:8].upper()}",
         "actionType": action_type,
         "summary": summary,
         "payload": payload,
         "status": status,
+        "businessId": business_id,
         "createdAt": datetime.now(timezone.utc).isoformat(),
     }
     await db.agent_decisions.insert_one(rec)
@@ -556,7 +558,7 @@ async def _record_decision(action_type: str, summary: str, payload: dict, status
 # =============================================================================
 # POINTS EXPIRY (inactivity-based, opt-in via loyalty_config.pointsExpiryDays)
 # =============================================================================
-async def _expire_inactive_points(cfg: dict) -> list:
+async def _expire_inactive_points(cfg: dict, business_id: Optional[str] = None) -> list:
     """Zero out a customer's points balance once pointsExpiryDays have passed
     since their last earn/redeem activity. Inactivity-based rather than
     FIFO-per-earn (which would need tracking an expiry date per earn ledger
@@ -567,7 +569,9 @@ async def _expire_inactive_points(cfg: dict) -> list:
     if days <= 0:
         return []
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    customers = await db.customers.find({"points": {"$gt": 0}}, {"_id": 0, "id": 1, "points": 1}).to_list(20000)
+    customers = await db.customers.find(
+        {"points": {"$gt": 0}, **tenant_scope_filter(business_id)}, {"_id": 0, "id": 1, "points": 1}
+    ).to_list(20000)
     expired = []
     for c in customers:
         last = await db.loyalty_ledger.find_one(
@@ -589,7 +593,7 @@ async def _expire_inactive_points(cfg: dict) -> list:
     return expired
 
 
-async def _warn_expiring_points(cfg: dict) -> list:
+async def _warn_expiring_points(cfg: dict, business_id: Optional[str] = None) -> list:
     """One-time "your points expire soon" notice, sent expiryWarnDays before
     pointsExpiryDays actually zeroes a balance. Expiry used to run
     completely silently — a customer only found out their balance was gone
@@ -603,7 +607,7 @@ async def _warn_expiring_points(cfg: dict) -> list:
     warn_cutoff = (now - timedelta(days=max(expiry_days - warn_days, 0))).isoformat()
     expire_cutoff = (now - timedelta(days=expiry_days)).isoformat()
     customers = await db.customers.find(
-        {"points": {"$gt": 0}},
+        {"points": {"$gt": 0}, **tenant_scope_filter(business_id)},
         {"_id": 0, "id": 1, "name": 1, "email": 1, "phone": 1, "points": 1, "loyaltyExpiryWarnedAt": 1},
     ).to_list(20000)
     warned = []
@@ -644,7 +648,7 @@ async def _warn_expiring_points(cfg: dict) -> list:
 # =============================================================================
 # TIER RE-EVALUATION (upgrade always; downgrade opt-in, with a grace period)
 # =============================================================================
-async def _reevaluate_tiers(cfg: dict) -> dict:
+async def _reevaluate_tiers(cfg: dict, business_id: Optional[str] = None) -> dict:
     """Recompute each customer's tier from their current points balance
     against routes/loyalty.py's owner-editable loyalty_tiers ladder.
     Upgrades apply immediately (unchanged from before). Downgrades only
@@ -652,7 +656,7 @@ async def _reevaluate_tiers(cfg: dict) -> dict:
     below their tier's threshold continuously for downgradeGraceDays — a
     single slow week shouldn't cost someone their tier the moment this
     tick runs."""
-    tiers = await db.loyalty_tiers.find({}, {"_id": 0}).to_list(20)
+    tiers = await db.loyalty_tiers.find(tenant_scope_filter(business_id), {"_id": 0}).to_list(20)
     if not tiers:
         return {"downgraded": [], "upgraded": []}
     tiers_desc = sorted(tiers, key=lambda t: t.get("minPoints", 0), reverse=True)
@@ -661,7 +665,7 @@ async def _reevaluate_tiers(cfg: dict) -> dict:
     now = datetime.now(timezone.utc)
 
     customers = await db.customers.find(
-        {"membershipTier": {"$exists": True}},
+        {"membershipTier": {"$exists": True}, **tenant_scope_filter(business_id)},
         {"_id": 0, "id": 1, "points": 1, "membershipTier": 1, "tierGraceStartedAt": 1},
     ).to_list(20000)
     downgraded, upgraded = [], []
@@ -703,30 +707,42 @@ async def _reevaluate_tiers(cfg: dict) -> dict:
 
 @router.get("/agent/segments")
 async def get_segments(_: dict = Depends(require_owner_or_manager)):
-    s = await _segment_customers()
+    s = await _segment_customers(_.get("businessId"))
     return {"segments": {k: len(v) for k, v in s.items()}, "ids": s}
 
 
 @router.get("/agent/decisions")
 async def get_decisions( limit: int = 100, _: dict = Depends(require_owner_or_manager)):
-    decisions = await db.agent_decisions.find({}, {"_id": 0}).sort("createdAt", -1).to_list(limit)
+    decisions = await db.agent_decisions.find(
+        tenant_scope_filter(_.get("businessId")), {"_id": 0}
+    ).sort("createdAt", -1).to_list(limit)
     return decisions
 
 
 @router.post("/agent/tick")
 async def agent_tick(request: Request, user: dict = Depends(require_owner_or_manager)):
-    """Run all autonomous rules once. Returns the list of decisions taken."""
+    """Run all autonomous rules once. Returns the list of decisions taken.
+
+    Every read/write below is scoped to the caller's own business_id.
+    Previously none of them were: any owner/manager at any business
+    calling this endpoint zeroed out points balances, changed membership
+    tiers, and issued real wallet vouchers for every business's customers
+    on the deployment, not just their own — see the independent security
+    review that found this for the exact mechanism."""
+    business_id = user.get("businessId")
     decisions = []
     # 1. Auto-segment + flag at-risk
-    segs = await _segment_customers()
+    segs = await _segment_customers(business_id)
     if len(segs["at_risk"]) > 0:
         decisions.append(await _record_decision("at_risk_flagged",
             f"Flagged {len(segs['at_risk'])} customers as at-risk (no visit in 60 days)",
-            {"customerIds": segs["at_risk"][:20]}))
+            {"customerIds": segs["at_risk"][:20]}, business_id=business_id))
     # 2. Birthday vouchers — actually issue wallet vouchers for customers whose
     # birthday month is now (idempotent per customer per year).
     from services.wallet_service import ensure_birthday_voucher
-    customers = await db.customers.find({"birthday": {"$exists": True}}, {"_id": 0}).to_list(5000)
+    customers = await db.customers.find(
+        {"birthday": {"$exists": True}, **tenant_scope_filter(business_id)}, {"_id": 0}
+    ).to_list(5000)
     issued = []
     for c in customers:
         try:
@@ -738,13 +754,17 @@ async def agent_tick(request: Request, user: dict = Depends(require_owner_or_man
     if issued:
         decisions.append(await _record_decision("birthday_vouchers",
             f"Issued {len(issued)} birthday-month vouchers straight to customer wallets",
-            {"issued": issued[:20]}))
+            {"issued": issued[:20]}, business_id=business_id))
     # 3. Inventory low-stock reorder suggestions
-    products = await db.products.find({"stock": {"$lte": 5}, "active": {"$ne": False}}, {"_id": 0, "id": 1, "name": 1, "stock": 1}).to_list(500)
+    products = await db.products.find(
+        {"stock": {"$lte": 5}, "active": {"$ne": False}, **tenant_scope_filter(business_id)},
+        {"_id": 0, "id": 1, "name": 1, "stock": 1},
+    ).to_list(500)
     if products:
         decisions.append(await _record_decision("low_stock_alert",
             f"{len(products)} products at/below 5 units — suggest reorder",
-            {"products": [{"id": p["id"], "name": p["name"], "stock": p["stock"]} for p in products[:20]]}))
+            {"products": [{"id": p["id"], "name": p["name"], "stock": p["stock"]} for p in products[:20]]},
+            business_id=business_id))
     # 4. Anomaly check on inventory
     try:
         from routes.v15_features import inventory_anomalies  # reuse
@@ -752,41 +772,41 @@ async def agent_tick(request: Request, user: dict = Depends(require_owner_or_man
         if anom.get("anomalies"):
             decisions.append(await _record_decision("inventory_anomaly",
                 f"Detected {len(anom['anomalies'])} unusual sales velocity",
-                {"anomalies": anom["anomalies"][:10]}))
+                {"anomalies": anom["anomalies"][:10]}, business_id=business_id))
     except Exception:
         pass
     # 5. Tonight-only blast suggestion if low booking count
     today_iso = datetime.now(timezone.utc).date().isoformat()
-    bookings_today = await db.reservations.count_documents({"date": today_iso})
+    bookings_today = await db.reservations.count_documents({"date": today_iso, **tenant_scope_filter(business_id)})
     if bookings_today < 5:
         decisions.append(await _record_decision("blast_suggested",
             f"Only {bookings_today} bookings tonight — suggest 20% off SMS blast to VIPs",
             {"bookingsToday": bookings_today, "vipCount": len(segs["vip"])},
-            status="suggested"))
+            status="suggested", business_id=business_id))
     # 6. Points expiry warning + 7. Points expiry + 8. Tier re-evaluation —
     # all opt-in via loyalty_config (pointsExpiryDays / downgradeEnabled),
     # no-ops otherwise. Warning runs before expiry so a customer who's about
     # to lose points this tick was at least told last tick, not the same run.
-    cfg = await get_config(user.get("businessId"))
-    warned = await _warn_expiring_points(cfg)
+    cfg = await get_config(business_id)
+    warned = await _warn_expiring_points(cfg, business_id)
     if warned:
         decisions.append(await _record_decision("points_expiry_warned",
             f"Sent expiry warning to {len(warned)} customer(s) with points expiring soon",
-            {"warned": warned[:20]}))
-    expired = await _expire_inactive_points(cfg)
+            {"warned": warned[:20]}, business_id=business_id))
+    expired = await _expire_inactive_points(cfg, business_id)
     if expired:
         decisions.append(await _record_decision("points_expired",
             f"Expired inactive points for {len(expired)} customer(s)",
-            {"expired": expired[:20]}))
-    tier_changes = await _reevaluate_tiers(cfg)
+            {"expired": expired[:20]}, business_id=business_id))
+    tier_changes = await _reevaluate_tiers(cfg, business_id)
     if tier_changes["upgraded"]:
         decisions.append(await _record_decision("tier_upgraded",
             f"{len(tier_changes['upgraded'])} customer(s) auto-upgraded to a higher tier",
-            {"upgraded": tier_changes["upgraded"][:20]}))
+            {"upgraded": tier_changes["upgraded"][:20]}, business_id=business_id))
     if tier_changes["downgraded"]:
         decisions.append(await _record_decision("tier_downgraded",
             f"{len(tier_changes['downgraded'])} customer(s) downgraded after {cfg.get('downgradeGraceDays', 30)} days below their tier's threshold",
-            {"downgraded": tier_changes["downgraded"][:20]}))
+            {"downgraded": tier_changes["downgraded"][:20]}, business_id=business_id))
     return {"decisionsCount": len(decisions), "decisions": decisions, "segments": {k: len(v) for k, v in segs.items()}}
 
 

@@ -531,7 +531,7 @@ from services import nua_trust
 @router.get("/trust/suggestions")
 async def trust_suggestions(_: dict = Depends(get_user)):
     """Tools currently eligible for promotion but not yet promoted."""
-    return await nua_trust.list_suggestions()
+    return await nua_trust.list_suggestions(_.get("businessId"))
 
 
 @router.get("/trust/settings")
@@ -546,7 +546,7 @@ async def save_trust_settings(body: dict, _: dict = Depends(require_owner)):
 
 @router.get("/tools/{tool_name}/trust")
 async def tool_trust(tool_name: str, _: dict = Depends(get_user)):
-    return await nua_trust.get_tool_trust(tool_name)
+    return await nua_trust.get_tool_trust(tool_name, _.get("businessId"))
 
 
 @router.post("/tools/{tool_name}/promote")
@@ -555,7 +555,8 @@ async def promote_tool(tool_name: str, user: dict = Depends(require_owner)):
     autonomy is a bigger call than the routine owner-or-manager permission
     toggle, so this is intentionally gated tighter."""
     try:
-        return await nua_trust.promote(tool_name, actor=user.get("email") or "owner")
+        return await nua_trust.promote(tool_name, actor=user.get("email") or "owner",
+                                        business_id=user.get("businessId"))
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -564,7 +565,7 @@ async def promote_tool(tool_name: str, user: dict = Depends(require_owner)):
 async def auto_executions(limit: int = 50, _: dict = Depends(get_user)):
     """Shadow-audit review feed: recent auto-tier tool calls, newest first,
     so an owner can spot-check what NUA ran unsupervised."""
-    return await nua_trust.list_recent_executions(limit=min(max(limit, 1), 200))
+    return await nua_trust.list_recent_executions(limit=min(max(limit, 1), 200), business_id=_.get("businessId"))
 
 
 @router.post("/tools/executions/{audit_id}/flag")
@@ -574,7 +575,7 @@ async def flag_execution(audit_id: str, body: dict, user: dict = Depends(require
     exposes a rollback and the caller asked for one, attempts to undo it."""
     reason = (body or {}).get("reason")
     row = await db.audit_events.find_one({"id": audit_id}, {"_id": 0})
-    if not row:
+    if not row or not tenant_owns(row.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Execution not found")
     tool_name = row.get("entityId")
     tool = nua_tools.TOOLS.get(tool_name)
@@ -589,6 +590,7 @@ async def flag_execution(audit_id: str, body: dict, user: dict = Depends(require
     result = await nua_trust.demote(
         tool_name, actor=user.get("email") or "owner",
         reason=reason or "Flagged as wrong from the auto-execution review feed",
+        business_id=user.get("businessId"),
     )
 
     undo = None

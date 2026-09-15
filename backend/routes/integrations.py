@@ -195,7 +195,8 @@ async def _create_stripe_session(data: dict, http_request: Request, cashier: dic
     from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
 
     origin_url = data.get("originUrl", str(http_request.base_url).rstrip("/"))
-    order_id = data.get("orderId", f"ORD-{str(uuid.uuid4())[:8].upper()}")
+    client_order_id = data.get("orderId")
+    order_id = client_order_id or f"ORD-{str(uuid.uuid4())[:8].upper()}"
     amount = data.get("amount", 0)
     sale_payload = data.get("sale")
 
@@ -209,9 +210,33 @@ async def _create_stripe_session(data: dict, http_request: Request, cashier: dic
     # resource identity — routes/bill_split.py's split_id,
     # routes/online_orders.py's placed-order id — get real protection with
     # no caller change at all. See services/payment_idempotency.py.
-    from services.payment_idempotency import claim_or_wait, record_result
-    idempotency_key = data.get("idempotencyKey") or order_id
-    prior_result = await claim_or_wait("stripe", idempotency_key)
+    #
+    # Namespaced by the cashier's own businessId: order_id/idempotencyKey
+    # is client-supplied on this generic endpoint (unlike bill_split's
+    # server-derived split_id), so without this a staff member at business
+    # A using the same orderId as business B within the claim window would
+    # have gotten back business B's live Stripe session instead of their
+    # own. A guest checkout (routes/bill_split.py's synthetic cashier, no
+    # businessId) still gets real per-split protection from split_id's own
+    # uniqueness — "guest" here is just this endpoint's shared fallback
+    # bucket for callers with no business of their own, not a weakening of
+    # bill_split's actual guarantee.
+    from services.payment_idempotency import claim_or_wait, record_result, fingerprint, IdempotencyConflict
+    idempotency_key = f"{cashier.get('businessId') or 'guest'}:{data.get('idempotencyKey') or order_id}"
+    # Pinned to amount + the CLIENT-supplied orderId (client_order_id, not
+    # order_id — order_id falls back to a fresh random value every call
+    # when the client omits it, which would make every retry look like a
+    # "different request" and 409 on its own legitimate retry). originUrl/
+    # sale legitimately vary across a genuine retry (different tab, cart
+    # snapshot re-serialized) without meaning a different transaction. A
+    # DIFFERENT amount or client-supplied orderId under the same key is
+    # exactly the "client reused a stale idempotency key across two
+    # different carts" bug this guards against.
+    try:
+        prior_result = await claim_or_wait("stripe", idempotency_key,
+                                            payload_fingerprint=fingerprint(amount, client_order_id))
+    except IdempotencyConflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
     if prior_result is not None:
         return prior_result
 

@@ -324,7 +324,22 @@ class RequireAuthMiddleware(BaseHTTPMiddleware):
     """Reject /api/ traffic that carries no valid token, before it reaches a route."""
 
     async def dispatch(self, request, call_next):
-        path = request.url.path
+        # request.scope["path"], not request.url.path: starlette's Request.url
+        # rebuilds a URL by string-concatenating the raw, unvalidated Host
+        # header with the real path and reparsing it (PYSEC-2026-161 /
+        # GHSA-86qp-5c8j-p5mr) — a Host header like "x/api/public" turns
+        # request.url.path into "/api/public/api/users", which
+        # _is_public_api() then waves through with no token check at all,
+        # while FastAPI's actual routing (which dispatches on scope["path"]
+        # directly, never touching Host) still sends the request to the
+        # real, sensitive handler. Verified end-to-end against a route with
+        # no route-level Depends() (GET/POST /api/users): the unmodified
+        # request correctly 401s, the same request with that Host header
+        # reaches routes/settings.py's get_users()/create_user() with zero
+        # authentication. scope["path"] is what the router actually uses
+        # and is not derived from any header, so it can't be spoofed this
+        # way regardless of which starlette version is installed.
+        path = request.scope["path"]
         if request.method == "OPTIONS" or not path.startswith("/api/"):
             return await call_next(request)
         if _is_public_api(path):
@@ -396,7 +411,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._last_evict = time()
 
     async def dispatch(self, request, call_next):
-        path = request.url.path
+        # scope["path"], not request.url.path — see RequireAuthMiddleware's
+        # comment on why request.url.path is Host-header-spoofable.
+        path = request.scope["path"]
         if not path.startswith("/api/") or path.startswith("/api/public") or path.startswith("/api/table"):
             return await call_next(request)
         override = self.PATH_OVERRIDES.get(path)
@@ -437,7 +454,14 @@ class NuaAliasMiddleware(BaseHTTPMiddleware):
     """Rewrite /api/ash/... to /api/nua/... so old tests keep working after
     the routes were renamed to the /nua namespace."""
     async def dispatch(self, request, call_next):
-        p = request.url.path
+        # scope["path"], not request.url.path — see RequireAuthMiddleware's
+        # comment. Beyond just being unreliable here, request.url.path would
+        # let a crafted Host header make this middleware rewrite
+        # scope["path"] to an attacker-chosen value (this middleware is the
+        # outermost layer, so that rewrite would reach every middleware and
+        # route after it) instead of only ever touching a genuine /api/ash/*
+        # request.
+        p = request.scope["path"]
         if p.startswith("/api/ash/") or p == "/api/ash":
             new_path = "/api/nua/" + p[len("/api/ash/"):] if p != "/api/ash" else "/api/nua"
             request.scope["path"] = new_path

@@ -157,7 +157,8 @@ async def approve(approval_id: str, *, actor: str, execute_fn: Callable[[Dict[st
     if appr.get("source") == "ash_agent":
         try:
             from services import nua_trust  # lazy: nua_tools -> approval_service, avoid the cycle
-            await nua_trust.record_decision(appr["actionType"], "approved", approval_id)
+            await nua_trust.record_decision(appr["actionType"], "approved", approval_id,
+                                             business_id=appr.get("businessId"))
         except Exception:
             logger.warning(f"[trust] record_decision failed for {approval_id}", exc_info=True)
     return doc
@@ -185,7 +186,8 @@ async def reject(approval_id: str, *, actor: str, reason: Optional[str] = None) 
     if appr.get("source") == "ash_agent":
         try:
             from services import nua_trust
-            await nua_trust.record_decision(appr["actionType"], "rejected", approval_id)
+            await nua_trust.record_decision(appr["actionType"], "rejected", approval_id,
+                                             business_id=appr.get("businessId"))
         except Exception:
             logger.warning(f"[trust] record_decision failed for {approval_id}", exc_info=True)
     return doc

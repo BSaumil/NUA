@@ -34,12 +34,25 @@ jobs:
         run: pip install -r requirements.txt
       - name: Lint (error-only — see backend/.flake8 for why this isn't full style enforcement)
         run: python -m flake8 .
-      - name: Type check (report only — 784 pre-existing findings on an
-          untyped codebase; not yet a merge gate, see backend/SECURITY_DEPENDENCY_DEBT.md
-          for the equivalent tracking convention)
+      - name: Type check (report only — informational mypy output, superseded
+          as a merge gate by the differential check below)
         run: python -m mypy --ignore-missing-imports server.py || true
-      - name: Dependency vulnerability scan (report only — see backend/SECURITY_DEPENDENCY_DEBT.md)
+      - name: Type check — differential baseline gate (fails if the mypy
+          error count grows past backend/mypy_baseline_count.txt, or a new
+          error code appears that wasn't already accepted — see
+          backend/scripts/check_type_baseline.py for why a raw "zero new
+          errors" gate isn't meaningful on this codebase's motor stubs)
+        run: python scripts/check_type_baseline.py
+      - name: Dependency vulnerability scan (report only — informational
+          pip-audit output, superseded as a merge gate by the differential
+          check below)
         run: python -m pip_audit -r requirements.txt || true
+      - name: Dependency vulnerability scan — differential baseline gate
+          (fails on any advisory for a package, or advisory id for an
+          already-tracked package, not yet triaged in
+          backend/dependency_baseline.json — see backend/SECURITY_DEPENDENCY_DEBT.md
+          and backend/scripts/check_dependency_baseline.py)
+        run: python scripts/check_dependency_baseline.py
       - name: Run in-process test suite
         # ADMIN_EMAIL/ADMIN_PASSWORD/DEMO_STAFF_PASSWORD/SUPPORT_OVERRIDE_KEY
         # are deliberately NOT set here — tests/inprocess/conftest.py sets

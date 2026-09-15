@@ -330,6 +330,15 @@ async def request_deposit(reservation_id: str, data: dict, http_request: Request
         # means they used before this endpoint existed (card reader, cash).
         return {"configured": False, "url": None}
 
+    # A double-click must not create two live Stripe sessions for the same
+    # deposit — reservation_id is already a stable resource identity, same
+    # pattern as the other checkout endpoints' order_id-keyed claim (see
+    # services/payment_idempotency.py).
+    from services.payment_idempotency import claim_or_wait, record_result
+    prior_result = await claim_or_wait("stripe_deposit", reservation_id)
+    if prior_result is not None:
+        return {"configured": True, **prior_result}
+
     from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
     import uuid
 
@@ -362,7 +371,9 @@ async def request_deposit(reservation_id: str, data: dict, http_request: Request
     await db.reservations.update_one(
         {"id": reservation_id}, {"$set": {"depositSessionId": session.session_id}}
     )
-    return {"configured": True, "url": session.url, "sessionId": session.session_id}
+    result = {"url": session.url, "sessionId": session.session_id}
+    await record_result("stripe_deposit", reservation_id, result)
+    return {"configured": True, **result}
 
 
 @router.post("/reservations/{reservation_id}/no-show")

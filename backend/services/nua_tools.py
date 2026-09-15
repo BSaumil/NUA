@@ -108,10 +108,23 @@ async def _tx_dismiss_insight(a):
 
 async def _tx_approve_pending_approval(a):
     """Ash approves a pending approval on the owner's behalf.
-    We never bypass the queue — this only works when caller has permission."""
+    We never bypass the queue — this only works when caller has permission.
+
+    Tenant check added: approval_service.approve() itself has no
+    businessId check (it trusts the caller to have already verified
+    ownership — routes/approvals.py's HTTP endpoint does this before
+    calling it), and this tool previously looked the approval up purely
+    by the model-supplied approvalId with no check at all. Without this,
+    a manager at business A (or a prompt-injected Ash agent acting on
+    their behalf) could execute business B's pending approval — voucher
+    issuance, refund, campaign send, whatever the underlying action is —
+    just by supplying business B's approvalId."""
     from services.rules_engine import ACTION_LIBRARY
+    from middleware.actor_context import get_actor_context, tenant_owns
     doc = await db.approvals.find_one({"id": a["approvalId"]}, {"_id": 0})
     if not doc:
+        return {"error": "approval not found"}
+    if not tenant_owns(doc.get("businessId"), get_actor_context().get("businessId")):
         return {"error": "approval not found"}
     if doc["status"] != "pending":
         return {"error": f"already {doc['status']}"}
@@ -125,6 +138,10 @@ async def _tx_approve_pending_approval(a):
 
 
 async def _tx_reject_pending_approval(a):
+    from middleware.actor_context import get_actor_context, tenant_owns
+    doc = await db.approvals.find_one({"id": a["approvalId"]}, {"_id": 0})
+    if not doc or not tenant_owns(doc.get("businessId"), get_actor_context().get("businessId")):
+        return {"error": "approval not found"}
     try:
         return await approval_service.reject(a["approvalId"], actor="ash-agent", reason=a.get("reason"))
     except ValueError as e:
