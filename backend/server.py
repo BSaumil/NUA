@@ -6,6 +6,8 @@ from fastapi import FastAPI, APIRouter
 from starlette.middleware.cors import CORSMiddleware
 import logging
 import os
+import re
+from typing import Optional
 
 from database import client
 
@@ -387,8 +389,13 @@ class RequireAuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+def _table_id_from_path(path: str) -> Optional[str]:
+    m = re.match(r"^/api/table/([^/]+)", path)
+    return m.group(1) if m else None
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """120 req/min per (tenant, identity). Excludes static & public booking.
+    """120 req/min per (tenant, identity) for authenticated staff traffic.
 
     A handful of paths get a stricter, IP-only override instead of the
     default — specifically ones that are unauthenticated by design and
@@ -397,6 +404,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     voucher codes has no `identity` beyond "unauthenticated", so without
     this override every guessed code would share the same generous 120/min
     room as every other anonymous request across the whole API.
+
+    /api/public/* and /api/table/* used to be excluded from rate limiting
+    entirely (found during the Trust Release final readiness audit) — an
+    anonymous caller could hit booking/waitlist creation, menu reads, or
+    table order placement at unlimited rate. PREFIX_OVERRIDES below covers
+    the write/enumeration-risk paths specifically (booking, waitlist,
+    voice webhooks) with their own stricter limits; everything else under
+    those two prefixes now falls through to a real, if generous, default
+    instead of no limit at all.
     """
     PATH_OVERRIDES = {
         "/api/vouchers/public-check": (10, 60),  # 10 req/min per IP
@@ -420,6 +436,32 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # tab can't grow client_error_log unbounded.
         "/api/ops/client-errors": (30, 60),  # 30 req/min per IP
     }
+    # Ordered (prefix, limit, window) list for endpoints whose path carries
+    # a variable segment (table_id, call_id) that PATH_OVERRIDES' exact-match
+    # dict can't key on. First matching prefix wins, checked before the
+    # generic public/table default.
+    PREFIX_OVERRIDES = (
+        # Booking/waitlist creation — a real, moderately-costly write on a
+        # fully anonymous surface; same tier as the guest-lookup overrides
+        # above.
+        ("/api/public/book", 10, 60),
+        ("/api/public/join-waitlist", 10, 60),
+        # Twilio's own webhook-delivery IPs are a shared pool across every
+        # customer's calls, not one IP per caller, and legitimate retry
+        # behavior for a single call can itself fire several requests in
+        # quick succession — generous enough that real multi-call traffic
+        # and retries are never mistaken for abuse, still bounded against a
+        # flood. The route's own CallSid-based dedup (routes/voice_inbound.py)
+        # is what actually protects against a duplicate booking; this is
+        # just a backstop against volume.
+        ("/api/voice/inbound", 60, 60),
+    )
+    # Everything else under /api/public/* and /api/table/* (menu reads,
+    # availability checks, order status polling, table order placement) —
+    # generous enough for normal guest traffic (including several guests at
+    # one venue sharing a WiFi NAT's IP, see the table_id keying below),
+    # bounded against a scraping/enumeration flood.
+    GUEST_DEFAULT_LIMIT = (60, 60)
 
     def __init__(self, app):
         super().__init__(app)
@@ -432,12 +474,31 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # scope["path"], not request.url.path — see RequireAuthMiddleware's
         # comment on why request.url.path is Host-header-spoofable.
         path = request.scope["path"]
-        if not path.startswith("/api/") or path.startswith("/api/public") or path.startswith("/api/table"):
+        if not path.startswith("/api/"):
             return await call_next(request)
+
         override = self.PATH_OVERRIDES.get(path)
+        prefix_override = next((o for o in self.PREFIX_OVERRIDES if path.startswith(o[0])), None)
+        is_guest_surface = path.startswith("/api/public") or path.startswith("/api/table")
+
         if override:
             limit, window = override
             key = f"path:{path}:{request.client.host if request.client else 'unknown'}"
+        elif prefix_override:
+            _prefix, limit, window = prefix_override
+            key = f"prefix:{_prefix}:{request.client.host if request.client else 'unknown'}"
+        elif is_guest_surface:
+            limit, window = self.GUEST_DEFAULT_LIMIT
+            ip = request.client.host if request.client else "unknown"
+            # Table-scoped, not just IP-scoped: several guests at one venue
+            # commonly share a single WiFi NAT's public IP, and keying
+            # purely on IP would let one table's QR-ordering activity
+            # throttle every other table's guests at the same venue. A
+            # resolved business (menu/booking reads carry ?business=) is
+            # folded in for the same reason on the business-scoped paths.
+            table_id = _table_id_from_path(path)
+            business = request.query_params.get("business")
+            key = f"guest:{ip}:{table_id or business or 'na'}"
         else:
             limit, window = self.limit, self.window
             tenant = request.headers.get("X-Tenant-Id", "default")
