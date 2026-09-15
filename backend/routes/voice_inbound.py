@@ -68,6 +68,16 @@ def _uid() -> str:
     return f"INB-{uuid.uuid4().hex[:8].upper()}"
 
 
+def _form_str(form: dict, key: str, default: str = "") -> str:
+    """Twilio always sends these fields as plain strings, but starlette
+    types a form field as `str | UploadFile` (multipart can carry a file
+    part under any name) — coerce explicitly so a crafted request can't
+    hand an UploadFile object into signature validation, ASR-confidence
+    parsing, or audit logging further down."""
+    value = form.get(key, default)
+    return value if isinstance(value, str) else default
+
+
 async def _audit(action: str, call_id: str, business_id: Optional[str], memo: str,
                   severity: str = "info", after: Optional[dict] = None) -> None:
     try:
@@ -346,9 +356,9 @@ async def voice_inbound(request: Request):
     form = dict(await request.form())
     await _verify(request, form)
 
-    caller = form.get("From", "unknown")
-    twilio_sid = form.get("CallSid", "")
-    to_number = form.get("To", "")
+    caller = _form_str(form, "From", "unknown")
+    twilio_sid = _form_str(form, "CallSid")
+    to_number = _form_str(form, "To")
 
     # Twilio retries a webhook that didn't answer inside its timeout — the
     # SAME CallSid arrives twice. Rejoin the call already in progress rather
@@ -434,9 +444,9 @@ async def voice_inbound_gather(call_id: str, request: Request):
             confirmation = call.get("finalMessage") or "Thanks for calling — goodbye."
         return _end_call_twiml(confirmation)
 
-    speech = form.get("SpeechResult", "").strip()
+    speech = _form_str(form, "SpeechResult").strip()
     try:
-        confidence = float(form.get("Confidence", "1.0") or "1.0")
+        confidence = float(_form_str(form, "Confidence", "1.0") or "1.0")
     except ValueError:
         confidence = 1.0
     state = dict(call.get("state") or {})
