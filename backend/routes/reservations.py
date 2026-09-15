@@ -316,6 +316,21 @@ async def seat_reservation(reservation_id: str, table_id: Optional[str] = None, 
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
     if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
+    if res.get("status") in ("cancelled", "no_show", "completed"):
+        raise HTTPException(status_code=400, detail=f"Booking is already {res.get('status')}")
+    # Large-booking approval/pre-order gates (services.booking_rules_engine
+    # sets these at creation time) were previously purely informational —
+    # nothing stopped a booking pending manager sign-off, or one whose
+    # matched tier requires a completed pre-order, from being seated
+    # exactly like any ordinary confirmed booking, defeating the entire
+    # point of gating a large party behind that review.
+    if res.get("approvalRequired") and res.get("approvalStatus") in ("pending", "rejected"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"This booking's approval is still {res.get('approvalStatus')} — approve it before seating")
+    if res.get("preOrderRequired") and not res.get("preOrderCompleted"):
+        raise HTTPException(
+            status_code=409, detail="This booking requires a completed pre-order before seating")
     tid = table_id or res.get("tableId")
     update_data = {"status": "seated", "seatedAt": datetime.utcnow().isoformat(), "updatedAt": datetime.utcnow().isoformat()}
     if tid:

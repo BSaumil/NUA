@@ -440,6 +440,80 @@ def test_rejecting_a_large_booking_cancels_it(tiered_rules, experience, client, 
         _cleanup_reservations("Reject Flow Guest")
 
 
+# -------------------------------------------------------- approval/pre-order gates
+# Remediation of the final readiness audit's finding: approvalStatus and
+# preOrderRequired/preOrderCompleted were purely informational — nothing
+# stopped POST /reservations/{id}/seat from seating a large booking still
+# pending manager sign-off, or one whose matched tier requires a completed
+# pre-order, exactly like any ordinary confirmed booking.
+
+def test_seating_a_pending_approval_large_booking_is_rejected(tiered_rules, experience, client, owner_headers):
+    r = req(client, "POST", "/api/public/book", json={
+        "guestName": "Seat Gate Pending Guest", "partySize": 14, "date": _future_date(), "time": "19:00",
+        "experienceId": experience["id"],
+    })
+    assert r.status_code == 200, r.text
+    res_id = r.json()["reservationId"]
+    assert r.json()["approvalRequired"] is True
+    fetched = req(client, "GET", f"/api/reservations/{res_id}", headers=owner_headers).json()
+    assert fetched["approvalStatus"] == "pending"
+    try:
+        r = req(client, "POST", f"/api/reservations/{res_id}/seat", headers=owner_headers)
+        assert r.status_code == 409, r.text
+        assert "pending" in r.json()["detail"].lower()
+
+        # Once approved (and, since this tier also requires a pre-order,
+        # that's completed too), seating goes through normally.
+        req(client, "POST", f"/api/reservations/{res_id}/approve", headers=owner_headers)
+        req(client, "PUT", f"/api/reservations/{res_id}", headers=owner_headers,
+            json={"preOrderCompleted": True})
+        r = req(client, "POST", f"/api/reservations/{res_id}/seat", headers=owner_headers)
+        assert r.status_code == 200, r.text
+    finally:
+        _cleanup_reservations("Seat Gate Pending Guest")
+
+
+def test_seating_a_rejected_large_booking_is_rejected(tiered_rules, experience, client, owner_headers):
+    r = req(client, "POST", "/api/public/book", json={
+        "guestName": "Seat Gate Rejected Guest", "partySize": 14, "date": _future_date(), "time": "19:00",
+        "experienceId": experience["id"],
+    })
+    res_id = r.json()["reservationId"]
+    try:
+        req(client, "POST", f"/api/reservations/{res_id}/reject", headers=owner_headers, json={"reason": "no room"})
+        r = req(client, "POST", f"/api/reservations/{res_id}/seat", headers=owner_headers)
+        assert r.status_code in (400, 409), (
+            f"a rejected (and therefore cancelled) large booking must never be seatable: {r.text[:200]}"
+        )
+    finally:
+        _cleanup_reservations("Seat Gate Rejected Guest")
+
+
+def test_seating_without_a_required_completed_pre_order_is_rejected(tiered_rules, experience, client, owner_headers):
+    r = req(client, "POST", "/api/public/book", json={
+        "guestName": "Seat Gate PreOrder Guest", "partySize": 8, "date": _future_date(), "time": "19:00",
+        "experienceId": experience["id"],
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    res_id = body["reservationId"]
+    assert body["preOrderRequired"] is True
+    fetched = req(client, "GET", f"/api/reservations/{res_id}", headers=owner_headers).json()
+    assert fetched["preOrderCompleted"] is False
+    try:
+        r = req(client, "POST", f"/api/reservations/{res_id}/seat", headers=owner_headers)
+        assert r.status_code == 409, r.text
+        assert "pre-order" in r.json()["detail"].lower()
+
+        # Once the pre-order is marked complete, seating goes through.
+        req(client, "PUT", f"/api/reservations/{res_id}", headers=owner_headers,
+            json={"preOrderCompleted": True})
+        r = req(client, "POST", f"/api/reservations/{res_id}/seat", headers=owner_headers)
+        assert r.status_code == 200, r.text
+    finally:
+        _cleanup_reservations("Seat Gate PreOrder Guest")
+
+
 # ------------------------------------------------- existing bookings unaffected
 
 def test_changing_rules_later_does_not_retroactively_touch_existing_bookings(client, owner_headers):
