@@ -297,6 +297,7 @@ async def _finalise_booking(state: dict, call_id: str, caller: str) -> dict:
     ctx = state.get("_ctx", {}) or {}
     business_id = ctx.get("businessId")
     from services.booking_rules_engine import validate_and_enrich_booking, BookingRuleViolation, capacity_lock
+    from services.cancellation_policy import snapshot_cutoff_hours
     try:
         async with capacity_lock(business_id, state["date"]):
             enrichment = await validate_and_enrich_booking(
@@ -317,6 +318,7 @@ async def _finalise_booking(state: dict, call_id: str, caller: str) -> dict:
                 "source": "phone",
                 "callId": call_id,
                 "createdAt": _now(),
+                "cancellationCutoffHours": await snapshot_cutoff_hours(business_id),
                 **enrichment,
             }
             await db.reservations.insert_one(booking)

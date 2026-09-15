@@ -119,6 +119,40 @@ def test_cancelling_outside_the_window_refunds_and_inside_it_forfeits(client, ow
         _run(db.reservations.delete_one({"id": late["id"]}))
 
 
+def test_a_later_policy_change_never_applies_retroactively_to_an_existing_booking(client, owner_headers):
+    """Remediation of the final readiness audit's finding: the cutoff used
+    to be looked up live at cancellation time, so tightening the policy
+    AFTER a guest booked would retroactively apply to their already-
+    confirmed reservation. A guest who booked under the default 24h
+    promise and cancels 30 hours out — comfortably outside 24h — must
+    still get a full refund even if the business later tightens the
+    policy to 72h, because the booking snapshotted 24h at creation time."""
+    other = _login_as(client, owner_headers, email="cancelretro.other@nua.com", business_id="cancelretro-biz")
+
+    near_dt = datetime.utcnow() + timedelta(hours=30)
+    res = _create_reservation(client, other, guestName="Retro Policy Guest",
+                              date=near_dt.strftime("%Y-%m-%d"), time=near_dt.strftime("%H:%M"),
+                              depositRequired=40.0, depositPaid=True)
+    assert res["cancellationCutoffHours"] == 24.0
+    _run(db.reservations.update_one({"id": res["id"]}, {"$set": {"depositSessionId": "cs_test_retro"}}))
+
+    tightened = req(client, "PUT", "/api/reservations/cancellation-policy", headers=other,
+                     json={"cutoffHours": 72})
+    assert tightened.status_code == 200
+
+    try:
+        r = req(client, "POST", f"/api/reservations/{res['id']}/cancel", headers=other, json={})
+        assert r.status_code == 200, r.text[:200]
+        body = r.json()
+        assert body.get("depositForfeited") is not True, (
+            "a booking made under the OLD 24h policy must not be judged against "
+            "the business's later-tightened 72h policy"
+        )
+    finally:
+        req(client, "PUT", "/api/reservations/cancellation-policy", headers=other, json={"cutoffHours": 24})
+        _run(db.reservations.delete_one({"id": res["id"]}))
+
+
 def test_waitlist_notify_sends_a_real_sms_once(client, owner_headers, monkeypatch):
     sent = []
 

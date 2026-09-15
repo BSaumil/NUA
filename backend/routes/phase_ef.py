@@ -342,6 +342,7 @@ async def simulate_call(data: dict, user: dict = Depends(get_user)):
             # created a reservation with none of those checks.
             from services.booking_rules_engine import (
                 validate_and_enrich_booking, BookingRuleViolation, capacity_lock)
+            from services.cancellation_policy import snapshot_cutoff_hours
             party_size = int(details.get("partySize", 2) or 2)
             booking_time = details.get("time", "19:00")
             enrichment = None
@@ -365,6 +366,7 @@ async def simulate_call(data: dict, user: dict = Depends(get_user)):
                         "source": "ai_phone_agent",
                         "createdAt": datetime.now(timezone.utc).isoformat(),
                         "businessId": user.get("businessId"),
+                        "cancellationCutoffHours": await snapshot_cutoff_hours(user.get("businessId")),
                         **enrichment,
                     }
                     if known_guest:

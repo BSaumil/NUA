@@ -155,6 +155,7 @@ async def create_reservation(reservation: ReservationCreate, user: Optional[dict
     # block (and only here — the customer path had none at all); it's now
     # one of several checks the engine runs for both.
     from services.booking_rules_engine import validate_and_enrich_booking, BookingRuleViolation, capacity_lock
+    from services.cancellation_policy import snapshot_cutoff_hours
     business_id = (user or {}).get("businessId")
     try:
         async with capacity_lock(business_id, reservation.date):
@@ -164,7 +165,9 @@ async def create_reservation(reservation: ReservationCreate, user: Optional[dict
                 override_reason=reservation.overrideReason, override_actor=user,
                 business_id=business_id,
             )
-            res_obj = Reservation(**{**reservation.dict(), **enrichment, "businessId": business_id})
+            cutoff_hours = await snapshot_cutoff_hours(business_id)
+            res_obj = Reservation(**{**reservation.dict(), **enrichment, "businessId": business_id,
+                                      "cancellationCutoffHours": cutoff_hours})
             doc = res_obj.dict()
             await db.reservations.insert_one(doc)
     except BookingRuleViolation as e:

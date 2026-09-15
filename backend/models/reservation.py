@@ -116,6 +116,12 @@ class Reservation(BaseModel):
     ruleOverrideReason: Optional[str] = None
     ruleOverrideBy: Optional[str] = None
     businessId: Optional[str] = None
+    # Snapshotted once at creation from services.cancellation_policy — the
+    # cutoff in effect for THIS booking, frozen so a later change to the
+    # business's policy never applies retroactively (see
+    # is_within_free_cancellation_window). None on a reservation created
+    # before this field existed, which falls back to a live policy lookup.
+    cancellationCutoffHours: Optional[float] = None
     # Real payment capture behind depositRequired/depositPaid above — see
     # routes/reservations.py's mark_no_show for how this is actually
     # collected/forfeited.

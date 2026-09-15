@@ -131,6 +131,7 @@ async def public_book_reservation(data: dict):
     an untagged reservation checked against the pooled rules/capacity."""
     from models.reservation import Reservation
     from services.booking_rules_engine import validate_and_enrich_booking, BookingRuleViolation, capacity_lock
+    from services.cancellation_policy import snapshot_cutoff_hours
     from routes.online_orders import _resolve_business_id
 
     business_id = await _resolve_business_id(data.get("business"))
@@ -145,7 +146,9 @@ async def public_book_reservation(data: dict):
                 date=date, time=time, party_size=party_size, source="online",
                 experience_id=experience_id, business_id=business_id,
             )
+            cutoff_hours = await snapshot_cutoff_hours(business_id)
             res_obj = Reservation(
+                cancellationCutoffHours=cutoff_hours,
                 guestName=data.get("guestName", "Guest"),
                 guestPhone=data.get("guestPhone", ""),
                 guestEmail=data.get("guestEmail", ""),
