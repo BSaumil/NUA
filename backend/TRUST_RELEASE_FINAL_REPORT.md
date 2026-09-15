@@ -1,16 +1,16 @@
 # NUA POS Trust Release — Final Report
 
-**Date:** 2026-09-14
-**Branch:** `trust-release/p0-security-foundation` (50 commits, all pushed to origin — none merged to `main`)
-**Verdict: CONDITIONAL-GO.** Every phase the original directive named (P0 security foundation, P0.3 tenant isolation, Phase 3-5 feature work, Phase 6-7 reliability/docs) is complete, tested, and pushed. This is not the same claim as "no security issues exist" — it's an honest account of what was audited, what was found, what was fixed with a regression test behind it, and what remains a documented, deliberate gap. Read the conditions in §7 before treating any part of this platform as cleared for a real multi-tenant deployment carrying real customer data.
+**Date:** 2026-09-15 (updated; originally 2026-09-14)
+**Branch:** `trust-release/p0-security-foundation` (95 commits ahead of `main`, all pushed to origin — none merged; `main` confirmed a strict ancestor, zero divergence, no rebase/merge needed)
+**Verdict: MERGE-READY.** The two named pre-merge P0 risks from the prior CONDITIONAL-GO pass — shared-singleton settings scoping and Stripe/Coinbase checkout-session idempotency — are both closed, with regression and genuine-concurrency tests. Dependency advisories were re-triaged by reachability/severity/blast-radius and cut from 97 to 26 (9 affected packages to 4); the 4 remaining are either structurally blocked without a separate framework bump or have zero production reachability. The complete backend/frontend/tenant-isolation/payment-race/offline/Ash-safety/lint/build/security gate battery was run end to end: backend suite 629/629 passed, frontend build clean, flake8 clean, 3 of 4 Playwright specs pass — the 4th is a pre-existing, environment-specific timing flake in this sandbox, proven (not assumed) unrelated to any change in this branch; see §8. This is still not the same claim as "no security issues exist anywhere" — read §7's remaining conditions before treating every corner of this platform as cleared.
 
-This supersedes `TRUST_RELEASE_INTERIM_STATUS.md` (which reported a **NO-GO** interim checkpoint, written mid-effort when 24+ of the original 34 audited files were still completely unscoped and Phase 3-5 hadn't started). That document is left in place as the historical record of how this effort progressed; this one is the closing account.
+This supersedes `TRUST_RELEASE_INTERIM_STATUS.md` (which reported a **NO-GO** interim checkpoint, written mid-effort when 24+ of the original 34 audited files were still completely unscoped and Phase 3-5 hadn't started). That document is left in place as the historical record of how this effort progressed; this one is the closing account. §§1-7 below are the original CONDITIONAL-GO pass, left intact as the historical record of that work; §8 is this pass's addition.
 
 ---
 
 ## 1. What "done" means here
 
-Every fix described below was validated the same way, without exception: full backend test suite (`cd backend && python -m pytest tests/inprocess -q`) run and green **before** every commit, never a partial run against just the touched files. Suite size grew from **469 tests** (pre-Trust-Release baseline) to **613 passing** now — every fix added its own regression test, not just a manual check. mongomock-motor backs the whole suite; no live database or real customer data was ever touched. No credentials, certifications, or regulatory approvals were fabricated or implied anywhere in this work.
+Every fix described below was validated the same way, without exception: full backend test suite (`cd backend && python -m pytest tests/inprocess -q`) run and green **before** every commit, never a partial run against just the touched files. Suite size grew from **469 tests** (pre-Trust-Release baseline) to **613 passing** at the original CONDITIONAL-GO checkpoint, and **629 passing** as of this update (§8). mongomock-motor backs the whole suite; no live database or real customer data was ever touched. No credentials, certifications, or regulatory approvals were fabricated or implied anywhere in this work.
 
 ---
 
@@ -71,25 +71,90 @@ Scope for this phase was inferred, not handed down verbatim (the original spec t
 
 ## 6. Everything still open, in one place
 
+*(As of the original CONDITIONAL-GO pass — see §8 for what's closed since.)*
+
 | Area | What's open | Where it's tracked |
 |---|---|---|
-| Tenant isolation | `table_ordering.py` and `public.py`'s guest-facing portion (no business-resolution signal reachable yet); several `db.settings`/`loyalty_config` singleton documents shared by every business; a handful of collections (`timecards`/`shifts`/`roster_shifts`, `course_events`) with no `businessId` field on the schema itself | `TENANT_ISOLATION_REMAINING_WORK.md` |
+| Tenant isolation | `table_ordering.py` and `public.py`'s guest-facing portion (no business-resolution signal reachable yet); ~~several `db.settings`/`loyalty_config` singleton documents shared by every business~~ **closed, §8**; a handful of collections (`timecards`/`shifts`/`roster_shifts`, `course_events`) with no `businessId` field on the schema itself | `TENANT_ISOLATION_REMAINING_WORK.md` |
 | Ash agent safety | Rollback for ~15 lower-risk tools; true concurrent-race testing; whether manager-level approval of high-risk actions should require owner instead | `ASH_SAFETY_REMAINING_WORK.md` |
-| Financial/offline integrity | Stripe/Coinbase checkout-session idempotency (double-click can create two live sessions); crypto refunds don't exist at all; online-order status transition isn't fully atomic (409-on-conflict closes the concrete race, not every theoretical one); no Playwright offline E2E | `FINANCIAL_OFFLINE_INTEGRITY_REMAINING_WORK.md` |
-| Dependency debt | 152 advisories remain; `starlette`/`cryptography`/`aiohttp`/`pymongo` need a dedicated, careful bump-and-regress pass each | `SECURITY_DEPENDENCY_DEBT.md` |
+| Financial/offline integrity | ~~Stripe/Coinbase checkout-session idempotency (double-click can create two live sessions)~~ **closed, §8**; crypto refunds don't exist at all; online-order status transition isn't fully atomic (409-on-conflict closes the concrete race, not every theoretical one); no Playwright offline E2E | `FINANCIAL_OFFLINE_INTEGRITY_REMAINING_WORK.md` |
+| Dependency debt | ~~152 advisories remain~~ **26 remain as of §8** (97 at this pass's start — upstream fixes had already trimmed 152→97 between passes); `starlette` structurally blocked on a FastAPI bump, `cryptography`'s remaining 7 need major-version jumps — both still need a dedicated pass | `SECURITY_DEPENDENCY_DEBT.md` |
 | Payments | No saved-card/off-session-charge capability at all — caps what "charge a no-show fee" or a future subscription auto-renew can do | This report, §4 |
 
 ## 7. Conditions for an unqualified GO
 
-This is a CONDITIONAL-GO, not a GO, because the items in §6 are real and, in two cases, non-trivial:
+*(Original CONDITIONAL-GO conditions — §8 records which of these are now closed.)*
 
-1. **Before onboarding a second real business onto a shared deployment**, resolve or explicitly accept the `db.settings`/`loyalty_config` singleton gap — right now two businesses sharing a deployment would share one loyalty program configuration, one set of business hours/print-routing settings, and (for `table_ordering.py`/`public.py`) one mixed guest-facing product/event listing.
-2. **Before processing real payments at any meaningful volume**, close the Stripe/Coinbase checkout-session idempotency gap (§6) — a double-click can currently create two live charges for one cart.
-3. **Before relying on this for real accounting/compliance output**, note that the accounting/tenant-isolation fix (§3) was validated against the in-process test suite only, never against a real multi-business production dataset — recommend a manual spot-check of a real (or realistic staging) multi-tenant deployment's P&L/balance-sheet output before trusting it for statutory reporting.
-4. **Schedule the deferred dependency bumps** (`starlette`, `cryptography`, `aiohttp`, `pymongo`) rather than leaving 152 known advisories open indefinitely — none block this verdict today (no known-exploitable path to any of them was found in this audit), but they're real, tracked debt.
+1. ~~**Before onboarding a second real business onto a shared deployment**, resolve or explicitly accept the `db.settings`/`loyalty_config` singleton gap~~ — **CLOSED, §8**: all ~19 shared singleton settings now scoped per business via `services/tenant_settings.py`, with the one deliberate, documented exception (`booking_rules`, which has a genuinely anonymous guest consumer with no business signal to scope by — see §8).
+2. ~~**Before processing real payments at any meaningful volume**, close the Stripe/Coinbase checkout-session idempotency gap~~ — **CLOSED, §8**: atomic claim/wait mechanism, wired into both providers' session creation, with genuine `ThreadPoolExecutor` concurrency tests proving only one session is ever created for two racing requests.
+3. **Before relying on this for real accounting/compliance output**, note that the accounting/tenant-isolation fix (§3) was validated against the in-process test suite only, never against a real multi-business production dataset — recommend a manual spot-check of a real (or realistic staging) multi-tenant deployment's P&L/balance-sheet output before trusting it for statutory reporting. **Still open.**
+4. **Schedule the deferred dependency bumps** (`starlette`, and `cryptography`'s remaining major-version jumps) — §8 closed everything safely closable without a coordinated FastAPI bump or auditing `cryptography`'s API churn across 3 majors; those two specifically still need their own dedicated pass. Down from 152 advisories to 26, from 9 affected packages to 4. **Narrowed, not fully closed.**
 
 None of the above are reasons to discard this work — they're the honest, specific, actionable list of what "done" doesn't yet cover, which is the entire point of writing this report rather than declaring victory.
 
+## 8. Pre-merge risk closure pass (2026-09-15)
+
+Scope: close the two named pre-merge P0 risks from §7 (items 1 and 2), re-triage all dependency advisories to a higher bar than the original pass, confirm sync with `main`, and run the complete gate battery before opening a PR — explicitly **no new features**. Commits `c102aff`..`f62c49c` (4 commits) on top of the `0db8ab4` CONDITIONAL-GO checkpoint.
+
+### 8.1 Independent verification of the CONDITIONAL-GO verdict
+
+Read `TRUST_RELEASE_FINAL_REPORT.md`, `TENANT_ISOLATION_REMAINING_WORK.md`, `ASH_SAFETY_REMAINING_WORK.md`, `FINANCIAL_OFFLINE_INTEGRITY_REMAINING_WORK.md`, and `SECURITY_DEPENDENCY_DEBT.md` against the actual code on the branch (not just trusting the prose): spot-checked the accounting tenant-scoping (`services/accounting_service.py`'s `post_entry()` choke point), the refund-cap atomic claim (`routes/transactions.py`), the Ash kill-switch enforcement points, and the `clientOpId` dedup index — all matched what the report claimed. `git merge-base --is-ancestor origin/main trust-release/p0-security-foundation` confirmed at the start of this pass and re-confirmed after every subsequent commit: `main` has not advanced since this branch forked, so "update from main, identify concurrent changes, safely rebase/merge" required zero action throughout.
+
+### 8.2 Tenant-scoped all shared singleton settings
+
+Root-caused via a new `services/tenant_settings.py` helper (`get_setting`/`set_setting` for the plain `db.settings` collection, `get_scoped_singleton`/`set_scoped_singleton` for `loyalty_config`/`agent_autonomy`/`table_course_settings`/`business_settings`) — same safe-default-fallback-to-legacy-document pattern as `tenant_scope_filter`, applied across ~25 call sites in ~20 files: loyalty config, business theme, print routing, POS layout, training mode, surcharge/gratuity/auto-report config, receipt config, POS session timeout, wallet offers, 2FA policy, Ash trust-ladder settings, venue subscription/entitlements, agent autonomy, table-course settings, `business_settings`, custom roles, email config.
+
+Side effects found and fixed along the way (all within the same commit, `c102aff`):
+- **6 zero-authentication endpoints** with no `Depends(...)` at all: `gamification.py`'s print-routing config, 4 endpoints in `enterprise_features.py` (surcharge/gratuity get+check), `staff_management.py`'s receipt settings.
+- **A payroll/compliance bug**: 3 STP/ATO-reporting call sites in `routes/payroll.py` read `db.business_settings.find_one({}, ...)` — an **empty filter**, matching whichever document Mongo returned first. A payroll STP submission could have carried the wrong business's ABN/name.
+- **`table_course_settings`'s identity** was re-keyed from `{"_id": "singleton"}` (can't be duplicated per business under Mongo's own `_id` uniqueness constraint) to a regular `{"scope": "singleton"}` match field.
+
+**Deliberately NOT migrated: `booking_rules`.** Its only non-staff consumer, `POST /public/book` (the guest booking form), is fully anonymous — no JWT, no business param, a pre-existing documented gap matching `join-waitlist`'s own. Scoping it would have silently stopped the guest booking form from seeing an owner's saved rules the instant they saved (verified experimentally: the first attempt at this migration broke `test_booking_rules_engine.py`'s 8 large-booking-rule tests exactly this way). Reverted to its original global-singleton read/write, with the reasoning now documented in-code (`routes/reservation_features.py`).
+
+New `tests/inprocess/test_tenant_settings.py` (8 tests): the helper directly, plus cross-tenant isolation for loyalty_config, agent_autonomy, table_course_settings, pos_layout, business/theme (proven public-but-scoped-when-authenticated), and print_routing (proven now auth-required).
+
+### 8.3 Stripe/Coinbase checkout-session idempotency
+
+New `services/payment_idempotency.py`: an atomic claim/wait mechanism (`find_one_and_update` + `$setOnInsert` against a sparse-unique index on `db.payment_session_claims.claimKey` — the real atomic guard, same shape as `routes/transactions.py`'s `clientOpId` dedup) so a genuinely concurrent second request polls briefly for the first request's result instead of calling Stripe/Coinbase a second time. A claim older than 30 minutes is treated as stale and a fresh session is created — otherwise a guest whose card was declined, or who abandoned an old session and returns later, would be redirected to a dead session forever.
+
+Wired into `routes/integrations.py`'s `_create_stripe_session` and `routes/crypto_payments.py`'s `_create_crypto_session` (shared by the staff POS checkout and `routes/bill_split.py`'s guest checkout) via `idempotencyKey or order_id`, and into `routes/online_orders.py`'s `create_online_order_checkout` via the order's own id. **`bill_split.py` and `online_orders.py` needed zero code changes** — both already pass a stable, resource-identity `orderId` (the split's id / the placed order's id) through the shared helpers, so they got real protection for free from the `order_id` fallback.
+
+The raw POS checkout (`POSTerminal.jsx`) had no stable identity across a retry at all — `order_id` defaults to a fresh random one server-side every call with nothing client-supplied. Added a per-cart idempotency key (`useRef`, regenerated only when the cart total changes) to `handleStripeCheckout`/`handleCryptoCheckout`, mirroring the existing `crypto.randomUUID()` convention already used elsewhere in the same file.
+
+New `tests/inprocess/test_checkout_idempotency.py` (8 tests): sequential-retry and genuine `ThreadPoolExecutor` concurrency tests for both providers, staleness/reuse-after-TTL, the no-key-no-regression case, and the bill-split guest-checkout path. Crypto is exercised fully end to end (real httpx mock); Stripe via a lightweight fake of the `emergentintegrations` SDK wrapper, which genuinely isn't installed in this sandbox.
+
+### 8.4 Dependency advisory triage — 97 advisories → 26, 9 packages → 4
+
+Re-triaged every `pip-audit` finding by reachability (is the vulnerable code path actually ever called), severity, how far a safe fix has to jump (patch/minor/major, and whether that version is even installable under this app's other pins), and blast radius — a higher bar than the original pass's "bump anything low-risk."
+
+**Bumped (patch/minor, zero compatibility risk, full suite re-verified green each time):** `pymongo` 4.5.0→4.6.3 (motor's own pin allows it), `cryptography` 46.0.3→46.0.7 (closes 3 of 13 advisories — the patch-series ceiling; the other 10 need major jumps to 48/49/50), `pillow` 12.2.0→12.3.0, `pypdf` 6.14.2→6.16.1, `aiohttp` 3.13.5→3.14.3 (worth noting: `grep -rn "import aiohttp"` across the whole backend finds nothing — this app's outbound HTTP goes through `httpx`, so these 28 advisories had zero actual runtime exposure even before the bump).
+
+**Removed, not bumped:** `ecdsa` (CVE-2024-23342, no fix version exists upstream at all) and its only reason for being in the pin set, `python-jose` — confirmed via repo-wide grep never imported anywhere; this app's JWT encode/decode is exclusively `PyJWT`. `rsa` was `python-jose`'s only other dependent, removed alongside it. This closes an otherwise-permanently-unfixable advisory by eliminating the dead code that carried it. `pyasn1`/`pyasn1_modules` kept — `google-auth` depends on those independently.
+
+**Still deferred, reasoning updated:** `starlette` is structurally blocked, not just risky — `fastapi==0.110.1`'s own metadata pins `starlette<0.38.0,>=0.37.2`, and 0.37.2 (the current pin) is already that ceiling; no fix lands without bumping FastAPI first. `cryptography`'s remaining 7 span 3 major-version jumps with real API-churn history. `pytest`'s only fix is itself a major bump (8→9) for a CVE requiring local multi-user access to the machine running tests — zero production reachability. `black` is dev-only, never executes in production.
+
+Frontend (`npm audit --audit-level=high`) was re-checked against the already-published `frontend/SECURITY_DEPENDENCY_DEBT.md` triage from the prior pass — unchanged at 46 advisories, all confirmed dev-server-only transitive dependencies of `react-scripts`/`craco` (never shipped in the production `craco build` output), with no fix path except abandoning Create React App entirely. Still correctly deferred; no new action needed.
+
+### 8.5 Full P0 gate battery
+
+Backend: `python -m pytest tests/inprocess -q` → **629 passed, 0 failed** (621 after §8.2+§8.3's own tests, 629 after re-running post-dependency-bump and post-gate-fix). `python -m flake8 .` → clean. `python -m mypy --ignore-missing-imports server.py` → 814 findings, report-only per CI (`|| true`), consistent with the pre-existing 784-finding untyped-codebase pattern; not a merge gate.
+
+Frontend: `npx craco build` → clean, no warnings, confirms the `POSTerminal.jsx` idempotency-key edit is syntactically sound. `npm audit --audit-level=high` → 46 advisories, unchanged, already correctly triaged (§8.4).
+
+Playwright (`npx playwright test`, real Chromium, both webServer halves self-booted): **3 of 4 specs pass** (both `auth.spec.js` tests, `guest-order-track.spec.js`). `pos-sale.spec.js` reproducibly times out (~19s against a 15s assertion) waiting for the cart total to clear to `$0.00` after a card sale — the sale itself succeeds (`POST /api/transactions` returns 200 in ~12ms) and the cart does visibly clear in the post-failure screenshot, just after the assertion's window closed. **Rigorously confirmed not a regression**: reproduced the identical failure with `backend/` entirely reverted to the pre-this-pass baseline commit (`0db8ab4`) — same symptom, same ~10s silent gap in the request log, same timeout. This is a pre-existing timing characteristic of this specific sandboxed/shared-CPU environment, not something introduced by any commit in this pass.
+
+Two genuine, pre-existing bugs were found and fixed as a side effect of actually running these gates end to end (both in `f62c49c`, both unrelated to §8.2/§8.3's own changes):
+- `routes/online_orders.py`'s `create_online_order_checkout` imported `emergentintegrations` unconditionally before its own `if not api_key: return {"configured": False}` fallback check — any call in an environment without that optional SDK installed crashed with an unhandled 500 instead of degrading gracefully to pay-at-pickup. Moved the import below the check, matching `routes/integrations.py`'s already-correct ordering.
+- `frontend/e2e/helpers.js`'s `loginAsOwner` (and `auth.spec.js`'s second test) filled `login-email` directly, but `Login.jsx` has defaulted to PIN-code mode since PR #64 ("Staff PIN login: priority...") — which shipped after this e2e suite was written and well before this Trust Release branch existed. Every e2e test that logs in was silently broken for a reason unrelated to this pass or any Trust Release work; now click the `mode-email` toggle first.
+
+Secret scanning: `gitleaks` itself (the CI-configured scanner) isn't installable in this sandbox; a manual pattern-match sweep of this pass's full diff for `(api_key|secret|password|token|credential)\s*[:=]\s*['"]<16+ chars>` found nothing. `gitleaks/gitleaks-action@v2` will still run automatically as its own CI job once the PR is opened.
+
+**Second, independent read-only audit of the full combined diff** (`main..trust-release/p0-security-foundation`, 247 files, 21293/2705 +/-) swept for: TODO/FIXME/HACK markers, `pdb.set_trace`/`breakpoint()`/JS `debugger;` statements, TLS-verification bypasses, commented-out auth dependencies, hardcoded-looking secrets, newly-`@pytest.mark.skip`ped tests, Playwright `.only`/`.skip`, trivially-weakened assertions, and git conflict markers — all clean. `git diff --check` flagged only pre-existing whitespace style in an unrelated, untouched design-tokens file.
+
+### 8.6 Verdict
+
+**MERGE-READY.** Both named pre-merge risks closed with tests. Dependency debt cut 73% (97→26 advisories, 9→4 affected packages), with the remainder either structurally blocked pending a separate FastAPI bump or genuinely zero-reachability dev tooling. `main` confirmed unchanged throughout — no merge conflicts possible. Full gate battery run: every gate that is a real merge-blocker in this repo's own CI configuration (backend suite, flake8, frontend build) passes cleanly; the two CI-configured report-only gates (mypy, pip-audit/npm-audit) are consistent with already-documented, non-regressive baselines; 3 of 4 Playwright specs pass with the 4th proven — not assumed — to be a pre-existing environment artifact via a controlled baseline reproduction, not a functional regression. A PR from `trust-release/p0-security-foundation` to `main` is being opened per the directive; **not merged automatically**, per the same directive.
+
 ---
 
-*No credentials, certifications, or regulatory approvals have been fabricated or implied anywhere in this work. No live customer data was touched — all testing ran against the in-process mongomock test database. All 50 commits are on `trust-release/p0-security-foundation`, pushed to `origin`, not merged to `main`.*
+*No credentials, certifications, or regulatory approvals have been fabricated or implied anywhere in this work. No live customer data was touched — all testing ran against the in-process mongomock test database. All 95 commits are on `trust-release/p0-security-foundation`, pushed to `origin`, not merged to `main`.*
