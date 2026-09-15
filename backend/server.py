@@ -236,6 +236,15 @@ PUBLIC_API_PREFIXES = (
     # routes/voice_calls.py (services/voice_calls.validate_signature), the
     # same trust model as the Coinbase webhook below uses HMAC for.
     "/api/voice/twiml/", "/api/voice/gather/", "/api/voice/status/",
+    # Inbound-call gather turns only — trailing slash so this can never
+    # match /api/voice/inbound/status, /config, /recent or /active (the
+    # owner/staff-facing endpoints in routes/voice_inbound.py, which stay
+    # behind the normal auth middleware). The bare POST /api/voice/inbound
+    # webhook itself (no call_id suffix yet) is listed as an exact path in
+    # PUBLIC_API_PATHS below instead, for the same reason — a prefix with
+    # no trailing slash there would have also matched every one of those
+    # staff-only sub-paths.
+    "/api/voice/inbound/gather/",
 )
 
 PUBLIC_API_PATHS = {
@@ -299,6 +308,15 @@ PUBLIC_API_PATHS = {
     # Coinbase Commerce webhook — authenticated by its own HMAC signature
     # (services/coinbase_commerce.py verify_webhook_signature), not a user token.
     "/api/webhook/coinbase",
+    # Twilio's very first inbound-call webhook — no call_id exists yet (that
+    # only appears once routes/voice_inbound.py creates the voice_calls doc
+    # and hands back a gather URL under /api/voice/inbound/gather/, which is
+    # in PUBLIC_API_PREFIXES above instead). Authenticated by Twilio request-
+    # signature validation inside the route itself, same as the other voice
+    # webhooks. Exact path only — never widen this to a prefix, or every
+    # owner/staff-facing /api/voice/inbound/* endpoint below it would also
+    # bypass auth.
+    "/api/voice/inbound",
     # A browser reporting its own crash — has to work from the login screen
     # and the guest ordering pages, neither of which carries a token.
     "/api/ops/client-errors",

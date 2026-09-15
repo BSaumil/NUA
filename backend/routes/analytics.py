@@ -6,7 +6,7 @@ from database import db
 from models.bas_report import BASReport, BASReportCreate
 from models.expense import Expense, ExpenseCreate
 from models.supplier import Supplier, SupplierCreate, PurchaseOrder, PurchaseOrderCreate
-from middleware.actor_context import tenant_scope_filter
+from middleware.actor_context import tenant_scope_filter, tenant_owns
 from utils.dates import date_range_filter as _date_match
 import asyncio
 import uuid
@@ -843,10 +843,71 @@ async def predict_customer_for_order(order_items: List[dict]):
     return {"matched": False, "message": "No matching customer patterns found"}
 
 @router.post("/orders/link-customer")
-async def link_order_to_customer(transaction_id: str, customer_id: str, points_earned: int = 0):
+async def link_order_to_customer(transaction_id: str, customer_id: str, user: dict = Depends(get_user)):
+    """Attach the "predicted" customer (see predict_customer_for_order above)
+    to a completed sale the register didn't have a loyalty match for at the
+    time, and back-credit the points that sale would have earned had the
+    customer been linked at checkout.
+
+    Used to accept a client-supplied `points_earned` with no auth at all —
+    any bearer token from any business could award an arbitrary number of
+    points to any customer of any business, with no ledger entry and no
+    audit trail (found in the Trust Release final readiness audit). Fixed
+    to require auth, verify both the transaction and the customer belong to
+    the caller's own business, and compute points itself from the
+    transaction's own stored items/total via the same
+    services.sale_recorder.compute_points_earned/credit_loyalty_points
+    canonical path routes/transactions.py's checkout uses — never a
+    client-supplied number.
+    """
+    business_id = user.get("businessId")
+    txn = await db.transactions.find_one({"id": transaction_id}, {"_id": 0})
+    if not txn or not tenant_owns(txn.get("businessId"), business_id):
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+    if not customer or not tenant_owns(customer.get("businessId"), business_id):
+        raise HTTPException(status_code=404, detail="Customer not found")
+    existing_customer_id = txn.get("customerId")
+    if existing_customer_id and existing_customer_id != customer_id:
+        raise HTTPException(status_code=409, detail="This order is already linked to a different customer")
+
+    # Idempotent: a retry (or this order already having been linked earlier)
+    # must not credit the same sale's points twice.
+    already_earned = await db.loyalty_ledger.find_one(
+        {"transactionId": transaction_id, "type": "earn"}, {"_id": 0})
+    if already_earned:
+        await db.transactions.update_one({"id": transaction_id}, {"$set": {"customerId": customer_id}})
+        return {"message": "Order linked (points already credited earlier)",
+                "pointsEarned": already_earned.get("points", 0), "skipped": True}
+
+    # Points computed from the sale's own recorded items/total — the exact
+    # same inputs and formula routes/transactions.py's checkout uses, not a
+    # client-supplied number.
+    from services.tenant_settings import get_scoped_singleton
+    from services.sale_recorder import compute_points_earned, credit_loyalty_points
+    loyalty_cfg = await get_scoped_singleton(db.loyalty_config, {"id": "default"}, business_id) or {}
+    tier_name = customer.get("membershipTier", "Bronze")
+    tier_doc = await db.loyalty_tiers.find_one({"name": tier_name}, {"_id": 0})
+    loyalty_multiplier = float((tier_doc or {}).get("multiplier", 1.0))
+    earn_lines = []
+    subtotal = float(txn.get("subtotal") or 0)
+    for item in txn.get("items", []):
+        product = await db.products.find_one({"id": item.get("productId")}, {"_id": 0, "category": 1})
+        line_total = float(item.get("price", 0)) * float(item.get("quantity", 1))
+        earn_lines.append(((product or {}).get("category") or "Other", line_total))
+    total = float(txn.get("total") or 0)
+    points_earned = compute_points_earned(subtotal, total, loyalty_multiplier, earn_lines, loyalty_cfg)
+
     await db.transactions.update_one({"id": transaction_id}, {"$set": {"customerId": customer_id}})
-    if points_earned > 0:
-        await db.customers.update_one({"id": customer_id}, {"$inc": {"points": points_earned, "visits": 1}})
+    await credit_loyalty_points(customer_id, points_earned, total, transaction_id, business_id=business_id)
+
+    from services.audit_service import log_event
+    await log_event(
+        entity_type="loyalty_ledger", entity_id=transaction_id, action="created",
+        after={"transactionId": transaction_id, "customerId": customer_id, "pointsEarned": points_earned},
+        memo=f"Linked order {transaction_id} to customer {customer_id}, credited {points_earned} points",
+        severity="notice", tags=["loyalty", "order_link"],
+    )
     return {"message": "Order linked and points awarded", "pointsEarned": points_earned}
 
 
