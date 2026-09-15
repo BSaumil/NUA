@@ -48,6 +48,20 @@ BACKUP_COLLECTIONS = [
     "suppliers", "bas_reports", "business_settings", "settings",
     "role_permissions", "vouchers", "loyalty_accounts", "staff_shifts",
     "audit_log", "coursing_config",
+    # Tenant config collections added since the original list was written —
+    # each one, if lost, means an owner has to manually reconstruct real
+    # configuration (the venue's own record, booking rules, loyalty
+    # program, table layout, cancellation policy) rather than restore it.
+    # Deliberately excludes collections that are closer to live/ephemeral
+    # session state than config — db.bill_splits/db.split_tabs/
+    # db.split_groups (guest payment claims actively changing minute to
+    # minute; restoring a stale snapshot could reopen an already-settled
+    # bill), db.voice_calls (a call log, not configuration), and
+    # db.booking_capacity_locks (a lock with a few seconds' TTL) — same
+    # reasoning this module already applies to kiosk_sessions/notifications/
+    # login_attempts/totp_used/trusted_devices/course_events above.
+    "businesses", "cancellation_policies", "booking_blackouts",
+    "floor_plans", "loyalty_config", "loyalty_tiers",
 ]
 
 
@@ -88,7 +102,13 @@ async def create_backup(database=None, business_id: Optional[str] = None) -> byt
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         for name in await _collections_present(database):
-            docs = await database[name].find(scope).to_list(None)
+            # db.businesses is keyed and self-identified by "id", not
+            # "businessId" (it IS the business) — tenant_scope_filter's
+            # generic {"businessId": ...} match would always come back
+            # empty for it, silently omitting the venue's own config
+            # record from every scoped (per-tenant) backup.
+            coll_scope = {"id": business_id} if (name == "businesses" and business_id) else scope
+            docs = await database[name].find(coll_scope).to_list(None)
             payload = json_util.dumps(docs).encode("utf-8")
             manifest["collections"][name] = {
                 "count": len(docs),
@@ -167,7 +187,24 @@ async def restore_into(archive: bytes, database, *, wipe: bool = False) -> dict:
             restored = 0
             for doc in docs:
                 fields = {k: v for k, v in doc.items() if k != "_id"}
-                key = {"id": doc["id"]} if "id" in doc else {"_id": doc["_id"]}
+                # Most collections key on their own string "id", but a
+                # handful of per-business singleton config documents
+                # (cancellation_policies, business_settings, settings,
+                # role_permissions, coursing_config) have no "id" field at
+                # all — they're looked up by "businessId" or "key" alone.
+                # Falling straight through to "_id" for those would upsert
+                # by the BACKUP's original (unrelated) ObjectId on a merge
+                # restore into a database that already has its own copy of
+                # that config under a different _id, creating a duplicate
+                # singleton instead of updating the existing one.
+                if "id" in doc:
+                    key = {"id": doc["id"]}
+                elif "businessId" in doc:
+                    key = {"businessId": doc["businessId"]}
+                elif "key" in doc:
+                    key = {"key": doc["key"]}
+                else:
+                    key = {"_id": doc["_id"]}
                 await database[coll].update_one(key, {"$set": fields}, upsert=True)
                 restored += 1
             result[coll] = restored
