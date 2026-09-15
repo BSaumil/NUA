@@ -169,7 +169,8 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
     # Loyalty config — used for both the redeem check below and the earn
     # calculation further down, so it's fetched once regardless of which (or
     # both) apply to this sale.
-    loyalty_cfg = await db.loyalty_config.find_one({"id": "default"}, {"_id": 0}) or {}
+    from services.tenant_settings import get_scoped_singleton
+    loyalty_cfg = await get_scoped_singleton(db.loyalty_config, {"id": "default"}, user.get("businessId")) or {}
 
     # Points redemption: the client-supplied pointsDiscount is a display hint
     # only — the value actually deducted from the bill (and the points balance)

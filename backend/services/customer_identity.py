@@ -34,9 +34,15 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-async def get_subscription() -> dict:
-    doc = await db.settings.find_one({"key": "venue_subscription"}, {"_id": 0})
-    sub = (doc or {}).get("value") or dict(DEFAULT_SUBSCRIPTION)
+async def get_subscription(business_id: Optional[str] = None) -> dict:
+    """Defaults business_id from the request's actor context (same
+    pattern as notification_service.send()) so existing callers don't
+    need editing — this used to be one add-on subscription/entitlement
+    record shared by every business on the deployment; see
+    services/tenant_settings.py."""
+    from services.tenant_settings import get_setting
+    value = await get_setting("venue_subscription", business_id)
+    sub = value if isinstance(value, dict) else dict(DEFAULT_SUBSCRIPTION)
     # customer_identity can never be switched off, whatever is stored.
     sub.setdefault("feature_flags", {})["customer_identity"] = True
     return sub

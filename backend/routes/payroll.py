@@ -176,7 +176,8 @@ async def commit_payrun(data: dict, user: dict = Depends(get_user)):
         await db.payrun_rows.insert_one({**r, "runId": run_id, "businessId": biz})
 
     # Build STP2 event immediately so the ATO submission is one click away.
-    biz = await db.business_settings.find_one({}, {"_id": 0}) or {}
+    from services.tenant_settings import get_scoped_singleton
+    biz = await get_scoped_singleton(db.business_settings, {"key": "main"}, user.get("businessId")) or {}
     stp = build_stp2_pay_event(
         employer_abn=biz.get("abn", ""),
         employer_name=biz.get("name", "NUA"),
@@ -248,7 +249,8 @@ async def payslip_pdf(run_id: str, staff_id: str, user: dict = Depends(get_user)
     row = await db.payrun_rows.find_one({"runId": run_id, "staffId": staff_id}, {"_id": 0})
     if not row:
         raise HTTPException(404, "Payslip not found")
-    biz = await db.business_settings.find_one({}, {"_id": 0}) or {}
+    from services.tenant_settings import get_scoped_singleton
+    biz = await get_scoped_singleton(db.business_settings, {"key": "main"}, user.get("businessId")) or {}
 
     lines = [
         f"{biz.get('name', 'NUA')} — ABN {biz.get('abn', '')}",
@@ -290,10 +292,11 @@ async def payslip_pdf(run_id: str, staff_id: str, user: dict = Depends(get_user)
 
 
 @router.post("/payroll/stp/build")
-async def build_stp(data: dict, _: dict = Depends(get_user)):
+async def build_stp(data: dict, user: dict = Depends(get_user)):
     """Return the STP2 event body for a pay run — ready to hand off to a
     registered SBR2 submitter (Xero / KeyPay / Reckon / ATO Business Portal)."""
-    biz = await db.business_settings.find_one({}, {"_id": 0}) or {}
+    from services.tenant_settings import get_scoped_singleton
+    biz = await get_scoped_singleton(db.business_settings, {"key": "main"}, user.get("businessId")) or {}
     return build_stp2_pay_event(
         employer_abn=biz.get("abn", ""),
         employer_name=biz.get("name", "NUA"),

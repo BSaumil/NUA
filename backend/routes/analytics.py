@@ -902,10 +902,11 @@ async def get_today_pulse(_user: dict = Depends(require_owner_or_manager)):
     avg_ticket = round(sales_today / txn_count, 2) if txn_count else 0
 
     # --- Settings-driven thresholds ---
-    s = await db.settings.find_one({"key": "today_targets"}, {"_id": 0})
+    from services.tenant_settings import get_setting
+    today_targets_value = await get_setting("today_targets", _user.get("businessId"))
     cfg = {"dailySalesTarget": 0, "laborPctThreshold": 32, "refundRateThreshold": 5}
-    if s and isinstance(s.get("value"), dict):
-        cfg.update({k: v for k, v in s["value"].items() if v is not None})
+    if isinstance(today_targets_value, dict):
+        cfg.update({k: v for k, v in today_targets_value.items() if v is not None})
 
     # --- Labor: rostered cost today vs sales ---
     shifts = await db.roster_shifts.find({"date": today_iso}, {"_id": 0}).to_list(500)
@@ -1006,21 +1007,21 @@ TODAY_TARGETS_DEFAULTS = {"dailySalesTarget": 0, "laborPctThreshold": 32, "refun
 
 @router.get("/analytics/today-targets")
 async def get_today_targets(_user: dict = Depends(get_user)):
-    s = await db.settings.find_one({"key": "today_targets"}, {"_id": 0})
+    from services.tenant_settings import get_setting
+    value = await get_setting("today_targets", _user.get("businessId"))
     cfg = dict(TODAY_TARGETS_DEFAULTS)
-    if s and isinstance(s.get("value"), dict):
-        cfg.update({k: v for k, v in s["value"].items() if v is not None})
+    if isinstance(value, dict):
+        cfg.update({k: v for k, v in value.items() if v is not None})
     return cfg
 
 
 @router.post("/analytics/today-targets")
 async def save_today_targets(data: dict, _user: dict = Depends(require_owner_or_manager)):
+    from services.tenant_settings import set_setting
     cfg = {
         "dailySalesTarget": max(float(data.get("dailySalesTarget", 0) or 0), 0),
         "laborPctThreshold": max(float(data.get("laborPctThreshold", 32) or 0), 1),
         "refundRateThreshold": max(float(data.get("refundRateThreshold", 5) or 0), 0),
     }
-    await db.settings.update_one(
-        {"key": "today_targets"}, {"$set": {"key": "today_targets", "value": cfg}}, upsert=True
-    )
+    await set_setting("today_targets", cfg, _user.get("businessId"))
     return cfg

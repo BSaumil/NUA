@@ -205,7 +205,7 @@ async def overbooking_check(data: dict, user: dict = Depends(get_user)):
         raise HTTPException(status_code=400, detail="date + time required")
 
     from services.booking_rules_engine import get_rules, capacity_for_slot
-    rules = await get_rules()
+    rules = await get_rules(user.get("businessId"))
     cap_info = await capacity_for_slot(date, time_str, rules, business_id=user.get("businessId"))
     available = cap_info["available"]
     allow = available >= party_size

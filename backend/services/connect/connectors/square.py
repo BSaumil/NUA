@@ -235,12 +235,17 @@ class SquareConnector(BaseConnector):
             cust = await db.customers.find_one({"externalRefs.square": square_customer_id}, {"_id": 0, "id": 1})
             customer_id = (cust or {}).get("id")
 
-        loyalty_cfg = await db.loyalty_config.find_one({"id": "default"}, {"_id": 0}) or {}
+        from services.tenant_settings import get_scoped_singleton
+        loyalty_cfg = await get_scoped_singleton(db.loyalty_config, {"id": "default"}, business_id) or {}
         loyalty_multiplier = 1.0
         if customer_id:
             customer = await db.customers.find_one({"id": customer_id}, {"_id": 0, "membershipTier": 1})
             if customer:
-                tier_doc = await db.loyalty_tiers.find_one({"name": customer.get("membershipTier", "Bronze")}, {"_id": 0})
+                from middleware.actor_context import tenant_scope_filter
+                tier_doc = await db.loyalty_tiers.find_one(
+                    {"$and": [tenant_scope_filter(business_id), {"name": customer.get("membershipTier", "Bronze")}]},
+                    {"_id": 0},
+                )
                 loyalty_multiplier = float((tier_doc or {}).get("multiplier", 1.0))
         points_earned = compute_points_earned(subtotal, total, loyalty_multiplier, earn_lines, loyalty_cfg)
 

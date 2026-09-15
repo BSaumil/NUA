@@ -1,8 +1,9 @@
 from fastapi import APIRouter, HTTPException, Depends
-from deps import get_user, require_owner, require_owner_or_manager
+from deps import get_user, require_owner, require_owner_or_manager, optional_user
 from database import db
 from middleware.actor_context import tenant_scope_filter, tenant_owns
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 import uuid
 import json
 
@@ -13,14 +14,15 @@ router = APIRouter()
 
 # ============ BUSINESS SETTINGS ============
 @router.get("/business/settings")
-async def get_business_settings(_: dict = Depends(get_user)):
-    biz = await db.business_settings.find_one({"key": "main"}, {"_id": 0})
+async def get_business_settings(user: dict = Depends(get_user)):
+    from services.tenant_settings import get_scoped_singleton
+    biz = await get_scoped_singleton(db.business_settings, {"key": "main"}, user.get("businessId"))
     return biz or {"name": "NUA", "abn": "", "address": "", "phone": "", "email": "", "taxId": ""}
 
 @router.post("/business/settings")
-async def save_business_settings(data: dict, _: dict = Depends(require_owner_or_manager)):
-    data["key"] = "main"
-    await db.business_settings.update_one({"key": "main"}, {"$set": data}, upsert=True)
+async def save_business_settings(data: dict, user: dict = Depends(require_owner_or_manager)):
+    from services.tenant_settings import set_scoped_singleton
+    await set_scoped_singleton(db.business_settings, {"key": "main"}, data, user.get("businessId"))
     return {"message": "Business settings saved"}
 
 
@@ -29,18 +31,25 @@ async def save_business_settings(data: dict, _: dict = Depends(require_owner_or_
 # an instant local preview as you drag/type; "Save" is what makes it apply
 # everywhere else too.
 @router.get("/business/theme")
-async def get_business_theme():
-    doc = await db.settings.find_one({"key": "business_theme"}, {"_id": 0})
-    return doc.get("value") if doc else None
+async def get_business_theme(user: Optional[dict] = Depends(optional_user)):
+    """Deliberately optional_user, not required auth: ThemeProvider mounts
+    this call at the app root, above both staff routes and every guest-
+    facing page (booking portal, waitlist tracking, loyalty rewards) — a
+    guest visiting one of those must keep getting a theme back, not a 401.
+    A guest carries no business signal (same deferred gap as public.py/
+    table_ordering.py), so falls back to the shared legacy theme exactly
+    as before this fix; an authenticated staff member now gets their own
+    business's theme once one has been saved."""
+    from services.tenant_settings import get_setting
+    return await get_setting("business_theme", (user or {}).get("businessId"))
 
 
 @router.post("/business/theme")
-async def save_business_theme(data: dict, _: dict = Depends(require_owner_or_manager)):
+async def save_business_theme(data: dict, user: dict = Depends(require_owner_or_manager)):
+    from services.tenant_settings import set_setting
     allowed = {"primary", "secondary", "accent", "background", "text", "sidebar"}
     theme = {k: v for k, v in data.items() if k in allowed and isinstance(v, str)}
-    await db.settings.update_one(
-        {"key": "business_theme"}, {"$set": {"key": "business_theme", "value": theme}}, upsert=True
-    )
+    await set_setting("business_theme", theme, user.get("businessId"))
     return theme
 
 
@@ -59,17 +68,18 @@ POS_LAYOUT_DEFAULTS = {
 
 
 @router.get("/pos/layout")
-async def get_pos_layout(_: dict = Depends(get_user)):
+async def get_pos_layout(user: dict = Depends(get_user)):
     """Any signed-in staff member can read this — the POS terminal itself
     needs it to render, same as the theme."""
-    doc = await db.settings.find_one({"key": "pos_layout"}, {"_id": 0})
-    saved = doc.get("value") if doc else {}
-    return {**POS_LAYOUT_DEFAULTS, **(saved or {}),
-            "quickActions": {**POS_LAYOUT_DEFAULTS["quickActions"], **((saved or {}).get("quickActions") or {})}}
+    from services.tenant_settings import get_setting
+    saved = await get_setting("pos_layout", user.get("businessId")) or {}
+    return {**POS_LAYOUT_DEFAULTS, **saved,
+            "quickActions": {**POS_LAYOUT_DEFAULTS["quickActions"], **(saved.get("quickActions") or {})}}
 
 
 @router.post("/pos/layout")
-async def save_pos_layout(data: dict, _: dict = Depends(require_owner_or_manager)):
+async def save_pos_layout(data: dict, user: dict = Depends(require_owner_or_manager)):
+    from services.tenant_settings import set_setting
     cart_position = data.get("cartPosition")
     if cart_position not in ("left", "right"):
         cart_position = POS_LAYOUT_DEFAULTS["cartPosition"]
@@ -80,9 +90,7 @@ async def save_pos_layout(data: dict, _: dict = Depends(require_owner_or_manager
     quick_actions = {"hold": bool(quick_in.get("hold", True)), "tabs": bool(quick_in.get("tabs", True))}
 
     layout = {"cartPosition": cart_position, "tileSize": tile_size, "quickActions": quick_actions}
-    await db.settings.update_one(
-        {"key": "pos_layout"}, {"$set": {"key": "pos_layout", "value": layout}}, upsert=True
-    )
+    await set_setting("pos_layout", layout, user.get("businessId"))
     return layout
 
 
@@ -147,18 +155,16 @@ async def distribute_tip_pool(user: dict = Depends(require_owner)):
 
 # ============ TRAINING MODE (Clover-style) ============
 @router.get("/settings/training-mode")
-async def get_training_mode():
-    setting = await db.settings.find_one({"key": "training_mode"}, {"_id": 0})
-    return {"enabled": setting.get("value", False) if setting else False}
+async def get_training_mode(user: dict = Depends(get_user)):
+    from services.tenant_settings import get_setting
+    value = await get_setting("training_mode", user.get("businessId"))
+    return {"enabled": bool(value)}
 
 @router.post("/settings/training-mode")
-async def toggle_training_mode(data: dict, _: dict = Depends(require_owner_or_manager)):
+async def toggle_training_mode(data: dict, user: dict = Depends(require_owner_or_manager)):
+    from services.tenant_settings import set_setting
     enabled = data.get("enabled", False)
-    await db.settings.update_one(
-        {"key": "training_mode"},
-        {"$set": {"key": "training_mode", "value": enabled, "updatedAt": datetime.now(timezone.utc).isoformat()}},
-        upsert=True
-    )
+    await set_setting("training_mode", enabled, user.get("businessId"))
     return {"enabled": enabled, "message": f"Training mode {'enabled' if enabled else 'disabled'}"}
 
 # ============ END-OF-DAY REPORTS (Square-style, Comprehensive) ============
@@ -347,8 +353,9 @@ PREDRAFTED_TEMPLATES = [
 ]
 
 
-async def _business_name() -> str:
-    biz = await db.business_settings.find_one({"key": "main"}, {"_id": 0})
+async def _business_name(business_id: Optional[str] = None) -> str:
+    from services.tenant_settings import get_scoped_singleton
+    biz = await get_scoped_singleton(db.business_settings, {"key": "main"}, business_id)
     return (biz or {}).get("name") or "us"
 
 
@@ -358,8 +365,8 @@ def _fill_template(text: str, *, business_name: str, tier: str = "") -> str:
 
 
 @router.get("/marketing/campaigns/templates")
-async def get_campaign_templates(_: dict = Depends(require_owner_or_manager)):
-    business_name = await _business_name()
+async def get_campaign_templates(user: dict = Depends(require_owner_or_manager)):
+    business_name = await _business_name(user.get("businessId"))
     return [
         {**t, "subject": _fill_template(t["subject"], business_name=business_name, tier=t.get("targetTier", "")),
          "body": _fill_template(t["body"], business_name=business_name, tier=t.get("targetTier", ""))}
@@ -368,12 +375,12 @@ async def get_campaign_templates(_: dict = Depends(require_owner_or_manager)):
 
 
 @router.post("/marketing/campaigns/draft")
-async def draft_campaign(data: dict, _: dict = Depends(require_owner_or_manager)):
+async def draft_campaign(data: dict, user: dict = Depends(require_owner_or_manager)):
     """AI-predrafted email: start from a template and/or a plain-English brief
     ('promote our new summer menu to Gold members') and return a ready-to-edit
     {name, subject, body}. Falls back to the raw template / a plain heuristic
     draft when no LLM key is configured."""
-    business_name = await _business_name()
+    business_name = await _business_name(user.get("businessId"))
     brief = (data.get("brief") or "").strip()
     target_tier = data.get("targetTier") or ""
     template = next((t for t in PREDRAFTED_TEMPLATES if t["key"] == data.get("templateKey")), None)

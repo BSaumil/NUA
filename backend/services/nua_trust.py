@@ -20,7 +20,7 @@ approval-gated plus a reset trust window, not just a dent in the streak,
 since the whole point is this ran unsupervised.
 """
 from __future__ import annotations
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 from database import db
 from services import nua_tools
@@ -50,22 +50,27 @@ def _empty_trust(window_size: int) -> dict:
     }
 
 
-async def get_settings() -> dict:
-    s = await db.settings.find_one({"key": "trust_settings"}, {"_id": 0})
+async def get_settings(business_id: Optional[str] = None) -> dict:
+    """Defaults business_id from the request's actor context (same
+    pattern as notification_service.send()) so existing callers don't
+    need editing — this used to be one Ash trust-ladder-promotion policy
+    shared by every business on the deployment; see
+    services/tenant_settings.py."""
+    from services.tenant_settings import get_setting
+    value = await get_setting("trust_settings", business_id)
     cfg = dict(DEFAULT_SETTINGS)
-    if s and isinstance(s.get("value"), dict):
-        cfg.update({k: v for k, v in s["value"].items() if v is not None})
+    if isinstance(value, dict):
+        cfg.update({k: v for k, v in value.items() if v is not None})
     return cfg
 
 
-async def save_settings(data: dict) -> dict:
+async def save_settings(data: dict, business_id: Optional[str] = None) -> dict:
+    from services.tenant_settings import set_setting
     cfg = {
         "minStreak": max(int(data.get("minStreak", DEFAULT_SETTINGS["minStreak"]) or 1), 1),
         "minStreakDays": max(int(data.get("minStreakDays", DEFAULT_SETTINGS["minStreakDays"]) or 0), 0),
     }
-    await db.settings.update_one(
-        {"key": "trust_settings"}, {"$set": {"key": "trust_settings", "value": cfg}}, upsert=True
-    )
+    await set_setting("trust_settings", cfg, business_id)
     return cfg
 
 

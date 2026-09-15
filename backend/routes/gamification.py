@@ -244,17 +244,25 @@ from services.print_routing import DEFAULT_PRINT_ROUTING
 
 
 @router.get("/print-routing/config")
-async def get_print_routing():
+async def get_print_routing(user: dict = Depends(get_user)):
     """Returns the current print-routing config. Auto-heals legacy shapes
     (e.g. an old dict-shaped `routes` field from a pre-v27 save) so the SPA
-    can always call `config.routes.map(...)` without crashing."""
+    can always call `config.routes.map(...)` without crashing.
+
+    Previously had no auth dependency at all — any caller with no
+    credential could read a business's print-routing config (which
+    printer each category routes to). Also previously a single global
+    document shared by every business on the deployment; see
+    services/tenant_settings.py.
+    """
     import copy
+    from services.tenant_settings import get_setting
     defaults = copy.deepcopy(DEFAULT_PRINT_ROUTING)
-    s = await db.settings.find_one({"key": "print_routing"}, {"_id": 0})
-    if not s or not s.get("value"):
+    value = await get_setting("print_routing", user.get("businessId"))
+    if not value:
         return defaults
 
-    cfg = s["value"] if isinstance(s.get("value"), dict) else {}
+    cfg = value if isinstance(value, dict) else {}
     # Coerce legacy `routes` shapes into a list.
     routes = cfg.get("routes")
     if isinstance(routes, dict):
@@ -273,7 +281,7 @@ async def get_print_routing():
 
 
 @router.post("/print-routing/config")
-async def save_print_routing(data: dict, _: dict = Depends(require_owner_or_manager)):
+async def save_print_routing(data: dict, user: dict = Depends(require_owner_or_manager)):
     """Persist print-routing config. Validates `routes` is an array of
     `{category, printer, priority}` objects — rejects legacy dict shapes so
     the SPA never crashes on a subsequent read."""
@@ -296,8 +304,8 @@ async def save_print_routing(data: dict, _: dict = Depends(require_owner_or_mana
         "defaultPrinter": data.get("defaultPrinter") or "Kitchen Printer",
         "defaultPriority": int(data.get("defaultPriority") or 2),
     }
-    await db.settings.update_one({"key": "print_routing"},
-                                  {"$set": {"key": "print_routing", "value": payload}}, upsert=True)
+    from services.tenant_settings import set_setting
+    await set_setting("print_routing", payload, user.get("businessId"))
     return {"message": "Print routing saved", "config": payload}
 
 @router.post("/print-routing/send")

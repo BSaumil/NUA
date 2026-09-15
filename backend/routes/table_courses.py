@@ -60,22 +60,22 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-# table_course_settings is a singleton ("_id": "singleton") shared by every
-# business on the deployment — the same architectural gap already flagged
-# for business_settings/print_routing/booking_rules in
-# TENANT_ISOLATION_REMAINING_WORK.md. Not fixed here for the same reason
-# (re-keying db.settings-shaped singletons deserves its own migration).
-# table_states and dock_notifications below ARE fixed, since they're
-# ordinary per-row collections, not singletons — and the gap there was
-# worse than a read leak: table_states is keyed only by tableId with no
-# businessId at all, so "Table 5" from two different businesses on a
-# shared deployment collided on one document, meaning one business seating
-# a guest could silently overwrite another business's live table state
-# (course progress, guest name, VIP flag) for a same-numbered table.
+# table_course_settings used to be a bare "_id": "singleton" doc shared by
+# every business on the deployment. Re-keyed per business via
+# services.tenant_settings.get_scoped_singleton/set_scoped_singleton — a
+# business that has never customised its courses reads the legacy
+# untagged document (same safe-default fallback as every other collection
+# in this codebase), the first business to save its own gets its own
+# tagged copy from then on. table_states and dock_notifications below were
+# already fixed in an earlier pass (they're ordinary per-row collections,
+# not singletons, and the gap there was worse than a read leak — see git
+# history / TENANT_ISOLATION_REMAINING_WORK.md).
 # ─── Settings CRUD ───────────────────────────────────────────────────────
 @router.get("/table-courses/settings")
-async def get_settings(_: dict = Depends(get_user)):
-    row = await db.table_course_settings.find_one({"_id": "singleton"})
+async def get_settings(user: dict = Depends(get_user)):
+    from services.tenant_settings import get_scoped_singleton, set_scoped_singleton
+    biz = user.get("businessId")
+    row = await get_scoped_singleton(db.table_course_settings, {"scope": "singleton"}, biz)
     if not row:
         row = {
             "courses": DEFAULT_COURSES,
@@ -83,7 +83,7 @@ async def get_settings(_: dict = Depends(get_user)):
             "autoAdvance": False,
             "updatedAt": _now(),
         }
-        await db.table_course_settings.insert_one({"_id": "singleton", **row})
+        await set_scoped_singleton(db.table_course_settings, {"scope": "singleton"}, row, biz)
     row.pop("_id", None)
     return row
 
@@ -92,6 +92,7 @@ async def get_settings(_: dict = Depends(get_user)):
 async def update_settings(body: CoursesSettingsIn, user: dict = Depends(get_user)):
     if user["role"] not in ("owner", "manager"):
         raise HTTPException(403, "Owner or manager only")
+    from services.tenant_settings import set_scoped_singleton
     payload = {
         "courses":       [c.dict() for c in body.courses],
         "overdueColour": body.overdueColour or OVERDUE_COLOUR,
@@ -99,9 +100,7 @@ async def update_settings(body: CoursesSettingsIn, user: dict = Depends(get_user
         "updatedAt":     _now(),
         "updatedBy":     user.get("email"),
     }
-    await db.table_course_settings.update_one(
-        {"_id": "singleton"}, {"$set": payload}, upsert=True,
-    )
+    await set_scoped_singleton(db.table_course_settings, {"scope": "singleton"}, payload, user.get("businessId"))
     return payload
 
 
@@ -124,7 +123,8 @@ async def list_states(user: dict = Depends(get_user)):
     Each row is enriched with derived colour + dwell minutes so the SPA can
     render without extra roundtrips."""
     states = await db.table_states.find(tenant_scope_filter(user.get("businessId")), {"_id": 0}).to_list(500)
-    settings_row = await db.table_course_settings.find_one({"_id": "singleton"})
+    from services.tenant_settings import get_scoped_singleton
+    settings_row = await get_scoped_singleton(db.table_course_settings, {"scope": "singleton"}, user.get("businessId"))
     courses = (settings_row or {}).get("courses", DEFAULT_COURSES)
     overdue_colour = (settings_row or {}).get("overdueColour", OVERDUE_COLOUR)
     by_key = {c["key"]: c for c in courses}

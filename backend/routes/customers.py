@@ -115,18 +115,17 @@ async def redeem_store_credit(customer_id: str, data: dict, _user: dict = Depend
 @router.get("/customers/wallet-offers")
 async def get_wallet_offer_settings(_user: dict = Depends(require_owner_or_manager)):
     from services.wallet_service import get_offer_settings
-    return await get_offer_settings()
+    return await get_offer_settings(_user.get("businessId"))
 
 
 @router.post("/customers/wallet-offers")
 async def save_wallet_offer_settings(data: dict, _user: dict = Depends(require_owner_or_manager)):
+    from services.tenant_settings import set_setting
     cfg = {
         "birthdayEnabled": bool(data.get("birthdayEnabled", True)),
         "birthdayAmount": max(float(data.get("birthdayAmount", 10) or 0), 0),
     }
-    await db.settings.update_one(
-        {"key": "wallet_offers"}, {"$set": {"key": "wallet_offers", "value": cfg}}, upsert=True
-    )
+    await set_setting("wallet_offers", cfg, _user.get("businessId"))
     return cfg
 
 # ============ FEEDBACK API ============

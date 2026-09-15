@@ -536,12 +536,12 @@ async def trust_suggestions(_: dict = Depends(get_user)):
 
 @router.get("/trust/settings")
 async def get_trust_settings(_: dict = Depends(get_user)):
-    return await nua_trust.get_settings()
+    return await nua_trust.get_settings(_.get("businessId"))
 
 
 @router.post("/trust/settings")
 async def save_trust_settings(body: dict, _: dict = Depends(require_owner)):
-    return await nua_trust.save_settings(body)
+    return await nua_trust.save_settings(body, _.get("businessId"))
 
 
 @router.get("/tools/{tool_name}/trust")

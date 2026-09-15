@@ -464,18 +464,20 @@ async def add_staff_simple(data: dict, request: Request):
 
 # Custom roles management
 @router.get("/roles")
-async def get_custom_roles(_: dict = Depends(get_user)):
-    s = await db.settings.find_one({"key": "custom_roles"}, {"_id": 0})
+async def get_custom_roles(user: dict = Depends(get_user)):
+    from services.tenant_settings import get_setting
     defaults = ["cashier", "kitchen", "manager", "barista", "bar", "floor", "host", "dishwasher"]
-    return s.get("value", defaults) if s else defaults
+    value = await get_setting("custom_roles", user.get("businessId"))
+    return value if value is not None else defaults
 
 @router.post("/roles")
 async def save_custom_roles(data: dict, request: Request):
     user = await get_current_user(request)
     if user["role"] != "owner":
         raise HTTPException(status_code=403, detail="Owner access only")
+    from services.tenant_settings import set_setting
     roles = data.get("roles", [])
-    await db.settings.update_one({"key": "custom_roles"}, {"$set": {"key": "custom_roles", "value": roles}}, upsert=True)
+    await set_setting("custom_roles", roles, user.get("businessId"))
     return {"message": f"{len(roles)} roles saved", "roles": roles}
 
 @router.delete("/staff/{staff_id}")

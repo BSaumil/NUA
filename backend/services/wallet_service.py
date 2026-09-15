@@ -19,11 +19,16 @@ DEFAULT_OFFERS = {
 }
 
 
-async def get_offer_settings() -> dict:
-    s = await db.settings.find_one({"key": "wallet_offers"}, {"_id": 0})
+async def get_offer_settings(business_id: Optional[str] = None) -> dict:
+    """Defaults business_id from the request's actor context (same pattern
+    as notification_service.send()) so existing callers don't need
+    editing — this used to be one config shared by every business on the
+    deployment; see services/tenant_settings.py."""
+    from services.tenant_settings import get_setting
+    value = await get_setting("wallet_offers", business_id)
     cfg = dict(DEFAULT_OFFERS)
-    if s and isinstance(s.get("value"), dict):
-        cfg.update(s["value"])
+    if isinstance(value, dict):
+        cfg.update(value)
     return cfg
 
 

@@ -765,7 +765,7 @@ async def get_2fa_policy(_: dict = Depends(require_owner_or_manager)):
 async def save_2fa_policy(data: dict, _: dict = Depends(require_owner)):
     """Only the owner can decide the venue needs a second factor."""
     from services import two_factor
-    return await two_factor.set_policy(bool(data.get("required")), data.get("roles"))
+    return await two_factor.set_policy(bool(data.get("required")), data.get("roles"), _.get("businessId"))
 
 
 # =============================================================================

@@ -107,11 +107,12 @@ class BookingRuleViolation(ValueError):
     """Message is guest-facing — safe to show verbatim in the UI."""
 
 
-async def get_rules() -> Dict[str, Any]:
-    s = await db.settings.find_one({"key": "booking_rules"}, {"_id": 0})
+async def get_rules(business_id: Optional[str] = None) -> Dict[str, Any]:
+    from services.tenant_settings import get_setting
+    value = await get_setting("booking_rules", business_id)
     rules = dict(DEFAULT_RULES)
-    if s and isinstance(s.get("value"), dict):
-        rules.update(s["value"])
+    if isinstance(value, dict):
+        rules.update(value)
     return rules
 
 
@@ -187,7 +188,8 @@ async def capacity_for_slot(date_str: str, time_str: str, rules: dict,
         floor_capacity = sum(
             int(t.get("maxCovers") or t.get("capacity") or t.get("seats") or 4) for t in tables
         ) or 60
-        overbooking_settings = await db.settings.find_one({"id": "overbooking"}, {"_id": 0}) or {}
+        from services.tenant_settings import get_scoped_singleton
+        overbooking_settings = await get_scoped_singleton(db.settings, {"id": "overbooking"}, business_id) or {}
         buffer_ratio = float(overbooking_settings.get("bufferRatio", 1.10))
         cap = int(floor_capacity * buffer_ratio)
 
@@ -271,7 +273,7 @@ async def validate_and_enrich_booking(
     # routes/phase_ef_wave2.py) already pass their own authenticated
     # user's businessId explicitly; the guest path passes nothing, same as
     # before this module had any tenant scoping at all.
-    rules = await get_rules()
+    rules = await get_rules(business_id)
     is_override = bool(override_reason) and bool(override_actor) and \
         (override_actor.get("role") in ("owner", "manager"))
 

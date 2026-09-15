@@ -53,9 +53,15 @@ DEFAULT_PRINT_ROUTING: Dict[str, Any] = {
 }
 
 
-async def load_config() -> Dict[str, Any]:
-    s = await db.settings.find_one({"key": "print_routing"}, {"_id": 0})
-    cfg = copy.deepcopy(s["value"]) if (s and s.get("value")) else copy.deepcopy(DEFAULT_PRINT_ROUTING)
+async def load_config(business_id: Optional[str] = None) -> Dict[str, Any]:
+    """Defaults `business_id` from the request's actor context (same
+    pattern as notification_service.send()/rules_engine.emit_event()) so
+    the many existing callers here don't each need editing — this used to
+    be one config shared by every business on the deployment; see
+    services/tenant_settings.py."""
+    from services.tenant_settings import get_setting
+    value = await get_setting("print_routing", business_id)
+    cfg = copy.deepcopy(value) if value else copy.deepcopy(DEFAULT_PRINT_ROUTING)
     routes = cfg.get("routes")
     if isinstance(routes, dict):
         cfg["routes"] = [

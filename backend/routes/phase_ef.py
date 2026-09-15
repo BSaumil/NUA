@@ -32,18 +32,24 @@ DEFAULT_AUTONOMY = {
 }
 
 
-@router.get("/agent/autonomy")
-async def get_autonomy(_: dict = Depends(get_user)):
-    cfg = await db.agent_autonomy.find_one({"id": "default"}, {"_id": 0})
+async def _get_autonomy_config(business_id=None) -> dict:
+    """Was a single global `{"id": "default"}` document shared by every
+    business on the deployment; see services/tenant_settings.py."""
+    from services.tenant_settings import get_scoped_singleton
+    cfg = await get_scoped_singleton(db.agent_autonomy, {"id": "default"}, business_id)
     return cfg or {"id": "default", **DEFAULT_AUTONOMY}
 
 
+@router.get("/agent/autonomy")
+async def get_autonomy(user: dict = Depends(get_user)):
+    return await _get_autonomy_config(user.get("businessId"))
+
+
 @router.put("/agent/autonomy")
-async def update_autonomy(data: dict, _: dict = Depends(require_owner)):
+async def update_autonomy(data: dict, user: dict = Depends(require_owner)):
+    from services.tenant_settings import set_scoped_singleton
     update = {k: v for k, v in data.items() if k in DEFAULT_AUTONOMY}
-    await db.agent_autonomy.update_one(
-        {"id": "default"}, {"$set": {"id": "default", **update}}, upsert=True
-    )
+    await set_scoped_singleton(db.agent_autonomy, {"id": "default"}, update, user.get("businessId"))
     return {"updated": update}
 
 
@@ -51,7 +57,7 @@ async def update_autonomy(data: dict, _: dict = Depends(require_owner)):
 # E1 — AUTO-VIP TAGGING
 # =============================================================================
 async def auto_tag_vips(business_id: str = None):
-    cfg = await db.agent_autonomy.find_one({"id": "default"}, {"_id": 0}) or DEFAULT_AUTONOMY
+    cfg = await _get_autonomy_config(business_id)
     promoted = []
     customers = await db.customers.find(tenant_scope_filter(business_id), {"_id": 0}).to_list(5000)
     for c in customers:
@@ -182,7 +188,7 @@ async def voice_extended(data: dict, user: dict = Depends(get_user)):
 # =============================================================================
 @router.post("/agent/auto-publish-roster")
 async def auto_publish_roster(data: dict, request: Request, user: dict = Depends(require_owner_or_manager)):
-    cfg = await db.agent_autonomy.find_one({"id": "default"}, {"_id": 0}) or DEFAULT_AUTONOMY
+    cfg = await _get_autonomy_config(user.get("businessId"))
     if not cfg.get("autoPublishRoster", False):
         raise HTTPException(status_code=400, detail="Auto-publish roster disabled in autonomy config")
 
@@ -428,7 +434,7 @@ async def get_pos_list(user: dict = Depends(require_owner_or_manager)):
 @router.post("/purchase-orders/generate")
 async def generate_po(user: dict = Depends(require_owner_or_manager)):
     """Auto-generate purchase orders from low-stock products grouped by supplier."""
-    cfg = await db.agent_autonomy.find_one({"id": "default"}, {"_id": 0}) or DEFAULT_AUTONOMY
+    cfg = await _get_autonomy_config(user.get("businessId"))
     threshold = int(cfg.get("autoReorderThreshold", 5))
     low = await db.products.find(
         {"stock": {"$lte": threshold}, "active": {"$ne": False}, **tenant_scope_filter(user.get("businessId"))},
@@ -729,7 +735,7 @@ async def your_usual(customer_id: str, user: dict = Depends(get_user)):
 @router.post("/agent/tick-extended")
 async def tick_extended(request: Request, user: dict = Depends(require_owner_or_manager)):
     """Runs Phase E + F autonomous decisions in addition to base tick."""
-    cfg = await db.agent_autonomy.find_one({"id": "default"}, {"_id": 0}) or DEFAULT_AUTONOMY
+    cfg = await _get_autonomy_config(user.get("businessId"))
     biz = user.get("businessId")
     biz_scope = tenant_scope_filter(biz)
     out = {"decisions": []}

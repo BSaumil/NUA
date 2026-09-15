@@ -36,15 +36,20 @@ async def delete_table_combination(combo_id: str, user: dict = Depends(require_o
     return {"message": "Combination deleted"}
 
 # ============ BOOKING RULES & SETTINGS ============
-# db.settings key "booking_rules" is a singleton document shared by every
-# business on the deployment — the same architectural gap already flagged
-# for business_settings/print_routing in TENANT_ISOLATION_REMAINING_WORK.md
-# (re-keying db.settings by (key, businessId) touches enough call sites to
-# deserve its own migration, not a one-off fix here). Left as global,
-# consistent with that earlier decision rather than fixing this one key in
-# isolation. /booking/rules (GET) and /booking/experiences (GET) are also
-# deliberately public — server.py's PUBLIC_API_PATHS — for the guest
-# booking portal, which has no staff token to enforce policy against.
+# db.settings key "booking_rules" is deliberately kept as a global singleton,
+# NOT migrated to tenant_settings.get_setting/set_setting like the other
+# settings in this sweep. Unlike those, it has a genuinely anonymous
+# consumer: routes/public.py's POST /public/book (the guest booking form)
+# calls booking_rules_engine.get_rules() with no business_id at all — no
+# JWT, no `?business=` param, nothing to scope by (see that module's own
+# docstring and TENANT_ISOLATION_REMAINING_WORK.md). If save_booking_rules
+# wrote a per-business copy here, an owner's saved rules would stop being
+# visible to that same anonymous endpoint the moment they saved — silently
+# disabling guest-side enforcement of large-booking/capacity rules, which
+# is worse than the pre-existing shared-singleton behavor. /booking/rules
+# (GET) and /booking/experiences (GET) are also deliberately public —
+# server.py's PUBLIC_API_PATHS — for the guest booking portal, which has
+# no staff token to enforce policy against.
 @router.get("/booking/rules")
 async def get_booking_rules():
     # Delegates to booking_rules_engine.get_rules() so this GET (what the
@@ -308,15 +313,14 @@ async def send_test_email(data: dict, user: dict = Depends(require_owner_or_mana
     email_record.pop("_id", None)
     return {"message": f"Test email logged (recipient: {recipient})", "emailId": email_record["id"]}
 
-# db.settings key "email_config" is the same kind of global singleton as
-# booking_rules above — left unscoped for the same reason (see the
-# comment on get_booking_rules).
 @router.get("/email/settings")
-async def get_email_settings(_: dict = Depends(require_owner)):
-    s = await db.settings.find_one({"key": "email_config"}, {"_id": 0})
-    return s.get("value", {}) if s else {"testEmail": "sambhatt7@gmail.com", "senderName": "NUA POS", "senderEmail": ""}
+async def get_email_settings(user: dict = Depends(require_owner)):
+    from services.tenant_settings import get_setting
+    value = await get_setting("email_config", user.get("businessId"))
+    return value or {"testEmail": "sambhatt7@gmail.com", "senderName": "NUA POS", "senderEmail": ""}
 
 @router.post("/email/settings")
-async def save_email_settings(data: dict, _: dict = Depends(require_owner)):
-    await db.settings.update_one({"key": "email_config"}, {"$set": {"key": "email_config", "value": data}}, upsert=True)
+async def save_email_settings(data: dict, user: dict = Depends(require_owner)):
+    from services.tenant_settings import set_setting
+    await set_setting("email_config", data, user.get("businessId"))
     return {"message": "Email settings saved"}

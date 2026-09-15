@@ -16,12 +16,13 @@ router = APIRouter()
 
 
 @router.get("/identity/entitlements")
-async def entitlements(_: dict = Depends(get_user)):
-    return await get_subscription()
+async def entitlements(user: dict = Depends(get_user)):
+    return await get_subscription(user.get("businessId"))
 
 
 @router.put("/identity/entitlements")
-async def set_entitlements(data: dict, _: dict = Depends(require_owner)):
+async def set_entitlements(data: dict, user: dict = Depends(require_owner)):
+    from services.tenant_settings import set_setting
     flags = data.get("feature_flags") or {}
     # customer_identity is not a switch — silently keep it on no matter
     # what a client sends.
@@ -30,11 +31,7 @@ async def set_entitlements(data: dict, _: dict = Depends(require_owner)):
         "addons_enabled": data.get("addons_enabled") or [],
         "feature_flags": flags,
     }
-    await db.settings.update_one(
-        {"key": "venue_subscription"},
-        {"$set": {"key": "venue_subscription", "value": value}},
-        upsert=True,
-    )
+    await set_setting("venue_subscription", value, user.get("businessId"))
     return value
 
 

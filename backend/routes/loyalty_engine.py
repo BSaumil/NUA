@@ -49,25 +49,31 @@ DEFAULT_CONFIG = {
 }
 
 
-async def get_config():
-    cfg = await db.loyalty_config.find_one({"id": "default"}, {"_id": 0})
+async def get_config(business_id: Optional[str] = None):
+    """Every business's own loyalty program configuration (earn rate,
+    redeem rate, category multipliers, expiry/downgrade policy) — was a
+    single global `{"id": "default"}` document shared by every business on
+    the deployment until this fix; see services/tenant_settings.py."""
+    from services.tenant_settings import get_scoped_singleton
+    cfg = await get_scoped_singleton(db.loyalty_config, {"id": "default"}, business_id)
     return cfg or {"id": "default", **DEFAULT_CONFIG}
 
 
 @router.get("/loyalty/config")
-async def get_loyalty_config(_: dict = Depends(get_user)):
-    return await get_config()
+async def get_loyalty_config(user: dict = Depends(get_user)):
+    return await get_config(user.get("businessId"))
 
 
 @router.put("/loyalty/config")
-async def update_loyalty_config(data: dict, _: dict = Depends(require_owner)):
+async def update_loyalty_config(data: dict, user: dict = Depends(require_owner)):
+    from services.tenant_settings import set_scoped_singleton
     update = {k: v for k, v in data.items() if k in (
         "earnRate", "redeemRate", "minRedeem", "categoryMultipliers", "active",
         "pointsExpiryDays", "expiryWarnDays", "downgradeEnabled", "downgradeGraceDays",
     )}
     update["updatedAt"] = datetime.now(timezone.utc).isoformat()
-    await db.loyalty_config.update_one({"id": "default"}, {"$set": {"id": "default", **update}}, upsert=True)
-    return await get_config()
+    await set_scoped_singleton(db.loyalty_config, {"id": "default"}, update, user.get("businessId"))
+    return await get_config(user.get("businessId"))
 
 
 # =============================================================================
@@ -98,7 +104,7 @@ async def earn_points(data: dict, user: dict = Depends(get_user)):
         existing = await db.loyalty_ledger.find_one({"transactionId": transaction_id, "type": "earn"})
         if existing:
             return {"earned": existing["points"], "skipped": True, "reason": "already credited"}
-    cfg = await get_config()
+    cfg = await get_config(user.get("businessId"))
     if not cfg.get("active", True):
         return {"earned": 0, "skipped": True, "reason": "loyalty disabled"}
     mults = cfg.get("categoryMultipliers", {})
@@ -150,7 +156,7 @@ async def redeem_points(data: dict, user: dict = Depends(get_user)):
         raise HTTPException(status_code=404, detail="Customer not found")
     if locked_check and locked_check.get("loyaltyLocked"):
         raise HTTPException(status_code=403, detail="Loyalty account locked pending fraud review")
-    cfg = await get_config()
+    cfg = await get_config(user.get("businessId"))
     min_redeem = int(cfg.get("minRedeem", 10))
     if points < min_redeem:
         raise HTTPException(status_code=400, detail=f"Minimum {min_redeem} points required")
@@ -187,7 +193,7 @@ async def get_balance(customer_id: str, user: dict = Depends(get_user)):
     if not customer or not tenant_owns(customer.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Customer not found")
     pts = int(customer.get("points", 0))
-    cfg = await get_config()
+    cfg = await get_config(user.get("businessId"))
     return {
         "customerId": customer_id,
         "points": pts,
@@ -216,7 +222,7 @@ async def get_liability_report(user: dict = Depends(require_owner_or_manager)):
     same accounting posture as gratuity being tracked as a liability rather
     than revenue. Nothing already computed this anywhere; it only ever
     existed implicitly as a sum nobody had run."""
-    cfg = await get_config()
+    cfg = await get_config(user.get("businessId"))
     redeem_rate = float(cfg.get("redeemRate", 0.01))
     scope = tenant_scope_filter(user.get("businessId"))
     customers = await db.customers.find(
@@ -761,7 +767,7 @@ async def agent_tick(request: Request, user: dict = Depends(require_owner_or_man
     # all opt-in via loyalty_config (pointsExpiryDays / downgradeEnabled),
     # no-ops otherwise. Warning runs before expiry so a customer who's about
     # to lose points this tick was at least told last tick, not the same run.
-    cfg = await get_config()
+    cfg = await get_config(user.get("businessId"))
     warned = await _warn_expiring_points(cfg)
     if warned:
         decisions.append(await _record_decision("points_expiry_warned",
