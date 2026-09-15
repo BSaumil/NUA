@@ -10,7 +10,7 @@ loyalty points a payment earns — are tied to a real phone number, not
 "whoever tapped first."
 """
 from __future__ import annotations
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Request, Depends, WebSocket, WebSocketDisconnect
 from database import db
 from deps import get_user
@@ -42,18 +42,33 @@ def _public_view(split: dict) -> dict:
     }
 
 
+async def _require_business_id(business: Optional[str]) -> str:
+    """The QR code a table's split link is printed from must carry
+    `?business=<slug-or-id>` — unlike table_ordering.py's menu/order QR
+    codes, this one gates money changing hands, so an absent or
+    unresolvable business is refused outright (400) rather than silently
+    falling back to an unscoped, cross-tenant-poolable lookup."""
+    from routes.online_orders import _resolve_business_id
+    business_id = await _resolve_business_id(business)
+    if not business_id:
+        raise HTTPException(status_code=400, detail="A valid business must be specified for bill splitting")
+    return business_id
+
+
 @router.get("/table/{table_number}/split")
-async def get_split(table_number: str):
+async def get_split(table_number: str, business: Optional[str] = None):
+    business_id = await _require_business_id(business)
     try:
-        split = await bill_split.get_or_create_split(table_number)
+        split = await bill_split.get_or_create_split(table_number, business_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return _public_view(split)
 
 
 @router.post("/table/{table_number}/split/mode")
-async def choose_mode(table_number: str, data: dict):
-    split = await bill_split.get_or_create_split(table_number)
+async def choose_mode(table_number: str, data: dict, business: Optional[str] = None):
+    business_id = await _require_business_id(business)
+    split = await bill_split.get_or_create_split(table_number, business_id)
     try:
         updated = await bill_split.set_mode(
             split["id"], data.get("mode"), data.get("equalCount"),
@@ -148,7 +163,8 @@ async def checkout(split_id: str, data: dict, http_request: Request, session: di
         "orderType": "dine_in", "tableNumber": split["tableNumber"],
         "customerId": customer["id"], "tipAmount": tip_amount,
     }
-    guest_cashier = {"id": f"guest:{session['phone']}", "name": "Guest self-checkout", "role": "guest"}
+    guest_cashier = {"id": f"guest:{session['phone']}", "name": "Guest self-checkout", "role": "guest",
+                      "businessId": split.get("businessId")}
     checkout_data = {
         "amount": charge_amount, "orderId": split_id,
         "originUrl": data.get("originUrl") or str(http_request.base_url).rstrip("/"),
@@ -281,6 +297,11 @@ async def staff_process_tab(split_id: str, data: dict, user: dict = Depends(get_
     "staff-only" — without an explicit Depends here, this endpoint
     (recording a real payment against a tab) was reachable by anyone on the
     internet with no credential at all, not merely unscoped to a tenant.
+
+    Also verifies the tab's own split belongs to the caller's business —
+    tab_id is an opaque id with no tenant field of its own, so without this
+    check a staff member from any business who learned/guessed another
+    business's tab_id could record a payment against it.
     """
     tab_id = data.get("tabId")
     amount = data.get("amount", 0)
@@ -288,6 +309,13 @@ async def staff_process_tab(split_id: str, data: dict, user: dict = Depends(get_
 
     if not tab_id:
         raise HTTPException(status_code=400, detail="tabId required")
+
+    tab = await db.split_tabs.find_one({"id": tab_id}, {"_id": 0})
+    if not tab:
+        raise HTTPException(status_code=404, detail="Tab not found")
+    owning_split = await db.bill_splits.find_one({"id": tab.get("splitId")}, {"_id": 0, "businessId": 1})
+    if not owning_split or owning_split.get("businessId") != user.get("businessId"):
+        raise HTTPException(status_code=404, detail="Tab not found")
 
     result = await split_payment.staff_process_tab_payment(tab_id, amount, method)
     if not result.get("success"):
@@ -338,12 +366,13 @@ async def get_active_splits(user: dict = Depends(get_user)):
     Same /api/table/ public-prefix issue as staff-process-tab below: with
     no Depends here, this returned every open split across every business
     on the deployment — guest phone numbers, item details, running
-    totals — to anyone on the internet with no credential. Auth added;
-    still not businessId-scoped (db.bill_splits carries no businessId field
-    at all — see FINANCIAL_OFFLINE_INTEGRITY_REMAINING_WORK.md), so any
-    logged-in staff member of any business can still see every business's
-    open splits. That's a smaller, real gap left for a schema-level fix."""
-    splits = await db.bill_splits.find({"status": "open"}, {"_id": 0}).to_list(200)
+    totals — to anyone on the internet with no credential. Auth added, and
+    now also businessId-scoped: db.bill_splits docs are stamped with the
+    resolving business at creation (services/bill_split.get_or_create_split),
+    so a logged-in staff member of one business can no longer see another
+    business's open splits."""
+    business_id = user.get("businessId")
+    splits = await db.bill_splits.find({"status": "open", "businessId": business_id}, {"_id": 0}).to_list(200)
     out = []
     for split in splits:
         tabs = await db.split_tabs.find(
@@ -363,8 +392,12 @@ async def get_active_splits(user: dict = Depends(get_user)):
 async def get_staff_status(table_number: str, user: dict = Depends(get_user)):
     """Staff view of split status (all claims, payments, balances). Same
     /api/table/ public-prefix issue as the two endpoints above — was
-    reachable with no credential; auth added."""
-    split = await db.bill_splits.find_one({"tableNumber": str(table_number), "status": "open"}, {"_id": 0})
+    reachable with no credential; auth added and scoped to the caller's
+    own business so a table-number collision with another business's open
+    split can't surface it here either."""
+    business_id = user.get("businessId")
+    split = await db.bill_splits.find_one(
+        {"tableNumber": str(table_number), "businessId": business_id, "status": "open"}, {"_id": 0})
     if not split:
         raise HTTPException(status_code=404, detail="No active split for this table")
 

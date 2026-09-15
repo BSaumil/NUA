@@ -448,7 +448,7 @@ def test_bill_split_guest_checkout_shares_a_stable_key_per_split(client, monkeyp
 
     call_log = _install_fake_stripe_sdk(monkeypatch)
     _run(_db.kitchen_orders.insert_one({
-        "id": "KORD-IDEM-SPLIT-1", "tableNumber": "T-IDEM-1", "status": "new",
+        "id": "KORD-IDEM-SPLIT-1", "tableNumber": "T-IDEM-1", "businessId": "default", "status": "new",
         "items": [{"productId": "PROD-IDEM-BURGER", "productName": "Burger", "category": "Mains", "quantity": 1}],
     }))
     _run(_db.products.insert_one({"id": "PROD-IDEM-BURGER", "name": "Burger", "price": 12.0, "category": "Mains"}))
@@ -458,8 +458,8 @@ def test_bill_split_guest_checkout_shares_a_stable_key_per_split(client, monkeyp
         token = guest_session.issue_guest_token("+61412345099")
         headers = {"Authorization": f"Bearer {token}"}
 
-        split_id = req(client, "GET", "/api/table/T-IDEM-1/split").json()["id"]
-        line_id = req(client, "GET", "/api/table/T-IDEM-1/split").json()["lines"][0]["id"]
+        split_id = req(client, "GET", "/api/table/T-IDEM-1/split?business=default").json()["id"]
+        line_id = req(client, "GET", "/api/table/T-IDEM-1/split?business=default").json()["lines"][0]["id"]
         req(client, "POST", f"/api/table/split/{split_id}/claim", headers=headers, json={"lineIds": [line_id]})
 
         payload = {"provider": "stripe", "lineIds": [line_id]}
@@ -479,8 +479,8 @@ def test_bill_split_guest_checkout_shares_a_stable_key_per_split(client, monkeyp
         _run(_db.customers.delete_many({"phone": "+61412345099"}))
         _run(db.payment_transactions.delete_many({"sessionId": {"$regex": "^cs_test_fake_"}}))
         if split_id:
-            # guest self-checkout has no businessId, so the claim key is
-            # namespaced "guest:{split_id}" (see routes/bill_split.py's
-            # guest_cashier and _create_stripe_session's businessId
-            # namespacing).
-            _run(db.payment_session_claims.delete_many({"key": f"guest:{split_id}"}))
+            # guest_cashier now carries the resolving business's real
+            # businessId (routes/bill_split.py, tenant-isolation fix), so
+            # the claim key is namespaced "default:{split_id}" here, not
+            # the old "guest:{split_id}" fallback.
+            _run(db.payment_session_claims.delete_many({"key": f"default:{split_id}"}))

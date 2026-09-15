@@ -27,14 +27,15 @@ def _mock_client_factory(handler):
     return factory
 
 
-def _seed_table_order(table_number, order_id="KORD-SPLIT-1", items=None):
+def _seed_table_order(table_number, order_id="KORD-SPLIT-1", items=None, business_id="default"):
     from database import db
     items = items or [
         {"productId": "PROD-BURGER", "productName": "Burger", "category": "Mains", "quantity": 2},
         {"productId": "PROD-FRIES", "productName": "Fries", "category": "Sides", "quantity": 1},
     ]
     _run(db.kitchen_orders.insert_one({
-        "id": order_id, "tableNumber": str(table_number), "items": items, "status": "new",
+        "id": order_id, "tableNumber": str(table_number), "businessId": business_id,
+        "items": items, "status": "new",
     }))
     _run(db.products.insert_one({"id": "PROD-BURGER", "name": "Burger", "price": 15.0, "category": "Mains"}))
     _run(db.products.insert_one({"id": "PROD-FRIES", "name": "Fries", "price": 6.0, "category": "Sides"}))
@@ -58,7 +59,7 @@ def _guest_token(phone="+61412345000"):
 def test_get_split_builds_one_line_per_unit(client):
     _seed_table_order("T-901")
     try:
-        r = req(client, "GET", "/api/table/T-901/split")
+        r = req(client, "GET", "/api/table/T-901/split?business=default")
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["tableNumber"] == "T-901"
@@ -77,25 +78,25 @@ def test_get_split_builds_one_line_per_unit(client):
 def test_get_split_is_idempotent(client):
     _seed_table_order("T-902")
     try:
-        r1 = req(client, "GET", "/api/table/T-902/split")
-        r2 = req(client, "GET", "/api/table/T-902/split")
+        r1 = req(client, "GET", "/api/table/T-902/split?business=default")
+        r2 = req(client, "GET", "/api/table/T-902/split?business=default")
         assert r1.json()["id"] == r2.json()["id"]
     finally:
         _cleanup_table("T-902")
 
 
 def test_get_split_404s_when_no_open_order(client):
-    r = req(client, "GET", "/api/table/T-NO-ORDER/split")
+    r = req(client, "GET", "/api/table/T-NO-ORDER/split?business=default")
     assert r.status_code == 404
 
 
 def test_a_new_round_firing_appends_lines_without_disturbing_claims(client):
     _seed_table_order("T-903")
     try:
-        split_id = req(client, "GET", "/api/table/T-903/split").json()["id"]
+        split_id = req(client, "GET", "/api/table/T-903/split?business=default").json()["id"]
         token = _guest_token("+61412345001")
         # Claim one burger before the second round fires.
-        lines = req(client, "GET", "/api/table/T-903/split").json()["lines"]
+        lines = req(client, "GET", "/api/table/T-903/split?business=default").json()["lines"]
         burger_line = next(l for l in lines if l["productName"] == "Burger")
         req(client, "POST", f"/api/table/split/{split_id}/claim",
             headers={"Authorization": f"Bearer {token}"}, json={"lineIds": [burger_line["id"]]})
@@ -108,7 +109,7 @@ def test_a_new_round_firing_appends_lines_without_disturbing_claims(client):
             {"productId": "PROD-FRIES", "productName": "Fries", "category": "Sides", "quantity": 1},
         ]}}))
 
-        body = req(client, "GET", "/api/table/T-903/split").json()
+        body = req(client, "GET", "/api/table/T-903/split?business=default").json()
         assert len(body["lines"]) == 4  # 2 burger + 2 fries now
         claimed = [l for l in body["lines"] if l["status"] == "claimed"]
         assert len(claimed) == 1  # the earlier claim survived the refresh
@@ -121,8 +122,8 @@ def test_a_new_round_firing_appends_lines_without_disturbing_claims(client):
 def test_mode_sticks_after_first_choice(client):
     _seed_table_order("T-904")
     try:
-        req(client, "POST", "/api/table/T-904/split/mode", json={"mode": "equal", "equalCount": 3})
-        body = req(client, "POST", "/api/table/T-904/split/mode", json={"mode": "items"}).json()
+        req(client, "POST", "/api/table/T-904/split/mode?business=default", json={"mode": "equal", "equalCount": 3})
+        body = req(client, "POST", "/api/table/T-904/split/mode?business=default", json={"mode": "items"}).json()
         assert body["mode"] == "equal"
     finally:
         _cleanup_table("T-904")
@@ -131,7 +132,7 @@ def test_mode_sticks_after_first_choice(client):
 def test_equal_split_shares_sum_back_to_the_exact_total(client):
     _seed_table_order("T-905")
     try:
-        body = req(client, "POST", "/api/table/T-905/split/mode", json={"mode": "equal", "equalCount": 3}).json()
+        body = req(client, "POST", "/api/table/T-905/split/mode?business=default", json={"mode": "equal", "equalCount": 3}).json()
         total_of_lines = round(sum(l["unitPrice"] for l in body["lines"]), 2)
         total_of_shares = round(sum(p["amount"] for p in body["equalParts"]), 2)
         assert total_of_shares == total_of_lines
@@ -145,7 +146,7 @@ def test_equal_split_shares_sum_back_to_the_exact_total(client):
 def test_claim_requires_a_guest_session(client):
     _seed_table_order("T-906")
     try:
-        split_id = req(client, "GET", "/api/table/T-906/split").json()["id"]
+        split_id = req(client, "GET", "/api/table/T-906/split?business=default").json()["id"]
         r = req(client, "POST", f"/api/table/split/{split_id}/claim", json={"lineIds": ["L1"]})
         assert r.status_code == 401
     finally:
@@ -155,8 +156,8 @@ def test_claim_requires_a_guest_session(client):
 def test_two_guests_cannot_claim_the_same_line(client):
     _seed_table_order("T-907")
     try:
-        split_id = req(client, "GET", "/api/table/T-907/split").json()["id"]
-        line_id = req(client, "GET", "/api/table/T-907/split").json()["lines"][0]["id"]
+        split_id = req(client, "GET", "/api/table/T-907/split?business=default").json()["id"]
+        line_id = req(client, "GET", "/api/table/T-907/split?business=default").json()["lines"][0]["id"]
         t1, t2 = _guest_token("+61412345002"), _guest_token("+61412345003")
 
         r1 = req(client, "POST", f"/api/table/split/{split_id}/claim",
@@ -174,8 +175,8 @@ def test_two_guests_cannot_claim_the_same_line(client):
 def test_release_returns_a_line_to_open(client):
     _seed_table_order("T-908")
     try:
-        split_id = req(client, "GET", "/api/table/T-908/split").json()["id"]
-        line_id = req(client, "GET", "/api/table/T-908/split").json()["lines"][0]["id"]
+        split_id = req(client, "GET", "/api/table/T-908/split?business=default").json()["id"]
+        line_id = req(client, "GET", "/api/table/T-908/split?business=default").json()["lines"][0]["id"]
         token = _guest_token("+61412345004")
         req(client, "POST", f"/api/table/split/{split_id}/claim",
             headers={"Authorization": f"Bearer {token}"}, json={"lineIds": [line_id]})
@@ -189,8 +190,8 @@ def test_release_returns_a_line_to_open(client):
 def test_claim_equal_slot_is_race_safe(client):
     _seed_table_order("T-909")
     try:
-        req(client, "POST", "/api/table/T-909/split/mode", json={"mode": "equal", "equalCount": 2})
-        split_id = req(client, "GET", "/api/table/T-909/split").json()["id"]
+        req(client, "POST", "/api/table/T-909/split/mode?business=default", json={"mode": "equal", "equalCount": 2})
+        split_id = req(client, "GET", "/api/table/T-909/split?business=default").json()["id"]
         t1, t2 = _guest_token("+61412345005"), _guest_token("+61412345006")
 
         r1 = req(client, "POST", f"/api/table/split/{split_id}/claim-equal",
@@ -209,8 +210,8 @@ def test_claim_equal_slot_is_race_safe(client):
 def test_checkout_requires_the_caller_to_have_claimed_the_line(client):
     _seed_table_order("T-910")
     try:
-        split_id = req(client, "GET", "/api/table/T-910/split").json()["id"]
-        line_id = req(client, "GET", "/api/table/T-910/split").json()["lines"][0]["id"]
+        split_id = req(client, "GET", "/api/table/T-910/split?business=default").json()["id"]
+        line_id = req(client, "GET", "/api/table/T-910/split?business=default").json()["lines"][0]["id"]
         token = _guest_token("+61412345007")
         # Never claimed — straight to checkout.
         r = req(client, "POST", f"/api/table/split/{split_id}/checkout",
@@ -225,8 +226,8 @@ def test_stripe_checkout_reports_not_configured_honestly(client, monkeypatch):
     monkeypatch.delenv("STRIPE_API_KEY", raising=False)
     _seed_table_order("T-911")
     try:
-        split_id = req(client, "GET", "/api/table/T-911/split").json()["id"]
-        line_id = req(client, "GET", "/api/table/T-911/split").json()["lines"][0]["id"]
+        split_id = req(client, "GET", "/api/table/T-911/split?business=default").json()["id"]
+        line_id = req(client, "GET", "/api/table/T-911/split?business=default").json()["lines"][0]["id"]
         token = _guest_token("+61412345008")
         req(client, "POST", f"/api/table/split/{split_id}/claim",
             headers={"Authorization": f"Bearer {token}"}, json={"lineIds": [line_id]})
@@ -255,8 +256,8 @@ def test_crypto_checkout_creates_a_charge_tagged_with_split_metadata(client, mon
 
     _seed_table_order("T-912")
     try:
-        split_id = req(client, "GET", "/api/table/T-912/split").json()["id"]
-        line_id = req(client, "GET", "/api/table/T-912/split").json()["lines"][0]["id"]
+        split_id = req(client, "GET", "/api/table/T-912/split?business=default").json()["id"]
+        line_id = req(client, "GET", "/api/table/T-912/split?business=default").json()["lines"][0]["id"]
         token = _guest_token("+61412345009")
         req(client, "POST", f"/api/table/split/{split_id}/claim",
             headers={"Authorization": f"Bearer {token}"}, json={"lineIds": [line_id]})
@@ -302,8 +303,8 @@ def test_paying_finalizes_the_sale_and_marks_the_line_paid(client, monkeypatch):
 
     _seed_table_order("T-913")
     try:
-        split_id = req(client, "GET", "/api/table/T-913/split").json()["id"]
-        line_id = req(client, "GET", "/api/table/T-913/split").json()["lines"][0]["id"]
+        split_id = req(client, "GET", "/api/table/T-913/split?business=default").json()["id"]
+        line_id = req(client, "GET", "/api/table/T-913/split?business=default").json()["lines"][0]["id"]
         token = _guest_token("+61412345010")
         req(client, "POST", f"/api/table/split/{split_id}/claim",
             headers={"Authorization": f"Bearer {token}"}, json={"lineIds": [line_id]})
@@ -350,7 +351,7 @@ def test_split_settles_once_every_line_is_paid(client, monkeypatch):
         {"productId": "PROD-FRIES", "productName": "Fries", "category": "Sides", "quantity": 1},
     ])
     try:
-        split = req(client, "GET", "/api/table/T-914/split").json()
+        split = req(client, "GET", "/api/table/T-914/split?business=default").json()
         assert len(split["lines"]) == 1
         line_id = split["lines"][0]["id"]
 
@@ -379,8 +380,8 @@ def test_a_verified_phone_creates_a_real_customer_that_earns_points_on_checkout(
         from database import db
         _run(db.customers.delete_many({"phone": phone}))
 
-        split_id = req(client, "GET", "/api/table/T-915/split").json()["id"]
-        line_id = req(client, "GET", "/api/table/T-915/split").json()["lines"][0]["id"]
+        split_id = req(client, "GET", "/api/table/T-915/split?business=default").json()["id"]
+        line_id = req(client, "GET", "/api/table/T-915/split?business=default").json()["lines"][0]["id"]
         token = _guest_token(phone)
         req(client, "POST", f"/api/table/split/{split_id}/claim",
             headers={"Authorization": f"Bearer {token}"}, json={"lineIds": [line_id]})
@@ -426,7 +427,7 @@ def test_custom_split_amounts_must_add_up_to_the_bill(client):
     _seed_table_order("T-916")
     try:
         # Bill is 2x$15 burger + $6 fries = $36. These don't add up.
-        r = req(client, "POST", "/api/table/T-916/split/mode",
+        r = req(client, "POST", "/api/table/T-916/split/mode?business=default",
                 json={"mode": "custom", "customAmounts": [10, 10]})
         assert r.status_code == 400
         assert "add up" in r.json()["detail"].lower()
@@ -437,7 +438,7 @@ def test_custom_split_amounts_must_add_up_to_the_bill(client):
 def test_custom_split_amounts_create_uneven_claimable_shares(client):
     _seed_table_order("T-917")
     try:
-        body = req(client, "POST", "/api/table/T-917/split/mode",
+        body = req(client, "POST", "/api/table/T-917/split/mode?business=default",
                     json={"mode": "custom", "customAmounts": [30, 6]}).json()
         assert body["mode"] == "custom"
         amounts = sorted(p["amount"] for p in body["equalParts"])
@@ -450,7 +451,7 @@ def test_custom_split_percents_convert_to_dollars_and_absorb_rounding_drift(clie
     _seed_table_order("T-918")
     try:
         # $36 total split 33.33/33.33/33.34 by percent.
-        body = req(client, "POST", "/api/table/T-918/split/mode",
+        body = req(client, "POST", "/api/table/T-918/split/mode?business=default",
                     json={"mode": "custom", "customPercents": [33.33, 33.33, 33.34]}).json()
         total = round(sum(p["amount"] for p in body["equalParts"]), 2)
         assert total == 36.0
@@ -461,7 +462,7 @@ def test_custom_split_percents_convert_to_dollars_and_absorb_rounding_drift(clie
 def test_custom_split_percents_must_add_up_to_100(client):
     _seed_table_order("T-919")
     try:
-        r = req(client, "POST", "/api/table/T-919/split/mode",
+        r = req(client, "POST", "/api/table/T-919/split/mode?business=default",
                 json={"mode": "custom", "customPercents": [50, 40]})
         assert r.status_code == 400
     finally:
@@ -482,7 +483,7 @@ def test_custom_share_is_claimable_and_payable_via_the_shared_slot_endpoints(cli
 
     _seed_table_order("T-920")
     try:
-        split = req(client, "POST", "/api/table/T-920/split/mode",
+        split = req(client, "POST", "/api/table/T-920/split/mode?business=default",
                     json={"mode": "custom", "customAmounts": [30, 6]}).json()
         split_id = split["id"]
         slot_index = next(p["index"] for p in split["equalParts"] if p["amount"] == 6.0)
@@ -524,8 +525,8 @@ def test_checkout_adds_a_tip_on_top_of_the_claimed_amount(client, monkeypatch):
 
     _seed_table_order("T-921")
     try:
-        split_id = req(client, "GET", "/api/table/T-921/split").json()["id"]
-        line = req(client, "GET", "/api/table/T-921/split").json()["lines"][0]
+        split_id = req(client, "GET", "/api/table/T-921/split?business=default").json()["id"]
+        line = req(client, "GET", "/api/table/T-921/split?business=default").json()["lines"][0]
         token = _guest_token("+61412345021")
         req(client, "POST", f"/api/table/split/{split_id}/claim",
             headers={"Authorization": f"Bearer {token}"}, json={"lineIds": [line["id"]]})
@@ -551,8 +552,8 @@ def test_checkout_adds_a_tip_on_top_of_the_claimed_amount(client, monkeypatch):
 def test_checkout_rejects_a_negative_tip(client):
     _seed_table_order("T-922")
     try:
-        split_id = req(client, "GET", "/api/table/T-922/split").json()["id"]
-        line_id = req(client, "GET", "/api/table/T-922/split").json()["lines"][0]["id"]
+        split_id = req(client, "GET", "/api/table/T-922/split?business=default").json()["id"]
+        line_id = req(client, "GET", "/api/table/T-922/split?business=default").json()["lines"][0]["id"]
         token = _guest_token("+61412345022")
         req(client, "POST", f"/api/table/split/{split_id}/claim",
             headers={"Authorization": f"Bearer {token}"}, json={"lineIds": [line_id]})
@@ -579,7 +580,7 @@ def test_paying_sends_the_guest_a_receipt_for_just_their_own_share(client, monke
         {"productId": "PROD-FRIES", "productName": "Fries", "category": "Sides", "quantity": 1},
     ])
     try:
-        split = req(client, "GET", "/api/table/T-923/split").json()
+        split = req(client, "GET", "/api/table/T-923/split?business=default").json()
         line_id = split["lines"][0]["id"]
         _run(bill_split.mark_lines_paid(split["id"], [line_id], None, "TXN-RECEIPT-1",
                                           guest_email="guest@example.com"))
@@ -601,7 +602,7 @@ def test_receipt_failure_never_blocks_marking_the_line_paid(client, monkeypatch)
         {"productId": "PROD-FRIES", "productName": "Fries", "category": "Sides", "quantity": 1},
     ])
     try:
-        split = req(client, "GET", "/api/table/T-924/split").json()
+        split = req(client, "GET", "/api/table/T-924/split?business=default").json()
         line_id = split["lines"][0]["id"]
         _run(bill_split.mark_lines_paid(split["id"], [line_id], None, "TXN-RECEIPT-2"))
         status = req(client, "GET", f"/api/table/split/{split['id']}/status").json()
@@ -635,7 +636,7 @@ def test_settling_a_split_frees_the_table_on_the_floor_plan(client, owner_header
         {"productId": "PROD-FRIES", "productName": "Fries", "category": "Sides", "quantity": 1},
     ])
     try:
-        split = req(client, "GET", "/api/table/T-925/split").json()
+        split = req(client, "GET", "/api/table/T-925/split?business=default").json()
         line_id = split["lines"][0]["id"]
         from services import bill_split
         _run(bill_split.mark_lines_paid(split["id"], [line_id], None, "TXN-SPLIT-FLOORPLAN"))
@@ -656,7 +657,7 @@ def test_settling_a_split_frees_the_table_on_the_floor_plan(client, owner_header
 def test_active_splits_lists_every_open_table_with_claims_and_tabs(client, owner_headers):
     _seed_table_order("T-926")
     try:
-        split = req(client, "GET", "/api/table/T-926/split").json()
+        split = req(client, "GET", "/api/table/T-926/split?business=default").json()
         line_id = split["lines"][0]["id"]
         token = _guest_token("+61412345026")
         req(client, "POST", f"/api/table/split/{split['id']}/claim",
@@ -695,3 +696,137 @@ def test_staff_process_tab_rejects_an_unauthenticated_caller(anon):
     r = req(anon, "POST", "/api/table/split/some-split-id/staff-process-tab",
             json={"tabId": "does-not-matter", "amount": 10})
     assert r.status_code in (401, 403), r.text
+
+
+# ----------------------------------------------------------- tenant isolation
+# Remediation of the final readiness audit's High finding: db.bill_splits
+# carried no businessId at all — get_or_create_split resolved a table's
+# open kitchen order by tableNumber alone, so two businesses that happen to
+# both have a "Table 5" with an open order at the same time would collide,
+# with whichever business's order Mongo returned first becoming BOTH
+# tables' bill. Fixed: the QR link must now carry a real ?business=, every
+# kitchen-order lookup and the created split are scoped to it, and the
+# staff-facing monitoring/collection endpoints are scoped to the caller's
+# own business.
+
+def _make_business(client, owner_headers, *, biz_id, email):
+    """A second, independent business + logged-in owner, for cross-tenant
+    tests — same pattern as test_voice_inbound_safety.py's _login_as."""
+    from database import db
+    _run(db.businesses.insert_one({
+        "id": biz_id, "slug": biz_id, "name": f"Biz {biz_id}", "status": "active",
+    }))
+    client.post("/api/auth/register", headers=owner_headers, json={
+        "name": "Bill Split Test Owner", "email": email, "password": "BillSplitTest2026!",
+    })
+    _run(db.auth_users.update_one({"email": email}, {"$set": {"role": "owner", "businessId": biz_id}}))
+    r = client.post("/api/auth/login", json={"email": email, "password": "BillSplitTest2026!"})
+    assert r.status_code == 200, f"login failed: {r.text[:200]}"
+    client.cookies.clear()
+    return {"Authorization": f"Bearer {r.json()['token']}"}
+
+
+def _cleanup_business(biz_id):
+    from database import db
+    _run(db.businesses.delete_many({"id": biz_id}))
+    _run(db.auth_users.delete_many({"businessId": biz_id}))
+
+
+def test_get_split_rejects_a_missing_or_unresolvable_business(client):
+    _seed_table_order("T-NOBIZ")
+    try:
+        r = req(client, "GET", "/api/table/T-NOBIZ/split")
+        assert r.status_code == 400, r.text
+        r = req(client, "GET", "/api/table/T-NOBIZ/split?business=does-not-exist")
+        assert r.status_code == 400, r.text
+    finally:
+        _cleanup_table("T-NOBIZ")
+
+
+def test_two_businesses_with_the_same_table_number_never_share_a_bill(client, owner_headers):
+    """The actual collision the missing businessId allowed: both businesses
+    have an open order on a table labelled 'T-COLLIDE' — a guest scanning
+    either QR must only ever see their own venue's order and lines."""
+    biz_b = "bill-split-biz-b"
+    try:
+        _make_business(client, owner_headers, biz_id=biz_b, email="billsplit-b-owner@nua.com")
+        _seed_table_order("T-COLLIDE", order_id="KORD-SPLIT-DEFAULT", business_id="default",
+                           items=[{"productId": "PROD-BURGER", "productName": "Burger",
+                                   "category": "Mains", "quantity": 1}])
+        from database import db
+        _run(db.kitchen_orders.insert_one({
+            "id": "KORD-SPLIT-BIZB", "tableNumber": "T-COLLIDE", "businessId": biz_b,
+            "items": [{"productId": "PROD-FRIES", "productName": "Fries",
+                       "category": "Sides", "quantity": 3}],
+            "status": "new",
+        }))
+
+        split_default = req(client, "GET", "/api/table/T-COLLIDE/split?business=default").json()
+        split_b = req(client, "GET", f"/api/table/T-COLLIDE/split?business={biz_b}").json()
+
+        assert split_default["id"] != split_b["id"]
+        assert [l["productName"] for l in split_default["lines"]] == ["Burger"]
+        assert [l["productName"] for l in split_b["lines"]] == ["Fries", "Fries", "Fries"]
+    finally:
+        _cleanup_table("T-COLLIDE")
+        _run(__import__("database").db.kitchen_orders.delete_many({"tableNumber": "T-COLLIDE"}))
+        _cleanup_business(biz_b)
+
+
+def test_active_splits_never_shows_another_business_open_split(client, owner_headers):
+    biz_b = "bill-split-biz-b2"
+    try:
+        biz_b_headers = _make_business(client, owner_headers, biz_id=biz_b, email="billsplit-b2-owner@nua.com")
+        _seed_table_order("T-ISOL-1", order_id="KORD-ISOL-1")
+        req(client, "GET", "/api/table/T-ISOL-1/split?business=default")
+
+        body = req(client, "GET", "/api/table/active-splits", headers=biz_b_headers).json()
+        assert all(s["tableNumber"] != "T-ISOL-1" for s in body["splits"]), (
+            "a staff member of a different business must never see this business's open split"
+        )
+    finally:
+        _cleanup_table("T-ISOL-1")
+        _cleanup_business(biz_b)
+
+
+def test_staff_status_is_scoped_to_the_callers_own_business(client, owner_headers):
+    biz_b = "bill-split-biz-b3"
+    try:
+        biz_b_headers = _make_business(client, owner_headers, biz_id=biz_b, email="billsplit-b3-owner@nua.com")
+        _seed_table_order("T-ISOL-2", order_id="KORD-ISOL-2")
+        req(client, "GET", "/api/table/T-ISOL-2/split?business=default")
+
+        r = req(client, "GET", "/api/table/T-ISOL-2/split/staff-status", headers=biz_b_headers)
+        assert r.status_code == 404, (
+            "another business's staff must not be able to read this table's split status"
+        )
+        r_owner = req(client, "GET", "/api/table/T-ISOL-2/split/staff-status", headers=owner_headers)
+        assert r_owner.status_code == 200
+    finally:
+        _cleanup_table("T-ISOL-2")
+        _cleanup_business(biz_b)
+
+
+def test_staff_process_tab_rejects_a_tab_belonging_to_another_business(client, owner_headers):
+    biz_b = "bill-split-biz-b4"
+    try:
+        biz_b_headers = _make_business(client, owner_headers, biz_id=biz_b, email="billsplit-b4-owner@nua.com")
+        _seed_table_order("T-ISOL-3", order_id="KORD-ISOL-3")
+        split = req(client, "GET", "/api/table/T-ISOL-3/split?business=default").json()
+        line_id = split["lines"][0]["id"]
+        token = _guest_token("+61412345099")
+        req(client, "POST", f"/api/table/split/{split['id']}/claim",
+            headers={"Authorization": f"Bearer {token}"}, json={"lineIds": [line_id]})
+        r = req(client, "POST", f"/api/table/split/{split['id']}/partial-checkout",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"amount": 5, "lineIds": [line_id], "totalAmount": 15})
+        tab_id = r.json()["tabId"]
+
+        r = req(client, "POST", "/api/table/split/x/staff-process-tab",
+                headers=biz_b_headers, json={"tabId": tab_id, "amount": 10})
+        assert r.status_code == 404, (
+            "a staff member of a different business must not be able to collect this tab"
+        )
+    finally:
+        _cleanup_table("T-ISOL-3")
+        _cleanup_business(biz_b)

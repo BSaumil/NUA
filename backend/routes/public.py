@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime
 from typing import Optional
 from database import db
+from deps import get_user
 import uuid
 import random
 
@@ -217,17 +218,29 @@ async def get_public_events(business: Optional[str] = None):
     return events
 
 # ============ QR PAYMENT API ============
+# Despite living in this file, these three routes carry no "/public/" path
+# segment (router has no prefix), so they're NOT on PUBLIC_API_PREFIXES/
+# PUBLIC_API_PATHS and RequireAuthMiddleware already 401s a request with no
+# credential at all. The gap found during the final readiness audit was
+# narrower but still real: with some valid staff token (any business) and
+# no businessId anywhere on db.payments/db.split_payments, a staff member
+# at business A could list, guess, or enumerate business B's QR-UPI payment
+# or split-payment record by its id — an 8-hex/~32-bit value, weak enough
+# to make guessing practical. Fixed: explicit Depends(get_user) (defense in
+# depth on top of the middleware), businessId stamped at creation and
+# required on every lookup/mutation, and ids widened to a full uuid4 hex.
 @router.post("/payments/generate-qr")
-async def generate_payment_qr(data: dict):
+async def generate_payment_qr(data: dict, user: dict = Depends(get_user)):
     amount = data.get("amount", 0)
-    transaction_id = data.get("transactionId", f"TXN-{str(uuid.uuid4())[:8].upper()}")
+    transaction_id = data.get("transactionId", f"TXN-{uuid.uuid4().hex.upper()}")
     method = data.get("method", "upi")
     merchant_upi = data.get("merchantUpi", "nua@upi")
     merchant_name = data.get("merchantName", "NUA Restaurant")
     note = data.get("note", f"Payment for order {transaction_id}")
     upi_string = f"upi://pay?pa={merchant_upi}&pn={merchant_name}&am={amount:.2f}&tn={note}&tr={transaction_id}"
     payment_record = {
-        "id": f"PAY-{str(uuid.uuid4())[:8].upper()}", "transactionId": transaction_id,
+        "id": f"PAY-{uuid.uuid4().hex.upper()}", "businessId": user.get("businessId"),
+        "transactionId": transaction_id,
         "amount": amount, "method": method, "status": "pending",
         "upiString": upi_string, "merchantUpi": merchant_upi,
         "createdAt": datetime.utcnow().isoformat(),
@@ -241,14 +254,16 @@ async def generate_payment_qr(data: dict):
     }
 
 @router.post("/payments/split")
-async def create_split_payment(data: dict):
+async def create_split_payment(data: dict, user: dict = Depends(get_user)):
     total = data.get("totalAmount", 0)
     splits = data.get("splits", [])
-    transaction_id = data.get("transactionId", f"TXN-{str(uuid.uuid4())[:8].upper()}")
+    transaction_id = data.get("transactionId", f"TXN-{uuid.uuid4().hex.upper()}")
+    business_id = user.get("businessId")
     split_records = []
     for i, split in enumerate(splits):
         record = {
-            "id": f"SPLIT-{str(uuid.uuid4())[:8].upper()}", "transactionId": transaction_id,
+            "id": f"SPLIT-{uuid.uuid4().hex.upper()}", "businessId": business_id,
+            "transactionId": transaction_id,
             "splitIndex": i + 1, "amount": split.get("amount", 0),
             "method": split.get("method", "card"),
             "payerName": split.get("payerName", f"Guest {i + 1}"),
@@ -262,15 +277,16 @@ async def create_split_payment(data: dict):
     return {"transactionId": transaction_id, "totalAmount": total, "splits": split_records, "splitCount": len(split_records)}
 
 @router.post("/payments/{payment_id}/confirm")
-async def confirm_payment(payment_id: str):
+async def confirm_payment(payment_id: str, user: dict = Depends(get_user)):
+    business_id = user.get("businessId")
     result = await db.payments.find_one_and_update(
-        {"id": payment_id},
+        {"id": payment_id, "businessId": business_id},
         {"$set": {"status": "confirmed", "confirmedAt": datetime.utcnow().isoformat()}},
         return_document=True
     )
     if not result:
         result = await db.split_payments.find_one_and_update(
-            {"id": payment_id},
+            {"id": payment_id, "businessId": business_id},
             {"$set": {"status": "confirmed", "confirmedAt": datetime.utcnow().isoformat()}},
             return_document=True
         )
