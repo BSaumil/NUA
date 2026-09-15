@@ -38,6 +38,14 @@ async def _create_crypto_session(data: dict, http_request: Request, cashier: dic
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Invalid amount")
 
+    # Same double-click/retry protection as _create_stripe_session — see
+    # services/payment_idempotency.py.
+    from services.payment_idempotency import claim_or_wait, record_result
+    idempotency_key = data.get("idempotencyKey") or order_id
+    prior_result = await claim_or_wait("crypto", idempotency_key)
+    if prior_result is not None:
+        return prior_result
+
     # Coinbase Commerce doesn't template a charge identifier into
     # redirect_url the way Stripe does {CHECKOUT_SESSION_ID} — it just
     # redirects to the bare URL with nothing appended. order_id is the one
@@ -77,7 +85,9 @@ async def _create_crypto_session(data: dict, http_request: Request, cashier: dic
                 payment_doc[k] = data[k]
     await db.payment_transactions.insert_one(payment_doc)
 
-    return {"url": charge["hosted_url"], "sessionId": charge["code"]}
+    result = {"url": charge["hosted_url"], "sessionId": charge["code"]}
+    await record_result("crypto", idempotency_key, result)
+    return result
 
 
 @router.post("/crypto/checkout")

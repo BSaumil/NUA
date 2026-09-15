@@ -202,6 +202,19 @@ async def _create_stripe_session(data: dict, http_request: Request, cashier: dic
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Invalid amount")
 
+    # A double-click or a client retry after a dropped response must not
+    # create two live Stripe sessions for the same cart. `idempotencyKey`
+    # (explicit, e.g. the POS's per-attempt UUID) takes priority; falling
+    # back to order_id means callers whose orderId is already a stable
+    # resource identity — routes/bill_split.py's split_id,
+    # routes/online_orders.py's placed-order id — get real protection with
+    # no caller change at all. See services/payment_idempotency.py.
+    from services.payment_idempotency import claim_or_wait, record_result
+    idempotency_key = data.get("idempotencyKey") or order_id
+    prior_result = await claim_or_wait("stripe", idempotency_key)
+    if prior_result is not None:
+        return prior_result
+
     host_url = str(http_request.base_url).rstrip("/")
     webhook_url = f"{host_url}/api/webhook/stripe"
     stripe_checkout = StripeCheckout(api_key=api_key, webhook_url=webhook_url)
@@ -249,7 +262,9 @@ async def _create_stripe_session(data: dict, http_request: Request, cashier: dic
     await db.payment_transactions.insert_one(payment_doc)
     payment_doc.pop("_id", None)
 
-    return {"url": session.url, "sessionId": session.session_id}
+    result = {"url": session.url, "sessionId": session.session_id}
+    await record_result("stripe", idempotency_key, result)
+    return result
 
 
 @router.post("/stripe/checkout")

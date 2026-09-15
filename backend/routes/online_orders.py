@@ -348,6 +348,15 @@ async def create_online_order_checkout(data: dict, http_request: Request):
         # pickup/delivery like every online order before this endpoint existed.
         return {"configured": False, "url": None}
 
+    # A double-click or a client retry must not create two live Stripe
+    # sessions for the same order — order_id is already a stable resource
+    # identity (unlike a freshly-generated one), so this needs no new
+    # client-supplied key at all. See services/payment_idempotency.py.
+    from services.payment_idempotency import claim_or_wait, record_result
+    prior_result = await claim_or_wait("stripe_online_order", order_id)
+    if prior_result is not None:
+        return {"configured": True, **prior_result}
+
     origin_url = data.get("originUrl", str(http_request.base_url).rstrip("/"))
     host_url = str(http_request.base_url).rstrip("/")
     webhook_url = f"{host_url}/api/webhook/stripe"
@@ -379,7 +388,9 @@ async def create_online_order_checkout(data: dict, http_request: Request):
     }
     await db.payment_transactions.insert_one(payment_doc)
     await db.online_orders.update_one({"id": order_id}, {"$set": {"paymentSessionId": session.session_id}})
-    return {"configured": True, "url": session.url, "sessionId": session.session_id}
+    result = {"url": session.url, "sessionId": session.session_id}
+    await record_result("stripe_online_order", order_id, result)
+    return {"configured": True, **result}
 
 
 # =============================================================================

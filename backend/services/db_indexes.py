@@ -66,6 +66,15 @@ async def ensure_indexes() -> None:
         # by table for the floor plan.
         await db.reservations.create_index("date")
         await db.reservations.create_index("tableNumber")
+
+        # Checkout-session idempotency claims (services/payment_idempotency.py)
+        # — sparse-unique on claimKey is the real atomic guard against two
+        # concurrent requests both creating a Stripe/Coinbase session for the
+        # same cart/order; see that module's own docstring. expiresAt is
+        # storage hygiene only (the module's own staleness check is what
+        # governs whether a claim is actually reused).
+        await db.payment_session_claims.create_index("claimKey", unique=True, sparse=True)
+        await db.payment_session_claims.create_index("expiresAt", expireAfterSeconds=0)
     except Exception as e:
         # mongomock supports create_index, but an unusual server version or a
         # transient connection hiccup shouldn't take the whole app down over
