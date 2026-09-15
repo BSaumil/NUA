@@ -331,8 +331,6 @@ async def create_online_order_checkout(data: dict, http_request: Request):
     would need a path-param-aware entry in server.py's public-path matcher,
     which only does prefix matching — a body field keeps this an exact,
     easily-audited allowlist entry instead)."""
-    from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
-
     order_id = data.get("orderId")
     if not order_id:
         raise HTTPException(status_code=400, detail="orderId is required")
@@ -347,6 +345,16 @@ async def create_online_order_checkout(data: dict, http_request: Request):
         # Not a hard failure — the guest just falls back to paying at
         # pickup/delivery like every online order before this endpoint existed.
         return {"configured": False, "url": None}
+
+    # Deliberately imported only after the config check above, not before:
+    # this endpoint must degrade to the pickup/delivery fallback whenever
+    # Stripe isn't configured, even in an environment where this optional
+    # SDK isn't installed at all — importing it unconditionally at the top
+    # turned every checkout attempt into an unhandled 500 in exactly that
+    # case (found running this endpoint end to end via Playwright). Matches
+    # routes/integrations.py's _create_stripe_session, which already does
+    # this the right way round.
+    from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
 
     # A double-click or a client retry must not create two live Stripe
     # sessions for the same order — order_id is already a stable resource
