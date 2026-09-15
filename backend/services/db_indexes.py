@@ -74,6 +74,7 @@ async def preflight_duplicate_report() -> list:
         ("business_settings", {}, ["key", "businessId"]),
         ("table_course_settings", {}, ["scope", "businessId"]),
         ("agent_autonomy", {}, ["id", "businessId"]),
+        ("businesses", {"inboundVoiceNumber": {"$exists": True, "$ne": None}}, ["inboundVoiceNumber"]),
     ]
     findings = []
     for coll_name, pre_filter, group_fields in checks:
@@ -189,3 +190,12 @@ async def ensure_indexes() -> None:
     await _create_index_safely(db.business_settings, [("key", 1), ("businessId", 1)], unique=True)
     await _create_index_safely(db.table_course_settings, [("scope", 1), ("businessId", 1)], unique=True)
     await _create_index_safely(db.agent_autonomy, [("id", 1), ("businessId", 1)], unique=True)
+
+    # Inbound-voice number → business mapping (routes/voice_inbound.py) —
+    # sparse (most businesses never set one) and unique, so two businesses
+    # can never both claim the same Twilio number even if the write-side
+    # check in inbound_config racing itself somehow let one through. This
+    # is the preventive half; _resolve_business_by_dialled_number's own
+    # "more than one match → refuse" check is the defensive half for a
+    # deployment where duplicates already existed before this index did.
+    await _create_index_safely(db.businesses, "inboundVoiceNumber", unique=True, sparse=True)

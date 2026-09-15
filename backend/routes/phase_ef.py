@@ -333,37 +333,57 @@ async def simulate_call(data: dict, user: dict = Depends(get_user)):
 
         # Take action based on intent
         if parsed.get("intent") == "reservation" and details.get("date"):
-            r = {
-                "id": f"RES-{str(uuid.uuid4())[:8].upper()}",
-                # A recognised caller keeps their CRM name even if the
-                # transcript never spelled it out.
-                "guestName": details.get("name") or (known_guest or {}).get("name") or caller,
-                "guestPhone": caller,
-                "partySize": int(details.get("partySize", 2) or 2),
-                "date": details.get("date"),
-                "time": details.get("time", "19:00"),
-                "status": "confirmed",
-                "source": "ai_phone_agent",
-                "createdAt": datetime.now(timezone.utc).isoformat(),
-                "businessId": user.get("businessId"),
-            }
-            if known_guest:
-                # Link it to the profile so this booking joins their history.
-                r["customerId"] = known_guest["customerId"]
-                r["guestEmail"] = known_guest.get("email") or None
-                await db.customers.update_one(
-                    {"id": known_guest["customerId"]},
-                    {"$push": {"reservationIds": r["id"]}},
+            # Same booking-rules engine routes/voice_inbound.py's real
+            # inbound calls and every web/staff booking go through —
+            # capacity, blackout dates, booking window, party-size tiers —
+            # instead of a bare insert_one that skipped all of it. Found
+            # during the Trust Release final readiness audit: this was the
+            # one other place (besides the real inbound-call webhook) that
+            # created a reservation with none of those checks.
+            from services.booking_rules_engine import validate_and_enrich_booking, BookingRuleViolation
+            party_size = int(details.get("partySize", 2) or 2)
+            booking_time = details.get("time", "19:00")
+            try:
+                enrichment = await validate_and_enrich_booking(
+                    date=details["date"], time=booking_time, party_size=party_size,
+                    source="phone", business_id=user.get("businessId"),
                 )
-            await db.reservations.insert_one(r)
-            intent_result["actions"].append({
-                "action": "reservation_created", "id": r["id"],
-                "customerId": r.get("customerId"),
-                "recognisedGuest": bool(known_guest),
-            })
-            # Auto-confirm SMS
-            await queue_sms(caller, r["guestName"], f"Booking confirmed: {r['date']} at {r['time']} for {r['partySize']} at NUA.",
-                             "phone_agent", business_id=user.get("businessId"))
+            except BookingRuleViolation as e:
+                intent_result["actions"].append({"action": "reservation_rejected", "reason": str(e)})
+                enrichment = None
+            if enrichment is not None:
+                r = {
+                    "id": f"RES-{str(uuid.uuid4())[:8].upper()}",
+                    # A recognised caller keeps their CRM name even if the
+                    # transcript never spelled it out.
+                    "guestName": details.get("name") or (known_guest or {}).get("name") or caller,
+                    "guestPhone": caller,
+                    "partySize": party_size,
+                    "date": details["date"],
+                    "time": booking_time,
+                    "status": "confirmed",
+                    "source": "ai_phone_agent",
+                    "createdAt": datetime.now(timezone.utc).isoformat(),
+                    "businessId": user.get("businessId"),
+                    **enrichment,
+                }
+                if known_guest:
+                    # Link it to the profile so this booking joins their history.
+                    r["customerId"] = known_guest["customerId"]
+                    r["guestEmail"] = known_guest.get("email") or None
+                    await db.customers.update_one(
+                        {"id": known_guest["customerId"]},
+                        {"$push": {"reservationIds": r["id"]}},
+                    )
+                await db.reservations.insert_one(r)
+                intent_result["actions"].append({
+                    "action": "reservation_created", "id": r["id"],
+                    "customerId": r.get("customerId"),
+                    "recognisedGuest": bool(known_guest),
+                })
+                # Auto-confirm SMS
+                await queue_sms(caller, r["guestName"], f"Booking confirmed: {r['date']} at {r['time']} for {r['partySize']} at NUA.",
+                                 "phone_agent", business_id=user.get("businessId"))
         elif parsed.get("intent") == "order":
             # Previously this only appended a logged {"action":
             # "order_drafted", "items": [...]} entry — no real order was
