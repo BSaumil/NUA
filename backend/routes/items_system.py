@@ -3,8 +3,8 @@ from database import db
 from datetime import datetime, timezone
 import uuid
 import logging
-from deps import require_owner, require_owner_or_manager, require_permission, optional_user
-from middleware.actor_context import tenant_scope_filter
+from deps import require_owner, require_owner_or_manager, require_permission, optional_user, get_user
+from middleware.actor_context import tenant_scope_filter, tenant_owns
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,10 @@ async def _would_create_cycle(cat_id: str, new_parent_id: str, field: str = "par
 
 
 @router.put("/categories/{cat_id}")
-async def update_category(cat_id: str, data: dict, _: dict = Depends(require_owner_or_manager)):
+async def update_category(cat_id: str, data: dict, user: dict = Depends(require_owner_or_manager)):
+    existing = await db.categories.find_one({"id": cat_id}, {"_id": 0, "businessId": 1})
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Not found")
     allowed = {"name", "sortOrder", "active", "icon", "color", "prepTime", "channels", "parentId", "reportsUnderId"}
     update = {k: v for k, v in data.items() if k in allowed}
     if "prepTime" in update: update["prepTime"] = int(update["prepTime"] or 0)
@@ -88,24 +91,37 @@ async def update_category(cat_id: str, data: dict, _: dict = Depends(require_own
 
 
 @router.post("/categories/{source_id}/merge/{target_id}")
-async def merge_categories(source_id: str, target_id: str, _: dict = Depends(require_owner_or_manager)):
+async def merge_categories(source_id: str, target_id: str, user: dict = Depends(require_owner_or_manager)):
     """Drag-and-drop merge: every product in `source` moves to `target`
     (matched by categoryId, falling back to the legacy name string for rows
     that predate categoryId), any sub-categories or reporting-rollups that
-    pointed at `source` are re-pointed to `target`, then `source` is deleted."""
+    pointed at `source` are re-pointed to `target`, then `source` is deleted.
+
+    Found during the Trust Release final readiness audit: this endpoint had
+    no tenant check at all, and its products.update_many had no businessId
+    filter — any owner/manager could re-categorize (and, via the delete
+    below, silently disappear) every OTHER business's products sharing the
+    same category name, not just their own."""
     if source_id == target_id:
         raise HTTPException(status_code=400, detail="Can't merge a category into itself")
+    business_id = user.get("businessId")
     source = await db.categories.find_one({"id": source_id}, {"_id": 0})
     target = await db.categories.find_one({"id": target_id}, {"_id": 0})
-    if not source or not target:
+    if (not source or not tenant_owns(source.get("businessId"), business_id)
+            or not target or not tenant_owns(target.get("businessId"), business_id)):
         raise HTTPException(status_code=404, detail="Category not found")
 
     result = await db.products.update_many(
-        {"$or": [{"categoryId": source_id}, {"categoryId": {"$in": [None, ""]}, "category": source["name"]}]},
+        {"$and": [tenant_scope_filter(business_id), {"$or": [
+            {"categoryId": source_id},
+            {"categoryId": {"$in": [None, ""]}, "category": source["name"]},
+        ]}]},
         {"$set": {"categoryId": target_id, "category": target["name"]}},
     )
-    await db.categories.update_many({"parentId": source_id}, {"$set": {"parentId": target_id}})
-    await db.categories.update_many({"reportsUnderId": source_id}, {"$set": {"reportsUnderId": target_id}})
+    await db.categories.update_many(
+        {"$and": [tenant_scope_filter(business_id), {"parentId": source_id}]}, {"$set": {"parentId": target_id}})
+    await db.categories.update_many(
+        {"$and": [tenant_scope_filter(business_id), {"reportsUnderId": source_id}]}, {"$set": {"reportsUnderId": target_id}})
     await db.categories.delete_one({"id": source_id})
     return {
         "message": f"Merged '{source['name']}' into '{target['name']}'",
@@ -162,7 +178,10 @@ async def cleanup_legacy_categories(_: dict = Depends(require_owner)):
     return {"removed": removed, "keptWithProducts": kept}
 
 @router.delete("/categories/{cat_id}")
-async def delete_category(cat_id: str, _: dict = Depends(require_owner)):
+async def delete_category(cat_id: str, user: dict = Depends(require_owner)):
+    existing = await db.categories.find_one({"id": cat_id}, {"_id": 0, "businessId": 1})
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Not found")
     await db.categories.delete_one({"id": cat_id})
     return {"message": "Category deleted"}
 
@@ -378,14 +397,15 @@ async def seed_catalog(_: dict = Depends(require_owner)):
 
 # ============ MODIFIERS (Universal) ============
 @router.get("/modifiers")
-async def get_modifiers():
-    mods = await db.modifiers.find({}, {"_id": 0}).to_list(500)
+async def get_modifiers(user: dict = Depends(get_user)):
+    mods = await db.modifiers.find(tenant_scope_filter(user.get("businessId")), {"_id": 0}).to_list(500)
     return mods
 
 @router.post("/modifiers")
-async def create_modifier(data: dict, _: dict = Depends(require_owner_or_manager)):
+async def create_modifier(data: dict, user: dict = Depends(require_owner_or_manager)):
     mod = {
         "id": f"mod-{str(uuid.uuid4())[:8]}",
+        "businessId": user.get("businessId"),
         "name": data.get("name", ""),
         "type": data.get("type", "list"),
         "mandatory": data.get("mandatory", False),
@@ -407,7 +427,10 @@ async def create_modifier(data: dict, _: dict = Depends(require_owner_or_manager
     return mod
 
 @router.put("/modifiers/{mod_id}")
-async def update_modifier(mod_id: str, data: dict, _: dict = Depends(require_owner_or_manager)):
+async def update_modifier(mod_id: str, data: dict, user: dict = Depends(require_owner_or_manager)):
+    existing = await db.modifiers.find_one({"id": mod_id}, {"_id": 0, "businessId": 1})
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Not found")
     allowed = {"name", "type", "mandatory", "multiSelect", "maxSelections", "options",
                "assignedCategories", "printWithItem",
                "channels", "availableFrom", "availableTo", "activeDays"}
@@ -420,20 +443,24 @@ async def update_modifier(mod_id: str, data: dict, _: dict = Depends(require_own
     return result
 
 @router.delete("/modifiers/{mod_id}")
-async def delete_modifier(mod_id: str, _: dict = Depends(require_owner_or_manager)):
+async def delete_modifier(mod_id: str, user: dict = Depends(require_owner_or_manager)):
+    existing = await db.modifiers.find_one({"id": mod_id}, {"_id": 0, "businessId": 1})
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Not found")
     await db.modifiers.delete_one({"id": mod_id})
     return {"message": "Modifier deleted"}
 
 # ============ DISCOUNTS & OFFERS ============
 @router.get("/discounts")
-async def get_discounts():
-    discounts = await db.discounts.find({}, {"_id": 0}).to_list(200)
+async def get_discounts(user: dict = Depends(get_user)):
+    discounts = await db.discounts.find(tenant_scope_filter(user.get("businessId")), {"_id": 0}).to_list(200)
     return discounts
 
 @router.post("/discounts")
-async def create_discount(data: dict, _: dict = Depends(require_owner)):
+async def create_discount(data: dict, user: dict = Depends(require_owner)):
     disc = {
         "id": f"DISC-{str(uuid.uuid4())[:8].upper()}",
+        "businessId": user.get("businessId"),
         "name": data.get("name", ""),
         "type": data.get("type", "percentage"),  # percentage, fixed, bundle, bogo, half_price
         "value": data.get("value", 0),  # % or $ amount
@@ -447,7 +474,10 @@ async def create_discount(data: dict, _: dict = Depends(require_owner)):
     return disc
 
 @router.put("/discounts/{disc_id}")
-async def update_discount(disc_id: str, data: dict, _: dict = Depends(require_owner)):
+async def update_discount(disc_id: str, data: dict, user: dict = Depends(require_owner)):
+    existing = await db.discounts.find_one({"id": disc_id}, {"_id": 0, "businessId": 1})
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Not found")
     allowed = {"name", "type", "value", "conditions", "active", "startDate", "endDate"}
     update = {k: v for k, v in data.items() if k in allowed}
     result = await db.discounts.find_one_and_update({"id": disc_id}, {"$set": update}, return_document=True)
@@ -457,7 +487,10 @@ async def update_discount(disc_id: str, data: dict, _: dict = Depends(require_ow
     return result
 
 @router.delete("/discounts/{disc_id}")
-async def delete_discount(disc_id: str, _: dict = Depends(require_owner)):
+async def delete_discount(disc_id: str, user: dict = Depends(require_owner)):
+    existing = await db.discounts.find_one({"id": disc_id}, {"_id": 0, "businessId": 1})
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Not found")
     await db.discounts.delete_one({"id": disc_id})
     return {"message": "Discount deleted"}
 
@@ -470,6 +503,7 @@ async def create_comp_void(data: dict, user: dict = Depends(require_permission("
     actually governs this, same as everywhere else it's used."""
     record = {
         "id": f"CV-{str(uuid.uuid4())[:8].upper()}",
+        "businessId": user.get("businessId"),
         "type": data.get("type", "comp"),  # comp or void
         "transactionId": data.get("transactionId"),
         "items": data.get("items", []),
@@ -501,15 +535,17 @@ async def create_comp_void(data: dict, user: dict = Depends(require_permission("
     return record
 
 @router.get("/comp-void")
-async def get_comp_voids(_: dict = Depends(require_owner_or_manager)):
-    records = await db.comp_voids.find({}, {"_id": 0}).sort("processedAt", -1).to_list(500)
+async def get_comp_voids(user: dict = Depends(require_owner_or_manager)):
+    records = await db.comp_voids.find(
+        tenant_scope_filter(user.get("businessId")), {"_id": 0}).sort("processedAt", -1).to_list(500)
     return records
 
 # ============ PAYMENT LINKS ============
 @router.post("/payment-links")
-async def create_payment_link(data: dict, _: dict = Depends(require_owner_or_manager)):
+async def create_payment_link(data: dict, user: dict = Depends(require_owner_or_manager)):
     link = {
         "id": f"PLINK-{str(uuid.uuid4())[:8].upper()}",
+        "businessId": user.get("businessId"),
         "productId": data.get("productId"),
         "productName": data.get("productName", ""),
         "price": data.get("price", 0),
@@ -522,11 +558,14 @@ async def create_payment_link(data: dict, _: dict = Depends(require_owner_or_man
     return link
 
 @router.get("/payment-links")
-async def get_payment_links():
-    links = await db.payment_links.find({}, {"_id": 0}).to_list(500)
+async def get_payment_links(user: dict = Depends(get_user)):
+    links = await db.payment_links.find(tenant_scope_filter(user.get("businessId")), {"_id": 0}).to_list(500)
     return links
 
 @router.delete("/payment-links/{link_id}")
-async def delete_payment_link(link_id: str, _: dict = Depends(require_owner_or_manager)):
+async def delete_payment_link(link_id: str, user: dict = Depends(require_owner_or_manager)):
+    existing = await db.payment_links.find_one({"id": link_id}, {"_id": 0, "businessId": 1})
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Not found")
     await db.payment_links.delete_one({"id": link_id})
     return {"message": "Payment link deleted"}
