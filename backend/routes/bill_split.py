@@ -200,6 +200,8 @@ async def checkout(split_id: str, data: dict, http_request: Request, session: di
 async def create_group(split_id: str, session: dict = Depends(get_guest_session)):
     """Create a group split (current guest is organizer)."""
     group = await split_group.create_split_group(split_id, session["phone"])
+    if group is None:
+        raise HTTPException(status_code=404, detail="Split not found")
     await split_group.sync_group_to_split(split_id)
     await realtime_mgr.broadcast_update(split_id, "group_created", group)
     return group
@@ -239,11 +241,22 @@ async def accept_group_invite(split_id: str, data: dict, session: dict = Depends
 
 
 @router.get("/table/split/{split_id}/group/status")
-async def get_group_status(split_id: str):
-    """Get group coordination status."""
+async def get_group_status(split_id: str, session: dict = Depends(get_guest_session)):
+    """Get group coordination status.
+
+    Every sibling guest endpoint on this split requires a verified guest
+    session — this one didn't require any credential at all, and its
+    response includes organizerPhone and every participant's phone
+    number. Now requires a verified session, and only returns phone
+    numbers to a caller who is actually a participant of THIS group;
+    anyone else with a valid session elsewhere gets a phone-redacted
+    summary instead of an outright 403, since knowing a group exists and
+    its size isn't itself sensitive the way the phone list is."""
     status = await split_group.get_group_status(split_id)
     if not status:
         raise HTTPException(status_code=404, detail="No group for this split")
+    if session["phone"] not in (status.get("participants") or []):
+        return {k: v for k, v in status.items() if k not in ("organizerPhone", "participants")}
     return status
 
 
@@ -253,29 +266,45 @@ async def get_group_status(split_id: str):
 
 @router.post("/table/split/{split_id}/partial-checkout")
 async def partial_checkout(split_id: str, data: dict, session: dict = Depends(get_guest_session)):
-    """Guest pays partial amount, remainder goes on tab."""
+    """Guest states an intent to pay part of their share now, with the
+    remainder going on a tab staff collects later.
+
+    This used to call record_partial_payment(..., method="card", ...)
+    immediately, marking the requested amount "paid" with no payment
+    processor anywhere in the path — no Stripe/Coinbase session, no
+    charge, no verification of any kind. A guest's own unverified POST
+    body became a real "already collected" entry on the venue's own
+    staff dashboard (routes/bill_split.py's active-splits/staff-status,
+    services/split_group.py). Wiring this specific flow into a real
+    payment provider (a genuinely new capability, not a fix of existing
+    behavior) is out of scope for this pass; until it exists, the tab
+    records the guest's stated intent only — staff must actually collect
+    and confirm the amount via POST .../staff-process-tab (already the
+    "a real payment was physically collected" path, see its own
+    docstring) before it counts as paid.
+    """
     amount = data.get("amount", 0)
     if not amount or amount <= 0:
         raise HTTPException(status_code=400, detail="amount must be > 0")
 
-    # Create guest tab
     line_ids = data.get("lineIds", [])
     slot_index = data.get("slotIndex")
     total_amount = data.get("totalAmount", amount)
 
     tab = await split_payment.create_guest_tab(split_id, session["phone"], total_amount, line_ids, slot_index)
 
-    # Record partial payment
-    payment_result = await split_payment.record_partial_payment(tab["id"], amount, "card", split_id)
-
-    await realtime_mgr.broadcast_payment(split_id, session["phone"], amount)
+    await realtime_mgr.broadcast_update(split_id, "guest_intends_partial_payment", {
+        "guestPhone": session["phone"], "tabId": tab["id"], "intendedAmount": amount,
+    })
 
     return {
-        "success": payment_result.get("success"),
+        "success": True,
         "tabId": tab["id"],
-        "paidAmount": payment_result.get("paidAmount"),
-        "remainingBalance": payment_result.get("remainingBalance"),
-        "status": payment_result.get("status"),
+        "intendedAmount": amount,
+        "paidAmount": tab["paidAmount"],
+        "remainingBalance": tab["remainingBalance"],
+        "status": tab["status"],
+        "message": "Recorded — a staff member will collect and confirm this payment.",
     }
 
 
@@ -423,7 +452,16 @@ async def get_staff_status(table_number: str, user: dict = Depends(get_user)):
 
 @router.websocket("/ws/split/{split_id}")
 async def websocket_split_updates(split_id: str, websocket: WebSocket):
-    """WebSocket endpoint for real-time split updates."""
+    """WebSocket endpoint for real-time split updates.
+
+    Sends _public_view(split), never the raw document — this used to send
+    the whole `db.bill_splits` doc straight to the client on connect and
+    on every sync_request, including lines[].claimedByPhone and
+    equalParts[].claimedByPhone, the exact guest phone numbers
+    _public_view's own docstring says must stay server-side. No
+    authentication is attached to this endpoint at all (a guest connects
+    before verifying a phone), so this was a fully unauthenticated PII
+    leak to anyone who knew a split_id."""
     await websocket.accept()
     await realtime_mgr.register_connection(split_id, websocket)
 
@@ -434,7 +472,7 @@ async def websocket_split_updates(split_id: str, websocket: WebSocket):
             await websocket.send_json({
                 "type": "connected",
                 "splitId": split_id,
-                "split": split,
+                "split": _public_view(split),
             })
 
         # Listen for client messages and broadcast
@@ -446,7 +484,8 @@ async def websocket_split_updates(split_id: str, websocket: WebSocket):
                 await websocket.send_json({"type": "pong"})
             elif msg_type == "sync_request":
                 split = await db.bill_splits.find_one({"id": split_id}, {"_id": 0})
-                await websocket.send_json({"type": "sync_response", "split": split})
+                await websocket.send_json({"type": "sync_response",
+                                            "split": _public_view(split) if split else None})
 
     except WebSocketDisconnect:
         await realtime_mgr.unregister_connection(split_id, websocket)

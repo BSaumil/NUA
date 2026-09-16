@@ -7,7 +7,7 @@ from typing import Optional
 from deps import get_user, require_owner_or_manager, require_owner
 from services import audit_service, entity_service
 from database import db
-from middleware.actor_context import tenant_scope_filter
+from middleware.actor_context import tenant_scope_filter, tenant_owns
 import csv
 import io
 
@@ -76,8 +76,23 @@ async def restore(entity_type: str, entity_id: str, version: int,
 @router.delete("/purge/{entity_type}/{entity_id}")
 async def gdpr_purge(entity_type: str, entity_id: str,
                      collection: str = Query(...),
-                     _: dict = Depends(require_owner)):
-    """Owner-only right-to-be-forgotten. Removes doc + history."""
+                     user: dict = Depends(require_owner)):
+    """Owner-only right-to-be-forgotten. Removes doc + history.
+
+    `collection` used to be taken straight from the caller with no
+    validation and no tenant check at all — an owner of ANY business could
+    permanently delete any document (auth_users, businesses, transactions,
+    anything) in any OTHER business by id, purely by knowing/guessing it.
+    Now restricted to the same allowlist restore/history already use
+    (this endpoint's own stated purpose — a GDPR purge of one of YOUR
+    entities — was never "arbitrary document in an arbitrary collection"),
+    and the document's own businessId is checked against the caller's
+    before anything is touched."""
+    if collection not in ENTITY_TYPE_TO_COLLECTION.values():
+        raise HTTPException(status_code=400, detail=f"Purge isn't supported for collection '{collection}'")
+    existing = await getattr(db, collection).find_one({"id": entity_id}, {"_id": 0, "businessId": 1})
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+        raise HTTPException(404, "Entity not found")
     ok = await entity_service.hard_delete(collection, entity_id, entity_type=entity_type)
     if not ok:
         raise HTTPException(404, "Entity not found")

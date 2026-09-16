@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Optional
 from database import db
 from deps import get_user, require_owner_or_manager
-from middleware.actor_context import tenant_scope_filter
+from middleware.actor_context import tenant_scope_filter, tenant_owns
 from models.customer import Customer, CustomerCreate, CustomerUpdate
 from models.feedback import Feedback, FeedbackCreate
 from utils.mongo_safe import safe_parse_list
@@ -48,7 +48,10 @@ async def create_customer(customer: CustomerCreate, _: dict = Depends(get_user))
     return doc
 
 @router.put("/customers/{customer_id}", response_model=Customer)
-async def update_customer(customer_id: str, customer_update: CustomerUpdate, _: dict = Depends(get_user)):
+async def update_customer(customer_id: str, customer_update: CustomerUpdate, user: dict = Depends(get_user)):
+    existing = await db.customers.find_one({"id": customer_id}, {"_id": 0, "businessId": 1})
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Customer not found")
     from services.entity_service import stamped_update
     update_data = {k: v for k, v in customer_update.dict().items() if v is not None}
     result = await stamped_update("customers", customer_id, update_data, entity_type="customer")
@@ -58,9 +61,9 @@ async def update_customer(customer_id: str, customer_update: CustomerUpdate, _: 
 
 # ============ CUSTOMER PROFILE (360 Guest CRM) ============
 @router.get("/customers/{customer_id}/profile")
-async def get_customer_profile(customer_id: str, _: dict = Depends(get_user)):
+async def get_customer_profile(customer_id: str, user: dict = Depends(get_user)):
     customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
-    if not customer:
+    if not customer or not tenant_owns(customer.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Customer not found")
     reservations = await db.reservations.find(
         {"$or": [{"customerId": customer_id}, {"guestEmail": customer.get("email", "")}]},
@@ -77,10 +80,13 @@ async def get_customer_profile(customer_id: str, _: dict = Depends(get_user)):
 
 # ============ CUSTOMER WALLET ============
 @router.get("/customers/{customer_id}/wallet")
-async def get_customer_wallet(customer_id: str, _: dict = Depends(get_user)):
+async def get_customer_wallet(customer_id: str, user: dict = Depends(get_user)):
     """Store credit + points + active vouchers + occasion offers in one view.
     Reading the wallet also lazily issues any due occasion vouchers
     (e.g. birthday month), so offers always show up without a cron job."""
+    existing = await db.customers.find_one({"id": customer_id}, {"_id": 0, "businessId": 1})
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Customer not found")
     from services.wallet_service import get_wallet
     wallet = await get_wallet(customer_id)
     if wallet is None:
@@ -89,10 +95,13 @@ async def get_customer_wallet(customer_id: str, _: dict = Depends(get_user)):
 
 # ============ STORE CREDIT (as a POS tender) ============
 @router.post("/customers/{customer_id}/store-credit/redeem")
-async def redeem_store_credit(customer_id: str, data: dict, _user: dict = Depends(get_user)):
+async def redeem_store_credit(customer_id: str, data: dict, user: dict = Depends(get_user)):
     """Atomic balance-checked decrement — used when store credit is applied
     as a payment tender at checkout. Mirrors the gift-card redeem pattern so
     two terminals can't double-spend the same customer's credit."""
+    existing = await db.customers.find_one({"id": customer_id}, {"_id": 0, "businessId": 1})
+    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+        raise HTTPException(status_code=404, detail="Customer not found")
     amount = round(float(data.get("amount", 0) or 0), 2)
     if amount <= 0:
         raise HTTPException(status_code=400, detail="amount must be > 0")

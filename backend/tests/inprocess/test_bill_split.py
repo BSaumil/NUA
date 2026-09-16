@@ -830,3 +830,107 @@ def test_staff_process_tab_rejects_a_tab_belonging_to_another_business(client, o
     finally:
         _cleanup_table("T-ISOL-3")
         _cleanup_business(biz_b)
+
+
+# ------------------------------------------------------- guest-intent tab
+
+
+def test_partial_checkout_records_guest_intent_only_not_a_completed_payment(client):
+    """Found during the Trust Release final readiness audit: this endpoint
+    used to call split_payment.record_partial_payment(..., method="card", ...)
+    immediately, marking the requested amount "paid" with no payment
+    processor anywhere in the path. Now it only records the guest's stated
+    intent (an open tab, $0 paid) — a staff member must actually collect and
+    confirm it via /staff-process-tab before it counts as paid."""
+    from database import db
+    _seed_table_order("T-INTENT-1")
+    try:
+        split = req(client, "GET", "/api/table/T-INTENT-1/split?business=default").json()
+        line_id = split["lines"][0]["id"]
+        token = _guest_token("+61412345111")
+        r = req(client, "POST", f"/api/table/split/{split['id']}/partial-checkout",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"amount": 5, "lineIds": [line_id], "totalAmount": 15})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["status"] == "open", "must not be pre-marked paid/partial — staff hasn't collected anything yet"
+        assert body["paidAmount"] == 0.0
+        assert "collect and confirm" in body["message"].lower()
+
+        tab = _run(db.split_tabs.find_one({"id": body["tabId"]}, {"_id": 0}))
+        assert tab["status"] == "open"
+        assert tab["paidAmount"] == 0.0
+        assert tab["payments"] == [], "no payment record must exist until staff actually collects it"
+    finally:
+        _cleanup_table("T-INTENT-1")
+
+
+def test_partial_checkout_rejects_non_positive_amount(client):
+    _seed_table_order("T-INTENT-2")
+    try:
+        split = req(client, "GET", "/api/table/T-INTENT-2/split?business=default").json()
+        token = _guest_token("+61412345112")
+        r = req(client, "POST", f"/api/table/split/{split['id']}/partial-checkout",
+                headers={"Authorization": f"Bearer {token}"}, json={"amount": 0})
+        assert r.status_code == 400, r.text
+    finally:
+        _cleanup_table("T-INTENT-2")
+
+
+# --------------------------------------------------------------- group API
+
+
+def test_create_group_404s_for_a_split_id_that_does_not_exist(client):
+    """services/split_group.create_split_group used to create a group document
+    for ANY split_id string with no check it corresponded to a real, open
+    split — an orphaned group with nothing to ever attach to."""
+    from database import db
+    token = _guest_token("+61412345113")
+    r = req(client, "POST", "/api/table/split/NOT-A-REAL-SPLIT-ID/group/create",
+            headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 404, r.text
+    assert _run(db.split_groups.find_one({"splitId": "NOT-A-REAL-SPLIT-ID"})) is None
+
+
+def test_group_status_requires_a_guest_session(client):
+    """get_group_status used to have no Depends(get_guest_session) at all —
+    fully unauthenticated, readable by anyone who could guess/enumerate a
+    split_id."""
+    _seed_table_order("T-GROUP-1")
+    try:
+        split = req(client, "GET", "/api/table/T-GROUP-1/split?business=default").json()
+        r = req(client, "GET", f"/api/table/split/{split['id']}/group/status")
+        assert r.status_code in (401, 403, 422), (
+            f"expected an auth failure with no guest session, got {r.status_code}: {r.text[:200]}"
+        )
+    finally:
+        _cleanup_table("T-GROUP-1")
+
+
+def test_group_status_redacts_organizer_and_participants_for_a_non_participant(client):
+    """A guest who is not in the group must not learn the organizer's phone
+    number or the participant list — those are phone-number PII, and any
+    guest holding a valid session token for a completely different phone
+    could otherwise read them just by knowing the split_id."""
+    _seed_table_order("T-GROUP-2")
+    try:
+        split = req(client, "GET", "/api/table/T-GROUP-2/split?business=default").json()
+        organizer_token = _guest_token("+61412345114")
+        r = req(client, "POST", f"/api/table/split/{split['id']}/group/create",
+                headers={"Authorization": f"Bearer {organizer_token}"})
+        assert r.status_code == 200, r.text
+
+        outsider_token = _guest_token("+61412345115")
+        r = req(client, "GET", f"/api/table/split/{split['id']}/group/status",
+                headers={"Authorization": f"Bearer {outsider_token}"})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert "organizerPhone" not in body
+        assert "participants" not in body
+
+        r_organizer = req(client, "GET", f"/api/table/split/{split['id']}/group/status",
+                           headers={"Authorization": f"Bearer {organizer_token}"})
+        assert r_organizer.status_code == 200
+        assert r_organizer.json().get("organizerPhone") == "+61412345114"
+    finally:
+        _cleanup_table("T-GROUP-2")

@@ -497,7 +497,7 @@ async def revoke_voucher(voucher_id: str, body: dict, user: dict = Depends(get_u
     if user["role"] not in ("owner", "manager"):
         raise HTTPException(403, "Owner/manager only")
     v = await db.vouchers.find_one({"id": voucher_id})
-    if not v:
+    if not v or not tenant_owns(v.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Voucher not found")
     await db.vouchers.update_one({"id": voucher_id}, {"$set": {
         "status": "revoked",
