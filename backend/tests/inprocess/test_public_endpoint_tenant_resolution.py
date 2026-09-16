@@ -185,6 +185,75 @@ def test_public_join_waitlist_position_is_scoped_per_business(client):
         _cleanup_business("PETR-BIZ-G")
 
 
+# ------------------------------------- resolve_or_require_business_id (P2)
+
+def test_public_book_refuses_when_ambiguous_between_multiple_businesses_and_no_business_given(client):
+    """Task #64 of the tenant-ownership release-closure pass: /public/book
+    used to silently create an untagged (businessId=None) reservation,
+    checked against rules/capacity pooled across EVERY business, whenever
+    ?business= was absent — operationally meaningless on any deployment
+    with more than one business (whose tables/kitchen is actually being
+    held?). Now refused (400) rather than guessed when more than one
+    business exists and none was specified."""
+    _make_business("PETR-BIZ-AMBIG-1", "petr-biz-ambig-1", "Ambig One")
+    _make_business("PETR-BIZ-AMBIG-2", "petr-biz-ambig-2", "Ambig Two")
+    try:
+        r = req(client, "POST", "/api/public/book", json={
+            "guestName": "Ambiguous Booking Test", "partySize": 2, "date": _future_date(), "time": "19:00",
+        })
+        assert r.status_code == 400, (
+            f"a booking with no ?business= on a multi-business deployment must be refused, not pooled, got {r.status_code}: {r.text[:200]}"
+        )
+        leaked = _run(db.reservations.find_one({"guestName": "Ambiguous Booking Test"}))
+        assert leaked is None, "a refused booking must never be created as an untagged row"
+    finally:
+        _run(db.reservations.delete_many({"guestName": "Ambiguous Booking Test"}))
+        _cleanup_business("PETR-BIZ-AMBIG-1")
+        _cleanup_business("PETR-BIZ-AMBIG-2")
+
+
+def test_public_join_waitlist_refuses_when_ambiguous_between_multiple_businesses(client):
+    _make_business("PETR-BIZ-AMBIG-3", "petr-biz-ambig-3", "Ambig Three")
+    _make_business("PETR-BIZ-AMBIG-4", "petr-biz-ambig-4", "Ambig Four")
+    try:
+        r = req(client, "POST", "/api/public/join-waitlist", json={
+            "guestName": "Ambiguous Waitlist Test", "partySize": 2,
+        })
+        assert r.status_code == 400, (
+            f"a waitlist join with no ?business= on a multi-business deployment must be refused, not pooled, got {r.status_code}"
+        )
+        leaked = _run(db.waitlist.find_one({"guestName": "Ambiguous Waitlist Test"}))
+        assert leaked is None
+    finally:
+        _run(db.waitlist.delete_many({"guestName": "Ambiguous Waitlist Test"}))
+        _cleanup_business("PETR-BIZ-AMBIG-3")
+        _cleanup_business("PETR-BIZ-AMBIG-4")
+
+
+def test_public_book_auto_resolves_when_exactly_one_business_exists(client):
+    """The single-tenant-deployment case must stay unaffected: with no
+    ?business= given and exactly one business in the whole deployment,
+    the booking auto-resolves to it rather than refusing or pooling."""
+    from database import db as _db
+    existing = _run(_db.businesses.find({}, {"_id": 0}).to_list(50))
+    try:
+        # Isolate to exactly one business for this test's own duration.
+        _run(_db.businesses.delete_many({}))
+        _make_business("PETR-BIZ-SOLE", "petr-biz-sole", "Sole Business")
+        r = req(client, "POST", "/api/public/book", json={
+            "guestName": "Sole Business Booking Test", "partySize": 2, "date": _future_date(), "time": "19:00",
+        })
+        assert r.status_code == 200, r.text[:300]
+        res_id = r.json()["reservationId"]
+        stored = _run(_db.reservations.find_one({"id": res_id}, {"_id": 0}))
+        assert stored["businessId"] == "PETR-BIZ-SOLE"
+    finally:
+        _run(_db.reservations.delete_many({"guestName": "Sole Business Booking Test"}))
+        _cleanup_business("PETR-BIZ-SOLE")
+        for b in existing:
+            _run(_db.businesses.insert_one(b))
+
+
 # ----------------------------------------------------- table_ordering.py
 
 def test_table_menu_scoped_by_business_does_not_leak_the_other_business(client):

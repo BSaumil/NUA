@@ -124,18 +124,25 @@ async def public_book_reservation(data: dict):
     closed date or a large-party set-menu requirement just by using the
     public form instead of calling the restaurant.
 
-    An optional `business` field (same slug-or-id the storefront and the
-    other /public/* routes in this file accept) scopes the created
-    reservation to a real business and checks rules/capacity/blackouts
-    against that business specifically, instead of the pooled-across-every-
-    business default. Absent or unresolved, this is unchanged from before:
-    an untagged reservation checked against the pooled rules/capacity."""
+    The `business` field (same slug-or-id the storefront and the other
+    /public/* routes in this file accept) scopes the created reservation to
+    a real business and checks rules/capacity/blackouts against that
+    business specifically. Previously this was optional and, absent or
+    unresolved, silently created an untagged reservation checked against
+    rules/capacity pooled across every business on the deployment — whose
+    tables and kitchen a guest's booking actually held was genuinely
+    ambiguous on any multi-tenant deployment. Now resolved via
+    resolve_or_require_business_id: an explicit ?business= still works
+    exactly as before; a single-business deployment with no reason to ever
+    pass it is unaffected (auto-resolves to that one business); only a
+    deployment with more than one business and no ?business= to
+    disambiguate is refused (400) rather than guessed."""
     from models.reservation import Reservation
     from services.booking_rules_engine import validate_and_enrich_booking, BookingRuleViolation, capacity_lock
     from services.cancellation_policy import snapshot_cutoff_hours
-    from routes.online_orders import _resolve_business_id
+    from routes.online_orders import resolve_or_require_business_id
 
-    business_id = await _resolve_business_id(data.get("business"))
+    business_id = await resolve_or_require_business_id(data.get("business"))
     party_size = int(data.get("partySize") or 2)
     date = data.get("date", "")
     time = data.get("time", "")
@@ -187,18 +194,18 @@ async def public_book_reservation(data: dict):
 
 @router.post("/public/join-waitlist")
 async def public_join_waitlist(data: dict):
-    # An optional `business` field (same slug-or-id as the rest of this
-    # file's routes) scopes both the created entry and the queue-position
-    # calculation to a real business. Absent or unresolved, this is
-    # unchanged from before: an untagged entry, position computed against
-    # the pooled-across-every-business waiting list — still surfaces
-    # correctly on every business's staff waitlist view via
-    # _public_tenant_filter's safe untagged-matches-everyone default, just
-    # not excluded from any other business's view either.
+    # The `business` field (same slug-or-id as the rest of this file's
+    # routes) scopes both the created entry and the queue-position
+    # calculation to a real business — previously optional, which meant an
+    # absent/unresolved value silently created an untagged entry pooled
+    # into every business's waitlist. Now resolved the same way booking is
+    # (resolve_or_require_business_id): a single-business deployment is
+    # unaffected; an ambiguous multi-business one without ?business= is
+    # refused (400) instead of pooled.
     from models.waitlist import WaitlistEntry
-    from routes.online_orders import _resolve_business_id
+    from routes.online_orders import resolve_or_require_business_id
 
-    business_id = await _resolve_business_id(data.get("business"))
+    business_id = await resolve_or_require_business_id(data.get("business"))
     waiting_query = {"status": "waiting", **_public_tenant_filter(business_id)}
     last = await db.waitlist.find(waiting_query).sort("position", -1).to_list(1)
     next_pos = (last[0]["position"] + 1) if last else 1

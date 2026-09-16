@@ -182,6 +182,37 @@ async def _resolve_business_id(business: Optional[str]) -> Optional[str]:
     return biz["id"] if biz else None
 
 
+async def resolve_or_require_business_id(business: Optional[str]) -> str:
+    """Like _resolve_business_id, but for a record a guest CREATES rather
+    than a page a guest reads. An untagged/pooled reservation or waitlist
+    entry isn't just imprecise — it's operationally meaningless (whose
+    tables, whose kitchen, whose capacity is actually being held?), and on
+    any deployment with more than one business it's a real cross-tenant
+    data-exposure gap, not just noise.
+
+    Resolves an explicit ?business= normally. With none given, auto-
+    resolves to the sole business IFF exactly one exists in this
+    deployment — the single-tenant-deployment case _resolve_business_id's
+    own docstring describes ("no reason to ever pass this param") stays
+    completely unaffected. Refuses (400) rather than guessing whenever
+    that's not unambiguous: zero businesses configured, or more than one
+    with no ?business= to disambiguate between them.
+    """
+    business_id = await _resolve_business_id(business)
+    if business_id:
+        return business_id
+    candidates = await db.businesses.find({}, {"_id": 0, "id": 1}).to_list(2)
+    if len(candidates) == 1:
+        return candidates[0]["id"]
+    if not candidates:
+        raise HTTPException(status_code=400, detail="No business is configured on this deployment")
+    raise HTTPException(
+        status_code=400,
+        detail="A valid business must be specified (?business=<slug-or-id>) — "
+               "more than one business is configured on this deployment",
+    )
+
+
 @router.get("/online/business")
 async def public_business_info(business: Optional[str] = None):
     """Lets the storefront tell "no ?business= param, unscoped menu" (normal

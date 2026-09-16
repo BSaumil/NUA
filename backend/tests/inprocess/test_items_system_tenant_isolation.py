@@ -318,3 +318,154 @@ def test_discount_and_payment_link_mutations_refuse_a_doc_with_no_businessId(cli
         assert still_there is not None
     finally:
         _run(db.payment_links.delete_many({"id": untagged_link_id}))
+
+
+# ----------------------------------------- category auto-seed / catalog seed
+# Task #64 of the tenant-ownership release-closure pass: get_categories'
+# auto-seed-on-empty and seed_catalog's name-matched upserts used to create
+# (or reuse) categories/products/modifiers with NO businessId at all — the
+# active hazard that blocked update_category/update_modifier from being
+# converted to tenant_owns_strict in the first place (see this file's other
+# tests, and middleware/actor_context.py's tenant_owns_strict docstring).
+
+
+def test_get_categories_does_not_seed_anything_for_an_anonymous_caller_with_none_existing(client):
+    from database import db
+    _run(db.categories.delete_many({}))
+    r = req(client, "GET", "/api/categories")
+    assert r.status_code == 200, r.text
+    assert r.json() == [], "an anonymous caller must never trigger creation of shared, untagged categories"
+    count = _run(db.categories.count_documents({}))
+    assert count == 0, "no categories should have been created as a side effect of an anonymous read"
+
+
+def test_get_categories_seeds_defaults_scoped_to_the_authenticated_business(client, owner_headers):
+    from database import db
+    _run(db.categories.delete_many({}))
+    try:
+        r = req(client, "GET", "/api/categories", headers=owner_headers)
+        assert r.status_code == 200, r.text
+        seeded = r.json()
+        assert len(seeded) == 5
+        for cat in seeded:
+            assert cat.get("businessId"), f"every auto-seeded category must be stamped with a real businessId: {cat}"
+        stored = _run(db.categories.find({}, {"_id": 0}).to_list(20))
+        assert all(c.get("businessId") for c in stored)
+    finally:
+        _run(db.categories.delete_many({}))
+
+
+def test_two_businesses_auto_seeding_categories_get_their_own_independent_copies(client, owner_headers):
+    from database import db
+    other = _make_business(client, owner_headers, biz_id="items-seed-other-biz",
+                            email="items-seed-other-owner@nua.com")
+    _run(db.categories.delete_many({}))
+    try:
+        r1 = req(client, "GET", "/api/categories", headers=owner_headers).json()
+        r2 = req(client, "GET", "/api/categories", headers=other).json()
+        ids_1 = {c["id"] for c in r1}
+        ids_2 = {c["id"] for c in r2}
+        assert ids_1.isdisjoint(ids_2), (
+            "two businesses auto-seeding at the same empty-catalog moment must get independent rows, "
+            f"not share ids — got overlap {ids_1 & ids_2}"
+        )
+        biz_1 = {c["businessId"] for c in r1}
+        biz_2 = {c["businessId"] for c in r2}
+        assert None not in biz_1 and None not in biz_2, "every seeded category must carry a real businessId"
+        assert biz_1 != biz_2, "the two businesses' seeded categories must be stamped with their own distinct businessId"
+    finally:
+        _run(db.categories.delete_many({}))
+        _cleanup_business("items-seed-other-biz")
+
+
+def test_seed_catalog_gives_two_businesses_their_own_independent_catalogs(client, owner_headers):
+    """Before this fix, seed_catalog's upsert filters matched by name alone
+    with no businessId — the second business to call it silently reused
+    (never created its own copy of) the first business's rows."""
+    from database import db
+    other = _make_business(client, owner_headers, biz_id="items-seed-catalog-other-biz",
+                            email="items-seed-catalog-other-owner@nua.com")
+    _run(db.categories.delete_many({}))
+    _run(db.products.delete_many({}))
+    _run(db.modifiers.delete_many({}))
+    try:
+        first = req(client, "POST", "/api/seed/catalog", headers=owner_headers)
+        assert first.status_code == 200, first.text
+        second = req(client, "POST", "/api/seed/catalog", headers=other)
+        assert second.status_code == 200, second.text
+        second_body = second.json()
+        assert second_body["categoriesAdded"] == second_body["categoriesTotal"], (
+            "the second business must get its OWN fresh categories, not silently reuse the first "
+            f"business's already-seeded rows: {second_body}"
+        )
+        assert second_body["productsAdded"] == second_body["productsTotal"]
+        assert second_body["modifiersAdded"] == second_body["modifiersTotal"]
+
+        owner_biz = _run(db.auth_users.find_one({"email": "owner@nua.com"}, {"_id": 0, "businessId": 1}))["businessId"]
+        cat_count_owner = _run(db.categories.count_documents({"businessId": owner_biz}))
+        cat_count_other = _run(db.categories.count_documents({"businessId": "items-seed-catalog-other-biz"}))
+        assert cat_count_owner > 0 and cat_count_other > 0
+        assert cat_count_owner == cat_count_other, "both businesses must end up with their own full, independent set"
+    finally:
+        _run(db.categories.delete_many({}))
+        _run(db.products.delete_many({}))
+        _run(db.modifiers.delete_many({}))
+        _cleanup_business("items-seed-catalog-other-biz")
+
+
+# ------------------------------- category/modifier mutation quarantine
+# Now that get_categories/seed_catalog no longer create untagged data (the
+# above), update_category/merge_categories/delete_category and
+# update_modifier/delete_modifier were converted from tenant_owns to
+# tenant_owns_strict. These mirror the existing quarantine tests for
+# accounting.py/awards.py/discounts+payment-links: an untagged row (only
+# reachable now as pre-fix legacy data) must be refused for every mutation,
+# not auto-owned by whichever business asks first, and never deleted as a
+# side effect of the refusal.
+
+
+def test_category_mutations_refuse_a_doc_with_no_businessId(client, owner_headers):
+    from database import db
+    untagged_id = "CAT-QUARANTINE-TEST-1"
+    _run(db.categories.insert_one({"id": untagged_id, "name": "Untagged Legacy Category", "businessId": None}))
+    try:
+        upd = req(client, "PUT", f"/api/categories/{untagged_id}", headers=owner_headers, json={"name": "Hijacked"})
+        assert upd.status_code == 404, upd.text
+        deL = req(client, "DELETE", f"/api/categories/{untagged_id}", headers=owner_headers)
+        assert deL.status_code == 404, deL.text
+        still_there = _run(db.categories.find_one({"id": untagged_id}))
+        assert still_there is not None and still_there["name"] == "Untagged Legacy Category"
+    finally:
+        _run(db.categories.delete_many({"id": untagged_id}))
+
+
+def test_merge_categories_refuses_an_untagged_source_or_target(client, owner_headers):
+    from database import db
+    untagged_id = "CAT-QUARANTINE-TEST-2"
+    own_id = "CAT-QUARANTINE-OWNED"
+    _run(db.categories.insert_one({"id": untagged_id, "name": "Untagged", "businessId": None}))
+    _run(db.categories.insert_one({"id": own_id, "name": "Owned", "businessId": "default"}))
+    try:
+        r1 = req(client, "POST", f"/api/categories/{untagged_id}/merge/{own_id}", headers=owner_headers)
+        assert r1.status_code == 404, r1.text
+        r2 = req(client, "POST", f"/api/categories/{own_id}/merge/{untagged_id}", headers=owner_headers)
+        assert r2.status_code == 404, r2.text
+        assert _run(db.categories.find_one({"id": untagged_id})) is not None
+        assert _run(db.categories.find_one({"id": own_id})) is not None
+    finally:
+        _run(db.categories.delete_many({"id": {"$in": [untagged_id, own_id]}}))
+
+
+def test_modifier_mutations_refuse_a_doc_with_no_businessId(client, owner_headers):
+    from database import db
+    untagged_id = "MOD-QUARANTINE-TEST-1"
+    _run(db.modifiers.insert_one({"id": untagged_id, "name": "Untagged Legacy Modifier", "businessId": None}))
+    try:
+        upd = req(client, "PUT", f"/api/modifiers/{untagged_id}", headers=owner_headers, json={"name": "Hijacked"})
+        assert upd.status_code == 404, upd.text
+        deL = req(client, "DELETE", f"/api/modifiers/{untagged_id}", headers=owner_headers)
+        assert deL.status_code == 404, deL.text
+        still_there = _run(db.modifiers.find_one({"id": untagged_id}))
+        assert still_there is not None and still_there["name"] == "Untagged Legacy Modifier"
+    finally:
+        _run(db.modifiers.delete_many({"id": untagged_id}))
