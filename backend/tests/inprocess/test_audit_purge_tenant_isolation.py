@@ -70,6 +70,39 @@ def test_purge_cannot_delete_another_businesss_document(client, owner_headers):
         _cleanup_business(biz_b)
 
 
+def test_purge_refuses_a_document_with_no_businessId_even_for_an_owner(client, owner_headers):
+    """gdpr_purge deliberately does NOT use tenant_owns()'s usual fail-open-
+    to-untagged-legacy-data rule — a hard delete of a document whose real
+    owner can't be confirmed is refused, not risked, even though this
+    codebase's own history (the _stamp_new() bug documented in
+    TENANT_ISOLATION_REMAINING_WORK.md) means an untagged businessId=None
+    row is a real, plausible state on an old deployment. Found by a second
+    independent readiness audit reviewing the first fix."""
+    from database import db
+    created = req(client, "POST", "/api/customers", headers=owner_headers, json={
+        "name": "Untagged Purge Customer", "email": "untaggedpurge@nua.com", "phone": "0400555666"})
+    assert created.status_code == 200, created.text[:200]
+    customer_id = created.json()["id"]
+    # $set to an explicit None, not $unset — the route's own existence
+    # check (`if not existing or ...`) uses a {"businessId": 1} projection,
+    # so a document where the field is genuinely ABSENT projects down to an
+    # empty {} (falsy in Python), which would 404 on "not existing" alone
+    # and never actually exercise the ownership check this test targets.
+    # An explicit null survives the projection as {"businessId": None} — a
+    # truthy dict — so the 404 this test asserts can only come from the
+    # ownership check itself, not this unrelated projection quirk.
+    _run(db.customers.update_one({"id": customer_id}, {"$set": {"businessId": None}}))
+
+    tenant = dict(owner_headers, **{"X-Tenant-Id": "default"})
+    r = req(client, "DELETE", f"/api/audit/purge/customer/{customer_id}",
+            headers=tenant, params={"collection": "customers"})
+    assert r.status_code == 404, (
+        f"a document with no confirmable businessId must be refused for a hard delete, got {r.status_code}"
+    )
+    still_there = _run(db.customers.find_one({"id": customer_id}))
+    assert still_there is not None
+
+
 def test_purge_deletes_a_document_you_actually_own(client, owner_headers):
     tenant = dict(owner_headers, **{"X-Tenant-Id": "default"})
     created = req(client, "POST", "/api/customers", headers=tenant, json={
