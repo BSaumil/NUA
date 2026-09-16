@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pydantic import BaseModel
 from database import db
 from deps import get_user, require_owner_or_manager
-from middleware.actor_context import tenant_scope_filter
+from middleware.actor_context import tenant_scope_filter, tenant_owns_strict
 import uuid
 import os
 
@@ -188,9 +188,18 @@ async def list_installed_awards(user: dict = Depends(get_user)):
 
 @router.delete("/awards/{code}")
 async def uninstall_award(code: str, user: dict = Depends(require_owner_or_manager)):
+    """The old inline `$or businessId/None/$exists` filter was the same
+    fail-open shape as tenant_owns() applied to a DELETE — awards are only
+    ever written by install_award above, which always stamps a real
+    businessId (no guest/anonymous path creates one), so an untagged award
+    row can only be genuine pre-fix legacy data, not currently-active data
+    from some other business — safe to quarantine with an exact match
+    rather than delete on a fail-open guess."""
     biz = user.get("businessId")
-    query = {"code": code, "$or": [{"businessId": biz}, {"businessId": {"$exists": False}}, {"businessId": None}]} if biz else {"code": code}
-    res = await db.awards.delete_one(query)
+    existing = await db.awards.find_one({"code": code}, {"_id": 0, "businessId": 1})
+    if not existing or not tenant_owns_strict(existing.get("businessId"), biz):
+        raise HTTPException(status_code=404, detail="Not installed")
+    res = await db.awards.delete_one({"code": code})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Not installed")
     return {"deleted": True}

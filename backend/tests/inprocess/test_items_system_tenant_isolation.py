@@ -285,3 +285,36 @@ def test_owner_can_still_manage_their_own_items(client, owner_headers):
     disc_id = disc.json()["id"]
     assert req(client, "PUT", f"/api/discounts/{disc_id}", headers=tenant, json={"name": "Renamed Disc"}).status_code == 200
     assert req(client, "DELETE", f"/api/discounts/{disc_id}", headers=tenant).status_code == 200
+
+
+def test_discount_and_payment_link_mutations_refuse_a_doc_with_no_businessId(client, owner_headers):
+    """update_discount/delete_discount/delete_payment_link have no shared-
+    demo-data creation path the way categories/modifiers do (create_discount
+    and create_payment_link always stamp a real businessId — verified by
+    reading every insert site for these two collections), so these three
+    were upgraded to tenant_owns_strict(): an untagged document is refused
+    for a mutation (quarantined) rather than auto-owned by whoever asks."""
+    from database import db
+    tenant = dict(owner_headers, **{"X-Tenant-Id": "default"})
+
+    untagged_disc_id = "DISC-UNTAGGED-TEST-1"
+    _run(db.discounts.insert_one({"id": untagged_disc_id, "name": "Untagged Discount", "businessId": None}))
+    try:
+        r1 = req(client, "PUT", f"/api/discounts/{untagged_disc_id}", headers=tenant, json={"name": "Hijacked"})
+        assert r1.status_code == 404, r1.text
+        r2 = req(client, "DELETE", f"/api/discounts/{untagged_disc_id}", headers=tenant)
+        assert r2.status_code == 404, r2.text
+        still_there = _run(db.discounts.find_one({"id": untagged_disc_id}))
+        assert still_there is not None and still_there["name"] == "Untagged Discount"
+    finally:
+        _run(db.discounts.delete_many({"id": untagged_disc_id}))
+
+    untagged_link_id = "PLINK-UNTAGGED-TEST-1"
+    _run(db.payment_links.insert_one({"id": untagged_link_id, "productName": "Untagged Link", "businessId": None}))
+    try:
+        r3 = req(client, "DELETE", f"/api/payment-links/{untagged_link_id}", headers=tenant)
+        assert r3.status_code == 404, r3.text
+        still_there = _run(db.payment_links.find_one({"id": untagged_link_id}))
+        assert still_there is not None
+    finally:
+        _run(db.payment_links.delete_many({"id": untagged_link_id}))

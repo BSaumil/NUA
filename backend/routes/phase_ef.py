@@ -9,7 +9,7 @@ from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from middleware.actor_context import tenant_scope_filter, tenant_owns
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Any
 from collections import Counter, defaultdict
 import uuid
 import os
@@ -291,7 +291,11 @@ async def simulate_call(data: dict, user: dict = Depends(get_user)):
         call["knownGuest"] = known_guest
 
     # Classify with LLM
-    intent_result = {"intent": "unknown", "actions": []}
+    # Explicit annotation: a bare dict literal mixing a str value with an
+    # empty list infers the list's element type as Sequence[str] (mypy
+    # treats str itself as Sequence[str] and joins the two), which then
+    # rejects every later .append(<dict>) call below as attr-defined.
+    intent_result: dict[str, Any] = {"intent": "unknown", "actions": []}
     try:
         from emergentintegrations.llm.chat import LlmChat, UserMessage
         # Give the agent the caller's history so it doesn't ask a regular for

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import uuid
 import logging
 from deps import require_owner, require_owner_or_manager, require_permission, optional_user, get_user
-from middleware.actor_context import tenant_scope_filter, tenant_owns
+from middleware.actor_context import tenant_scope_filter, tenant_owns, tenant_owns_strict
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +67,17 @@ async def _would_create_cycle(cat_id: str, new_parent_id: str, field: str = "par
 
 @router.put("/categories/{cat_id}")
 async def update_category(cat_id: str, data: dict, user: dict = Depends(require_owner_or_manager)):
+    # NOT tenant_owns_strict here, deliberately: get_categories seeds 5
+    # default categories with fixed ids ("cat-beverages", etc.) and no
+    # businessId at all the first time ANY business (or even a guest,
+    # since that GET takes optional_user) hits an empty result — shared,
+    # currently-active default data, not just historical legacy data. A
+    # strict exact-match would make every business's own default menu
+    # categories permanently un-editable the moment they try to rename or
+    # disable one, which is the normal, expected first action on this
+    # screen. Fixing that properly means giving these defaults a real
+    # per-business identity instead of a shared fixed id — a separate,
+    # larger schema change, not attempted in this pass.
     existing = await db.categories.find_one({"id": cat_id}, {"_id": 0, "businessId": 1})
     if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Not found")
@@ -104,6 +115,9 @@ async def merge_categories(source_id: str, target_id: str, user: dict = Depends(
     same category name, not just their own."""
     if source_id == target_id:
         raise HTTPException(status_code=400, detail="Can't merge a category into itself")
+    # NOT tenant_owns_strict here — same reasoning as update_category's own
+    # comment: default categories are shared, currently-active, untagged
+    # data (get_categories' auto-seed), not just legacy rows.
     business_id = user.get("businessId")
     source = await db.categories.find_one({"id": source_id}, {"_id": 0})
     target = await db.categories.find_one({"id": target_id}, {"_id": 0})
@@ -179,6 +193,7 @@ async def cleanup_legacy_categories(_: dict = Depends(require_owner)):
 
 @router.delete("/categories/{cat_id}")
 async def delete_category(cat_id: str, user: dict = Depends(require_owner)):
+    # NOT tenant_owns_strict — same reasoning as update_category's own comment.
     existing = await db.categories.find_one({"id": cat_id}, {"_id": 0, "businessId": 1})
     if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Not found")
@@ -428,6 +443,11 @@ async def create_modifier(data: dict, user: dict = Depends(require_owner_or_mana
 
 @router.put("/modifiers/{mod_id}")
 async def update_modifier(mod_id: str, data: dict, user: dict = Depends(require_owner_or_manager)):
+    # NOT tenant_owns_strict — seed_catalog() below creates its 10 starter
+    # modifiers via an upsert matched by name alone, with no businessId at
+    # all (a currently-active shared-demo-catalog path, not just legacy
+    # data), so a strict exact-match would make a business's own seeded
+    # modifiers permanently un-editable.
     existing = await db.modifiers.find_one({"id": mod_id}, {"_id": 0, "businessId": 1})
     if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Not found")
@@ -444,6 +464,7 @@ async def update_modifier(mod_id: str, data: dict, user: dict = Depends(require_
 
 @router.delete("/modifiers/{mod_id}")
 async def delete_modifier(mod_id: str, user: dict = Depends(require_owner_or_manager)):
+    # NOT tenant_owns_strict — same reasoning as update_modifier's own comment.
     existing = await db.modifiers.find_one({"id": mod_id}, {"_id": 0, "businessId": 1})
     if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Not found")
@@ -476,7 +497,7 @@ async def create_discount(data: dict, user: dict = Depends(require_owner)):
 @router.put("/discounts/{disc_id}")
 async def update_discount(disc_id: str, data: dict, user: dict = Depends(require_owner)):
     existing = await db.discounts.find_one({"id": disc_id}, {"_id": 0, "businessId": 1})
-    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if not existing or not tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Not found")
     allowed = {"name", "type", "value", "conditions", "active", "startDate", "endDate"}
     update = {k: v for k, v in data.items() if k in allowed}
@@ -489,7 +510,7 @@ async def update_discount(disc_id: str, data: dict, user: dict = Depends(require
 @router.delete("/discounts/{disc_id}")
 async def delete_discount(disc_id: str, user: dict = Depends(require_owner)):
     existing = await db.discounts.find_one({"id": disc_id}, {"_id": 0, "businessId": 1})
-    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if not existing or not tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Not found")
     await db.discounts.delete_one({"id": disc_id})
     return {"message": "Discount deleted"}
@@ -565,7 +586,7 @@ async def get_payment_links(user: dict = Depends(get_user)):
 @router.delete("/payment-links/{link_id}")
 async def delete_payment_link(link_id: str, user: dict = Depends(require_owner_or_manager)):
     existing = await db.payment_links.find_one({"id": link_id}, {"_id": 0, "businessId": 1})
-    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if not existing or not tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Not found")
     await db.payment_links.delete_one({"id": link_id})
     return {"message": "Payment link deleted"}

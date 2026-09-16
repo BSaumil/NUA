@@ -203,3 +203,38 @@ def test_pos_sale_auto_posts_a_journal_entry_scoped_to_the_selling_business(clie
     je = _run(db.journal_entries.find_one({"sourceType": "pos_sale", "sourceRef": txn_id}, {"_id": 0}))
     assert je is not None, "a POS sale must auto-post a journal entry"
     assert je["businessId"] == "default", "the auto-posted entry must be stamped with the selling business"
+
+
+def test_a_bill_with_no_businessId_is_quarantined_from_mutation_by_anyone(client, owner_headers):
+    """routes/accounting.py's mutation endpoints (pay_bill, delete_bill, and
+    the sibling invoice/deposit/bank-match/budget ones) used tenant_owns(),
+    which treats a document with no businessId at all as owned by whoever
+    asks — dangerous for a WRITE given this codebase's own documented
+    history of untagged rows created by many different businesses before
+    tenant stamping existed. Fixed to tenant_owns_strict(): an untagged
+    document is refused for a mutation by ANY caller (quarantined) rather
+    than auto-assigned to whoever asks first or silently deleted. Found
+    during a bounded release-closure pass explicitly enumerating every
+    fail-open fallback path in the codebase."""
+    tenant = dict(owner_headers, **{"X-Tenant-Id": "default"})
+    untagged_bill_id = "ACCT-QUARANTINE-BILL-1"
+    _run(db.bills.insert_one({
+        "id": untagged_bill_id, "vendorName": "Untagged Legacy Vendor",
+        "amount": 500.0, "amountPaid": 0.0, "status": "unpaid",
+        "dueDate": "2099-01-01", "businessId": None,
+    }))
+    try:
+        pay = req(client, "POST", f"/api/accounting/bills/{untagged_bill_id}/pay",
+                   headers=tenant, json={"amount": 500.0, "accountCode": "1000"})
+        assert pay.status_code == 404, (
+            f"an untagged bill must be refused for payment (quarantined), not auto-owned, got {pay.status_code}"
+        )
+        delete = req(client, "DELETE", f"/api/accounting/bills/{untagged_bill_id}", headers=tenant)
+        assert delete.status_code == 404, (
+            f"an untagged bill must be refused for deletion (quarantined), not auto-owned, got {delete.status_code}"
+        )
+        still_there = _run(db.bills.find_one({"id": untagged_bill_id}))
+        assert still_there is not None, "quarantine must never delete the untagged document as a side effect"
+        assert still_there["status"] == "unpaid", "quarantine must never mutate the untagged document either"
+    finally:
+        _run(db.bills.delete_many({"id": untagged_bill_id}))

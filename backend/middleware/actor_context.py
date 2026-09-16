@@ -69,6 +69,41 @@ def tenant_owns(doc_business_id: Optional[str], business_id: Optional[str] = Non
     return doc_business_id == biz
 
 
+def tenant_owns_strict(doc_business_id: Optional[str], business_id: Optional[str] = None) -> bool:
+    """Like tenant_owns(), but for a MUTATION (update or delete) rather than
+    a read — where the fail-open convention above is actively dangerous
+    instead of merely permissive.
+
+    tenant_owns()'s "either side missing/null means allow" rule exists so a
+    READ never hides a pre-tenant-stamping legacy document from the one
+    business that actually created it, back when nothing was tagged at all.
+    That reasoning has no equivalent for a WRITE: this codebase's own
+    history includes a real bug (`_stamp_new()`'s old `setdefault()`
+    no-op — see TENANT_ISOLATION_REMAINING_WORK.md) that left rows created
+    by MANY DIFFERENT businesses all sharing `businessId=None` — so an
+    untagged document is not reliably "this one caller's legacy data", it
+    could belong to any business that existed before the stamping fix
+    landed. Letting tenant_owns()'s fail-open rule govern a
+    find_one_and_update/update_one/delete_one means ANY business can
+    permanently mutate or destroy ANY other business's untagged row,
+    merely by guessing/enumerating its id.
+
+    Deliberately an EXACT match only: an untagged document (or an unknown
+    caller businessId) is refused for a mutation rather than risked. This
+    intentionally makes such documents un-editable/un-deletable via the
+    normal tenant-scoped route until they are properly re-tagged — a
+    quarantine, not an assignment. Never auto-assigns an untagged document
+    to whichever business happens to ask first, and never deletes it as a
+    side effect of being asked to. First applied to routes/audit.py's
+    gdpr_purge (a hard delete) before being generalized here; see that
+    endpoint's own comment for the original reasoning.
+    """
+    biz = business_id or get_actor_context().get("businessId")
+    if not biz or not doc_business_id:
+        return False
+    return doc_business_id == biz
+
+
 class ActorContextMiddleware(BaseHTTPMiddleware):
     """Populates the contextvar from request headers + JWT.
 

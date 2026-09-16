@@ -95,3 +95,22 @@ def test_super_by_award_uses_only_this_businesss_installed_award(client, owner_h
         assert body["staffSuper"][0]["awardName"] is None
     finally:
         _run(db.awards.delete_many({"code": "MA000003"}))
+
+
+def test_uninstall_refuses_an_award_with_no_businessId(client, owner_headers):
+    """uninstall_award's old inline fail-open filter (`$or businessId/None/
+    $exists`) let ANY business delete an untagged award row — the same
+    dangerous-for-a-delete shape as tenant_owns(). install_award always
+    stamps a real businessId (no guest path creates one), so an untagged
+    row is only ever genuine pre-fix legacy data; fixed to require an
+    exact match, quarantining it instead."""
+    _run(db.awards.insert_one({"code": "MA000099-UNTAGGED", "businessId": None, "name": "Untagged Legacy Award"}))
+    try:
+        r = req(client, "DELETE", "/api/awards/MA000099-UNTAGGED", headers=owner_headers)
+        assert r.status_code == 404, (
+            f"an untagged award must be refused for deletion (quarantined), not auto-owned, got {r.status_code}"
+        )
+        still_there = _run(db.awards.find_one({"code": "MA000099-UNTAGGED"}))
+        assert still_there is not None, "quarantine must never delete the untagged document as a side effect"
+    finally:
+        _run(db.awards.delete_many({"code": "MA000099-UNTAGGED"}))

@@ -140,8 +140,26 @@ class ResetPasswordRequest(BaseModel):
 @router.post("/login")
 async def login(req: LoginRequest, request: Request, response: Response):
     email = req.email.lower()
-    # Brute force check
-    identifier = f"{request.client.host}:{email}"
+    # Brute force check — keyed on the account alone (email), NOT on
+    # request.client.host. This used to be f"{request.client.host}:{email}",
+    # which looked stricter (per-IP-per-account) but was actually WEAKER:
+    # this deployment runs uvicorn with --proxy-headers
+    # --forwarded-allow-ips '*' (see Dockerfile/railway.json), so
+    # request.client.host reflects a caller-supplied X-Forwarded-For
+    # verbatim whenever the container is reachable without a header-
+    # stripping proxy in front of it — confirmed by direct reproduction
+    # against a real uvicorn instance with these exact flags. Concatenating
+    # a spoofable value into the lockout key let an attacker mint a fresh
+    # bucket every request by rotating the header, resetting the count to
+    # zero each time regardless of the fixed target email. Keying on the
+    # account alone closes that for THIS specific brute-force guard,
+    # independent of whatever the real deployment's proxy trust turns out
+    # to be — see TRUST_RELEASE_FINAL_REPORT.md's X-Forwarded-For section
+    # for the parts of the rate-limiting surface this can't fix (anonymous
+    # guest/public endpoints and forgot-password's deliberately IP-keyed
+    # anti-enumeration throttle have no non-spoofable identity to key on
+    # instead).
+    identifier = f"acct:{email}"
     attempts = await db.login_attempts.find_one({"identifier": identifier})
     if attempts and attempts.get("count", 0) >= 5:
         locked_until = attempts.get("locked_until")
@@ -245,7 +263,10 @@ async def two_factor_challenge(req: TwoFactorChallenge, request: Request, respon
 
     # The challenge itself is brute-forceable — a million codes is not many if
     # you can try them all — so it gets the same lockout the password does.
-    identifier = f"2fa:{request.client.host}:{user_id}"
+    # Keyed on user_id alone, not request.client.host — see login()'s own
+    # comment on why the IP component was removed (spoofable via
+    # X-Forwarded-For under this deployment's uvicorn proxy-trust config).
+    identifier = f"2fa:{user_id}"
     attempts = await db.login_attempts.find_one({"identifier": identifier})
     if attempts and attempts.get("count", 0) >= 5:
         locked_until = attempts.get("locked_until")
