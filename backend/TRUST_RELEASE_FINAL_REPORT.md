@@ -592,4 +592,103 @@ This branch remains on `trust-release/p0-security-foundation`, pushed to `origin
 
 ---
 
-*No credentials, certifications, or regulatory approvals have been fabricated or implied anywhere in this work. No live customer data was touched — all testing ran against the in-process mongomock test database. 88 commits are on `trust-release/p0-security-foundation`, pushed to `origin`, not merged to `main`.*
+## 12. Tenant-ownership inventory completion pass (2026-09-16, fifth pass)
+
+A follow-up directive explicitly authorised and required finishing the tenant-ownership work §11.2/§11.6 had disclosed as open: convert the ~117 previously-unreviewed `tenant_owns()` mutation sites (not another small subset), fix the active untagged creation paths named in §11.2, enforce verified ownership for reads as well as mutations, build a dry-run-first idempotent legacy migration, and correct any stale claims. This section supersedes §11.2's and §11.6's "not yet triaged" framing for the items closed here — it does not replace them, since §11.2's own record of *why* three specific classes remain open is still the accurate reasoning.
+
+### 12.1 Complete ownership inventory
+
+Every `tenant_owns(` call site in the backend was counted and individually classified, not sampled:
+
+| | Count | Disposition |
+|---|---|---|
+| `tenant_owns_strict(` sites before this pass (§11.2) | 15 | already fixed |
+| `tenant_owns_strict(` sites after this pass | **145** | +130 this pass |
+| Remaining fail-open `tenant_owns(` sites | **30** | individually classified below — none are genuine shared/reference data |
+
+**Fixed this pass — active untagged creation paths (directive item 3):**
+
+- `routes/public.py`'s `/public/book` and `/public/join-waitlist` — previously silently proceeded with `businessId=None` when unresolvable; now call `routes/online_orders.py`'s new `resolve_or_require_business_id()`, which auto-resolves on a single-tenant deployment (matching the codebase's own existing single-tenant convention) and refuses (400) only when genuinely ambiguous.
+- `routes/items_system.py`'s `get_categories` auto-seed and `seed_catalog` catalogue upserts — now scoped and stamped by the authenticated caller's `businessId`; a latent `insert_one`-mutates-dict bug this surfaced (the same list object being returned after Mongo injected a raw `_id` into it) was fixed alongside it.
+- `routes/reservations.py` (23 sites) and `items_system.py`'s category/modifier/discount/payment-link mutations — converted to `tenant_owns_strict()` now that their creation paths are fixed above.
+- Found via broader hazard scanning, not named in the original directive: `services/customer_match.py::find_or_create_customer_by_phone` and `services/connect/connectors/square.py::_upsert_customer` now take and stamp an explicit `business_id`; `routes/settings.py`'s `POST /offline/sync` was dead code with no route-level auth or tenant check at all (protected only by the blanket auth middleware) — now requires auth, refuses to overwrite another business's transaction/product, and stamps the caller's `businessId`.
+
+**Fixed this pass — bulk mutation-site conversion (directive item 2):** 33 additional route/service files converted to `tenant_owns_strict()` for every site the test suite confirmed had no currently-active untagged-creation hazard: `advanced_features.py`, `ai_pantry.py`, `bookings_inbox.py`, `measured_inventory.py`, `nua.py`, `online_orders.py`, `payroll.py`, `products.py`, `reservation_features.py`, `social_media.py`, `super.py`, `table_courses.py`, `temperature.py`, `transactions.py`, `services/accounting_service.py`, `services/nua_planner.py`, `services/nua_tools.py`, plus the surviving (non-hazard) sites within `analytics.py`, `appointments.py`, `approvals.py`, `commerce_v29.py`, `loyalty.py`, `loyalty_engine.py`, `loyalty_v2.py`, `rules_engine.py`, `stock_transfers.py`, `v15_features.py`, `v25_suite.py`, `voice_calls.py`. Plus `routes/accounting.py`'s `get_journal` (§12.2 below).
+
+**The remaining 30 fail-open sites — individually classified, none are genuine shared data:**
+
+| Class | Sites | Files | Why not converted this pass |
+|---|---|---|---|
+| `purchase_orders` | 3 | `routes/phase_ef.py` | Collection has two legitimate document shapes by design (the file's own pre-existing docstrings and tests construct a shape with no `businessId`); a strict conversion 404s a real, current workflow. |
+| `kitchen_orders` | 2 | `routes/coursing.py`, `services/ticket_lifecycle.py` | `routes/table_ordering.py`'s guest QR ordering has a documented, previously-disclosed, not-fixed-this-pass optional-`?business=` deferral (§10.10) that still actively creates untagged `kitchen_orders` today; converting these two sites would 404 that live guest flow. |
+| `customers` | 25 | `routes/commerce_v29.py` (1), `loyalty_engine.py` (5), `customers.py` (4), `voice_calls.py` (1), `finalize.py` (3), `analytics.py` (1), `v15_features.py` (2), `loyalty_v2.py` (5), `v25_suite.py` (3) | `models/customer.py`'s `Customer` Pydantic model has no `businessId` field in its schema at all — it is stamped externally and inconsistently at 15+ creation call sites and test fixtures across the codebase. This is a schema-level gap, not a single call site; closing it safely requires auditing and fixing every creation site and every test fixture that constructs a bare `Customer(...)`, which is model/schema work beyond a bounded call-site conversion and risks the "unrelated architecture rewrite" the standing directive explicitly prohibits. |
+
+Each of these three classes was found the same way, not guessed: bulk-convert, run the full suite, individually trace every resulting failure back to source before deciding whether to keep the conversion or revert it with a documented reason. All three reverts are evidenced by their own inline code comments plus dedicated tests proving the *documented* behavior (e.g. `test_batch_tenant_owns_strict_quarantine.py`, the purchase-order dual-shape tests already in `test_purchase_orders.py`).
+
+### 12.2 Read-path enforcement (directive item 4)
+
+Missing `businessId` must not mean public/shared — applied to reads, not just mutations. All 30 remaining sites above were checked for read-vs-write context; none guard genuine cross-tenant shared/reference data (a repo-wide search for any intentionally-shared, cross-tenant collection found none — every hit was either same-business-cross-device sharing, unrelated prose, or one of the three classes above).
+
+One genuine read-path gap was found and fixed independent of the three hazard classes: `routes/accounting.py`'s `get_journal` used fail-open `tenant_owns()` to read a single journal entry by id, even though every creation path for `journal_entries` (`POST /journals`, and `services/accounting_service.py`'s auto-posting on a POS sale) always stamps `businessId` — unlike the hazard classes, there is no active untagged-creation path this would break. Converted to `tenant_owns_strict()`; new test `test_a_journal_entry_with_no_businessId_is_quarantined_from_reads_by_anyone` proves an untagged journal entry, previously readable by any authenticated user on any business, now 404s for everyone.
+
+### 12.3 Legacy-data migration (directive item 5)
+
+New `services/ownership_migration.py` + `routes/ownership_migration.py`: a dry-run-first, idempotent migration for the collections whose creation paths are now confirmed safe (`MIGRATABLE_COLLECTIONS` — 24 collections, deliberately excluding `customers`, `purchase_orders`, and `kitchen_orders`, since "migrating" a collection whose creation path still produces untagged documents would just relabel documents a live code path immediately recreates as untagged).
+
+- **Evidence-only resolution, never a guess:** two conservative resolvers, tried in order — a linked customer's own confirmed `businessId` (a real, pre-existing relationship), or the sole business on a single-tenant deployment (no real ambiguity to begin with). Anything neither resolver can match is quarantined, not guessed, not assigned to whichever business happens to run the migration first.
+- **Quarantine, never delete, never cross-tenant-expose:** unresolved documents get `_ownershipQuarantined`/`_ownershipQuarantinedAt`/`_ownershipQuarantineReason` flags set — the document itself is untouched and unreachable through any normal tenant-scoped endpoint (`tenant_owns_strict()` still refuses it). Listing or resolving quarantined documents is gated behind owner auth *and* the same `X-Support-Override` header pattern `routes/licensing.py`'s ABN-change override already uses — hard-fails closed if the env var is unset, no default.
+- **Idempotent:** already-quarantined documents are skipped (not re-flagged) on a repeat scan or run; verified by a dedicated test that runs the same collection through the migration three times and asserts the quarantine timestamp never changes after the first run.
+- **Authorised manual resolution:** a human can assign a quarantined document to a real business after review, via the same support-override-gated endpoint; every manual resolution writes an audit-log entry.
+
+9 tests (`tests/inprocess/test_ownership_migration.py`): allowlist rejection, dry-run writes nothing, real run resolves via a linked customer, real run quarantines an unresolvable document without deleting it, idempotency across three repeated real runs, resolve-quarantined requires the exact support-override header (wrong key and no header both refused), a valid override assigns and clears the quarantine flag with an audit trail, and both admin write endpoints require owner auth even before the override check.
+
+### 12.4 Legitimate-workflow regression testing (directive item 6)
+
+Every conversion in §12.1 was verified against the *existing* test suite before being kept — a failure there was treated as a legitimate-workflow break requiring either a creation-path fix (as with public booking/categories) or a documented revert (the three hazard classes), never as a reason to weaken the check back to fail-open. New two-tenant regression tests were added across the affected surfaces:
+
+- **Missing/null `businessId` (quarantine-on-mutation):** `test_items_system_tenant_isolation.py` (category/modifier/discount/payment-link), `test_reservations_tenant_isolation.py` (reservation/waitlist), `test_offline_sync_tenant_isolation.py`, `test_batch_tenant_owns_strict_quarantine.py` (rules_engine, temperature devices, stock_transfers, approvals, customer_segments, appointments — a representative sample of the 33-file batch), `test_ownership_migration.py`, `test_accounting_tenant_isolation.py`'s new read-path test (§12.2).
+- **Forged/ambiguous ownership on creation:** `test_public_endpoint_tenant_resolution.py` — public booking/waitlist refuse (400) when ambiguous between multiple businesses and no `?business=` given, and auto-resolve correctly on a single-tenant deployment; two-business independent category-seeding and catalogue-upsert isolation in `test_items_system_tenant_isolation.py`.
+- **Reads:** the accounting.py fix's own test, plus the pre-existing cross-tenant-404 pattern already covering every `tenant_owns_strict()` GET site.
+- **Writes:** every quarantine test above, plus `test_items_system_tenant_isolation.py`'s and `test_reservations_tenant_isolation.py`'s cross-tenant-rejection tests.
+- **Service helpers:** `test_connect_square.py` — added a two-tenant collision test proving two businesses syncing a Square customer with the same external id no longer collide; `services/customer_match.py`'s new `business_id` parameter is exercised through `routes/bill_split.py`'s existing checkout test path.
+
+Legitimate workflows were confirmed still working, not just security-tested: two-business independent category auto-seeding, two-business independent catalogue upserts, public booking with a resolvable single business, ambiguous-multi-business refusal, existing reservation approve/seat/cancel/no-show flows (unchanged, still passing), existing customer/order access patterns, and three repeated migration runs against the same fixture data producing identical end state.
+
+### 12.5 Proxy trust configuration (directive item 7)
+
+Already completed earlier in this same session (task #70, commit `4f75795`) and unchanged by this section: `FORWARDED_ALLOW_IPS` env var (default `127.0.0.1` — trust nobody unless explicitly configured, replacing the old hardcoded `'*'`) in `Dockerfile`/`railway.json`; `backend/scripts/verify_forwarded_allow_ips.py` empirically reproduces the mechanism against real uvicorn subprocesses under three configurations (untrusted IP not matching the real peer, trusted IP matching the real peer, the old `'*'` value); `backend/FORWARDED_ALLOW_IPS_SETUP.md` documents exactly what infrastructure evidence is needed to set this correctly in a real deployment. **The blocker named in §11.4/§11.9 is unchanged and still explicit**: this repository cannot confirm which platform actually serves production traffic or whether a real stripping proxy sits in front of it, so PILOT-READY remains blocked on that specific operational confirmation — this pass made the setting configurable and locally verifiable, it did not and could not verify the real edge, and does not claim to.
+
+### 12.6 Full gate suite — exact results, this pass's own final head (`45bece3`)
+
+| Gate | Command | Result |
+|---|---|---|
+| Backend suite | `python -m pytest tests/inprocess -q` | **788 passed, 0 failed, 0 skipped** |
+| Lint | `python -m flake8 .` | clean |
+| Differential type gate | `python scripts/check_type_baseline.py` | **814/814 errors, 16/16 known error codes — pass** |
+| Differential dependency gate | `python scripts/check_dependency_baseline.py` | **14/14 advisories within accepted baseline — pass** |
+
+Two commits this pass: `5f932dd` (bulk conversion + migration engine + tests, 787 passed pre-push confirmation run) and `45bece3` (the accounting.py read-path fix + test, 788 passed — the +1 is the new test itself). Both pushed to `origin/trust-release/p0-security-foundation`.
+
+### 12.7 Corrections to prior stale claims
+
+Per the directive's explicit instruction to correct stale summaries rather than leave them standing:
+
+- §11.2's "**The remaining ~117 non-GET sites... were NOT individually triaged this pass**" is now closed for 87 of those sites (the ones in the 33 files converted this pass) and explicitly, individually re-confirmed-open for the rest (the 30 in §12.1's table) — no longer an unreviewed estimate.
+- §11.6's row "fail-open-to-untagged-data on mutation paths ... **Partially closed, disclosed** ... ~117 non-GET sites explicitly named as not yet triaged" should now be read as: **145/175 tenant-owned mutation+read sites are strict; the 30 that remain are individually named and classified in §12.1, not an unreviewed bulk estimate.**
+- No other claim in §11 (proxy trust, guest checkout, mypy baseline, gate results as of that pass's own head) is stale — each was already scoped to "this pass's own head" and remains accurate as a historical record of that pass.
+
+### 12.8 Verdict
+
+| Level | Verdict | Basis |
+|---|---|---|
+| **MERGE-READY** | **YES** | All local gates pass on this pass's own final head (§12.6); the ownership-inventory work explicitly authorised by this directive is complete for 145 of 175 identified sites, with the remaining 30 individually classified (not silently skipped) and none of them a *new* regression — `tenant_owns()`'s fail-open behavior on those 30 sites is pre-existing, unchanged behavior this pass investigated and disclosed rather than introduced. Every prior pass's Critical/High findings remain closed (§11.6, unaffected by this pass). |
+| **STAGING-DEPLOYMENT-READY** | **YES, with the same code/config checklist as §11.7-A** | Nothing in this pass changes §11.7-A's checklist; the new ownership-migration admin endpoints and `FORWARDED_ALLOW_IPS` setting are both configuration this session could safely build and test, not staging provisioning this session can perform. |
+| **STAGING-VALIDATED** | **NO — unchanged from §11.9** | Still requires real staging traffic and human operators; this pass took no deployment action. |
+| **PILOT-READY** | **NO — still specifically blocked on the X-Forwarded-For / deployment-topology confirmation (§11.4/§12.5)** | Unchanged: the setting is now configurable and locally verified, but this repository still cannot confirm the real production edge topology. Separately, the three disclosed residual ownership-inventory classes (§12.1) should be closed or explicitly accepted as permanent before a pilot handles real customer data across those collections, since a pilot is exactly the point real cross-tenant legacy data would first surface. |
+| **PRODUCTION-READY** | **NOT YET** | Inherits every blocker in §11.9 plus this pass's own three disclosed residual classes (§12.1) — none of them tenant-isolation regressions introduced by this pass, all of them named, scoped follow-up work: a `purchase_orders` document-shape reconciliation, a `table_ordering.py` guest-flow fix (already disclosed in §10.10), and a `Customer` model schema change plus a fixture-wide audit. |
+
+This branch remains on `trust-release/p0-security-foundation`, pushed to `origin` at `45bece3`, **not merged and not deployed by this session.** No production settings and no live customer data were touched at any point in this pass.
+
+---
+
+*No credentials, certifications, or regulatory approvals have been fabricated or implied anywhere in this work. No live customer data was touched — all testing ran against the in-process mongomock test database. 95 commits are on `trust-release/p0-security-foundation`, pushed to `origin`, not merged to `main` (`origin/main` confirmed a strict ancestor, zero divergence, as of `45bece3`).*
