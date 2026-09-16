@@ -65,7 +65,7 @@ from models.accounting import (
 )
 from utils.mongo_safe import safe_parse_list
 from services import accounting_service as svc
-from middleware.actor_context import tenant_scope_filter, tenant_owns, tenant_owns_strict
+from middleware.actor_context import tenant_scope_filter, tenant_owns_strict
 import uuid
 import logging
 import os
@@ -169,7 +169,7 @@ async def list_journals(
 @router.get("/journals/{jid}")
 async def get_journal(jid: str, user: dict = Depends(get_user)):
     doc = await db.journal_entries.find_one({"id": jid}, {"_id": 0})
-    if doc is None or not tenant_owns(doc.get("businessId"), user.get("businessId")):
+    if doc is None or not tenant_owns_strict(doc.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Journal entry not found")
     return doc
 

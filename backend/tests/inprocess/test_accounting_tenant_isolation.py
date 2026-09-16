@@ -81,6 +81,32 @@ def test_journal_get_and_reverse_are_owned_per_business(client, owner_headers):
     assert own_get.json()["businessId"] == "acct-je-other-biz"
 
 
+def test_a_journal_entry_with_no_businessId_is_quarantined_from_reads_by_anyone(client, owner_headers):
+    """get_journal used tenant_owns(), which treats a document with no
+    businessId at all as owned by whoever asks — a READ-path fail-open
+    gap distinct from (and found after) the mutation-path fixes above:
+    an untagged journal entry was readable by any authenticated user on
+    any business, not just refused for mutation. Fixed to
+    tenant_owns_strict() since journal_entries is tenant-owned financial
+    data, not shared reference data, and every creation path
+    (create_journal, and services/accounting_service.py's auto-posting)
+    always stamps businessId — so a genuinely untagged row can only be
+    a stale/legacy record, never a currently-valid shared one."""
+    untagged_id = "ACCT-QUARANTINE-JE-1"
+    _run(db.journal_entries.insert_one({
+        "id": untagged_id, "date": "2099-01-01", "sourceType": "manual",
+        "lines": [{"accountCode": "1000", "debit": 1.0, "credit": 0.0}],
+        "businessId": None,
+    }))
+    try:
+        cross_get = req(client, "GET", f"/api/accounting/journals/{untagged_id}", headers=owner_headers)
+        assert cross_get.status_code == 404, (
+            f"an untagged journal entry must be refused for reads by anyone, got {cross_get.status_code}"
+        )
+    finally:
+        _run(db.journal_entries.delete_many({"id": untagged_id}))
+
+
 def test_reports_exclude_another_businesss_journal_entries(client, owner_headers):
     other = _login_as(client, owner_headers, email="acct.reports.other@nua.com", business_id="acct-reports-other-biz")
     req(client, "POST", "/api/accounting/seed", headers=other)
