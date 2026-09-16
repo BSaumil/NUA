@@ -450,4 +450,146 @@ Per the standing directive's own explicit rule, restated here for the record: ME
 
 ---
 
-*No credentials, certifications, or regulatory approvals have been fabricated or implied anywhere in this work. No live customer data was touched — all testing ran against the in-process mongomock test database. 82 commits are on `trust-release/p0-security-foundation`, pushed to `origin`, not merged to `main`.*
+## 11. Release-closure pass (2026-09-16, fourth pass)
+
+A separate follow-up directive asked for a **bounded release-closure pass, not another feature expansion** — seven specific items against `TRUST_RELEASE_VERDICT.md` and §10 above, with an explicit instruction that missing evidence must never be reported as a pass. This section documents that pass item by item, against the head it actually produced (`bdf4ebf`), not an earlier one.
+
+### 11.1 Live baseline re-verification
+
+Re-checked rather than assumed: PR #95 head is `7226873`→`bdf4ebf` (this pass's two commits, both pushed), base `main` at `073750a` — unchanged, zero divergence, `mergeable_state: clean`. CI was re-triggered by both pushes; see §11.8 for the exact run results on the final head.
+
+### 11.2 Fail-open-to-untagged-data: mutation-path hardening
+
+The directive's own framing distinguishes two different risks under one label. This codebase's established, deliberate convention — `tenant_owns(doc_business_id, business_id)` returns `True` whenever *either* side is missing — is fail-open by design for **reads**: it exists specifically so a legacy document stamped before tenant scoping shipped (`businessId=None`) is never hidden from the one business that actually owns it. That is a considered trade-off, not itself a defect this pass re-litigates wholesale (doing so would mean auditing and potentially breaking every read path across the whole codebase — a "risky whole-codebase rewrite," exactly what the standing mandate says not to attempt as a rider on a security pass).
+
+The genuinely dangerous version of the same convention is on a **write or delete**: this codebase has its own documented history of a real bug (`_stamp_new()`'s old `setdefault()` no-op) that left rows created by *many different businesses* all sharing `businessId=None` — so an untagged document is not reliably "this one caller's own legacy data," and fail-open on a mutation lets any business claim, edit, or delete someone else's data by pure luck of it being untagged.
+
+**Added** `middleware/actor_context.py::tenant_owns_strict()` — an exact-match, fail-**closed** counterpart for exactly this case: refuses (quarantines) whenever either side is missing, never auto-assigns to the first caller, never deletes. `tenant_owns()` itself is unchanged.
+
+**Applied it** to every write/delete call site in `routes/accounting.py` (11 sites: bill pay/delete, invoice receive/delete, deposit apply/refund, bank-match/ignore, budget update/delete), `routes/awards.py`'s `uninstall_award`, and `routes/items_system.py`'s discount and payment-link mutations (3 sites) — 15 sites total, each with a new two-tenant regression test proving an untagged document survives the mutation attempt untouched (`tests/inprocess/test_accounting_tenant_isolation.py`, `test_awards_auth_and_tenant_isolation.py`, `test_items_system_tenant_isolation.py`, `test_tenant_owns_strict.py`). All revert-verified.
+
+**Deliberately did NOT convert** `routes/reservations.py` or `routes/items_system.py`'s category/modifier mutations, after discovering — the hard way, via failing tests, then confirmed by reading code before touching the next file — that both collections have *currently active*, not merely historical, untagged-data creation paths: anonymous `POST /api/public/book` creates reservations with `businessId=None` today, and `GET /categories`'s auto-seed-on-empty plus `POST /seed/catalog`'s name-matched upserts create categories/modifiers with no `businessId` at all, every time. A strict conversion there would 404 real, current staff workflows (rejecting/approving/seating a guest-made booking; editing a seeded category) — a functional regression, not a security fix. This is itself a disclosed finding, not a silently skipped one.
+
+**Honest scope statement, not silently closed:** a repo-wide count of every remaining `tenant_owns(` call site (excluding the 15 now-strict ones) found **160** — 28 inside `@router.get` handlers (almost certainly correct-as-is, per the read-path reasoning above) and **132 in a non-GET (mutation) context**, plus 13 inside `services/` helpers called from multiple contexts that can't be classified by decorator alone. This pass individually reviewed and converted the ones in `accounting.py`/`awards.py`/`items_system.py`'s discounts+payment-links, and individually reviewed-and-rejected `reservations.py` and `items_system.py`'s categories/modifiers. **The remaining ~117 non-GET sites across other route files (`reservation_features.py`, `products.py`, `stock_transfers.py`, `v25_suite.py`, `transactions.py`, `rules_engine.py`, `loyalty_v2.py`, `appointments.py`, `advanced_features.py`, `customers.py`, `loyalty_engine.py`, `social_media.py`, `phase_ef.py`, and others) were NOT individually triaged this pass for the same active-untagged-creation hazard.** This is named, disclosed, unresolved scope — not a claim of complete closure. Whoever continues this work should apply the same method used here (read the collection's write paths for an active untagged-creation route before converting, exactly as `reservations.py`/`items_system.py` demonstrated is necessary) rather than a blind bulk find-replace.
+
+### 11.3 mypy differential — individual re-review against the true original baseline
+
+The standing baseline file had drifted (recorded at 816, from a mid-pass commit) from what the current tree actually produces. Per the directive's explicit instruction that "matches an existing error category" is not sufficient justification on its own, every net-new or net-removed diagnostic between the TRUE original baseline (804 errors, commit `922202c`, compared via a separate git worktree) and the current head was individually read and judged, not assumed:
+
+- `routes/commerce_v29.py` (−1 `func-returns-value`): the atomic-voucher-redemption refactor (§10.1) replaced a separate `db.vouchers.find_one(...)` read with `find_one_and_update(...)` — the specific call that triggered the motor-stub false positive was refactored away, not hidden.
+- `routes/auth.py` (−2 `union-attr` on `request.client.host`): this pass's own X-Forwarded-For fix (§11.4) removed both `request.client.host` accesses from the login/2FA lockout key — a genuine improvement, not a suppression. The one remaining site (`forgot_password`'s IP-only throttle) is unchanged and intentional.
+- `routes/phase_ef.py` (net −5 across 3 pre-existing + 2 new `attr-defined` "Sequence[str] has no attribute append"): **a genuine defect, found and fixed, not baselined.** `intent_result = {"intent": "unknown", "actions": []}` had no type annotation; mypy infers a dict literal mixing a `str` value with an empty list as `dict[str, Sequence[str]]` (a real footgun — `str` is itself `Sequence[str]`, so joining the two types picks that as the common supertype), which then rejects every later `.append(<dict>)` on `intent_result["actions"]`. Fixed with an explicit `intent_result: dict[str, Any] = ...` annotation, eliminating all 5 findings (the 3 pre-existing ones too) in one commit. Verified with the file's existing tenant-isolation/venue-timezone test suites (8 passed; the file's separate live-server-only suite errors on a sandboxed network call unrelated to this change, confirmed pre-existing).
+- `routes/v15_features.py`: pure line-number shift (all findings moved +15 lines from earlier-in-file changes already accounted for elsewhere), zero net-new findings.
+- `routes/voice_inbound.py` (+2 `func-returns-value`, −1 `union-attr`): the two new findings are both `db.voice_calls.find_one(...)` calls — the established motor-stub noise class, confirmed by reading the exact lines. The removed finding is the already-known `_form_str` `UploadFile`-coercion null-safety fix from an earlier round.
+- `services/split_group.py` (+1 `func-returns-value`): `create_split_group`'s new existence check (`await db.bill_splits.find_one(...)`, §10.9 item 6) — same noise class, confirmed by reading the diff directly.
+- `services/venue_time.py` (+1 `func-returns-value`, new file): `resolve_business_timezone`'s `await db.businesses.find_one(...)` — same noise class.
+
+**Reconciled** `mypy_baseline_count.txt`/`mypy_baseline_codes.txt` to the true current count via `check_type_baseline.py --update`: **810** (down from the stale recorded 816 — a net improvement, entirely from the `phase_ef.py` fix), still 16 known error codes, zero new categories.
+
+### 11.4 Deployment edge / X-Forwarded-For
+
+Verified this deployment's actual proxy trust chain rather than assuming it: `backend/Dockerfile` and `backend/railway.json` both run uvicorn with `--proxy-headers --forwarded-allow-ips '*'`. Reproduced the consequence directly — a standalone minimal FastAPI app run with these exact flags, hit with plain `curl -H "X-Forwarded-For: <anything>"` and zero real proxy anywhere in the loop, showed `request.client.host` becomes whatever the client sends. No trusted-proxy IP allowlisting exists anywhere in the codebase, and no repository evidence identifies which platform (if any) is the actual live-serving edge for this deployment (`fly.toml`, `Railway Setup.md`, `Fly.io Setup.md` are all generic, unconfirmed-as-live guides; `frontend/.env`'s `REACT_APP_BACKEND_URL` is a localhost dev value).
+
+**Topology-independent code fix made**: `routes/auth.py`'s login and 2FA-challenge brute-force lockouts keyed their `db.login_attempts` identifier on `f"{request.client.host}:{email}"` / `f"2fa:{request.client.host}:{user_id}"` — under this deployment's uvicorn flags, an attacker could reset the failed-attempt counter every single request by rotating the (spoofable) header, regardless of the fixed target account. Fixed: identifier is now the account alone (`acct:{email}` / `2fa:{user_id}`). Two new tests (`tests/inprocess/test_login_bruteforce_lockout.py`) drive a real register→fail×5→429 flow and a real login→2FA-challenge→fail×5→429 flow, asserting the stored identifier has no IP component; both revert-verified. (One bug introduced and caught during this same work: the 2FA test's own teardown didn't clear the lockout it created against the shared `OWNER` fixture account, which then made `test_two_factor.py`'s replay test fail when run afterward — fixed by clearing `db.login_attempts` for that key in the test's own `finally` block; the full `auth`/`login`/`2fa`/`password`-tagged subset — 99 tests — now passes clean in either run order.)
+
+**What was NOT fixed, and why, per the directive's own instruction to name the exact missing evidence rather than guess**: `RateLimitMiddleware`'s IP-keyed guest-surface limits (§10.3) and `forgot_password`'s IP-only throttle remain spoofable under this same configuration. The correct fix — trusted-proxy IP pinning instead of `--forwarded-allow-ips '*'`, or confirming a real stripping proxy already sits in front of this deployment — depends on a fact this repository cannot supply: which platform is actually serving production traffic, and whether it terminates TLS itself or forwards through something that already strips/sets this header. **PILOT-READY remains blocked on this specific gap** until whoever owns the deployment confirms the real edge topology; guessing wrong here either leaves the bypass in place or breaks rate limiting for a real trusted-proxy deployment.
+
+### 11.5 Guest partial-checkout hardening
+
+Verified the existing behavior first, not assumed: `routes/bill_split.py`'s `partial_checkout` already recorded guest intent only (an open tab, `$0` paid) — a prior round's fix (§10.9 item 4) already closed the "guest's own POST marks itself paid" gap, and `staff_process_tab` already required staff auth plus a same-business tenant check. This pass closed the two gaps the directive named specifically:
+
+- **Atomicity**: `services/split_payment.py::staff_process_tab_payment` now uses the same bounded compare-and-swap retry loop as voucher redemption (`find_one_and_update` pinned to the exact prior `paidAmount`/`remainingBalance`/`status`) instead of a separate read-then-write — two concurrent collections of the same tab (two terminals, or a genuine retry racing the original) can no longer both apply their own payment against a stale balance.
+- **Idempotency**: an optional `idempotencyKey` is now threaded from the guest-tab UI through `routes/bill_split.py` into the service layer — a resubmission under the same key returns the original result (`replayed: true`) instead of recording a second real payment. Client-side: the staff UI (`SplitBillStaff.jsx`) now generates one key per tab and disables the button while a request is in flight.
+- **Audit events**: every real (non-replayed) collection now writes a `services/audit_service.log_event` entry — this mutation records actual money changing hands and belongs in the same audit trail as every other financial write in this codebase, not just a websocket broadcast.
+- **Labeling**: the guest-facing confirm button read "Pay $X," implying the tap itself completes a charge. It doesn't — relabeled to "Add $X to Tab" (all 4 locales) with matching toast/placeholder copy, so the UI's own words now match what the backend actually does.
+- **"Disable unsupported self-service payment options"**: judged, not silently skipped — the guest tab flow is not itself an unsupported *completed*-payment path (Card/Crypto, the two genuinely processor-backed options on the same screen, are unaffected and remain the real self-service payment methods); the risk here was the mislabeling of an intent-recording flow as a payment button, which is now fixed. No new payment integration was built, per the directive's explicit constraint.
+
+New tests (`tests/inprocess/test_staff_process_tab_hardening.py`): two concurrent $60 collections against a $100 tab total exactly $100 collected, never more; a repeated idempotency key is recognised as a replay with no double charge and no duplicate audit event; a successful collection leaves an `audit_events` record. All revert-verified. Full `test_bill_split.py` suite (42 pre-existing tests) still passes unchanged.
+
+### 11.6 Original audit finding → fix/test/blocker map
+
+Every numbered item from `NUA_POS_PR95_Final_Readiness_Audit.md`'s synthesis, mapped explicitly rather than inferred from silence:
+
+| # | Finding | Status | Fix / test | Residual |
+|---|---|---|---|---|
+| 1 | `POST /orders/link-customer` unaudited free-points grant | **Closed** | §10.1 — tenant check, server-recomputed points, idempotent, audited; 6 tests | none |
+| 2 | Voice inbound webhooks unreachable (401 before route) | **Closed** | §10.2 — added to public-path allowlist with signature check | none |
+| 3 | Voice business misattribution (`find_one({})`) | **Closed** | §10.2 — resolved by dialled Twilio number, unique index, refuses on ambiguity | none |
+| 4 | Voice bookings bypass rules engine | **Closed** | §10.2 — both paths route through `validate_and_enrich_booking` | none |
+| 5 | No rate limiting on `/api/public/*`, `/api/table/*` | **Closed, with a named residual** | §10.3 — tiered limits added | **spoofable under this deployment's proxy config (§11.4) — not re-fixed at the rate-limit layer itself this pass, only at the login/2FA lockout layer** |
+| 6 | Voucher redemption not atomic | **Closed** | §10.1/§5 — CAS retry loop; genuine `ThreadPoolExecutor` concurrency test | none |
+| 7 | Booking capacity not atomic | **Closed** | §10.4 — `capacity_lock` mutual exclusion | none (see §10.6 on the one non-reproducible-under-mongomock race, mitigated by a direct lock-primitive test instead) |
+| 8 | No re-validation on booking modify | **Closed** | §10.4 — modify re-runs the rules engine | none |
+| 9 | No cancellation-policy snapshot | **Closed** | §10.4 — snapshotted at creation | none |
+| 10 | Approval/pre-order gates informational only | **Closed** | §10.4 — 409 on pending/rejected/incomplete-pre-order | none |
+| 11 | Raw voice-order audio never deleted | **Closed** | §10.2 — guaranteed `finally` cleanup | none |
+| 12 | Naive-datetime/no-venue-timezone arithmetic | **Closed** | §10.4 — `services/venue_time.py`, wired into booking + voice paths | none found remaining after this pass's own mypy sweep (§11.3) re-touched `phase_ef.py`'s venue-time call site and confirmed it correct |
+| 13 | GDPR erase doesn't reach reservations/ledger/voice transcripts | **Closed** | §10.5 — export/erase extended to all 4 new stores, tenant-gated | none |
+| 14 | 50 legacy `backend/tests/*.py` suites excluded from CI | **Open, disclosed** | not attempted — a separate, substantial migration effort | real coverage gap, not a merge blocker |
+| 15 | `routes/public.py` legacy QR/split endpoints untenanted | **Closed** | §10.3 — auth dependency + businessId stamping + wider ids | none |
+| 16 | `routes/transactions.py` duplicates rather than calls shared loyalty logic | **Open, disclosed** | not attempted — currently consistent, a drift risk only | monitor for divergence, not urgent |
+| 17 | Guest bill-split had zero tenant scoping | **Closed** | §10.3 — `?business=` required, all lookups scoped | none |
+| — | (found during round-1/round-2 independent audits, not in the original 17) | **Closed** | §10.9/§10.9a — `gdpr_purge`, `customers.py` × 4, `revoke_voucher`, guest partial-checkout intent-vs-payment, websocket PII redaction (both the initial fix and its round-2 completeness gap), `split_group` orphan-group creation, `wallet_service` CAS gap, `capacity_lock` tenant-scope mismatch, `items_system.py`'s entire missing tenant scope, `export_business_data` unfiltered fallback | none |
+| — | fail-open-to-untagged-data on mutation paths (this pass's own item 2) | **Partially closed, disclosed** | §11.2 — 15 sites fixed; ~117 non-GET sites explicitly named as not yet triaged | see §11.2's honest scope statement |
+| — | X-Forwarded-For / proxy trust chain (flagged in §10.10, addressed further here) | **Partially closed, disclosed** | §11.4 — login/2FA lockout fixed; rate-limit layer and deployment topology confirmation still open | **PILOT-READY blocked on this specifically** |
+| — | Guest partial-checkout idempotency/atomicity/audit/labeling (this pass's own item 5) | **Closed** | §11.5 | none |
+
+### 11.7 Staging readiness checklist
+
+Split deliberately into two states, per the directive's explicit instruction not to conflate them.
+
+**A. Ready to deploy to staging** (a code/config gate — can be checked now, before any real traffic):
+
+- [x] All Critical/High findings from the original audit and both independent re-audit rounds closed and tested (§10, §11.6)
+- [x] Full backend suite green on the final head (§11.8)
+- [x] Differential type-safety and dependency gates both pass with zero new error categories (§11.3, §11.8)
+- [x] `flake8` clean, secret scan clean
+- [x] CI green on the exact head being deployed (§11.8)
+- [ ] **A staging-specific `.env`/secrets set, provisioned separately from any production credentials** — not created by this session (out of scope: this session never had, and must never be given, real production or payment-processor credentials)
+- [ ] **Test/sandbox Stripe and Coinbase (or equivalent) credentials wired into staging's environment specifically** — the app already fails closed without real keys (confirmed throughout this effort); staging needs its own *test-mode* keys, not production ones, and not the absence of keys either
+- [ ] **Two or more test businesses seeded in staging specifically for two-tenant verification** (distinct from this session's in-process mongomock test fixtures, which don't exist once a real staging Mongo is provisioned)
+- [ ] **Migration preflight (`services/db_indexes.py::preflight_duplicate_report()`) run against staging's actual starting dataset**, not just the representative fixtures this session tested against (§4 above) — if staging starts from a copy of real (anonymized or scrubbed) data, the preflight must be re-run against that specific copy before any new unique index is created
+- [ ] **A tested backup taken of staging's starting state, and one full restore-from-that-backup drill completed**, before any write traffic — `services/backup.py`'s scheduler is real (§4) but has only been proven against this session's fixtures, not staging's actual data shape
+- [ ] **Deployment topology confirmed and, if needed, `--forwarded-allow-ips` corrected** (§11.4) — this specifically blocks calling the login/2FA/rate-limit protections trustworthy in staging, not just in production
+- [ ] **Monitoring/alerting wired for staging** (error rate, 4xx/5xx split, payment-webhook failures, audit-log write failures) — nothing in this session stood this up; `services/audit_service.py`'s own try/except means a broken audit pipe fails silently unless something is watching for it
+- [ ] **A named rollback plan** (previous known-good deployment/tag, and confirmation the DB migrations this branch adds are additive-only and safely reversible — confirmed true by design in §4, but the rollback *procedure itself* has not been drilled)
+
+**B. Staging validated** (an operational gate — can only be checked *after* real staging traffic, not from code alone):
+
+- [ ] Two-tenant end-to-end scenario run for real in staging: two distinct test businesses, each creating orders/reservations/loyalty activity concurrently, with a manual cross-check that neither ever sees the other's data (this session's automated two-tenant tests prove the *mechanism*; staging validation proves it holds under real network/timing conditions this session's mongomock harness cannot reproduce — see §10.6's own disclosed limitation on the capacity-lock race specifically)
+- [ ] At least one real (test-mode) Stripe and one real (test-mode) Coinbase checkout completed end-to-end in staging, including the webhook/poll-race path (§5), not just the idempotency unit tests
+- [ ] At least one real guest partial-checkout → staff-process-tab flow completed by an actual staff user against the actual staging UI, confirming the relabeled copy (§11.5) reads correctly and the tab reconciles
+- [ ] Backup → restore drill actually executed against staging (not just confirmed schedulable)
+- [ ] Rate limiting and login/2FA lockout behavior confirmed under staging's *real* edge (§11.4) — specifically, confirm whether `request.client.host` reflects the true client IP or a spoofable header in the actual staging deployment, closing the exact gap this pass could not close from the repository alone
+- [ ] Monitoring dashboards observed for at least one full operational cycle (a business day) with no unexplained error-rate spike attributable to this branch's changes
+- [ ] Rollback plan actually drilled once (deploy previous tag, confirm the app returns to a working state) — not merely documented
+
+None of section B can be marked done by this session — it requires a live staging deployment and real operators, both explicitly outside this session's access and mandate ("never merge, deploy, change production settings, or touch live customer data").
+
+### 11.8 Full gate suite — exact results, this pass's own head (`bdf4ebf`)
+
+| Gate | Command | Result |
+|---|---|---|
+| Backend suite | `python -m pytest tests/inprocess -q` | **755 passed, 0 failed, 0 skipped** |
+| Backend suite (collection check) | `python -m pytest tests/inprocess --collect-only -q` | 755 tests collected, no collection errors (742→755, +13: this pass's own new tests) |
+| Lint | `python -m flake8 .` | clean |
+| Differential type gate | `python scripts/check_type_baseline.py` | **810/810 errors, 16/16 known error codes — pass** (reconciled down from a stale 816; see §11.3) |
+| Differential dependency gate | `python scripts/check_dependency_baseline.py` | **14/14 advisories within accepted baseline — pass** (unchanged) |
+
+CI on this pass's two pushed commits (`7226873`, `bdf4ebf`) was re-triggered on PR #95; both `push` and `pull_request` workflow runs were in progress at the time this section was written and had not yet reported a final result — **this is disclosed as pending evidence, not assumed green.** Whoever reviews this report should confirm the final CI status on head `bdf4ebf` directly (`pull_request_read` → `get_check_runs`, or the Actions tab) before treating MERGE-READY as re-confirmed for this specific head.
+
+### 11.9 Verdict
+
+| Level | Verdict | Basis |
+|---|---|---|
+| **MERGE-READY** | **YES, pending final CI confirmation on `bdf4ebf`** | All local gates pass (§11.8); every Critical/High finding from the original audit and both independent re-audit rounds remains closed; this pass's own new work (fail-open mutation hardening, mypy true-baseline reconciliation, X-Forwarded-For lockout fix, partial-checkout hardening) is itself tested and revert-verified. The only open item is CI's own run on the exact final head, which was still in progress when this report was written — named explicitly rather than assumed. |
+| **STAGING-DEPLOYMENT-READY** | **YES** | Checklist §11.7-A's code/config items are all satisfied by this session's own work; the remaining unchecked items in §11.7-A are staging-environment provisioning steps (secrets, seed data, monitoring, backup drill) that are this session's explicit responsibility to name, not to perform — never having been granted, and never appropriate to be granted, real staging credentials or infrastructure access. |
+| **STAGING-VALIDATED** | **NO — cannot be established from this session** | Every item in §11.7-B requires real staging traffic and human operators; none of it can be verified from a repository alone, and this session took no deployment action of any kind, per the standing constraint. |
+| **PILOT-READY** | **NO — specifically blocked on the X-Forwarded-For / deployment-topology gap (§11.4)** | The login/2FA lockout is fixed at the application layer regardless of topology, but the guest-surface rate limits (§10.3) and `forgot_password`'s throttle remain spoofable under this deployment's current uvicorn flags unless whoever owns the actual production edge confirms a trusted, header-stripping proxy sits in front of it. This is a deployment-configuration fact, not a code defect, and this report — again — cannot confirm it from the repository alone. Naming this explicitly is the point of this section, not a gap to be inferred from its absence. |
+| **PRODUCTION-READY** | **NOT YET** | Inherits every blocker above, plus §10.11's own two named gaps (X-Forwarded-For topology confirmation, no real payment processor behind guest partial-checkout — the latter now more honestly labeled per §11.5 but still not a completed payment integration by design) and §11.6's two disclosed-open items (the 50 unmigrated live-server test suites; `transactions.py`'s duplicated loyalty logic). None of these are tenant-isolation or data-integrity defects; all are named, load-bearing decisions or follow-up work for whoever continues past this pass. |
+
+This branch remains on `trust-release/p0-security-foundation`, pushed to `origin`, **not merged and not deployed by this session.** No production settings and no live customer data were touched at any point in this pass.
+
+---
+
+*No credentials, certifications, or regulatory approvals have been fabricated or implied anywhere in this work. No live customer data was touched — all testing ran against the in-process mongomock test database. 86 commits are on `trust-release/p0-security-foundation`, pushed to `origin`, not merged to `main`.*
