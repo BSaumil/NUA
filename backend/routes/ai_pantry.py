@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from deps import get_user, require_owner_or_manager
 from database import db
-from middleware.actor_context import tenant_scope_filter, tenant_owns
+from middleware.actor_context import tenant_scope_filter, tenant_owns_strict
 import os
 import uuid
 from datetime import datetime
@@ -237,7 +237,7 @@ async def apply_invoice(invoice_id: str, data: dict, user: dict = Depends(requir
     """Apply selected price/cost updates from a parsed invoice. `selections` is
     a list of `{matchedProductId, applyPrice (bool), applyCost (bool), priceOverride}`."""
     inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
-    if not inv or not tenant_owns(inv.get("businessId"), user.get("businessId")):
+    if not inv or not tenant_owns_strict(inv.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Invoice not found")
     selections = {s.get("matchedProductId"): s for s in (data.get("selections") or []) if s.get("matchedProductId")}
     updated, audit = 0, []
@@ -258,7 +258,7 @@ async def apply_invoice(invoice_id: str, data: dict, user: dict = Depends(requir
         # a crafted request can't reprice another business's product even if
         # it somehow got a matchedProductId that isn't really this business's.
         product = await db.products.find_one({"id": pid}, {"_id": 0, "id": 1, "businessId": 1})
-        if product is None or not tenant_owns(product.get("businessId"), user.get("businessId")):
+        if product is None or not tenant_owns_strict(product.get("businessId"), user.get("businessId")):
             continue
         upd["updatedAt"] = datetime.utcnow().isoformat()
         await db.products.update_one({"id": pid}, {"$set": upd})

@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from database import db
 from deps import get_user
-from middleware.actor_context import tenant_scope_filter, tenant_owns, get_actor_context
+from middleware.actor_context import tenant_scope_filter, tenant_owns, tenant_owns_strict, get_actor_context
 from services import voice_calls as vc
 import os
 import uuid
@@ -82,6 +82,15 @@ async def initiate_call(*, customer_id: Optional[str], phone: Optional[str], pur
     customer = None
     if customer_id:
         customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+    # NOT tenant_owns_strict — models/customer.py's Customer model has no
+    # businessId field at all; it's stamped externally, inconsistently,
+    # at ~15+ different creation call sites and test fixtures across this
+    # codebase (confirmed via the full test suite: converting this site
+    # broke test_loyalty_v2_points_field.py/test_voice_calls.py, both of
+    # which seed a customer via the bare Customer(...).dict() shape with
+    # no businessId). Auditing and fixing every customer-creation site
+    # plus every test fixture that relies on this is a larger, separate
+    # effort — not attempted this pass.
         if customer is None or not tenant_owns(customer.get("businessId"), business_id):
             raise HTTPException(status_code=404, detail="Customer not found")
         phone = phone or customer.get("phone")
@@ -141,7 +150,7 @@ async def list_calls(limit: int = 50, user: dict = Depends(get_user)):
 @router.get("/voice/calls/{call_id}")
 async def get_call(call_id: str, user: dict = Depends(get_user)):
     row = await db.voice_calls.find_one({"id": call_id}, {"_id": 0})
-    if row is None or not tenant_owns(row.get("businessId"), user.get("businessId")):
+    if row is None or not tenant_owns_strict(row.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Call not found")
     return row
 

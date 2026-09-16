@@ -18,7 +18,7 @@ import logging
 
 from database import db
 from deps import get_user, require_owner_or_manager
-from middleware.actor_context import tenant_scope_filter, tenant_owns
+from middleware.actor_context import tenant_scope_filter, tenant_owns_strict
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -106,7 +106,7 @@ async def connect_account(body: AccountConnectIn, user: dict = Depends(require_o
 @router.delete("/social/accounts/{account_id}")
 async def disconnect_account(account_id: str, user: dict = Depends(require_owner_or_manager)):
     guard = await db.social_accounts.find_one({"id": account_id}, {"_id": 0, "id": 1, "businessId": 1})
-    if guard is None or not tenant_owns(guard.get("businessId"), user.get("businessId")):
+    if guard is None or not tenant_owns_strict(guard.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Account not found")
     res = await db.social_accounts.delete_one({"id": account_id})
     if res.deleted_count == 0:
@@ -161,7 +161,7 @@ async def duplicate_post(post_id: str, body: Optional[dict] = None, user: dict =
     """
     body = body or {}
     src = await db.social_posts.find_one({"id": post_id}, {"_id": 0})
-    if not src or not tenant_owns(src.get("businessId"), user.get("businessId")):
+    if not src or not tenant_owns_strict(src.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Post not found")
     new_status = body.get("status", "draft")
     if new_status not in ("draft", "scheduled"):
@@ -203,7 +203,7 @@ async def update_post(post_id: str, body: dict, user: dict = Depends(require_own
     flow. Only a small, explicit set of fields is mutable; status is
     validated against the same allow-list as create_post."""
     guard = await db.social_posts.find_one({"id": post_id}, {"_id": 0, "id": 1, "businessId": 1})
-    if guard is None or not tenant_owns(guard.get("businessId"), user.get("businessId")):
+    if guard is None or not tenant_owns_strict(guard.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Post not found")
     allowed = {"caption", "hashtags", "imageUrl", "scheduledFor", "status", "postType"}
     update = {k: v for k, v in body.items() if k in allowed}
@@ -222,7 +222,7 @@ async def update_post(post_id: str, body: dict, user: dict = Depends(require_own
 @router.delete("/social/posts/{post_id}")
 async def delete_post(post_id: str, user: dict = Depends(require_owner_or_manager)):
     guard = await db.social_posts.find_one({"id": post_id}, {"_id": 0, "id": 1, "businessId": 1})
-    if guard is None or not tenant_owns(guard.get("businessId"), user.get("businessId")):
+    if guard is None or not tenant_owns_strict(guard.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Post not found")
     res = await db.social_posts.delete_one({"id": post_id})
     if res.deleted_count == 0:
@@ -236,7 +236,7 @@ async def publish_post(post_id: str, user: dict = Depends(require_owner_or_manag
     deferred until per-platform OAuth is wired — this endpoint flips the
     status flag and stamps publishedAt so the UI flow works end-to-end."""
     post = await db.social_posts.find_one({"id": post_id}, {"_id": 0})
-    if not post or not tenant_owns(post.get("businessId"), user.get("businessId")):
+    if not post or not tenant_owns_strict(post.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Post not found")
     now = datetime.now(timezone.utc).isoformat()
     await db.social_posts.update_one(
@@ -825,6 +825,6 @@ async def _run_weekly_plan_job(*, plan_id: str, plan_days: list, platforms: list
 async def get_plan_job(plan_id: str, user: dict = Depends(get_user)):
     """Poll progress for an in-flight or completed weekly plan."""
     job = await db.social_plan_jobs.find_one({"planId": plan_id}, {"_id": 0})
-    if not job or not tenant_owns(job.get("businessId"), user.get("businessId")):
+    if not job or not tenant_owns_strict(job.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Plan job not found")
     return job

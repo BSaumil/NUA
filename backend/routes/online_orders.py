@@ -24,7 +24,7 @@ import uuid
 
 from utils.notifications import notify_order
 from routes.commerce_v29 import _resolve_voucher, _validate_voucher_rules, _compute_voucher_discount
-from middleware.actor_context import tenant_scope_filter, tenant_owns
+from middleware.actor_context import tenant_scope_filter, tenant_owns_strict
 
 router = APIRouter()
 
@@ -461,7 +461,7 @@ async def list_orders( status: Optional[str] = None, limit: int = 100, user: dic
 @router.get("/online/orders/{order_id}")
 async def get_order(order_id: str, user: dict = Depends(get_user)):
     row = await db.online_orders.find_one({"id": order_id}, {"_id": 0})
-    if not row or not tenant_owns(row.get("businessId"), user.get("businessId")):
+    if not row or not tenant_owns_strict(row.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Order not found")
     return row
 

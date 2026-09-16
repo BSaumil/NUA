@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 from database import db
 from deps import get_user, require_owner_or_manager, require_owner, require_permission
-from middleware.actor_context import tenant_scope_filter, tenant_owns
+from middleware.actor_context import tenant_scope_filter, tenant_owns_strict
 from services import nua_intelligence
 
 logger = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ async def run(include_summary: bool = False, user: dict = Depends(require_owner_
 async def dismiss_insight(iid: str, user: dict = Depends(require_owner_or_manager)):
     from datetime import datetime, timezone
     existing = await db.ash_insights.find_one({"id": iid}, {"_id": 0, "id": 1, "businessId": 1})
-    if existing is None or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if existing is None or not tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Insight not found")
     r = await db.ash_insights.update_one({"id": iid}, {"$set": {"resolvedAt": datetime.now(timezone.utc).isoformat(), "resolvedBy": "manual"}})
     if r.matched_count == 0:
@@ -277,7 +277,7 @@ async def list_plans(status: Optional[str] = None, limit: int = 50, user: dict =
 @router.get("/plans/{plan_id}")
 async def get_plan(plan_id: str, user: dict = Depends(get_user)):
     plan = await db.ash_plans.find_one({"id": plan_id}, {"_id": 0})
-    if not plan or not tenant_owns(plan.get("businessId"), user.get("businessId")):
+    if not plan or not tenant_owns_strict(plan.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "plan not found")
     return plan
 
@@ -575,7 +575,7 @@ async def flag_execution(audit_id: str, body: dict, user: dict = Depends(require
     exposes a rollback and the caller asked for one, attempts to undo it."""
     reason = (body or {}).get("reason")
     row = await db.audit_events.find_one({"id": audit_id}, {"_id": 0})
-    if not row or not tenant_owns(row.get("businessId"), user.get("businessId")):
+    if not row or not tenant_owns_strict(row.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Execution not found")
     tool_name = row.get("entityId")
     tool = nua_tools.TOOLS.get(tool_name)

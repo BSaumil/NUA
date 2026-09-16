@@ -24,7 +24,7 @@ from datetime import datetime, date, timezone
 from pydantic import BaseModel
 from database import db
 from deps import get_user
-from middleware.actor_context import tenant_scope_filter, tenant_owns
+from middleware.actor_context import tenant_scope_filter, tenant_owns_strict
 import uuid
 
 router = APIRouter()
@@ -188,7 +188,7 @@ async def mark_paid(run_id: str, data: dict, user: dict = Depends(get_user)):
     if user["role"] != "owner":
         raise HTTPException(403, "Owner only")
     guard = await db.super_weekly_runs.find_one({"id": run_id}, {"_id": 0, "id": 1, "businessId": 1})
-    if guard is None or not tenant_owns(guard.get("businessId"), user.get("businessId")):
+    if guard is None or not tenant_owns_strict(guard.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Super run not found")
     allowed = {"status", "paidAt", "clearingHouseRef", "note"}
     update = {k: v for k, v in data.items() if k in allowed}

@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pydantic import BaseModel
 from database import db
 from deps import get_user
-from middleware.actor_context import tenant_scope_filter, tenant_owns
+from middleware.actor_context import tenant_scope_filter, tenant_owns_strict
 import uuid
 import logging
 
@@ -289,7 +289,7 @@ async def list_notifications(serverId: Optional[str] = None, unreadOnly: bool = 
 @router.post("/table-courses/notifications/{notif_id}/read")
 async def mark_notif_read(notif_id: str, user: dict = Depends(get_user)):
     existing = await db.dock_notifications.find_one({"id": notif_id}, {"_id": 0, "businessId": 1})
-    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if not existing or not tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Notification not found")
     r = await db.dock_notifications.update_one(
         {"id": notif_id},

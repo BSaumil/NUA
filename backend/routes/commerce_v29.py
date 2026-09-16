@@ -48,7 +48,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 from database import db
 from deps import get_user
-from middleware.actor_context import get_actor_context, tenant_scope_filter, tenant_owns
+from middleware.actor_context import get_actor_context, tenant_scope_filter, tenant_owns, tenant_owns_strict
 from models.voucher import Voucher, VoucherCreate, VoucherRedeemRequest, VoucherValidateRequest, VoucherRedemption, VoucherRules
 from models.wallet_ledger import LedgerEntry, LedgerEntryCreate
 import base64
@@ -497,7 +497,7 @@ async def revoke_voucher(voucher_id: str, body: dict, user: dict = Depends(get_u
     if user["role"] not in ("owner", "manager"):
         raise HTTPException(403, "Owner/manager only")
     v = await db.vouchers.find_one({"id": voucher_id})
-    if not v or not tenant_owns(v.get("businessId"), user.get("businessId")):
+    if not v or not tenant_owns_strict(v.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Voucher not found")
     await db.vouchers.update_one({"id": voucher_id}, {"$set": {
         "status": "revoked",
@@ -539,6 +539,15 @@ async def _ledger_write(*, customer_id: str, type_: str, sign: int, amount: floa
 @router.get("/wallet/{customer_id}")
 async def get_wallet(customer_id: str, user: dict = Depends(get_user)):
     c = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+    # NOT tenant_owns_strict — models/customer.py's Customer model has no
+    # businessId field at all; it's stamped externally, inconsistently,
+    # at ~15+ different creation call sites and test fixtures across this
+    # codebase (confirmed via the full test suite: converting this site
+    # broke test_loyalty_v2_points_field.py/test_voice_calls.py, both of
+    # which seed a customer via the bare Customer(...).dict() shape with
+    # no businessId). Auditing and fixing every customer-creation site
+    # plus every test fixture that relies on this is a larger, separate
+    # effort — not attempted this pass.
     if not c or not tenant_owns(c.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Customer not found")
     entries = await db.wallet_ledger.find({"customerId": customer_id}, {"_id": 0}).sort("createdAt", -1).to_list(2000)

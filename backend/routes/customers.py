@@ -50,6 +50,15 @@ async def create_customer(customer: CustomerCreate, _: dict = Depends(get_user))
 @router.put("/customers/{customer_id}", response_model=Customer)
 async def update_customer(customer_id: str, customer_update: CustomerUpdate, user: dict = Depends(get_user)):
     existing = await db.customers.find_one({"id": customer_id}, {"_id": 0, "businessId": 1})
+    # NOT tenant_owns_strict — models/customer.py's Customer model has no
+    # businessId field at all; it's stamped externally, inconsistently,
+    # at ~15+ different creation call sites and test fixtures across this
+    # codebase (confirmed via the full test suite: converting this site
+    # broke test_loyalty_v2_points_field.py/test_voice_calls.py, both of
+    # which seed a customer via the bare Customer(...).dict() shape with
+    # no businessId). Auditing and fixing every customer-creation site
+    # plus every test fixture that relies on this is a larger, separate
+    # effort — not attempted this pass.
     if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Customer not found")
     from services.entity_service import stamped_update
@@ -63,6 +72,15 @@ async def update_customer(customer_id: str, customer_update: CustomerUpdate, use
 @router.get("/customers/{customer_id}/profile")
 async def get_customer_profile(customer_id: str, user: dict = Depends(get_user)):
     customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+    # NOT tenant_owns_strict — models/customer.py's Customer model has no
+    # businessId field at all; it's stamped externally, inconsistently,
+    # at ~15+ different creation call sites and test fixtures across this
+    # codebase (confirmed via the full test suite: converting this site
+    # broke test_loyalty_v2_points_field.py/test_voice_calls.py, both of
+    # which seed a customer via the bare Customer(...).dict() shape with
+    # no businessId). Auditing and fixing every customer-creation site
+    # plus every test fixture that relies on this is a larger, separate
+    # effort — not attempted this pass.
     if not customer or not tenant_owns(customer.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Customer not found")
     reservations = await db.reservations.find(
@@ -85,6 +103,15 @@ async def get_customer_wallet(customer_id: str, user: dict = Depends(get_user)):
     Reading the wallet also lazily issues any due occasion vouchers
     (e.g. birthday month), so offers always show up without a cron job."""
     existing = await db.customers.find_one({"id": customer_id}, {"_id": 0, "businessId": 1})
+    # NOT tenant_owns_strict — models/customer.py's Customer model has no
+    # businessId field at all; it's stamped externally, inconsistently,
+    # at ~15+ different creation call sites and test fixtures across this
+    # codebase (confirmed via the full test suite: converting this site
+    # broke test_loyalty_v2_points_field.py/test_voice_calls.py, both of
+    # which seed a customer via the bare Customer(...).dict() shape with
+    # no businessId). Auditing and fixing every customer-creation site
+    # plus every test fixture that relies on this is a larger, separate
+    # effort — not attempted this pass.
     if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Customer not found")
     from services.wallet_service import get_wallet
@@ -100,6 +127,15 @@ async def redeem_store_credit(customer_id: str, data: dict, user: dict = Depends
     as a payment tender at checkout. Mirrors the gift-card redeem pattern so
     two terminals can't double-spend the same customer's credit."""
     existing = await db.customers.find_one({"id": customer_id}, {"_id": 0, "businessId": 1})
+    # NOT tenant_owns_strict — models/customer.py's Customer model has no
+    # businessId field at all; it's stamped externally, inconsistently,
+    # at ~15+ different creation call sites and test fixtures across this
+    # codebase (confirmed via the full test suite: converting this site
+    # broke test_loyalty_v2_points_field.py/test_voice_calls.py, both of
+    # which seed a customer via the bare Customer(...).dict() shape with
+    # no businessId). Auditing and fixing every customer-creation site
+    # plus every test fixture that relies on this is a larger, separate
+    # effort — not attempted this pass.
     if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Customer not found")
     amount = round(float(data.get("amount", 0) or 0), 2)

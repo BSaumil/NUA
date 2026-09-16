@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from deps import get_user, optional_user, require_owner, require_owner_or_manager
 from database import db
-from middleware.actor_context import tenant_scope_filter, tenant_owns
+from middleware.actor_context import tenant_scope_filter, tenant_owns_strict
 from datetime import datetime, timezone
 import uuid
 
@@ -30,7 +30,7 @@ async def create_table_combination(data: dict, user: dict = Depends(require_owne
 @router.delete("/tables/combinations/{combo_id}")
 async def delete_table_combination(combo_id: str, user: dict = Depends(require_owner_or_manager)):
     existing = await db.table_combinations.find_one({"id": combo_id}, {"_id": 0, "businessId": 1})
-    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if not existing or not tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         return {"message": "Combination deleted"}  # matches the prior no-op-on-missing-id behavior
     await db.table_combinations.delete_one({"id": combo_id})
     return {"message": "Combination deleted"}
@@ -132,7 +132,7 @@ async def create_experience(data: dict, user: dict = Depends(require_owner_or_ma
 @router.put("/booking/experiences/{exp_id}")
 async def update_experience(exp_id: str, data: dict, user: dict = Depends(require_owner_or_manager)):
     existing = await db.booking_experiences.find_one({"id": exp_id}, {"_id": 0, "businessId": 1})
-    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if not existing or not tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Not found")
     result = await db.booking_experiences.find_one_and_update({"id": exp_id}, {"$set": data}, return_document=True)
     if not result:
@@ -143,7 +143,7 @@ async def update_experience(exp_id: str, data: dict, user: dict = Depends(requir
 @router.delete("/booking/experiences/{exp_id}")
 async def delete_experience(exp_id: str, user: dict = Depends(require_owner_or_manager)):
     existing = await db.booking_experiences.find_one({"id": exp_id}, {"_id": 0, "businessId": 1})
-    if existing and tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if existing and tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         await db.booking_experiences.delete_one({"id": exp_id})
     return {"message": "Experience deleted"}
 
@@ -180,7 +180,7 @@ async def create_club_offer(data: dict, user: dict = Depends(require_owner)):
 @router.put("/clubmember/offers/{offer_id}")
 async def update_club_offer(offer_id: str, data: dict, user: dict = Depends(require_owner)):
     existing = await db.club_offers.find_one({"id": offer_id}, {"_id": 0, "businessId": 1})
-    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if not existing or not tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Not found")
     allowed = {"title", "description", "discount", "startDate", "startTime", "endDate", "endTime", "totalSlots", "active", "socialPlatforms"}
     update = {k: v for k, v in data.items() if k in allowed}
@@ -193,7 +193,7 @@ async def update_club_offer(offer_id: str, data: dict, user: dict = Depends(requ
 @router.delete("/clubmember/offers/{offer_id}")
 async def delete_club_offer(offer_id: str, user: dict = Depends(require_owner)):
     existing = await db.club_offers.find_one({"id": offer_id}, {"_id": 0, "businessId": 1})
-    if existing and tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if existing and tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         await db.club_offers.delete_one({"id": offer_id})
     return {"message": "Offer deleted"}
 
@@ -290,7 +290,7 @@ async def add_social_account(data: dict, user: dict = Depends(require_owner)):
 @router.delete("/clubmember/social-accounts/{account_id}")
 async def remove_social_account(account_id: str, user: dict = Depends(require_owner)):
     existing = await db.social_accounts.find_one({"id": account_id}, {"_id": 0, "businessId": 1})
-    if existing and tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if existing and tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         await db.social_accounts.delete_one({"id": account_id})
     return {"message": "Account removed"}
 

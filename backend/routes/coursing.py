@@ -279,6 +279,12 @@ async def add_round(order_id: str, body: dict, user: dict = Depends(get_user)):
             return dup
 
     order = await db.kitchen_orders.find_one({"id": order_id}, {"_id": 0})
+    # NOT tenant_owns_strict — routes/table_ordering.py's guest QR ordering
+    # takes an OPTIONAL ?business=, and absent/unresolved still creates the
+    # kitchen_orders row today (a deliberate, documented, lower-severity
+    # deferral — see TRUST_RELEASE_FINAL_REPORT.md §10.10 — not fixed this
+    # pass). A strict exact-match here would 404 a live, currently-active
+    # QR order any time that optional param was omitted.
     if not order or not tenant_owns(order.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Order not found")
     if order.get("status") in ("served", "cancelled"):

@@ -7,7 +7,7 @@ from typing import Optional, Dict, Any
 from datetime import datetime, timezone
 from database import db
 from deps import get_user, require_owner_or_manager
-from middleware.actor_context import tenant_scope_filter, tenant_owns
+from middleware.actor_context import tenant_scope_filter, tenant_owns_strict
 from services import rules_engine as re_svc
 import uuid
 import os
@@ -97,7 +97,7 @@ async def create_rule(body: dict, user: dict = Depends(require_owner_or_manager)
 @router.get("/{rid}")
 async def get_rule(rid: str, user: dict = Depends(get_user)):
     r = await db.rules.find_one({"id": rid}, {"_id": 0})
-    if not r or not tenant_owns(r.get("businessId"), user.get("businessId")):
+    if not r or not tenant_owns_strict(r.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Rule not found")
     return r
 
@@ -105,7 +105,7 @@ async def get_rule(rid: str, user: dict = Depends(get_user)):
 @router.patch("/{rid}")
 async def update_rule(rid: str, body: dict, user: dict = Depends(require_owner_or_manager)):
     guard = await db.rules.find_one({"id": rid}, {"_id": 0, "id": 1, "businessId": 1})
-    if guard is None or not tenant_owns(guard.get("businessId"), user.get("businessId")):
+    if guard is None or not tenant_owns_strict(guard.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Rule not found")
     upd = {k: v for k, v in body.items() if k not in ("id", "createdBy", "createdAt", "triggerCount", "lastTriggeredAt", "businessId")}
     upd["updatedAt"] = datetime.now(timezone.utc).isoformat()
@@ -118,7 +118,7 @@ async def update_rule(rid: str, body: dict, user: dict = Depends(require_owner_o
 @router.delete("/{rid}")
 async def delete_rule(rid: str, user: dict = Depends(require_owner_or_manager)):
     guard = await db.rules.find_one({"id": rid}, {"_id": 0, "id": 1, "businessId": 1})
-    if guard is None or not tenant_owns(guard.get("businessId"), user.get("businessId")):
+    if guard is None or not tenant_owns_strict(guard.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Rule not found")
     r = await db.rules.delete_one({"id": rid})
     if r.deleted_count == 0:
@@ -129,7 +129,7 @@ async def delete_rule(rid: str, user: dict = Depends(require_owner_or_manager)):
 @router.post("/{rid}/toggle")
 async def toggle_rule(rid: str, user: dict = Depends(require_owner_or_manager)):
     rule = await db.rules.find_one({"id": rid}, {"_id": 0})
-    if not rule or not tenant_owns(rule.get("businessId"), user.get("businessId")):
+    if not rule or not tenant_owns_strict(rule.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Rule not found")
     new_state = not rule.get("active", True)
     await db.rules.update_one({"id": rid}, {"$set": {"active": new_state, "updatedAt": datetime.now(timezone.utc).isoformat()}})
@@ -201,7 +201,7 @@ async def simulate(body: dict, user: dict = Depends(get_user)):
         if not rid:
             raise HTTPException(400, "rule or ruleId is required")
         rule = await db.rules.find_one({"id": rid}, {"_id": 0})
-        if not rule or not tenant_owns(rule.get("businessId"), user.get("businessId")):
+        if not rule or not tenant_owns_strict(rule.get("businessId"), user.get("businessId")):
             raise HTTPException(404, "Rule not found")
     cond = re_svc.evaluate_conditions(rule.get("conditions"), payload)
     return {

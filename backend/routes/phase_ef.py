@@ -7,7 +7,7 @@ F: AI Phone Agent, auto-PO generation, live menu A/B testing, guest 'your usual'
 from fastapi import APIRouter, HTTPException, Request, Response, Depends
 from deps import get_user, require_owner, require_owner_or_manager
 from database import db
-from middleware.actor_context import tenant_scope_filter, tenant_owns
+from middleware.actor_context import tenant_scope_filter, tenant_owns, tenant_owns_strict
 from datetime import datetime, timezone
 from typing import Optional, Any
 from collections import Counter, defaultdict
@@ -96,7 +96,7 @@ async def queue_sms(to: str, name: str, body: str, kind: str = "manual", busines
 @router.post("/comms/auto-confirm/{reservation_id}")
 async def auto_confirm_reservation(reservation_id: str, user: dict = Depends(get_user)):
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
+    if not res or not tenant_owns_strict(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     phone = res.get("guestPhone") or res.get("phone") or res.get("customerPhone") or ""
     if not phone:
@@ -554,6 +554,13 @@ async def update_po(po_id: str, action: str, user: dict = Depends(require_owner_
     if action not in ("approve", "send", "receive", "cancel"):
         raise HTTPException(status_code=400, detail="Invalid action")
     guard = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0, "id": 1, "businessId": 1})
+    # NOT tenant_owns_strict — db.purchase_orders holds two different
+    # document shapes (see this endpoint's/po_pdf's own docstring): the
+    # legacy analytics.py POST path stamps a real businessId, but POs
+    # matched/created by supplier NAME STRING alone (this file's own
+    # generate path historically, and still a currently-tolerated shape
+    # per tests/inprocess/test_po_supplier_email.py) may have none. A
+    # strict exact-match would 404 those, not just close a gap.
     if guard is None or not tenant_owns(guard.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="PO not found")
     status_map = {"approve": "approved", "send": "sent", "receive": "received", "cancel": "cancelled"}
@@ -601,6 +608,13 @@ async def edit_po(po_id: str, data: dict, user: dict = Depends(require_owner)):
     has already acted on the original numbers, so editing in place would
     silently disagree with what actually happened."""
     po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+    # NOT tenant_owns_strict — db.purchase_orders holds two different
+    # document shapes (see this endpoint's/po_pdf's own docstring): the
+    # legacy analytics.py POST path stamps a real businessId, but POs
+    # matched/created by supplier NAME STRING alone (this file's own
+    # generate path historically, and still a currently-tolerated shape
+    # per tests/inprocess/test_po_supplier_email.py) may have none. A
+    # strict exact-match would 404 those, not just close a gap.
     if not po or not tenant_owns(po.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="PO not found")
     if po["status"] not in ("draft", "approved"):
@@ -644,6 +658,13 @@ async def po_pdf(po_id: str, user: dict = Depends(require_owner_or_manager)):
     quantity/name."""
     from routes.finalize import _pdf_from_lines
     po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+    # NOT tenant_owns_strict — db.purchase_orders holds two different
+    # document shapes (see this endpoint's/po_pdf's own docstring): the
+    # legacy analytics.py POST path stamps a real businessId, but POs
+    # matched/created by supplier NAME STRING alone (this file's own
+    # generate path historically, and still a currently-tolerated shape
+    # per tests/inprocess/test_po_supplier_email.py) may have none. A
+    # strict exact-match would 404 those, not just close a gap.
     if not po or not tenant_owns(po.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="PO not found")
 
@@ -729,7 +750,7 @@ async def record_conversion(test_id: str, data: dict):
 @router.post("/ab-tests/{test_id}/conclude")
 async def conclude_test(test_id: str, user: dict = Depends(require_owner_or_manager)):
     test = await db.ab_tests.find_one({"id": test_id}, {"_id": 0})
-    if not test or not tenant_owns(test.get("businessId"), user.get("businessId")):
+    if not test or not tenant_owns_strict(test.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Not found")
     # Winner = higher conversion rate
     ea, eb = max(test["exposures"]["A"], 1), max(test["exposures"]["B"], 1)

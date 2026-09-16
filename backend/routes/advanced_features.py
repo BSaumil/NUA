@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from deps import get_user, require_owner, require_owner_or_manager, optional_user
 from database import db
-from middleware.actor_context import tenant_scope_filter, tenant_owns
+from middleware.actor_context import tenant_scope_filter, tenant_owns_strict
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 import uuid
@@ -534,7 +534,7 @@ async def get_segment_customers(segment_id: str, limit: int = 500, user: dict = 
     """The full matching list, not just preview's 20-row sample — for an
     owner who wants to actually see (or export) who's in a segment."""
     segment = await db.customer_segments.find_one({"id": segment_id}, {"_id": 0})
-    if not segment or not tenant_owns(segment.get("businessId"), user.get("businessId")):
+    if not segment or not tenant_owns_strict(segment.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Segment not found")
     customers = await _resolve_segment_customers(segment.get("rules") or {}, limit=min(limit, 5000),
                                                   business_id=user.get("businessId"))
@@ -550,7 +550,7 @@ async def get_segment_customers(segment_id: str, limit: int = 500, user: dict = 
 @router.put("/marketing/segments/{segment_id}")
 async def update_segment(segment_id: str, data: dict, user: dict = Depends(require_owner_or_manager)):
     existing = await db.customer_segments.find_one({"id": segment_id}, {"_id": 0})
-    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if not existing or not tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Segment not found")
     name = (data.get("name") or existing["name"]).strip()
     if not name:
@@ -581,7 +581,7 @@ async def create_segment(data: dict, user: dict = Depends(require_owner_or_manag
 @router.delete("/marketing/segments/{segment_id}")
 async def delete_segment(segment_id: str, user: dict = Depends(require_owner_or_manager)):
     existing = await db.customer_segments.find_one({"id": segment_id}, {"_id": 0})
-    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if not existing or not tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Segment not found")
     result = await db.customer_segments.delete_one({"id": segment_id})
     if result.deleted_count == 0:
@@ -603,7 +603,7 @@ async def _campaign_recipients(campaign: dict) -> list:
     business_id = campaign.get("businessId")
     if campaign.get("segmentId"):
         segment = await db.customer_segments.find_one({"id": campaign["segmentId"]}, {"_id": 0})
-        if segment and not tenant_owns(segment.get("businessId"), business_id):
+        if segment and not tenant_owns_strict(segment.get("businessId"), business_id):
             segment = None
         rules = (segment or {}).get("rules") or {}
     elif campaign.get("segmentRules"):
@@ -741,7 +741,7 @@ async def _send_campaign_emails(campaign: dict) -> dict:
 @router.post("/marketing/campaigns/{campaign_id}/send")
 async def send_campaign(campaign_id: str, user: dict = Depends(require_owner_or_manager)):
     campaign = await db.campaigns.find_one({"id": campaign_id}, {"_id": 0})
-    if not campaign or not tenant_owns(campaign.get("businessId"), user.get("businessId")):
+    if not campaign or not tenant_owns_strict(campaign.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Campaign not found")
     if campaign.get("status") == "recurring":
         raise HTTPException(status_code=400, detail="Recurring campaigns run automatically — use run-now instead")
@@ -776,7 +776,7 @@ async def run_campaign_now(campaign_id: str, user: dict = Depends(require_owner_
     """Manually fire one recurring campaign immediately, without waiting
     for its schedule — same effect as run-due picking it up, just now."""
     campaign = await db.campaigns.find_one({"id": campaign_id}, {"_id": 0})
-    if not campaign or not tenant_owns(campaign.get("businessId"), user.get("businessId")):
+    if not campaign or not tenant_owns_strict(campaign.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Campaign not found")
     if campaign.get("status") != "recurring":
         raise HTTPException(status_code=400, detail="Only recurring campaigns can be run this way")
@@ -808,7 +808,7 @@ async def run_due_campaigns(user: dict = Depends(require_owner_or_manager)):
 @router.delete("/marketing/campaigns/{campaign_id}")
 async def delete_campaign(campaign_id: str, user: dict = Depends(require_owner_or_manager)):
     campaign = await db.campaigns.find_one({"id": campaign_id}, {"_id": 0})
-    if not campaign or not tenant_owns(campaign.get("businessId"), user.get("businessId")):
+    if not campaign or not tenant_owns_strict(campaign.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Campaign not found")
     await db.campaigns.delete_one({"id": campaign_id})
     return {"message": "Campaign deleted"}

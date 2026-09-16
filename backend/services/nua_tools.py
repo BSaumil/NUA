@@ -120,11 +120,11 @@ async def _tx_approve_pending_approval(a):
     issuance, refund, campaign send, whatever the underlying action is —
     just by supplying business B's approvalId."""
     from services.rules_engine import ACTION_LIBRARY
-    from middleware.actor_context import get_actor_context, tenant_owns
+    from middleware.actor_context import get_actor_context, tenant_owns_strict
     doc = await db.approvals.find_one({"id": a["approvalId"]}, {"_id": 0})
     if not doc:
         return {"error": "approval not found"}
-    if not tenant_owns(doc.get("businessId"), get_actor_context().get("businessId")):
+    if not tenant_owns_strict(doc.get("businessId"), get_actor_context().get("businessId")):
         return {"error": "approval not found"}
     if doc["status"] != "pending":
         return {"error": f"already {doc['status']}"}
@@ -138,9 +138,9 @@ async def _tx_approve_pending_approval(a):
 
 
 async def _tx_reject_pending_approval(a):
-    from middleware.actor_context import get_actor_context, tenant_owns
+    from middleware.actor_context import get_actor_context, tenant_owns_strict
     doc = await db.approvals.find_one({"id": a["approvalId"]}, {"_id": 0})
-    if not doc or not tenant_owns(doc.get("businessId"), get_actor_context().get("businessId")):
+    if not doc or not tenant_owns_strict(doc.get("businessId"), get_actor_context().get("businessId")):
         return {"error": "approval not found"}
     try:
         return await approval_service.reject(a["approvalId"], actor="ash-agent", reason=a.get("reason"))

@@ -3,7 +3,7 @@ from typing import Optional
 from datetime import datetime
 from database import db
 from deps import get_user, require_owner, require_owner_or_manager
-from middleware.actor_context import tenant_scope_filter, tenant_owns
+from middleware.actor_context import tenant_scope_filter, tenant_owns_strict
 from models.loyalty import Event, EventCreate
 import uuid
 
@@ -27,7 +27,7 @@ async def create_loyalty_reward(reward: dict, user: dict = Depends(require_owner
 @router.delete("/loyalty/rewards/{reward_id}")
 async def delete_loyalty_reward(reward_id: str, user: dict = Depends(require_owner_or_manager)):
     existing = await db.loyalty_rewards.find_one({"id": reward_id}, {"_id": 0, "businessId": 1})
-    if existing and tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if existing and tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         await db.loyalty_rewards.delete_one({"id": reward_id})
     return {"message": "Reward deleted"}
 

@@ -6,7 +6,7 @@ from deps import get_user, require_owner_or_manager
 from models.promotion import Promotion, PromotionCreate
 from models.transaction import Transaction, TransactionCreate
 from models.refund import Refund, RefundCreate
-from middleware.actor_context import tenant_scope_filter, tenant_owns
+from middleware.actor_context import tenant_scope_filter, tenant_owns_strict
 from utils.errors import log_and_continue
 from utils.dates import date_range_filter
 from pymongo.errors import DuplicateKeyError
@@ -39,7 +39,7 @@ async def create_promotion(promotion: PromotionCreate, user: dict = Depends(requ
 @router.put("/promotions/{promo_id}")
 async def update_promotion(promo_id: str, data: dict, user: dict = Depends(require_owner_or_manager)):
     existing = await db.promotions.find_one({"id": promo_id}, {"_id": 0, "businessId": 1})
-    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if not existing or not tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Promotion not found")
     allowed = {"name", "type", "discount", "active", "schedule",
                "products", "category", "categories",
@@ -57,7 +57,7 @@ async def update_promotion(promo_id: str, data: dict, user: dict = Depends(requi
 @router.delete("/promotions/{promo_id}")
 async def delete_promotion(promo_id: str, user: dict = Depends(require_owner_or_manager)):
     existing = await db.promotions.find_one({"id": promo_id}, {"_id": 0, "businessId": 1})
-    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if not existing or not tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Promotion not found")
     result = await db.promotions.delete_one({"id": promo_id})
     if result.deleted_count == 0:
@@ -480,7 +480,7 @@ async def get_hourly_transactions(_user: dict = Depends(get_user)):
 @router.get("/transactions/{txn_id}")
 async def get_transaction_detail(txn_id: str, _user: dict = Depends(get_user)):
     txn = await db.transactions.find_one({"id": txn_id}, {"_id": 0})
-    if not txn or not tenant_owns(txn.get("businessId"), _user.get("businessId")):
+    if not txn or not tenant_owns_strict(txn.get("businessId"), _user.get("businessId")):
         raise HTTPException(status_code=404, detail="Transaction not found")
     # Attach any refunds for this transaction
     refunds = await db.refunds.find({"originalTransactionId": txn_id}, {"_id": 0}).to_list(100)
@@ -560,7 +560,7 @@ async def get_refunds(_user: dict = Depends(get_user)):
 @router.post("/refunds", response_model=Refund)
 async def create_refund(refund: RefundCreate, _user: dict = Depends(require_owner_or_manager)):
     original_txn = await db.transactions.find_one({"id": refund.originalTransactionId})
-    if not original_txn or not tenant_owns(original_txn.get("businessId"), _user.get("businessId")):
+    if not original_txn or not tenant_owns_strict(original_txn.get("businessId"), _user.get("businessId")):
         raise HTTPException(status_code=404, detail="Original transaction not found")
     if refund.amount <= 0:
         raise HTTPException(status_code=400, detail="Refund amount must be positive")

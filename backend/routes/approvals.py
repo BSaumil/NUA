@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 from database import db
 from deps import get_user, require_owner_or_manager
-from middleware.actor_context import tenant_scope_filter, tenant_owns
+from middleware.actor_context import tenant_scope_filter, tenant_owns_strict
 from services import approval_service, rules_engine as re_svc
 
 router = APIRouter(prefix="/approvals")
@@ -27,7 +27,7 @@ async def pending_count(user: dict = Depends(get_user)):
 @router.get("/{aid}")
 async def get_approval(aid: str, user: dict = Depends(get_user)):
     doc = await db.approvals.find_one({"id": aid}, {"_id": 0})
-    if not doc or not tenant_owns(doc.get("businessId"), user.get("businessId")):
+    if not doc or not tenant_owns_strict(doc.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Approval not found")
     return doc
 
@@ -91,7 +91,7 @@ async def _execute_action(params: dict, action_type: str, rule_id: Optional[str]
 @router.post("/{aid}/approve")
 async def approve(aid: str, user: dict = Depends(require_owner_or_manager)):
     doc = await db.approvals.find_one({"id": aid}, {"_id": 0})
-    if not doc or not tenant_owns(doc.get("businessId"), user.get("businessId")):
+    if not doc or not tenant_owns_strict(doc.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Approval not found")
 
     async def exec_fn(params):
@@ -107,7 +107,7 @@ async def approve(aid: str, user: dict = Depends(require_owner_or_manager)):
 @router.post("/{aid}/reject")
 async def reject(aid: str, body: dict, user: dict = Depends(require_owner_or_manager)):
     doc = await db.approvals.find_one({"id": aid}, {"_id": 0})
-    if not doc or not tenant_owns(doc.get("businessId"), user.get("businessId")):
+    if not doc or not tenant_owns_strict(doc.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Approval not found")
     try:
         return await approval_service.reject(aid, actor=user["email"], reason=body.get("reason"))

@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Depends
 from database import db
 from deps import get_user, require_owner_or_manager
-from middleware.actor_context import tenant_scope_filter, tenant_owns
+from middleware.actor_context import tenant_scope_filter, tenant_owns, tenant_owns_strict
 from utils.notifications import send_sms
 import hashlib
 import secrets
@@ -468,7 +468,7 @@ async def create_challenge(body: dict, user: dict = Depends(require_owner_or_man
 @router.delete("/challenges/{cid}")
 async def delete_challenge(cid: str, user: dict = Depends(require_owner_or_manager)):
     guard = await db.loyalty_challenges.find_one({"id": cid}, {"_id": 0, "id": 1, "businessId": 1})
-    if guard is None or not tenant_owns(guard.get("businessId"), user.get("businessId")):
+    if guard is None or not tenant_owns_strict(guard.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "not found")
     r = await db.loyalty_challenges.delete_one({"id": cid})
     if not r.deleted_count:
@@ -479,7 +479,7 @@ async def delete_challenge(cid: str, user: dict = Depends(require_owner_or_manag
 @router.patch("/challenges/{cid}")
 async def update_challenge(cid: str, body: dict, user: dict = Depends(require_owner_or_manager)):
     guard = await db.loyalty_challenges.find_one({"id": cid}, {"_id": 0, "id": 1, "businessId": 1})
-    if guard is None or not tenant_owns(guard.get("businessId"), user.get("businessId")):
+    if guard is None or not tenant_owns_strict(guard.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "not found")
     allowed = {"name", "description", "target", "startDate", "endDate", "reward", "active"}
     update = {k: v for k, v in body.items() if k in allowed}
@@ -498,6 +498,15 @@ async def update_challenge(cid: str, body: dict, user: dict = Depends(require_ow
 @router.get("/progress/{customer_id}")
 async def get_progress(customer_id: str, user: dict = Depends(get_user)):
     guard = await db.customers.find_one({"id": customer_id}, {"_id": 0, "id": 1, "businessId": 1})
+    # NOT tenant_owns_strict — models/customer.py's Customer model has no
+    # businessId field at all; it's stamped externally, inconsistently,
+    # at ~15+ different creation call sites and test fixtures across this
+    # codebase (confirmed via the full test suite: converting this site
+    # broke test_loyalty_v2_points_field.py/test_voice_calls.py, both of
+    # which seed a customer via the bare Customer(...).dict() shape with
+    # no businessId). Auditing and fixing every customer-creation site
+    # plus every test fixture that relies on this is a larger, separate
+    # effort — not attempted this pass.
     if guard is None or not tenant_owns(guard.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Customer not found")
     return await get_customer_progress(customer_id)
@@ -668,6 +677,15 @@ async def guest_lookup(body: Dict[str, Any]):
 @router.post("/evaluate/{customer_id}")
 async def evaluate(customer_id: str, user: dict = Depends(get_user)):
     guard = await db.customers.find_one({"id": customer_id}, {"_id": 0, "id": 1, "businessId": 1})
+    # NOT tenant_owns_strict — models/customer.py's Customer model has no
+    # businessId field at all; it's stamped externally, inconsistently,
+    # at ~15+ different creation call sites and test fixtures across this
+    # codebase (confirmed via the full test suite: converting this site
+    # broke test_loyalty_v2_points_field.py/test_voice_calls.py, both of
+    # which seed a customer via the bare Customer(...).dict() shape with
+    # no businessId). Auditing and fixing every customer-creation site
+    # plus every test fixture that relies on this is a larger, separate
+    # effort — not attempted this pass.
     if guard is None or not tenant_owns(guard.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Customer not found")
     return await evaluate_customer(customer_id)
@@ -694,10 +712,28 @@ async def create_referral(body: dict, user: dict = Depends(get_user)):
         raise HTTPException(400, "referrerId + refereeEmail (or refereeId) required")
     business_id = user.get("businessId")
     referrer = await db.customers.find_one({"id": referrer_id}, {"_id": 0})
+    # NOT tenant_owns_strict — models/customer.py's Customer model has no
+    # businessId field at all; it's stamped externally, inconsistently,
+    # at ~15+ different creation call sites and test fixtures across this
+    # codebase (confirmed via the full test suite: converting this site
+    # broke test_loyalty_v2_points_field.py/test_voice_calls.py, both of
+    # which seed a customer via the bare Customer(...).dict() shape with
+    # no businessId). Auditing and fixing every customer-creation site
+    # plus every test fixture that relies on this is a larger, separate
+    # effort — not attempted this pass.
     if not referrer or not tenant_owns(referrer.get("businessId"), business_id):
         raise HTTPException(404, "referrer not found")
     if referee_id:
         referee_guard = await db.customers.find_one({"id": referee_id}, {"_id": 0, "id": 1, "businessId": 1})
+    # NOT tenant_owns_strict — models/customer.py's Customer model has no
+    # businessId field at all; it's stamped externally, inconsistently,
+    # at ~15+ different creation call sites and test fixtures across this
+    # codebase (confirmed via the full test suite: converting this site
+    # broke test_loyalty_v2_points_field.py/test_voice_calls.py, both of
+    # which seed a customer via the bare Customer(...).dict() shape with
+    # no businessId). Auditing and fixing every customer-creation site
+    # plus every test fixture that relies on this is a larger, separate
+    # effort — not attempted this pass.
         if referee_guard is None or not tenant_owns(referee_guard.get("businessId"), business_id):
             raise HTTPException(404, "referee not found")
 
@@ -743,7 +779,7 @@ async def complete_referral(ref_id: str, body: dict, user: dict = Depends(get_us
     Body optionally { refereeId } — used when the invite was email-only."""
     business_id = user.get("businessId")
     r = await db.loyalty_referrals.find_one({"id": ref_id}, {"_id": 0})
-    if r is None or not tenant_owns(r.get("businessId"), business_id):
+    if r is None or not tenant_owns_strict(r.get("businessId"), business_id):
         raise HTTPException(404, "referral not found")
     if r["status"] == "completed":
         return r
@@ -752,6 +788,15 @@ async def complete_referral(ref_id: str, body: dict, user: dict = Depends(get_us
     if not referee_id:
         raise HTTPException(400, "refereeId is required")
     referee_guard = await db.customers.find_one({"id": referee_id}, {"_id": 0, "id": 1, "businessId": 1})
+    # NOT tenant_owns_strict — models/customer.py's Customer model has no
+    # businessId field at all; it's stamped externally, inconsistently,
+    # at ~15+ different creation call sites and test fixtures across this
+    # codebase (confirmed via the full test suite: converting this site
+    # broke test_loyalty_v2_points_field.py/test_voice_calls.py, both of
+    # which seed a customer via the bare Customer(...).dict() shape with
+    # no businessId). Auditing and fixing every customer-creation site
+    # plus every test fixture that relies on this is a larger, separate
+    # effort — not attempted this pass.
     if referee_guard is None or not tenant_owns(referee_guard.get("businessId"), business_id):
         raise HTTPException(404, "referee not found")
 

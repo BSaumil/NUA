@@ -217,9 +217,9 @@ async def payroll_register(days: int = 90, user: dict = Depends(get_user)):
 
 @router.get("/payroll/ytd/{staff_id}")
 async def payroll_ytd(staff_id: str, user: dict = Depends(get_user)):
-    from middleware.actor_context import tenant_owns
+    from middleware.actor_context import tenant_owns_strict
     staff_doc = await db.auth_users.find_one({"id": staff_id}, {"_id": 0, "businessId": 1})
-    if not staff_doc or not tenant_owns(staff_doc.get("businessId"), user.get("businessId")):
+    if not staff_doc or not tenant_owns_strict(staff_doc.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Staff member not found")
     today = date.today()
     fy_start = date(today.year if today.month >= 7 else today.year - 1, 7, 1)
@@ -242,9 +242,9 @@ async def payroll_ytd(staff_id: str, user: dict = Depends(get_user)):
 @router.get("/payroll/payslip/{run_id}/{staff_id}/pdf")
 async def payslip_pdf(run_id: str, staff_id: str, user: dict = Depends(get_user)):
     """Fair Work-compliant payslip PDF for one employee, one pay run."""
-    from middleware.actor_context import tenant_owns
+    from middleware.actor_context import tenant_owns_strict
     run = await db.payruns.find_one({"id": run_id}, {"_id": 0}) or {}
-    if run and not tenant_owns(run.get("businessId"), user.get("businessId")):
+    if run and not tenant_owns_strict(run.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Payslip not found")
     row = await db.payrun_rows.find_one({"runId": run_id, "staffId": staff_id}, {"_id": 0})
     if not row:

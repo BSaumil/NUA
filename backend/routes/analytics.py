@@ -6,7 +6,7 @@ from database import db
 from models.bas_report import BASReport, BASReportCreate
 from models.expense import Expense, ExpenseCreate
 from models.supplier import Supplier, SupplierCreate, PurchaseOrder, PurchaseOrderCreate
-from middleware.actor_context import tenant_scope_filter, tenant_owns
+from middleware.actor_context import tenant_scope_filter, tenant_owns, tenant_owns_strict
 from utils.dates import date_range_filter as _date_match
 import asyncio
 import uuid
@@ -862,9 +862,18 @@ async def link_order_to_customer(transaction_id: str, customer_id: str, user: di
     """
     business_id = user.get("businessId")
     txn = await db.transactions.find_one({"id": transaction_id}, {"_id": 0})
-    if not txn or not tenant_owns(txn.get("businessId"), business_id):
+    if not txn or not tenant_owns_strict(txn.get("businessId"), business_id):
         raise HTTPException(status_code=404, detail="Transaction not found")
     customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+    # NOT tenant_owns_strict — models/customer.py's Customer model has no
+    # businessId field at all; it's stamped externally, inconsistently,
+    # at ~15+ different creation call sites and test fixtures across this
+    # codebase (confirmed via the full test suite: converting this site
+    # broke test_loyalty_v2_points_field.py/test_voice_calls.py, both of
+    # which seed a customer via the bare Customer(...).dict() shape with
+    # no businessId). Auditing and fixing every customer-creation site
+    # plus every test fixture that relies on this is a larger, separate
+    # effort — not attempted this pass.
     if not customer or not tenant_owns(customer.get("businessId"), business_id):
         raise HTTPException(status_code=404, detail="Customer not found")
     existing_customer_id = txn.get("customerId")

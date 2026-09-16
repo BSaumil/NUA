@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone, date
 from pydantic import BaseModel
 from database import db
 from deps import get_user
-from middleware.actor_context import tenant_scope_filter, tenant_owns
+from middleware.actor_context import tenant_scope_filter, tenant_owns_strict
 import uuid
 import os
 import statistics
@@ -253,7 +253,7 @@ async def update_device(device_id: str, data: dict, user: dict = Depends(get_use
     if user["role"] not in ("owner", "manager"):
         raise HTTPException(403, "Owner or manager only")
     guard = await db.temperature_devices.find_one({"id": device_id}, {"_id": 0, "id": 1, "businessId": 1})
-    if guard is None or not tenant_owns(guard.get("businessId"), user.get("businessId")):
+    if guard is None or not tenant_owns_strict(guard.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Device not found")
     allowed = {"name", "unitType", "brand", "model", "connectivity", "deviceId",
                "location", "minC", "maxC", "active"}
@@ -272,7 +272,7 @@ async def delete_device(device_id: str, user: dict = Depends(get_user)):
     if user["role"] != "owner":
         raise HTTPException(403, "Owner only")
     guard = await db.temperature_devices.find_one({"id": device_id}, {"_id": 0, "id": 1, "businessId": 1})
-    if guard is None or not tenant_owns(guard.get("businessId"), user.get("businessId")):
+    if guard is None or not tenant_owns_strict(guard.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Device not found")
     r = await db.temperature_devices.delete_one({"id": device_id})
     if r.deleted_count == 0:
@@ -285,7 +285,7 @@ async def rotate_secret(device_id: str, user: dict = Depends(get_user)):
     if user["role"] != "owner":
         raise HTTPException(403, "Owner only")
     guard = await db.temperature_devices.find_one({"id": device_id}, {"_id": 0, "id": 1, "businessId": 1})
-    if guard is None or not tenant_owns(guard.get("businessId"), user.get("businessId")):
+    if guard is None or not tenant_owns_strict(guard.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Device not found")
     new_secret = uuid.uuid4().hex
     r = await db.temperature_devices.update_one(
@@ -303,7 +303,7 @@ async def log_reading(body: ReadingIn, background_tasks: BackgroundTasks,
     """Manual reading endpoint — used from the POS 'Log now' button and as a
     fallback when a sensor is offline or its battery died."""
     device = await db.temperature_devices.find_one({"id": body.deviceId}, {"_id": 0})
-    if not device or not tenant_owns(device.get("businessId"), user.get("businessId")):
+    if not device or not tenant_owns_strict(device.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Device not found")
     return await _persist_reading(device, body.temperatureC, body.humidity,
                                   body.batteryPct, body.source or "manual",
@@ -380,7 +380,7 @@ async def list_alerts(unacknowledgedOnly: bool = False, user: dict = Depends(get
 @router.post("/temperature/alerts/{alert_id}/acknowledge")
 async def ack_alert(alert_id: str, user: dict = Depends(get_user)):
     guard = await db.temperature_alerts.find_one({"id": alert_id}, {"_id": 0, "id": 1, "businessId": 1})
-    if guard is None or not tenant_owns(guard.get("businessId"), user.get("businessId")):
+    if guard is None or not tenant_owns_strict(guard.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Alert not found")
     r = await db.temperature_alerts.update_one(
         {"id": alert_id},

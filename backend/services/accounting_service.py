@@ -16,7 +16,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 from database import db
 from models.accounting import JournalEntry, JournalLine
-from middleware.actor_context import tenant_scope_filter, tenant_owns, get_actor_context
+from middleware.actor_context import tenant_scope_filter, tenant_owns_strict, get_actor_context
 import uuid
 import logging
 
@@ -209,7 +209,7 @@ async def reverse_entry(entry_id: str, *, memo: Optional[str] = None, created_by
     if business_id is None:
         business_id = get_actor_context().get("businessId")
     orig = await db.journal_entries.find_one({"id": entry_id}, {"_id": 0})
-    if orig is None or not tenant_owns(orig.get("businessId"), business_id):
+    if orig is None or not tenant_owns_strict(orig.get("businessId"), business_id):
         raise ValueError("Journal entry not found")
     reversed_lines = [
         {"accountCode": l["accountCode"], "accountName": l.get("accountName"),

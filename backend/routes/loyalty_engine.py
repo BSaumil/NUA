@@ -9,7 +9,7 @@ Loyalty rules (user spec):
 from fastapi import APIRouter, HTTPException, Request, Depends
 from deps import get_user, require_owner, require_owner_or_manager
 from database import db
-from middleware.actor_context import tenant_owns, tenant_scope_filter
+from middleware.actor_context import tenant_owns, tenant_owns_strict, tenant_scope_filter
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, List
 import uuid
@@ -97,6 +97,15 @@ async def earn_points(data: dict, user: dict = Depends(get_user)):
     if not customer_id or not items:
         raise HTTPException(status_code=400, detail="customerId + items required")
     customer = await db.customers.find_one({"id": customer_id}, {"_id": 0, "businessId": 1})
+    # NOT tenant_owns_strict — models/customer.py's Customer model has no
+    # businessId field at all; it's stamped externally, inconsistently,
+    # at ~15+ different creation call sites and test fixtures across this
+    # codebase (confirmed via the full test suite: converting this site
+    # broke test_loyalty_v2_points_field.py/test_voice_calls.py, both of
+    # which seed a customer via the bare Customer(...).dict() shape with
+    # no businessId). Auditing and fixing every customer-creation site
+    # plus every test fixture that relies on this is a larger, separate
+    # effort — not attempted this pass.
     if not customer or not tenant_owns(customer.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Customer not found")
     # Idempotency: skip if we already credited this transaction
@@ -152,6 +161,15 @@ async def redeem_points(data: dict, user: dict = Depends(get_user)):
     if not customer_id or points <= 0:
         raise HTTPException(status_code=400, detail="customerId + points (>0) required")
     locked_check = await db.customers.find_one({"id": customer_id}, {"_id": 0, "loyaltyLocked": 1, "businessId": 1})
+    # NOT tenant_owns_strict — models/customer.py's Customer model has no
+    # businessId field at all; it's stamped externally, inconsistently,
+    # at ~15+ different creation call sites and test fixtures across this
+    # codebase (confirmed via the full test suite: converting this site
+    # broke test_loyalty_v2_points_field.py/test_voice_calls.py, both of
+    # which seed a customer via the bare Customer(...).dict() shape with
+    # no businessId). Auditing and fixing every customer-creation site
+    # plus every test fixture that relies on this is a larger, separate
+    # effort — not attempted this pass.
     if not locked_check or not tenant_owns(locked_check.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Customer not found")
     if locked_check and locked_check.get("loyaltyLocked"):
@@ -190,6 +208,15 @@ async def redeem_points(data: dict, user: dict = Depends(get_user)):
 @router.get("/loyalty/balance/{customer_id}")
 async def get_balance(customer_id: str, user: dict = Depends(get_user)):
     customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+    # NOT tenant_owns_strict — models/customer.py's Customer model has no
+    # businessId field at all; it's stamped externally, inconsistently,
+    # at ~15+ different creation call sites and test fixtures across this
+    # codebase (confirmed via the full test suite: converting this site
+    # broke test_loyalty_v2_points_field.py/test_voice_calls.py, both of
+    # which seed a customer via the bare Customer(...).dict() shape with
+    # no businessId). Auditing and fixing every customer-creation site
+    # plus every test fixture that relies on this is a larger, separate
+    # effort — not attempted this pass.
     if not customer or not tenant_owns(customer.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Customer not found")
     pts = int(customer.get("points", 0))
@@ -206,6 +233,15 @@ async def get_balance(customer_id: str, user: dict = Depends(get_user)):
 @router.get("/loyalty/ledger/{customer_id}")
 async def get_ledger(customer_id: str, user: dict = Depends(get_user)):
     customer = await db.customers.find_one({"id": customer_id}, {"_id": 0, "businessId": 1})
+    # NOT tenant_owns_strict — models/customer.py's Customer model has no
+    # businessId field at all; it's stamped externally, inconsistently,
+    # at ~15+ different creation call sites and test fixtures across this
+    # codebase (confirmed via the full test suite: converting this site
+    # broke test_loyalty_v2_points_field.py/test_voice_calls.py, both of
+    # which seed a customer via the bare Customer(...).dict() shape with
+    # no businessId). Auditing and fixing every customer-creation site
+    # plus every test fixture that relies on this is a larger, separate
+    # effort — not attempted this pass.
     if not customer or not tenant_owns(customer.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Customer not found")
     entries = await db.loyalty_ledger.find({"customerId": customer_id}, {"_id": 0}).sort("createdAt", -1).to_list(100)
@@ -460,7 +496,7 @@ async def resolve_fraud_flag(flag_id: str, data: dict, user: dict = Depends(requ
     if new_status not in ("reviewed_ok", "confirmed_abuse"):
         raise HTTPException(status_code=400, detail="status must be reviewed_ok or confirmed_abuse")
     flag = await db.loyalty_fraud_flags.find_one({"id": flag_id}, {"_id": 0})
-    if not flag or not tenant_owns(flag.get("businessId"), user.get("businessId")):
+    if not flag or not tenant_owns_strict(flag.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Flag not found")
     if flag["status"] != "open":
         raise HTTPException(status_code=400, detail=f"Flag already {flag['status']}")
@@ -501,6 +537,15 @@ async def unlock_loyalty_account(customer_id: str, user: dict = Depends(require_
     since re-enabling redemption after a fraud confirmation is a judgment
     call worth restricting more tightly than reviewing the flag itself."""
     customer = await db.customers.find_one({"id": customer_id}, {"_id": 0, "businessId": 1})
+    # NOT tenant_owns_strict — models/customer.py's Customer model has no
+    # businessId field at all; it's stamped externally, inconsistently,
+    # at ~15+ different creation call sites and test fixtures across this
+    # codebase (confirmed via the full test suite: converting this site
+    # broke test_loyalty_v2_points_field.py/test_voice_calls.py, both of
+    # which seed a customer via the bare Customer(...).dict() shape with
+    # no businessId). Auditing and fixing every customer-creation site
+    # plus every test fixture that relies on this is a larger, separate
+    # effort — not attempted this pass.
     if not customer or not tenant_owns(customer.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Customer not found")
     await db.customers.update_one({"id": customer_id}, {"$set": {"loyaltyLocked": False}})

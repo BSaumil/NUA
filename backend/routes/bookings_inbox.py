@@ -16,7 +16,7 @@ from datetime import datetime, timezone, date as date_cls
 from pydantic import BaseModel
 from database import db
 from deps import get_user, require_owner_or_manager
-from middleware.actor_context import tenant_scope_filter, tenant_owns
+from middleware.actor_context import tenant_scope_filter, tenant_owns_strict
 import os
 import json
 import uuid
@@ -96,7 +96,7 @@ async def acknowledge_booking(item_id: str, body: dict, user: dict = Depends(req
     user_name = user.get("name") or user.get("email") or "system"
 
     row = await db.booking_inbox.find_one({"id": item_id}, {"_id": 0})
-    if not row or not tenant_owns(row.get("businessId"), user.get("businessId")):
+    if not row or not tenant_owns_strict(row.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Inbox item not found")
 
     now = datetime.now(timezone.utc).isoformat()
@@ -134,7 +134,7 @@ async def acknowledge_booking(item_id: str, body: dict, user: dict = Depends(req
 @router.post("/bookings/inbox/{item_id}/dismiss")
 async def dismiss(item_id: str, user: dict = Depends(require_owner_or_manager)):
     row = await db.booking_inbox.find_one({"id": item_id}, {"_id": 0})
-    if not row or not tenant_owns(row.get("businessId"), user.get("businessId")):
+    if not row or not tenant_owns_strict(row.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Not found")
     await db.booking_inbox.update_one({"id": item_id}, {"$set": {"status": "dismissed"}})
     return {"ok": True}

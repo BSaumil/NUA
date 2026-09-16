@@ -43,7 +43,7 @@ from fastapi import APIRouter, HTTPException, Request, Depends
 from deps import get_user, require_owner, require_owner_or_manager
 from database import db
 from routes.products import GUEST_HIDDEN_PRODUCT_FIELDS
-from middleware.actor_context import tenant_scope_filter, tenant_owns
+from middleware.actor_context import tenant_scope_filter, tenant_owns, tenant_owns_strict
 from datetime import datetime, timezone, timedelta
 from collections import Counter, defaultdict
 from typing import Optional
@@ -138,7 +138,7 @@ async def process_sync_queue(user: dict = Depends(require_owner_or_manager)):
             elif kind == "stock.adjust":
                 guard = await db.products.find_one(
                     {"id": payload.get("productId")}, {"_id": 0, "id": 1, "businessId": 1})
-                if guard is None or not tenant_owns(guard.get("businessId"), business_id):
+                if guard is None or not tenant_owns_strict(guard.get("businessId"), business_id):
                     errors.append({"clientOpId": op.get("clientOpId"), "reason": "product not found"})
                     continue
                 await db.products.update_one(
@@ -148,7 +148,7 @@ async def process_sync_queue(user: dict = Depends(require_owner_or_manager)):
             elif kind == "tab.append":
                 guard = await db.pos_tabs.find_one(
                     {"id": payload.get("tabId")}, {"_id": 0, "id": 1, "businessId": 1})
-                if guard is None or not tenant_owns(guard.get("businessId"), business_id):
+                if guard is None or not tenant_owns_strict(guard.get("businessId"), business_id):
                     errors.append({"clientOpId": op.get("clientOpId"), "reason": "tab not found"})
                     continue
                 await db.pos_tabs.update_one(
@@ -246,7 +246,7 @@ async def publish_to_sites(data: dict, user: dict = Depends(get_user)):
 async def rollback_publish(pub_id: str, user: dict = Depends(get_user)):
     if user["role"] != "owner": raise HTTPException(status_code=403, detail="Owner only")
     guard = await db.publications.find_one({"id": pub_id}, {"_id": 0, "id": 1, "businessId": 1})
-    if guard is None or not tenant_owns(guard.get("businessId"), user.get("businessId")):
+    if guard is None or not tenant_owns_strict(guard.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Publication not found")
     r = await db.publications.update_one({"id": pub_id}, {"$set": {"rolledBack": True, "rolledBackAt": _now()}})
     if r.matched_count == 0: raise HTTPException(status_code=404, detail="Publication not found")
@@ -322,7 +322,7 @@ async def open_dispute(data: dict, user: dict = Depends(get_user)):
     tx_id = data.get("txId")
     if tx_id:
         tx_guard = await db.transactions.find_one({"id": tx_id}, {"_id": 0, "id": 1, "businessId": 1})
-        if tx_guard is None or not tenant_owns(tx_guard.get("businessId"), business_id):
+        if tx_guard is None or not tenant_owns_strict(tx_guard.get("businessId"), business_id):
             raise HTTPException(status_code=404, detail="Transaction not found")
     d = {
         "id": _uid("DSP"), "txId": tx_id, "amount": float(data.get("amount", 0) or 0),
@@ -340,10 +340,10 @@ async def attach_evidence(dispute_id: str, data: dict, user: dict = Depends(get_
     if user["role"] not in ("owner", "manager"): raise HTTPException(status_code=403, detail="Owner/Manager only")
     business_id = user.get("businessId")
     d = await db.disputes.find_one({"id": dispute_id}, {"_id": 0})
-    if d is None or not tenant_owns(d.get("businessId"), business_id):
+    if d is None or not tenant_owns_strict(d.get("businessId"), business_id):
         raise HTTPException(status_code=404, detail="Not found")
     tx = await db.transactions.find_one({"id": d.get("txId")}, {"_id": 0})
-    if tx is not None and not tenant_owns(tx.get("businessId"), business_id):
+    if tx is not None and not tenant_owns_strict(tx.get("businessId"), business_id):
         tx = None
     evidence = {
         "transactionSnapshot": tx or {},
@@ -593,7 +593,7 @@ async def toggle_86(product_id: str, data: dict, user: dict = Depends(get_user))
     if user["role"] not in ("owner", "manager", "kitchen"):
         raise HTTPException(status_code=403, detail="Owner/Manager/Kitchen only")
     guard = await db.products.find_one({"id": product_id}, {"_id": 0, "id": 1, "businessId": 1})
-    if guard is None or not tenant_owns(guard.get("businessId"), user.get("businessId")):
+    if guard is None or not tenant_owns_strict(guard.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Product not found")
     flag = bool(data.get("eightySixed", True))
     update = {"eightySixed": flag, "eightySixedAt": _now() if flag else None,
@@ -647,6 +647,15 @@ async def trigger_win_back(data: dict, user: dict = Depends(get_user)):
     owned_cids = []
     for cid in cids:
         c_guard = await db.customers.find_one({"id": cid}, {"_id": 0, "id": 1, "businessId": 1})
+    # NOT tenant_owns_strict — models/customer.py's Customer model has no
+    # businessId field at all; it's stamped externally, inconsistently,
+    # at ~15+ different creation call sites and test fixtures across this
+    # codebase (confirmed via the full test suite: converting this site
+    # broke test_loyalty_v2_points_field.py/test_voice_calls.py, both of
+    # which seed a customer via the bare Customer(...).dict() shape with
+    # no businessId). Auditing and fixing every customer-creation site
+    # plus every test fixture that relies on this is a larger, separate
+    # effort — not attempted this pass.
         if c_guard is not None and tenant_owns(c_guard.get("businessId"), business_id):
             owned_cids.append(cid)
     campaign = {"id": _uid("RCV"), "customerIds": owned_cids, "voucherValue": voucher_value,
@@ -766,7 +775,7 @@ async def ash_approve(data: dict, user: dict = Depends(require_owner)):
     approved_action_ids = data.get("actionIds", [])  # empty = approve all
     business_id = user.get("businessId")
     plan = await db.ash_plans.find_one({"id": plan_id}, {"_id": 0})
-    if plan is None or not tenant_owns(plan.get("businessId"), business_id):
+    if plan is None or not tenant_owns_strict(plan.get("businessId"), business_id):
         raise HTTPException(status_code=404, detail="Plan not found")
     executed = []
     for act in plan.get("actions", []):
@@ -952,7 +961,7 @@ async def send_marketing(campaign_id: str, data: dict = None, user: dict = Depen
     if user["role"] not in ("owner", "manager"):
         raise HTTPException(status_code=403, detail="Owner/Manager only")
     campaign = await db.marketing_campaigns.find_one({"id": campaign_id}, {"_id": 0})
-    if campaign is None or not tenant_owns(campaign.get("businessId"), user.get("businessId")):
+    if campaign is None or not tenant_owns_strict(campaign.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Campaign not found")
     if campaign.get("status") == "held":
         raise HTTPException(status_code=400, detail="Campaign is on hold — take it off hold before sending")
@@ -1060,7 +1069,7 @@ async def hold_marketing(campaign_id: str, data: dict = None, user: dict = Depen
     if user["role"] not in ("owner", "manager"):
         raise HTTPException(status_code=403, detail="Owner/Manager only")
     campaign = await db.marketing_campaigns.find_one({"id": campaign_id}, {"_id": 0})
-    if campaign is None or not tenant_owns(campaign.get("businessId"), user.get("businessId")):
+    if campaign is None or not tenant_owns_strict(campaign.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Campaign not found")
     if campaign.get("status") == "sent":
         raise HTTPException(status_code=400, detail="Campaign already sent")
@@ -1074,7 +1083,7 @@ async def hold_marketing(campaign_id: str, data: dict = None, user: dict = Depen
 async def marketing_performance(campaign_id: str, user: dict = Depends(get_user)):
     """Redemption attribution — which issued vouchers actually came back."""
     campaign = await db.marketing_campaigns.find_one({"id": campaign_id}, {"_id": 0, "id": 1, "businessId": 1})
-    if campaign is None or not tenant_owns(campaign.get("businessId"), user.get("businessId")):
+    if campaign is None or not tenant_owns_strict(campaign.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Campaign not found")
     vouchers = await db.vouchers.find(
         {"sourceType": "campaign", "sourceRef": campaign_id}, {"_id": 0}
@@ -1169,7 +1178,7 @@ async def enroll_sub(data: dict, user: dict = Depends(get_user)):
     business_id = user.get("businessId")
     plan_id = data.get("planId")
     plan_guard = await db.subscription_plans.find_one({"id": plan_id}, {"_id": 0, "id": 1, "businessId": 1})
-    if plan_guard is None or not tenant_owns(plan_guard.get("businessId"), business_id):
+    if plan_guard is None or not tenant_owns_strict(plan_guard.get("businessId"), business_id):
         raise HTTPException(status_code=404, detail="planId does not exist")
     sub = {"id": _uid("SUBSC"), "customerId": data.get("customerId"), "planId": plan_id,
            "status": "active", "startedAt": _now(), "businessId": business_id}
@@ -1191,7 +1200,7 @@ async def update_sub_member(sub_id: str, data: dict, user: dict = Depends(get_us
         raise HTTPException(status_code=403, detail="Owner only")
     business_id = user.get("businessId")
     guard = await db.subscriptions.find_one({"id": sub_id}, {"_id": 0, "id": 1, "businessId": 1})
-    if guard is None or not tenant_owns(guard.get("businessId"), business_id):
+    if guard is None or not tenant_owns_strict(guard.get("businessId"), business_id):
         raise HTTPException(status_code=404, detail="Membership not found")
     allowed = {"planId", "status", "notes", "customerId"}
     update = {k: v for k, v in data.items() if k in allowed}
@@ -1202,7 +1211,7 @@ async def update_sub_member(sub_id: str, data: dict, user: dict = Depends(get_us
     if "planId" in update:
         plan_guard = await db.subscription_plans.find_one(
             {"id": update["planId"]}, {"_id": 0, "id": 1, "businessId": 1})
-        if plan_guard is None or not tenant_owns(plan_guard.get("businessId"), business_id):
+        if plan_guard is None or not tenant_owns_strict(plan_guard.get("businessId"), business_id):
             raise HTTPException(status_code=404, detail="planId does not exist")
     update["updatedAt"] = _now()
     r = await db.subscriptions.update_one({"id": sub_id}, {"$set": update})
@@ -1219,7 +1228,7 @@ async def cancel_sub_member(sub_id: str, user: dict = Depends(get_user)):
     if user["role"] != "owner":
         raise HTTPException(status_code=403, detail="Owner only")
     guard = await db.subscriptions.find_one({"id": sub_id}, {"_id": 0, "id": 1, "businessId": 1})
-    if guard is None or not tenant_owns(guard.get("businessId"), user.get("businessId")):
+    if guard is None or not tenant_owns_strict(guard.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Membership not found")
     r = await db.subscriptions.update_one(
         {"id": sub_id},
@@ -1255,7 +1264,7 @@ async def upsert_recipe(data: dict, user: dict = Depends(get_user)):
     pid = data.get("productId")
     if not pid: raise HTTPException(status_code=400, detail="productId required")
     prod_guard = await db.products.find_one({"id": pid}, {"_id": 0, "id": 1, "businessId": 1})
-    if prod_guard is None or not tenant_owns(prod_guard.get("businessId"), business_id):
+    if prod_guard is None or not tenant_owns_strict(prod_guard.get("businessId"), business_id):
         raise HTTPException(status_code=404, detail="Product not found")
     ingredients = data.get("ingredients", [])  # [{item, quantity, unit, costPerUnit}]
     total_cost = sum(float(i.get("quantity", 0) or 0) * float(i.get("costPerUnit", 0) or 0) for i in ingredients)
@@ -1270,7 +1279,7 @@ async def upsert_recipe(data: dict, user: dict = Depends(get_user)):
 @router.get("/recipes/{product_id}")
 async def get_recipe(product_id: str, user: dict = Depends(get_user)):
     prod_guard = await db.products.find_one({"id": product_id}, {"_id": 0, "id": 1, "businessId": 1})
-    if prod_guard is None or not tenant_owns(prod_guard.get("businessId"), user.get("businessId")):
+    if prod_guard is None or not tenant_owns_strict(prod_guard.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Product not found")
     r = await db.product_recipes.find_one({"productId": product_id}, {"_id": 0})
     return r or {"productId": product_id, "ingredients": [], "computedCost": 0}
@@ -1349,6 +1358,15 @@ async def waste_insights(user: dict = Depends(get_user)):
 @router.get("/guest/{customer_id}")
 async def universal_guest(customer_id: str, user: dict = Depends(get_user)):
     c = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+    # NOT tenant_owns_strict — models/customer.py's Customer model has no
+    # businessId field at all; it's stamped externally, inconsistently,
+    # at ~15+ different creation call sites and test fixtures across this
+    # codebase (confirmed via the full test suite: converting this site
+    # broke test_loyalty_v2_points_field.py/test_voice_calls.py, both of
+    # which seed a customer via the bare Customer(...).dict() shape with
+    # no businessId). Auditing and fixing every customer-creation site
+    # plus every test fixture that relies on this is a larger, separate
+    # effort — not attempted this pass.
     if c is None or not tenant_owns(c.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Customer not found")
     visits = await db.transactions.count_documents({"customerId": customer_id})
@@ -1450,7 +1468,7 @@ async def respond_review(data: dict, user: dict = Depends(get_user)):
     if user["role"] not in ("owner", "manager"): raise HTTPException(status_code=403, detail="Owner/Manager only")
     rid = data.get("reviewId"); response = (data.get("response") or "").strip()
     rev_guard = await db.reviews.find_one({"id": rid}, {"_id": 0, "id": 1, "businessId": 1})
-    if rev_guard is None or not tenant_owns(rev_guard.get("businessId"), user.get("businessId")):
+    if rev_guard is None or not tenant_owns_strict(rev_guard.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Review not found")
     if not response:
         # Ask LLM to draft
@@ -1473,6 +1491,15 @@ async def recovery_action(data: dict, user: dict = Depends(get_user)):
     business_id = user.get("businessId")
     customer_id = data.get("customerId")
     c_guard = await db.customers.find_one({"id": customer_id}, {"_id": 0, "id": 1, "businessId": 1})
+    # NOT tenant_owns_strict — models/customer.py's Customer model has no
+    # businessId field at all; it's stamped externally, inconsistently,
+    # at ~15+ different creation call sites and test fixtures across this
+    # codebase (confirmed via the full test suite: converting this site
+    # broke test_loyalty_v2_points_field.py/test_voice_calls.py, both of
+    # which seed a customer via the bare Customer(...).dict() shape with
+    # no businessId). Auditing and fixing every customer-creation site
+    # plus every test fixture that relies on this is a larger, separate
+    # effort — not attempted this pass.
     if c_guard is None or not tenant_owns(c_guard.get("businessId"), business_id):
         raise HTTPException(status_code=404, detail="Customer not found")
     voucher = float(data.get("voucherAmount", 20))
