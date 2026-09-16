@@ -21,6 +21,7 @@ from datetime import datetime, timezone, timedelta, date
 from pydantic import BaseModel
 from database import db
 from deps import get_user
+from middleware.actor_context import tenant_scope_filter, tenant_owns
 import uuid
 import io
 import base64
@@ -48,20 +49,22 @@ async def preshift_briefing(user: dict = Depends(get_user)):
        - dishes to push (low-margin? high-stock? high-margin flagged?)
     """
     today = date.today().isoformat()
+    biz = user.get("businessId")
+    scope = tenant_scope_filter(biz)
 
     # Out-of-stock: any product where stock <= 0 OR eightySixed=True
     oos = await db.products.find(
-        {"$or": [{"stock": {"$lte": 0}}, {"eightySixed": True}]},
+        {"$or": [{"stock": {"$lte": 0}}, {"eightySixed": True}], **scope},
         {"_id": 0, "id": 1, "name": 1, "category": 1, "stock": 1, "eightySixed": 1},
     ).to_list(500)
 
     # Specials: `isSpecial=true` OR promotion active today
     specials = await db.products.find(
-        {"isSpecial": True},
+        {"isSpecial": True, **scope},
         {"_id": 0, "id": 1, "name": 1, "category": 1, "price": 1, "description": 1},
     ).to_list(200)
     active_promos = await db.promotions.find(
-        {"active": True},
+        {"active": True, **scope},
         {"_id": 0, "id": 1, "name": 1, "discount": 1, "schedule": 1},
     ).to_list(200)
 
@@ -69,12 +72,17 @@ async def preshift_briefing(user: dict = Depends(get_user)):
     # db.shifts, read here previously, are dead collections nothing in the
     # app writes to any more; actual clock-ins land in db.timecards, keyed
     # by staffId, not by date, so they're matched up by prefix on clockIn).
+    # roster_shifts/timecards don't carry their own businessId (same
+    # pre-existing schema gap as payroll.py's timecards), so both are scoped
+    # transitively through this business's own staff list.
     from services.punctuality import shift_punctuality
     is_owner = user.get("role") == "owner"
 
-    roster_today = await db.roster_shifts.find({"date": today}, {"_id": 0}).sort("startTime", 1).to_list(200)
+    staff_ids = {s["id"] for s in await db.auth_users.find(scope, {"_id": 0, "id": 1}).to_list(500)}
+    roster_today = await db.roster_shifts.find(
+        {"date": today, "staffId": {"$in": list(staff_ids)}}, {"_id": 0}).sort("startTime", 1).to_list(200)
     timecards_today = await db.timecards.find(
-        {"clockIn": {"$regex": f"^{today}"}}, {"_id": 0}
+        {"clockIn": {"$regex": f"^{today}"}, "staffId": {"$in": list(staff_ids)}}, {"_id": 0}
     ).to_list(200)
     # Last clock-in of the day per staff member — covers a same-day re-clock
     # after a missed clock-out being fixed up, without double-counting them
@@ -120,7 +128,7 @@ async def preshift_briefing(user: dict = Depends(get_user)):
 
     # Upsell candidates — high-margin items with plenty of stock
     upsells = await db.products.find(
-        {"stock": {"$gt": 10}, "$or": [{"eightySixed": {"$exists": False}}, {"eightySixed": False}]},
+        {"stock": {"$gt": 10}, "$or": [{"eightySixed": {"$exists": False}}, {"eightySixed": False}], **scope},
         {"_id": 0, "id": 1, "name": 1, "category": 1, "price": 1, "cost": 1},
     ).sort("price", -1).to_list(500)
     def margin_pct(p):
@@ -193,7 +201,7 @@ async def update_day_rule(weekday: int, body: DayRuleIn, user: dict = Depends(ge
 # ═════════════════════════════════════════════════════════════════════════
 def _sign_qr(payload: dict) -> str:
     """Sign a QR payload with the JWT secret so scans can be verified."""
-    secret = os.environ.get("JWT_SECRET", "dev-secret").encode()
+    secret = os.environ["JWT_SECRET"].encode()
     raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
     sig = hmac.new(secret, raw, hashlib.sha256).hexdigest()[:16]
     b64 = base64.urlsafe_b64encode(raw).decode().rstrip("=")
@@ -436,11 +444,11 @@ async def channel_effective_status(channel: str, _: dict = Depends(get_user)):
 # Guest digital wallet — QR/barcode for POS scan + AI CRM update
 # ═════════════════════════════════════════════════════════════════════════
 @router.get("/customers/{customer_id}/wallet")
-async def guest_wallet(customer_id: str, _: dict = Depends(get_user)):
+async def guest_wallet(customer_id: str, user: dict = Depends(get_user)):
     """Return the QR payload + barcode + tier metadata for a customer's
     digital wallet. This is what mobile Apple/Google Wallet stubs pull in."""
     c = await db.customers.find_one({"id": customer_id}, {"_id": 0})
-    if not c:
+    if not c or not tenant_owns(c.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Customer not found")
     payload = {"cid": customer_id, "tier": c.get("membershipTier", "Bronze"),
                 "issued": int(datetime.now(timezone.utc).timestamp())}
@@ -458,7 +466,7 @@ async def guest_wallet(customer_id: str, _: dict = Depends(get_user)):
 
 
 @router.post("/customers/lookup-by-token")
-async def lookup_by_token(body: dict, _: dict = Depends(get_user)):
+async def lookup_by_token(body: dict, user: dict = Depends(get_user)):
     """POS scans a wallet QR → returns the customer for one-tap add-to-cart."""
     token = body.get("token") or ""
     try:
@@ -473,15 +481,15 @@ async def lookup_by_token(body: dict, _: dict = Depends(get_user)):
     except Exception:
         raise HTTPException(400, "Malformed token")
     c = await db.customers.find_one({"id": payload.get("cid")}, {"_id": 0})
-    if not c:
+    if not c or not tenant_owns(c.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Customer not found")
     return c
 
 
 # ─── Native Apple Wallet + Google Wallet passes ─────────────────────────
-async def _resolve_wallet_context(customer_id: str) -> dict:
+async def _resolve_wallet_context(customer_id: str, business_id: Optional[str] = None) -> dict:
     c = await db.customers.find_one({"id": customer_id}, {"_id": 0})
-    if not c:
+    if not c or not tenant_owns(c.get("businessId"), business_id):
         raise HTTPException(404, "Customer not found")
     payload = {"cid": customer_id, "tier": c.get("membershipTier", "Bronze"),
                 "issued": int(datetime.now(timezone.utc).timestamp())}
@@ -498,11 +506,11 @@ async def _resolve_wallet_context(customer_id: str) -> dict:
 
 
 @router.get("/customers/{customer_id}/wallet/apple.pkpass")
-async def apple_wallet_pass(customer_id: str, _: dict = Depends(get_user)):
+async def apple_wallet_pass(customer_id: str, user: dict = Depends(get_user)):
     """Return a real `.pkpass` archive. Signed if Pass Type ID certs are
     configured in env, otherwise unsigned (still valid structure)."""
     from utils.wallet_passes import build_pkpass
-    ctx = await _resolve_wallet_context(customer_id)
+    ctx = await _resolve_wallet_context(customer_id, user.get("businessId"))
     blob, meta = build_pkpass(**ctx)
     filename = f"nua-{customer_id}.pkpass"
     return Response(
@@ -516,11 +524,11 @@ async def apple_wallet_pass(customer_id: str, _: dict = Depends(get_user)):
 
 
 @router.get("/customers/{customer_id}/wallet/google")
-async def google_wallet_link(customer_id: str, _: dict = Depends(get_user)):
+async def google_wallet_link(customer_id: str, user: dict = Depends(get_user)):
     """Return a Google Wallet "save to phone" link + JWT. `signed=false`
     when the service-account key isn't configured yet."""
     from utils.wallet_passes import build_google_wallet_link
-    ctx = await _resolve_wallet_context(customer_id)
+    ctx = await _resolve_wallet_context(customer_id, user.get("businessId"))
     return build_google_wallet_link(**ctx)
 
 

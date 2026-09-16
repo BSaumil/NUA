@@ -748,7 +748,7 @@ export default function SplitBillGuestEnhanced() {
                       Cancel
                     </Button>
                     <Button onClick={handlePartialPayment} disabled={busy}>
-                      Pay {money(parseFloat(partialAmount) || 0)}
+                      {t('split.tab.confirmTab', { amount: money(parseFloat(partialAmount) || 0) })}
                     </Button>
                   </div>
                 </div>

@@ -9,6 +9,7 @@ from models.refund import Refund, RefundCreate
 from middleware.actor_context import tenant_scope_filter, tenant_owns
 from utils.errors import log_and_continue
 from utils.dates import date_range_filter
+from pymongo.errors import DuplicateKeyError
 import logging
 import uuid
 
@@ -85,6 +86,24 @@ async def get_transactions(
 
 @router.post("/transactions", response_model=Transaction)
 async def create_transaction(transaction: TransactionCreate, user: dict = Depends(get_user)):
+    # Offline-queue replay dedup. The frontend's offline queue
+    # (frontend/src/lib/offlineQueue.js) retries this exact POST with the
+    # exact same payload whenever it can't confirm the previous attempt
+    # succeeded (e.g. connectivity dropped right after the server wrote the
+    # sale but before the response reached the client) — without this, that
+    # retry rings up a second, fully-effectuated duplicate sale: a second
+    # transaction, a second stock deduction, a second loyalty-points earn.
+    # Checked before any side effects (points redemption, stock, GL) run,
+    # so a genuine retry does none of that work twice. The db.transactions
+    # unique-sparse index on clientOpId is the actual atomic guard for the
+    # rarer concurrent-duplicate case; this early return handles the
+    # overwhelmingly common sequential-retry case cheaply.
+    if transaction.clientOpId:
+        prior = await db.transactions.find_one(
+            {"clientOpId": transaction.clientOpId, **tenant_scope_filter(user.get("businessId"))}, {"_id": 0})
+        if prior:
+            return Transaction(**prior)
+
     items_list = []
     earn_lines = []  # [(category, lineTotal)] — for category-multiplier points earning below
     subtotal = 0
@@ -150,7 +169,8 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
     # Loyalty config — used for both the redeem check below and the earn
     # calculation further down, so it's fetched once regardless of which (or
     # both) apply to this sale.
-    loyalty_cfg = await db.loyalty_config.find_one({"id": "default"}, {"_id": 0}) or {}
+    from services.tenant_settings import get_scoped_singleton
+    loyalty_cfg = await get_scoped_singleton(db.loyalty_config, {"id": "default"}, user.get("businessId")) or {}
 
     # Points redemption: the client-supplied pointsDiscount is a display hint
     # only — the value actually deducted from the bill (and the points balance)
@@ -280,9 +300,21 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
         "status": "completed",
         "receiptNumber": f"R-{str(uuid.uuid4())[:8].upper()}",
         "businessId": user.get("businessId"),
+        "clientOpId": transaction.clientOpId,
     }
 
-    await db.transactions.insert_one(txn_dict)
+    try:
+        await db.transactions.insert_one(txn_dict)
+    except DuplicateKeyError:
+        # A genuinely concurrent duplicate — another request with the same
+        # clientOpId won the race between our own find_one check above and
+        # this insert. Return that winner's transaction rather than raising;
+        # the caller (the offline queue) just wants "this sale exists now",
+        # not a 500 for having asked twice.
+        winner = await db.transactions.find_one({"clientOpId": transaction.clientOpId}, {"_id": 0})
+        if winner:
+            return Transaction(**winner)
+        raise
     txn_dict.pop("_id", None)
 
     # Record the redemption on the loyalty ledger for history/reporting — the
@@ -297,6 +329,7 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
                 "type": "redeem",
                 "points": -points_redeemed,
                 "value": points_discount,
+                "businessId": user.get("businessId"),
                 "createdAt": datetime.utcnow().isoformat(),
             })
         except Exception:
@@ -346,6 +379,8 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
             UpdateOne({"id": item.productId}, {"$inc": {"stock": -item.quantity}})
             for item in transaction.items
         ])
+        from utils.stock_ops import clamp_negative_stock
+        await clamp_negative_stock(item.productId for item in transaction.items)
 
     for item in transaction.items:
         try:
@@ -374,7 +409,8 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
     # Update customer stats
     if transaction.customerId:
         from services.sale_recorder import credit_loyalty_points
-        await credit_loyalty_points(transaction.customerId, points_earned, total, txn_dict["id"])
+        await credit_loyalty_points(transaction.customerId, points_earned, total, txn_dict["id"],
+                                     business_id=user.get("businessId"))
         # Free base identity layer — a repeat contact match at POS checkout is
         # an identity touchpoint (skipped automatically for base-only venues).
         try:
@@ -418,6 +454,7 @@ async def create_transaction(transaction: TransactionCreate, user: dict = Depend
                         "id": f"LP-{str(uuid.uuid4())[:8].upper()}",
                         "customerId": part.customerId, "transactionId": txn_dict["id"],
                         "type": "earn", "points": part_points,
+                        "businessId": user.get("businessId"),
                         "createdAt": datetime.utcnow().isoformat(),
                     })
                 except Exception:
@@ -507,6 +544,7 @@ async def _reverse_loyalty_for_refund(original_txn: dict, refund_amount: float) 
             "customerId": customer_id, "transactionId": original_txn["id"],
             "type": "refund_reversal", "points": net,
             "earnClawedBack": actual_clawback, "redeemRestored": redeem_restore,
+            "businessId": original_txn.get("businessId"),
             "createdAt": datetime.utcnow().isoformat(),
         })
         reversed_for.append({"customerId": customer_id, "earnClawedBack": actual_clawback, "redeemRestored": redeem_restore})
@@ -526,11 +564,40 @@ async def create_refund(refund: RefundCreate, _user: dict = Depends(require_owne
         raise HTTPException(status_code=404, detail="Original transaction not found")
     if refund.amount <= 0:
         raise HTTPException(status_code=400, detail="Refund amount must be positive")
-    # Cap cumulative refunds at the original transaction total
+
+    # Atomic cumulative-refund cap. The old version read the sum of prior
+    # refunds, compared it to the total in Python, then separately inserted
+    # — two concurrent requests for the same transaction (a double-click, or
+    # two staff processing the same complaint) could both read the same
+    # "not yet refunded" balance before either wrote, and both pass the
+    # check, refunding more than the sale total with nothing to stop it.
+    # This claims the refund atomically on the transaction document itself:
+    # find_one_and_update's filter and the $inc it guards are evaluated as
+    # one operation, so MongoDB's own per-document serialization — not a
+    # Python-side check — is what decides which concurrent request(s) fit
+    # under the cap. $ifNull's fallback to the freshly-read `already_refunded`
+    # (the legacy db.refunds-sum baseline) only ever matters for the very
+    # first atomic claim against a transaction that had refunds recorded
+    # before this field existed; every claim after that serializes purely
+    # against `refundedTotal` on the document, with no read involved.
     prior = await db.refunds.find({"originalTransactionId": refund.originalTransactionId}).to_list(1000)
     already_refunded = sum(r.get("amount", 0) for r in prior)
-    refundable = round(original_txn.get("total", 0) - already_refunded, 2)
-    if refund.amount > refundable:
+    claimed = await db.transactions.find_one_and_update(
+        {
+            "id": refund.originalTransactionId,
+            "$expr": {
+                "$lte": [
+                    {"$add": [{"$ifNull": ["$refundedTotal", already_refunded]}, refund.amount]},
+                    "$total",
+                ]
+            },
+        },
+        {"$inc": {"refundedTotal": refund.amount}},
+    )
+    if not claimed:
+        current = await db.transactions.find_one({"id": refund.originalTransactionId}, {"_id": 0, "total": 1, "refundedTotal": 1})
+        refunded_now = (current or {}).get("refundedTotal", already_refunded)
+        refundable = round((current or {}).get("total", 0) - refunded_now, 2)
         raise HTTPException(
             status_code=400,
             detail=f"Refund exceeds remaining refundable amount (${refundable:.2f})"
