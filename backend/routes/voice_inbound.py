@@ -153,10 +153,18 @@ def extract_time(text: str) -> Optional[str]:
     return None
 
 
-def extract_date(text: str) -> Optional[str]:
-    """Return an ISO YYYY-MM-DD, or None. Handles today/tomorrow/day-of-week."""
+def extract_date(text: str, today: Optional[date] = None) -> Optional[str]:
+    """Return an ISO YYYY-MM-DD, or None. Handles today/tomorrow/day-of-week.
+
+    `today` should be the venue's own local date (services.venue_time), not
+    the server's — a guest saying "tomorrow" near midnight means tomorrow
+    in the restaurant's timezone, not the server's, and "today" said late
+    in the evening server-UTC-time could otherwise resolve to a date that's
+    already tomorrow at the venue. Defaults to server UTC date only for
+    callers that don't have a business_id in scope yet."""
     s = (text or "").lower()
-    today = datetime.now(timezone.utc).date()
+    if today is None:
+        today = datetime.now(timezone.utc).date()
     if "tonight" in s or "today" in s or "this evening" in s:
         return today.isoformat()
     if "tomorrow" in s:
@@ -527,7 +535,9 @@ async def voice_inbound_gather(call_id: str, request: Request):
             v = extract_party_size(speech)
             if v: state["partySize"] = v
         if not state.get("date"):
-            v = extract_date(speech)
+            from services.venue_time import venue_now_for_business
+            venue_today = (await venue_now_for_business(business_id)).date()
+            v = extract_date(speech, today=venue_today)
             if v: state["date"] = v
         if not state.get("time"):
             v = extract_time(speech)

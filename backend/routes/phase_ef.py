@@ -310,13 +310,18 @@ async def simulate_call(data: dict, user: dict = Depends(get_user)):
                     bits.append(f"ALLERGY: {p['value']}.")
             bits.append("Use their name; default the booking name to it unless they give another.")
             guest_context = " " + " ".join(bits)
+        # Venue-local date, not the server's — see services/venue_time.py.
+        # A guest saying "today"/"tomorrow" means relative to the
+        # restaurant's own clock, not wherever this process happens to run.
+        from services.venue_time import venue_now_for_business
+        venue_today = (await venue_now_for_business(user.get("businessId"))).date().isoformat()
         chat = LlmChat(
             api_key=os.environ.get("EMERGENT_LLM_KEY"),
             session_id=f"phone-{call['id']}",
             system_message=(
                 "You are an AI phone agent for NUA restaurant. Given a caller transcript, return STRICT JSON: "
                 '{"intent":"reservation|order|inquiry|other","details":{"partySize":2,"date":"YYYY-MM-DD","time":"19:00","name":"...","items":[{"name":"...","qty":1}],"question":"..."}}. '
-                "Only fill details that match. Today is " + datetime.now().date().isoformat()
+                "Only fill details that match. Today is " + venue_today
                 + guest_context
             ),
         )

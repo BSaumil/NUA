@@ -289,3 +289,44 @@ def test_a_spoken_yes_creates_a_real_reservation_via_the_rules_engine(client, mo
     finally:
         _cleanup(biz_ids=[biz_id], call_ids=[call_id] if call_id else [],
                  reservation_ids=[reservation_id] if reservation_id else [])
+
+
+def test_a_spoken_date_is_resolved_in_the_venues_own_timezone_not_the_servers(client, monkeypatch):
+    """extract_date's "today" used to always be datetime.now(timezone.utc) —
+    the SERVER's own clock — regardless of which business the caller was
+    talking to. A guest saying "tomorrow" near midnight in their own
+    venue's timezone could get a booking dated one day off from what they
+    meant. Fixed: the gather webhook now resolves "today" via
+    services.venue_time's business-timezone-aware helper before calling
+    extract_date. Found during the Trust Release final readiness audit."""
+    import services.voice_calls as vc
+    monkeypatch.setattr(vc, "validate_signature", lambda *a, **k: True)
+
+    import services.venue_time as venue_time
+    from datetime import datetime
+
+    async def _fixed_venue_now(business_id):
+        # A fixed, deterministic "venue-local now" independent of whatever
+        # day this test actually runs on.
+        return datetime(2026, 3, 15, 10, 0, 0)
+
+    monkeypatch.setattr(venue_time, "venue_now_for_business", _fixed_venue_now)
+
+    biz_id, number = "voice-tz-date-biz-1", "+61488888888"
+    _make_business(biz_id, number=number)
+    call_id = None
+    try:
+        client.post("/api/voice/inbound", data={"From": "+61400000008", "CallSid": "CA-TZDATE-1", "To": number})
+        call = _run(db.voice_calls.find_one({"twilioCallSid": "CA-TZDATE-1"}, {"_id": 0}))
+        call_id = call["id"]
+
+        r = client.post(f"/api/voice/inbound/gather/{call_id}",
+                         data={"SpeechResult": "tomorrow", "Confidence": "1.0"})
+        assert r.status_code == 200
+        updated = _run(db.voice_calls.find_one({"id": call_id}, {"_id": 0}))
+        assert updated["state"].get("date") == "2026-03-16", (
+            f"'tomorrow' relative to the fixed venue-local now (2026-03-15) must resolve to "
+            f"2026-03-16, got {updated['state'].get('date')}"
+        )
+    finally:
+        _cleanup(biz_ids=[biz_id], call_ids=[call_id] if call_id else [])
