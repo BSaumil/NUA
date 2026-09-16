@@ -93,7 +93,8 @@ def guest_context(customer: dict) -> str:
 
 
 async def find_or_create_customer_by_phone(phone: str, *, name: str = "Guest",
-                                             tag: str = "guest") -> dict:
+                                             tag: str = "guest",
+                                             business_id: Optional[str] = None) -> dict:
     """Resolves an existing db.customers record by phone, or creates a
     minimal real one — used by guest self-checkout flows (bill splitting)
     where a phone is all that's verified.
@@ -108,6 +109,12 @@ async def find_or_create_customer_by_phone(phone: str, *, name: str = "Guest",
     separate identity_customers collection — create_transaction's loyalty
     math reads/writes db.customers, so that's the record that actually
     needs to exist for a split-bill payment to earn points.
+
+    business_id must be supplied by the caller (the guest's own split/
+    table already resolved one) and is stamped on a newly created record —
+    previously omitted entirely, so every guest-checkout customer created
+    this way had no businessId at all, regardless of which business's
+    table they paid from.
     """
     existing = await find_matching_customer(phone=phone)
     if existing:
@@ -117,7 +124,7 @@ async def find_or_create_customer_by_phone(phone: str, *, name: str = "Guest",
         "membershipTier": "Bronze", "totalSpent": 0.0, "visits": 0, "points": 0,
         "joinDate": datetime.utcnow().isoformat(), "tags": [tag],
         "isVip": False, "notes": "", "noShowCount": 0, "avgSpendPerVisit": 0.0,
-        "storeCredit": 0.0,
+        "storeCredit": 0.0, "businessId": business_id,
     }
     await db.customers.insert_one(dict(doc))
     doc.pop("_id", None)

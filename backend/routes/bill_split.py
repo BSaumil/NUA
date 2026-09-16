@@ -155,7 +155,8 @@ async def checkout(split_id: str, data: dict, http_request: Request, session: di
     # the loyalty points this payment earns via create_transaction land on
     # an actual account instead of evaporating with an anonymous sale.
     from services.customer_match import find_or_create_customer_by_phone
-    customer = await find_or_create_customer_by_phone(session["phone"], tag="split_bill")
+    customer = await find_or_create_customer_by_phone(
+        session["phone"], tag="split_bill", business_id=split.get("businessId"))
 
     sale = {
         "items": items, "paymentMethod": "Card" if provider == "stripe" else "Crypto",

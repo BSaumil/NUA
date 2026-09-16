@@ -8,7 +8,7 @@ from services import floor_tables
 from models.reservation import Reservation, ReservationCreate, ReservationUpdate
 from models.floor_plan import FloorPlan, FloorPlanCreate, FloorPlanUpdate
 from models.waitlist import WaitlistEntry, WaitlistEntryCreate, WaitlistEntryUpdate
-from middleware.actor_context import tenant_scope_filter, tenant_owns
+from middleware.actor_context import tenant_scope_filter, tenant_owns_strict
 import asyncio
 import json
 import logging
@@ -51,7 +51,7 @@ async def guest_intel(customer_id: str, user: dict = Depends(get_user)):
     """Full booking-desk summary for one known guest."""
     from services.guest_intel import build_guest_intel
     customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
-    if not customer or not tenant_owns(customer.get("businessId"), user.get("businessId")):
+    if not customer or not tenant_owns_strict(customer.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Customer not found")
     return await build_guest_intel(customer, business_id=user.get("businessId"))
 
@@ -142,7 +142,7 @@ async def update_cancellation_policy_route(data: dict, user: dict = Depends(requ
 @router.get("/reservations/{reservation_id}", response_model=Reservation)
 async def get_reservation(reservation_id: str, user: dict = Depends(get_user)):
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
+    if not res or not tenant_owns_strict(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     return Reservation(**res)
 
@@ -238,7 +238,7 @@ async def create_reservation(reservation: ReservationCreate, user: Optional[dict
 @router.put("/reservations/{reservation_id}", response_model=Reservation)
 async def update_reservation(reservation_id: str, update: ReservationUpdate, user: dict = Depends(get_user)):
     existing = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if not existing or not tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     update_data = {k: v for k, v in update.dict().items() if v is not None}
     update_data["updatedAt"] = datetime.utcnow().isoformat()
@@ -296,7 +296,7 @@ async def update_reservation(reservation_id: str, update: ReservationUpdate, use
 @router.delete("/reservations/{reservation_id}")
 async def delete_reservation(reservation_id: str, user: dict = Depends(require_owner_or_manager)):
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
+    if not res or not tenant_owns_strict(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     if res.get("tableId"):
         found = await floor_tables.get_table_by_id(res["tableId"])
@@ -314,7 +314,7 @@ async def delete_reservation(reservation_id: str, user: dict = Depends(require_o
 @router.post("/reservations/{reservation_id}/seat")
 async def seat_reservation(reservation_id: str, table_id: Optional[str] = None, user: dict = Depends(get_user)):
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
+    if not res or not tenant_owns_strict(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     if res.get("status") in ("cancelled", "no_show", "completed"):
         raise HTTPException(status_code=400, detail=f"Booking is already {res.get('status')}")
@@ -345,7 +345,7 @@ async def seat_reservation(reservation_id: str, table_id: Optional[str] = None, 
 @router.post("/reservations/{reservation_id}/complete")
 async def complete_reservation(reservation_id: str, user: dict = Depends(get_user)):
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
+    if not res or not tenant_owns_strict(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     await db.reservations.update_one(
         {"id": reservation_id},
@@ -372,7 +372,7 @@ async def complete_reservation(reservation_id: str, user: dict = Depends(get_use
 @router.post("/reservations/{reservation_id}/request-deposit")
 async def request_deposit(reservation_id: str, data: dict, http_request: Request, user: dict = Depends(get_user)):
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
+    if not res or not tenant_owns_strict(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     amount = float(res.get("depositRequired") or 0)
     if amount <= 0:
@@ -451,7 +451,7 @@ async def mark_no_show(reservation_id: str, fee: float = 0, user: dict = Depends
     collected when nothing was actually captured.
     """
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
+    if not res or not tenant_owns_strict(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
 
     update_data = {"status": "no_show", "noShowFee": fee, "updatedAt": datetime.utcnow().isoformat()}
@@ -498,7 +498,7 @@ async def cancel_reservation(reservation_id: str, body: dict = None, user: dict 
     endpoint is for genuinely removing a record, not everyday cancellation.
     """
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
+    if not res or not tenant_owns_strict(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     if res.get("status") in ("cancelled", "no_show", "completed"):
         raise HTTPException(status_code=400, detail=f"Booking is already {res.get('status')}")
@@ -554,7 +554,7 @@ async def approve_large_booking(reservation_id: str, user: dict = Depends(requir
     requireApproval set (services.booking_rules_engine sets approvalStatus
     to 'pending' at creation time for those)."""
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
+    if not res or not tenant_owns_strict(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     if not res.get("approvalRequired"):
         raise HTTPException(status_code=400, detail="This booking doesn't require approval")
@@ -587,7 +587,7 @@ async def reject_large_booking(reservation_id: str, body: dict = None, user: dic
     reservation; the guest needs to be told and re-booked under a tier that
     actually fits, not silently kept as-is."""
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
+    if not res or not tenant_owns_strict(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     if not res.get("approvalRequired"):
         raise HTTPException(status_code=400, detail="This booking doesn't require approval")
@@ -633,7 +633,7 @@ async def restore_reservation(reservation_id: str, body: dict = None, user: dict
     the guest still needs seating.
     """
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
+    if not res or not tenant_owns_strict(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     prior_status = res.get("status")
     if prior_status not in ("cancelled", "no_show"):
@@ -676,7 +676,7 @@ async def restore_reservation(reservation_id: str, body: dict = None, user: dict
 @router.get("/reservations/auto-assign/{reservation_id}")
 async def auto_assign_table(reservation_id: str, user: dict = Depends(get_user)):
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
+    if not res or not tenant_owns_strict(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     party = res.get("partySize", 2)
     section_pref = res.get("section")
@@ -786,7 +786,7 @@ async def get_floor_plans(user: dict = Depends(get_user)):
 @router.get("/floor-plans/{plan_id}", response_model=FloorPlan)
 async def get_floor_plan(plan_id: str, user: dict = Depends(get_user)):
     plan = await db.floor_plans.find_one({"id": plan_id}, {"_id": 0})
-    if not plan or not tenant_owns(plan.get("businessId"), user.get("businessId")):
+    if not plan or not tenant_owns_strict(plan.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Floor plan not found")
     return FloorPlan(**plan)
 
@@ -800,7 +800,7 @@ async def create_floor_plan(plan: FloorPlanCreate, user: dict = Depends(require_
 @router.put("/floor-plans/{plan_id}", response_model=FloorPlan)
 async def update_floor_plan(plan_id: str, update: FloorPlanUpdate, user: dict = Depends(require_owner_or_manager)):
     existing = await db.floor_plans.find_one({"id": plan_id}, {"_id": 0, "businessId": 1})
-    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if not existing or not tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Floor plan not found")
     update_data = {k: v for k, v in update.dict().items() if v is not None}
     update_data["updatedAt"] = datetime.utcnow().isoformat()
@@ -820,7 +820,7 @@ async def update_floor_plan(plan_id: str, update: FloorPlanUpdate, user: dict = 
 @router.delete("/floor-plans/{plan_id}")
 async def delete_floor_plan(plan_id: str, user: dict = Depends(require_owner_or_manager)):
     existing = await db.floor_plans.find_one({"id": plan_id}, {"_id": 0, "businessId": 1})
-    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if not existing or not tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Floor plan not found")
     result = await db.floor_plans.delete_one({"id": plan_id})
     if result.deleted_count == 0:
@@ -832,7 +832,7 @@ async def update_table_status(table_id: str, status: str, plan_id: Optional[str]
                                 user: dict = Depends(get_user)):
     if plan_id:
         plan = await db.floor_plans.find_one({"id": plan_id}, {"_id": 0})
-        if plan and tenant_owns(plan.get("businessId"), user.get("businessId")):
+        if plan and tenant_owns_strict(plan.get("businessId"), user.get("businessId")):
             tables = plan.get("tables", [])
             for t in tables:
                 if t.get("id") == table_id:
@@ -926,7 +926,7 @@ async def free_table_by_number(number: str, _: dict = Depends(get_user)):
 async def assign_server_to_section(section_id: str, server_id: str, plan_id: str,
                                      user: dict = Depends(require_owner_or_manager)):
     plan = await db.floor_plans.find_one({"id": plan_id}, {"_id": 0})
-    if not plan or not tenant_owns(plan.get("businessId"), user.get("businessId")):
+    if not plan or not tenant_owns_strict(plan.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Floor plan not found")
     sections = plan.get("sections", [])
     for s in sections:
@@ -981,7 +981,7 @@ async def add_to_waitlist(entry: WaitlistEntryCreate, user: dict = Depends(get_u
 @router.put("/waitlist/{entry_id}", response_model=WaitlistEntry)
 async def update_waitlist_entry(entry_id: str, update: WaitlistEntryUpdate, user: dict = Depends(get_user)):
     guard = await db.waitlist.find_one({"id": entry_id}, {"_id": 0})
-    if not guard or not tenant_owns(guard.get("businessId"), user.get("businessId")):
+    if not guard or not tenant_owns_strict(guard.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Waitlist entry not found")
     update_data = {k: v for k, v in update.dict().items() if v is not None}
     result = await db.waitlist.find_one_and_update(
@@ -1011,7 +1011,7 @@ async def update_waitlist_entry(entry_id: str, update: WaitlistEntryUpdate, user
 @router.post("/waitlist/{entry_id}/seat")
 async def seat_waitlist_guest(entry_id: str, table_id: Optional[str] = None, user: dict = Depends(get_user)):
     entry = await db.waitlist.find_one({"id": entry_id}, {"_id": 0})
-    if not entry or not tenant_owns(entry.get("businessId"), user.get("businessId")):
+    if not entry or not tenant_owns_strict(entry.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Waitlist entry not found")
     update_data = {"status": "seated", "seatedTime": datetime.utcnow().isoformat()}
     if table_id:
@@ -1022,7 +1022,7 @@ async def seat_waitlist_guest(entry_id: str, table_id: Optional[str] = None, use
 @router.delete("/waitlist/{entry_id}")
 async def remove_from_waitlist(entry_id: str, user: dict = Depends(get_user)):
     guard = await db.waitlist.find_one({"id": entry_id}, {"_id": 0, "businessId": 1})
-    if not guard or not tenant_owns(guard.get("businessId"), user.get("businessId")):
+    if not guard or not tenant_owns_strict(guard.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Entry not found")
     result = await db.waitlist.delete_one({"id": entry_id})
     if result.deleted_count == 0:
@@ -1130,7 +1130,7 @@ async def ai_assign_table(reservation_id: str, user: dict = Depends(get_user)):
       • time conflict avoidance (skip tables booked within ±90min of this slot)
     """
     res = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    if not res or not tenant_owns(res.get("businessId"), user.get("businessId")):
+    if not res or not tenant_owns_strict(res.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Reservation not found")
     party = int(res.get("partySize", 2) or 2)
 
@@ -1220,7 +1220,7 @@ async def ai_assign_walkin(body: dict, user: dict = Depends(get_user)):
     customer_id = body.get("customerId")
     if customer_id:
         cust = await db.customers.find_one({"id": customer_id}, {"_id": 0})
-        if cust and not tenant_owns(cust.get("businessId"), user.get("businessId")):
+        if cust and not tenant_owns_strict(cust.get("businessId"), user.get("businessId")):
             cust = None
         if cust:
             guest = {

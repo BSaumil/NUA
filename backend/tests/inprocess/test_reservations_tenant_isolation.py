@@ -251,3 +251,67 @@ def test_request_deposit_validates_and_degrades_without_stripe_configured(client
         assert body["url"] is None
     finally:
         _run(db.reservations.delete_one({"id": needs_deposit["id"]}))
+
+
+# ---------------------------------------------- untagged-doc quarantine
+# Tenant-ownership release-closure pass: every tenant_owns() check in this
+# file was converted to tenant_owns_strict() now that the only remaining
+# active untagged-reservation-creation path (routes/public.py's
+# /public/book) requires a resolved business (see that file's own tests).
+# An untagged reservation/waitlist entry here can now only be genuine
+# pre-fix legacy data — quarantined (refused, never auto-owned or deleted)
+# rather than readable/editable by whichever business asks first.
+
+
+def test_get_reservation_refuses_a_doc_with_no_businessId(client, owner_headers):
+    untagged_id = "RES-QUARANTINE-TEST-1"
+    _run(db.reservations.insert_one({
+        "id": untagged_id, "guestName": "Untagged Legacy Guest", "guestPhone": "+61400000900",
+        "partySize": 2, "date": "2027-06-15", "time": "19:00", "status": "confirmed", "businessId": None,
+    }))
+    try:
+        r = req(client, "GET", f"/api/reservations/{untagged_id}", headers=owner_headers)
+        assert r.status_code == 404, (
+            f"a reservation with no businessId must be refused on read too, not shown to whichever "
+            f"business asks first, got {r.status_code}"
+        )
+    finally:
+        _run(db.reservations.delete_one({"id": untagged_id}))
+
+
+def test_update_and_delete_reservation_refuse_a_doc_with_no_businessId(client, owner_headers):
+    untagged_id = "RES-QUARANTINE-TEST-2"
+    _run(db.reservations.insert_one({
+        "id": untagged_id, "guestName": "Untagged Legacy Guest 2", "guestPhone": "+61400000901",
+        "partySize": 2, "date": "2027-06-15", "time": "19:30", "status": "confirmed", "businessId": None,
+    }))
+    try:
+        upd = req(client, "PUT", f"/api/reservations/{untagged_id}", headers=owner_headers,
+                   json={"partySize": 4})
+        assert upd.status_code == 404, upd.text[:200]
+        deL = req(client, "DELETE", f"/api/reservations/{untagged_id}", headers=owner_headers)
+        assert deL.status_code == 404, deL.text[:200]
+        still_there = _run(db.reservations.find_one({"id": untagged_id}))
+        assert still_there is not None and still_there["partySize"] == 2, (
+            "a rejected quarantine mutation must never modify or delete the untagged document"
+        )
+    finally:
+        _run(db.reservations.delete_many({"id": untagged_id}))
+
+
+def test_waitlist_mutations_refuse_a_doc_with_no_businessId(client, owner_headers):
+    untagged_id = "WL-QUARANTINE-TEST-1"
+    _run(db.waitlist.insert_one({
+        "id": untagged_id, "guestName": "Untagged Legacy Waitlist", "guestPhone": "+61400000902",
+        "partySize": 2, "position": 1, "status": "waiting", "businessId": None,
+    }))
+    try:
+        upd = req(client, "PUT", f"/api/waitlist/{untagged_id}", headers=owner_headers,
+                   json={"partySize": 3})
+        assert upd.status_code == 404, upd.text[:200]
+        deL = req(client, "DELETE", f"/api/waitlist/{untagged_id}", headers=owner_headers)
+        assert deL.status_code == 404, deL.text[:200]
+        still_there = _run(db.waitlist.find_one({"id": untagged_id}))
+        assert still_there is not None and still_there["partySize"] == 2
+    finally:
+        _run(db.waitlist.delete_many({"id": untagged_id}))

@@ -305,17 +305,25 @@ class SquareConnector(BaseConnector):
                 for c in page.get("customers", []):
                     run.bump("fetched")
                     run.add_sample(c)
-                    await self._upsert_customer(c)
+                    await self._upsert_customer(c, business_id)
                 cursor = page.get("cursor")
                 if not cursor:
                     break
 
-    async def _upsert_customer(self, c: Dict[str, Any]) -> None:
+    async def _upsert_customer(self, c: Dict[str, Any], business_id: str) -> None:
         email = c.get("email_address") or f"square-{c.get('id')}@no-email.nua"
         phone = c.get("phone_number") or ""
         name = " ".join(filter(None, [c.get("given_name"), c.get("family_name")])) or "Square Customer"
         doc = {"name": name, "email": email, "phone": phone}
-        existing = await db.customers.find_one({"externalRefs.square": c.get("id")}, {"_id": 0, "id": 1})
+        # externalRefs.square alone (with no businessId in the match filter)
+        # let a repeated sync for one business match — and silently take
+        # over — a customer imported by ANY OTHER business that happened to
+        # reuse the same Square customer id (a real risk: Square ids are
+        # global, not scoped to the merchant account that imported them
+        # into this app). Both the lookup and the newly-created row are now
+        # scoped to the business running this sync.
+        existing = await db.customers.find_one(
+            {"externalRefs.square": c.get("id"), "businessId": business_id}, {"_id": 0, "id": 1})
         if existing:
             await db.customers.update_one(
                 {"id": existing["id"]},
@@ -331,6 +339,7 @@ class SquareConnector(BaseConnector):
                 "feedbackCount": 0, "reservationIds": [], "storeCredit": 0.0,
                 "joinDate": datetime.now(timezone.utc),
                 "externalRefs": {"square": c.get("id")},
+                "businessId": business_id,
                 **doc,
             })
 
@@ -372,7 +381,7 @@ class SquareConnector(BaseConnector):
         elif event_type.startswith("customer."):
             customer = (event.get("data", {}).get("object", {}) or {}).get("customer")
             if customer:
-                await self._upsert_customer(customer)
+                await self._upsert_customer(customer, business_id)
                 run.bump("updated")
         elif event_type.startswith("catalog."):
             # Catalog webhooks only carry the changed object id — re-fetch it.
