@@ -23,6 +23,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 from database import db
+from middleware.actor_context import get_actor_context, tenant_owns_strict
 from services import nua_tools, nua_personas, audit_service
 import json
 import logging
@@ -202,6 +203,7 @@ Propose the plan now (JSON only)."""
         "createdBy": actor,
         "createdAt": _now(),
         "updatedAt": _now(),
+        "businessId": get_actor_context().get("businessId"),
     }
     await db.ash_plans.insert_one(dict(plan))
     try:
@@ -220,14 +222,19 @@ Propose the plan now (JSON only)."""
 async def _execute_step(plan_id: str, idx: int, *, actor: str) -> Dict[str, Any]:
     """Run one step through the tool permission gate."""
     plan = await db.ash_plans.find_one({"id": plan_id}, {"_id": 0})
-    if not plan:
+    if not plan or not tenant_owns_strict(plan.get("businessId"), get_actor_context().get("businessId")):
         return {"error": "plan not found"}
     if idx < 0 or idx >= len(plan["steps"]):
         return {"error": "step out of range"}
     step = plan["steps"][idx]
     if step["status"] not in ("pending", "approved"):
         return {"error": f"step already {step['status']}"}
-    outcome = await nua_tools.execute_tool(step["tool"], step.get("args") or {}, actor=actor)
+    # plan_id+idx also guards against a race between two near-simultaneous
+    # calls to execute the same step (the status check above only catches
+    # a *second*, later call — not one that reads "pending" before the
+    # first call's own status update has committed).
+    outcome = await nua_tools.execute_tool(step["tool"], step.get("args") or {}, actor=actor,
+                                             idempotency_key=f"plan:{plan_id}:{idx}:{step['tool']}")
     new_status = ("pending_approval" if outcome.get("status") == "pending_approval"
                   else ("blocked" if outcome.get("status") == "blocked"
                         else ("executed" if outcome.get("status") == "executed" else "error")))
@@ -256,7 +263,7 @@ async def _execute_step(plan_id: str, idx: int, *, actor: str) -> Dict[str, Any]
 async def approve_plan(plan_id: str, *, actor: str) -> Dict[str, Any]:
     """Walk every pending step. Each may execute directly, enqueue an approval, or be blocked."""
     plan = await db.ash_plans.find_one({"id": plan_id}, {"_id": 0})
-    if not plan:
+    if not plan or not tenant_owns_strict(plan.get("businessId"), get_actor_context().get("businessId")):
         return {"error": "plan not found"}
     if plan["status"] in ("completed", "rejected"):
         return {"error": f"plan already {plan['status']}"}
@@ -282,6 +289,9 @@ async def approve_plan(plan_id: str, *, actor: str) -> Dict[str, Any]:
 
 
 async def reject_plan(plan_id: str, *, actor: str, reason: Optional[str] = None) -> Dict[str, Any]:
+    existing = await db.ash_plans.find_one({"id": plan_id}, {"_id": 0, "id": 1, "businessId": 1})
+    if existing is None or not tenant_owns_strict(existing.get("businessId"), get_actor_context().get("businessId")):
+        return {"error": "plan not found"}
     r = await db.ash_plans.update_one(
         {"id": plan_id},
         {"$set": {"status": "rejected", "rejectedBy": actor,
@@ -308,7 +318,7 @@ async def approve_step(plan_id: str, idx: int, *, actor: str) -> Dict[str, Any]:
 
 async def reject_step(plan_id: str, idx: int, *, actor: str, reason: Optional[str] = None) -> Dict[str, Any]:
     plan = await db.ash_plans.find_one({"id": plan_id}, {"_id": 0})
-    if not plan:
+    if not plan or not tenant_owns_strict(plan.get("businessId"), get_actor_context().get("businessId")):
         return {"error": "plan not found"}
     if idx < 0 or idx >= len(plan["steps"]):
         return {"error": "step out of range"}
@@ -344,7 +354,7 @@ async def simulate_plan(plan_id: str, *, actor: str) -> Dict[str, Any]:
     • The LLM writes a projected-outcome narrative.
     """
     plan = await db.ash_plans.find_one({"id": plan_id}, {"_id": 0})
-    if not plan:
+    if not plan or not tenant_owns_strict(plan.get("businessId"), get_actor_context().get("businessId")):
         return {"error": "plan not found"}
     tool_map = {t.name: t for t in nua_tools.TOOLS.values()}
     simulated_steps: List[Dict[str, Any]] = []

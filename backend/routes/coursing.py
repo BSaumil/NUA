@@ -17,6 +17,7 @@ from fastapi.responses import StreamingResponse
 
 from database import db
 from deps import get_user, require_permission
+from middleware.actor_context import tenant_scope_filter, tenant_owns
 from models.kitchen_order import KitchenOrder
 from services import coursing
 
@@ -115,7 +116,8 @@ async def send_to_kitchen(body: dict, request: Request, user: dict = Depends(get
     table_number = body.get("tableNumber")
     if table_number and not body.get("newTicket") and str(order_type).replace("-", "_") == "dine_in":
         existing = await db.kitchen_orders.find_one(
-            {"tableNumber": table_number, "status": {"$nin": ["served", "cancelled"]}},
+            {"tableNumber": table_number, "status": {"$nin": ["served", "cancelled"]},
+             **tenant_scope_filter(user.get("businessId"))},
             {"_id": 0}, sort=[("createdAt", -1)],
         )
         if existing:
@@ -151,6 +153,7 @@ async def send_to_kitchen(body: dict, request: Request, user: dict = Depends(get
     doc = order.dict()
     doc["straightFired"] = straight
     doc["clientKey"] = client_key
+    doc["businessId"] = user.get("businessId")
     # Every station this ticket fires from, stamped on the ticket itself — the
     # KDS station filter reads this, and per-course dockets can't answer it.
     try:
@@ -206,7 +209,8 @@ async def _apply_due_auto_fires(order: dict, config: dict, actor: str = "auto") 
     from routes.kitchen import fire_course_internal
     for course in due:
         try:
-            order = await fire_course_internal(order["id"], course, actor)
+            order = await fire_course_internal(order["id"], course, actor,
+                                                business_id=order.get("businessId"))
         except Exception:
             break
     return order
@@ -215,14 +219,14 @@ async def _apply_due_auto_fires(order: dict, config: dict, actor: str = "auto") 
 @router.get("/coursing/orders/open")
 async def open_kitchen_orders(tableNumber: Optional[str] = None,
                               transactionId: Optional[str] = None,
-                              _: dict = Depends(get_user)):
+                              user: dict = Depends(get_user)):
     """Kitchen orders the POS can still fire courses on.
 
     This is also how the POS re-attaches after a refresh, or how a second
     tablet picks up a table someone else rang in — without it, fire/hold
     only worked in the tab that happened to create the ticket.
     """
-    query: dict = {"status": {"$nin": ["served", "cancelled"]}}
+    query: dict = {"status": {"$nin": ["served", "cancelled"]}, **tenant_scope_filter(user.get("businessId"))}
     if tableNumber:
         query["tableNumber"] = tableNumber
     if transactionId:
@@ -275,7 +279,13 @@ async def add_round(order_id: str, body: dict, user: dict = Depends(get_user)):
             return dup
 
     order = await db.kitchen_orders.find_one({"id": order_id}, {"_id": 0})
-    if not order:
+    # NOT tenant_owns_strict — routes/table_ordering.py's guest QR ordering
+    # takes an OPTIONAL ?business=, and absent/unresolved still creates the
+    # kitchen_orders row today (a deliberate, documented, lower-severity
+    # deferral — see TRUST_RELEASE_FINAL_REPORT.md §10.10 — not fixed this
+    # pass). A strict exact-match here would 404 a live, currently-active
+    # QR order any time that optional param was omitted.
+    if not order or not tenant_owns(order.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Order not found")
     if order.get("status") in ("served", "cancelled"):
         raise HTTPException(status_code=409, detail="Order is already closed")
@@ -354,6 +364,7 @@ async def settle_table(body: dict, user: dict = Depends(get_user)):
         actor=user.get("name") or user.get("email"),
         release_table=body.get("releaseTable", True),
         seats=body.get("seats"),
+        business_id=user.get("businessId"),
     )
 
 
@@ -367,7 +378,8 @@ async def move_ticket(body: dict, user: dict = Depends(get_user)):
     if str(src) == str(dst):
         return {"movedOrders": [], "from": src, "to": dst}
     return await ticket_lifecycle.move_ticket(
-        str(src), str(dst), actor=user.get("name") or user.get("email"))
+        str(src), str(dst), actor=user.get("name") or user.get("email"),
+        business_id=user.get("businessId"))
 
 
 @router.post("/coursing/orders/{order_id}/void")
@@ -381,7 +393,8 @@ async def void_from_ticket(order_id: str, body: dict,
     """
     from services import print_routing, ticket_lifecycle
     result = await ticket_lifecycle.void_items(
-        order_id, body.get("items") or [], actor=user.get("name") or user.get("email"))
+        order_id, body.get("items") or [], actor=user.get("name") or user.get("email"),
+        business_id=user.get("businessId"))
     if not result["ok"]:
         raise HTTPException(status_code=404, detail="Order not found")
 
@@ -434,8 +447,10 @@ async def coursing_stream(request: Request, tableNumber: Optional[str] = None,
     the one endpoint that accepts it.
     """
     from routes.auth import get_current_user
+    business_id = None
     try:
-        await get_current_user(request)
+        stream_user = await get_current_user(request)
+        business_id = stream_user.get("businessId")
     except HTTPException:
         if not token:
             raise
@@ -445,8 +460,10 @@ async def coursing_stream(request: Request, tableNumber: Optional[str] = None,
             payload = _jwt.decode(token, _secret(), algorithms=[JWT_ALGORITHM])
             if payload.get("type") != "access":
                 raise HTTPException(status_code=401, detail="Invalid token type")
-            if not await db.auth_users.find_one({"id": payload["sub"]}):
+            token_user = await db.auth_users.find_one({"id": payload["sub"]}, {"_id": 0})
+            if not token_user:
                 raise HTTPException(status_code=401, detail="User not found")
+            business_id = token_user.get("businessId")
         except _jwt.PyJWTError:
             raise HTTPException(status_code=401, detail="Invalid token")
 
@@ -465,7 +482,7 @@ async def coursing_stream(request: Request, tableNumber: Optional[str] = None,
                 return
             try:
                 config = await coursing.get_config()
-                query: dict = {"status": {"$nin": ["served", "cancelled"]}}
+                query: dict = {"status": {"$nin": ["served", "cancelled"]}, **tenant_scope_filter(business_id)}
                 if tableNumber:
                     query["tableNumber"] = tableNumber
                 rows = await db.kitchen_orders.find(query, {"_id": 0}).to_list(20)
@@ -774,7 +791,7 @@ async def purge_course_events(user: dict = Depends(get_user)):
 
 
 @router.get("/coursing/end-of-service")
-async def end_of_service(_: dict = Depends(get_user)):
+async def end_of_service(user: dict = Depends(get_user)):
     """What's still open, before the overnight sweep silently cancels it.
 
     Stale tickets were auto-cancelled at the next board read with no report,
@@ -783,8 +800,9 @@ async def end_of_service(_: dict = Depends(get_user)):
     view: what's outstanding, how long it's been, and what it's worth.
     """
     from services import course_events
+    biz_scope = tenant_scope_filter(user.get("businessId"))
     rows = await db.kitchen_orders.find(
-        {"status": {"$in": ["new", "preparing", "ready"]}}, {"_id": 0}).to_list(500)
+        {"status": {"$in": ["new", "preparing", "ready"]}, **biz_scope}, {"_id": 0}).to_list(500)
     now = datetime.now(timezone.utc)
 
     open_tickets = []
@@ -814,7 +832,7 @@ async def end_of_service(_: dict = Depends(get_user)):
 
     # Tables still showing occupied with nothing open against them, and the
     # reverse — both mean the floor plan won't be right when doors open.
-    plans = await db.floor_plans.find({}, {"_id": 0}).to_list(20)
+    plans = await db.floor_plans.find(biz_scope, {"_id": 0}).to_list(20)
     occupied = [t.get("number") for p in plans for t in (p.get("tables") or [])
                 if t.get("status") == "occupied"]
     with_tickets = {t["tableNumber"] for t in open_tickets if t.get("tableNumber")}
@@ -843,9 +861,13 @@ async def close_service(body: dict, user: dict = Depends(get_user)):
     from services import ticket_lifecycle
     reason = (body or {}).get("reason") or "closed at end of service"
     actor = user.get("name") or user.get("email")
+    biz_scope = tenant_scope_filter(user.get("businessId"))
 
+    # Scoped to this business — otherwise an owner closing out their own
+    # service would cancel every other business's open kitchen tickets too.
     rows = await db.kitchen_orders.find(
-        {"status": {"$in": ["new", "preparing", "ready"]}}, {"_id": 0, "id": 1, "tableNumber": 1}
+        {"status": {"$in": ["new", "preparing", "ready"]}, **biz_scope},
+        {"_id": 0, "id": 1, "tableNumber": 1}
     ).to_list(500)
     closed, freed = [], []
     for o in rows:
@@ -862,7 +884,7 @@ async def close_service(body: dict, user: dict = Depends(get_user)):
     # right during service and wrong at close, because tomorrow's staff would
     # open to a floor plan full of last night's tables.
     stranded = []
-    for plan in await db.floor_plans.find({}, {"_id": 0}).to_list(20):
+    for plan in await db.floor_plans.find(biz_scope, {"_id": 0}).to_list(20):
         for t in plan.get("tables") or []:
             if t.get("status") == "occupied" and t.get("number") not in freed:
                 if await ticket_lifecycle.free_table(t["number"], actor):
@@ -873,17 +895,20 @@ async def close_service(body: dict, user: dict = Depends(get_user)):
 
 
 @router.post("/coursing/auto-fire/tick")
-async def auto_fire_tick(_: dict = Depends(get_user)):
+async def auto_fire_tick(user: dict = Depends(get_user)):
     """Evaluate timing rules across every open ticket.
 
     The POS already evaluates its own ticket on read; this covers tables
-    nobody happens to be looking at.
+    nobody happens to be looking at. Scoped to the caller's own business —
+    this is triggered by a business's own POS session, not a system-wide
+    cron, so it must never fire another business's held courses.
     """
     config = await coursing.get_config()
     if not config.get("enabled") or not config.get("autoFireTiming"):
         return {"checked": 0, "fired": []}
     rows = await db.kitchen_orders.find(
-        {"status": {"$nin": ["served", "cancelled"]}}, {"_id": 0}).to_list(200)
+        {"status": {"$nin": ["served", "cancelled"]}, **tenant_scope_filter(user.get("businessId"))},
+        {"_id": 0}).to_list(200)
     fired = []
     for order in rows:
         due = coursing.due_auto_fires(order, config)
@@ -891,6 +916,7 @@ async def auto_fire_tick(_: dict = Depends(get_user)):
             continue
         from routes.kitchen import fire_course_internal
         for course in due:
-            await fire_course_internal(order["id"], course, "auto")
+            await fire_course_internal(order["id"], course, "auto",
+                                        business_id=order.get("businessId"))
             fired.append({"orderId": order["id"], "course": course})
     return {"checked": len(rows), "fired": fired}

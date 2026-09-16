@@ -20,7 +20,7 @@ import uuid
 
 from database import db
 from deps import require_owner_or_manager
-from middleware.actor_context import tenant_scope_filter, tenant_owns
+from middleware.actor_context import tenant_scope_filter, tenant_owns_strict
 
 router = APIRouter()
 
@@ -57,7 +57,7 @@ async def create_transfer(data: StockTransferCreate, user: dict = Depends(requir
         raise HTTPException(status_code=400, detail="Source and destination must differ")
 
     product = await db.products.find_one({"id": data.productId}, {"_id": 0})
-    if not product or not tenant_owns(product.get("businessId"), user.get("businessId")):
+    if not product or not tenant_owns_strict(product.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Product not found")
 
     stock_by_loc = product.get("stockByLocation") or {}
@@ -119,7 +119,7 @@ async def list_transfers(status: Optional[str] = None, productId: Optional[str] 
 @router.post("/stock-transfers/{transfer_id}/receive", response_model=StockTransfer)
 async def receive_transfer(transfer_id: str, user: dict = Depends(require_owner_or_manager)):
     transfer = await db.stock_transfers.find_one({"id": transfer_id}, {"_id": 0})
-    if not transfer or not tenant_owns(transfer.get("businessId"), user.get("businessId")):
+    if not transfer or not tenant_owns_strict(transfer.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Transfer not found")
     if transfer["status"] != "in_transit":
         raise HTTPException(status_code=400, detail=f"Transfer is already {transfer['status']}")
@@ -140,7 +140,7 @@ async def cancel_transfer(transfer_id: str, user: dict = Depends(require_owner_o
     """Cancels an in-transit transfer and returns the stock to its source —
     for a shipment that never actually left, or was requested by mistake."""
     transfer = await db.stock_transfers.find_one({"id": transfer_id}, {"_id": 0})
-    if not transfer or not tenant_owns(transfer.get("businessId"), user.get("businessId")):
+    if not transfer or not tenant_owns_strict(transfer.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Transfer not found")
     if transfer["status"] != "in_transit":
         raise HTTPException(status_code=400, detail=f"Transfer is already {transfer['status']}")

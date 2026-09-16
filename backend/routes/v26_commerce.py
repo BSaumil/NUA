@@ -977,7 +977,8 @@ async def cfd_enriched(request: Request, terminalId: Optional[str] = None, user:
     customer = live.get("selectedCustomer")
     cart = live.get("cart") or []
     subtotal = sum(float(i.get("price", 0)) * int(i.get("quantity", 1)) for i in cart)
-    cfg = await db.loyalty_config.find_one({}, {"_id": 0}) or {}
+    from services.tenant_settings import get_scoped_singleton
+    cfg = await get_scoped_singleton(db.loyalty_config, {"id": "default"}, user.get("businessId")) or {}
     earn_rate = float(cfg.get("earnRate", 1))
     points_earned = int(subtotal * earn_rate) if customer else 0
     points_missed = 0 if customer else int(subtotal * earn_rate)

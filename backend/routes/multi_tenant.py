@@ -144,12 +144,19 @@ async def export_business_data(business_id: str, collection: Optional[str] = Non
     if collection and collection in collections_to_export:
         collections_to_export = [collection]
 
+    # tenant_scope_filter, not a bare {"businessId": business_id} fallback to
+    # {} on empty results — this used to re-query with NO filter at all
+    # whenever a business genuinely had zero docs in some collection (a
+    # brand-new business with no transactions yet, say), handing the
+    # exporting owner every OTHER business's data in that collection too.
+    # tenant_scope_filter's own fail-open behavior (matching untagged legacy
+    # rows) still covers the pre-tenant-stamping case this fallback was
+    # trying to serve, without ever crossing into another business's data.
+    biz_or_untagged = tenant_scope_filter(business_id)
     export_data = {"business": business, "exportedAt": datetime.now(timezone.utc).isoformat()}
     for coll_name in collections_to_export:
         coll = db[coll_name]
-        docs = await coll.find({"businessId": business_id}, {"_id": 0}).to_list(10000)
-        if not docs:
-            docs = await coll.find({}, {"_id": 0}).to_list(10000)
+        docs = await coll.find(biz_or_untagged, {"_id": 0}).to_list(10000)
         export_data[coll_name] = {"count": len(docs), "data": docs}
 
     return export_data

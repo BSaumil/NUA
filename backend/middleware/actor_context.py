@@ -69,6 +69,41 @@ def tenant_owns(doc_business_id: Optional[str], business_id: Optional[str] = Non
     return doc_business_id == biz
 
 
+def tenant_owns_strict(doc_business_id: Optional[str], business_id: Optional[str] = None) -> bool:
+    """Like tenant_owns(), but for a MUTATION (update or delete) rather than
+    a read — where the fail-open convention above is actively dangerous
+    instead of merely permissive.
+
+    tenant_owns()'s "either side missing/null means allow" rule exists so a
+    READ never hides a pre-tenant-stamping legacy document from the one
+    business that actually created it, back when nothing was tagged at all.
+    That reasoning has no equivalent for a WRITE: this codebase's own
+    history includes a real bug (`_stamp_new()`'s old `setdefault()`
+    no-op — see TENANT_ISOLATION_REMAINING_WORK.md) that left rows created
+    by MANY DIFFERENT businesses all sharing `businessId=None` — so an
+    untagged document is not reliably "this one caller's legacy data", it
+    could belong to any business that existed before the stamping fix
+    landed. Letting tenant_owns()'s fail-open rule govern a
+    find_one_and_update/update_one/delete_one means ANY business can
+    permanently mutate or destroy ANY other business's untagged row,
+    merely by guessing/enumerating its id.
+
+    Deliberately an EXACT match only: an untagged document (or an unknown
+    caller businessId) is refused for a mutation rather than risked. This
+    intentionally makes such documents un-editable/un-deletable via the
+    normal tenant-scoped route until they are properly re-tagged — a
+    quarantine, not an assignment. Never auto-assigns an untagged document
+    to whichever business happens to ask first, and never deletes it as a
+    side effect of being asked to. First applied to routes/audit.py's
+    gdpr_purge (a hard delete) before being generalized here; see that
+    endpoint's own comment for the original reasoning.
+    """
+    biz = business_id or get_actor_context().get("businessId")
+    if not biz or not doc_business_id:
+        return False
+    return doc_business_id == biz
+
+
 class ActorContextMiddleware(BaseHTTPMiddleware):
     """Populates the contextvar from request headers + JWT.
 
@@ -98,7 +133,7 @@ class ActorContextMiddleware(BaseHTTPMiddleware):
             try:
                 import jwt
                 import os
-                secret = os.environ.get("JWT_SECRET") or "nua-fallback-please-set-jwt-secret"
+                secret = os.environ["JWT_SECRET"]
                 data = jwt.decode(token, secret, algorithms=["HS256"], options={"verify_exp": False})
                 email = data.get("email") or data.get("sub")
                 role = data.get("role")
@@ -106,11 +141,24 @@ class ActorContextMiddleware(BaseHTTPMiddleware):
             except Exception:
                 pass  # Auth will handle its own error on the route
 
-        # X-Tenant-Id/X-Business-Id headers (used by partner/integration
-        # callers that aren't a logged-in staff member) win when present;
-        # otherwise fall back to the businessId already embedded in the
-        # staff member's own access token.
-        business_id = header_business_id or jwt_business_id
+        # Authenticated JWT membership is authoritative — a logged-in staff
+        # member's own businessId always wins, full stop. The header used to
+        # win whenever present, which meant any logged-in user of Business A
+        # could send X-Business-Id: <business-B-id> and have writes/reads
+        # tagged/scoped as Business B (confirmed exploitable via
+        # commerce_v29.py's voucher and wallet-ledger writes, which read this
+        # contextvar for tenant tagging). There's currently no per-user
+        # multi-business membership list in this codebase (each auth_users
+        # doc carries exactly one businessId), so "a business the actor is
+        # authorised to access" is that single value — nothing else to
+        # select among yet. If/when real multi-business membership exists,
+        # this is where a header would validate against that membership set
+        # rather than being trusted outright.
+        #
+        # The header still matters for the case it was originally built for:
+        # a partner/integration caller with no bearer token at all (no JWT
+        # to derive a businessId from).
+        business_id = jwt_business_id or header_business_id
 
         ctx = {
             "email": email,

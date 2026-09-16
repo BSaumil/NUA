@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 
 from database import db
 from deps import get_user, require_owner_or_manager
-from middleware.actor_context import tenant_scope_filter, tenant_owns
+from middleware.actor_context import tenant_scope_filter, tenant_owns_strict
 from models.service_catalog import Service, ServiceCreate, ServiceUpdate
 from models.appointment import Appointment, AppointmentCreate, AppointmentUpdate
 from models.client_intake import IntakeNote, IntakeNoteCreate
@@ -48,7 +48,7 @@ async def create_service(data: ServiceCreate, user: dict = Depends(require_owner
 @router.put("/services/{service_id}", response_model=Service)
 async def update_service(service_id: str, data: ServiceUpdate, user: dict = Depends(require_owner_or_manager)):
     existing = await db.services.find_one({"id": service_id}, {"_id": 0, "businessId": 1})
-    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if not existing or not tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Service not found")
     update_data = {k: v for k, v in data.dict().items() if v is not None}
     update_data["updatedAt"] = datetime.utcnow().isoformat()
@@ -61,7 +61,7 @@ async def update_service(service_id: str, data: ServiceUpdate, user: dict = Depe
 @router.delete("/services/{service_id}")
 async def delete_service(service_id: str, user: dict = Depends(require_owner_or_manager)):
     existing = await db.services.find_one({"id": service_id}, {"_id": 0, "businessId": 1})
-    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if not existing or not tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Service not found")
     await db.services.update_one({"id": service_id}, {"$set": {"active": False}})
     return {"message": "Service deactivated", "id": service_id}
@@ -173,7 +173,7 @@ async def create_appointment(data: AppointmentCreate, user: dict = Depends(get_u
 @router.put("/appointments/{appointment_id}", response_model=Appointment)
 async def update_appointment(appointment_id: str, data: AppointmentUpdate, user: dict = Depends(get_user)):
     existing = await db.appointments.find_one({"id": appointment_id}, {"_id": 0})
-    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if not existing or not tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Appointment not found")
 
     update_data = {k: v for k, v in data.dict().items() if v is not None}
@@ -212,7 +212,7 @@ async def update_appointment(appointment_id: str, data: AppointmentUpdate, user:
 
 async def _set_status(appointment_id: str, status: str, user: dict) -> Appointment:
     existing = await db.appointments.find_one({"id": appointment_id}, {"_id": 0})
-    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if not existing or not tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Appointment not found")
     now_iso = datetime.utcnow().isoformat()
     result = await db.appointments.find_one_and_update(
@@ -238,7 +238,7 @@ async def no_show_appointment(appointment_id: str, fee: float = 0, user: dict = 
     what the no-show cost and tallies it against the client's history, the
     way a front-desk ledger would."""
     existing = await db.appointments.find_one({"id": appointment_id}, {"_id": 0})
-    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if not existing or not tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Appointment not found")
     now_iso = datetime.utcnow().isoformat()
     result = await db.appointments.find_one_and_update(

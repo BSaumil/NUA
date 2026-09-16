@@ -55,6 +55,33 @@ def test_internal_endpoints_refuse_anonymous(anon, method, path):
         f"{method} {path} answered {r.status_code} with no credential: {r.text[:200]}"
 
 
+def test_a_forged_host_header_cannot_smuggle_a_protected_path_past_the_gate(anon):
+    """Final pre-merge assurance pass: starlette 0.37.2 (pinned by
+    fastapi==0.110.1's own constraint — see backend/SECURITY_DEPENDENCY_DEBT.md)
+    carries PYSEC-2026-161 / GHSA-86qp-5c8j-p5mr — Request.url rebuilds a URL
+    by string-concatenating the raw, unvalidated Host header with the real
+    path and reparsing it. server.py's RequireAuthMiddleware used to read
+    `request.url.path` for its public/protected decision — a Host header of
+    "x/api/public" turned "/api/users" into "/api/public/api/users" for that
+    check alone, waving a real staff-management request through with zero
+    token, while FastAPI's actual routing (which dispatches on
+    request.scope["path"] directly and never touches Host) still sent it to
+    routes/settings.py's get_users()/create_user(). Reproduced end to end
+    against a real un-authenticated MongoDB call before the fix (server.py,
+    middleware/license_middleware.py now read scope["path"] instead).
+    Exercises every PUBLIC_API_PREFIXES entry as the injected suffix against
+    every MUST_BE_SHUT path, since any one of them turning a protected path
+    "public"-looking is the same bypass."""
+    for spoofed_prefix in PUBLIC_PREFIXES:
+        host = f"x{spoofed_prefix}"
+        for method, path in MUST_BE_SHUT:
+            r = req(anon, method, path, json={}, headers={"Host": host})
+            assert r.status_code in (401, 403), (
+                f"{method} {path} with Host: {host!r} answered {r.status_code} "
+                f"with no credential — Host-header path-injection bypass: {r.text[:200]}"
+            )
+
+
 def test_no_get_route_answers_anonymously_unless_allow_listed(anon, app):
     """The sweep itself — this is what found the original 66."""
     paths = sorted({

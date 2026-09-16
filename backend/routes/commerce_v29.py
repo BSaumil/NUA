@@ -48,7 +48,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 from database import db
 from deps import get_user
-from middleware.actor_context import get_actor_context, tenant_scope_filter, tenant_owns
+from middleware.actor_context import get_actor_context, tenant_scope_filter, tenant_owns, tenant_owns_strict
 from models.voucher import Voucher, VoucherCreate, VoucherRedeemRequest, VoucherValidateRequest, VoucherRedemption, VoucherRules
 from models.wallet_ledger import LedgerEntry, LedgerEntryCreate
 import base64
@@ -68,7 +68,7 @@ router = APIRouter()
 # Signing helpers (HMAC-SHA256 with JWT_SECRET, base64url with no padding)
 # ═════════════════════════════════════════════════════════════════════════
 def _secret() -> bytes:
-    return (os.environ.get("JWT_SECRET") or "nua-fallback-please-set-jwt-secret").encode()
+    return os.environ["JWT_SECRET"].encode()
 
 def _sign_payload(payload: dict) -> str:
     body = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).rstrip(b"=").decode()
@@ -128,7 +128,15 @@ def _build_voucher_doc(payload: dict, user: Optional[dict], customer_data: dict)
         issuedBy=(user or {}).get("email"),
         freeItemId=payload.get("freeItemId"),
         metadata=payload.get("metadata") or {},
-        businessId=payload.get("businessId") or (user or {}).get("businessId") or get_actor_context().get("businessId"),
+        # The authenticated caller's own businessId always wins — this used
+        # to check payload.get("businessId") FIRST, meaning any client could
+        # put {"businessId": "<another business's id>"} in the POST body and
+        # have the voucher tagged as belonging to a different tenant than
+        # the one they're actually authenticated as. No current caller
+        # (public /vouchers, /vouchers/bulk, or the internal refund/gift-card
+        # issuers) relies on payload.businessId when a user is present, so
+        # it's now only consulted as a last resort with no user in scope.
+        businessId=(user or {}).get("businessId") or get_actor_context().get("businessId") or payload.get("businessId"),
     )
     return v.dict()
 
@@ -362,82 +370,117 @@ async def public_check_voucher(body: PublicVoucherCheck):
 
 @router.post("/vouchers/redeem")
 async def redeem_voucher(body: VoucherRedeemRequest, user: dict = Depends(get_user)):
-    v = await _resolve_voucher(body.code, body.token, user.get("businessId"))
+    # Two concurrent redemptions of the same voucher (two terminals, or a
+    # shared code redeemed twice near-simultaneously) used to both read the
+    # same voucher snapshot, both compute their own "new" residual/count/
+    # status, and both write with a bare $set — the second write silently
+    # overwrote the first's, so a one-time voucher could be redeemed twice,
+    # or a partial voucher's residual could be applied against a stale
+    # balance. Fixed with a bounded optimistic-concurrency loop: each
+    # attempt re-reads the voucher fresh, computes the update, and commits
+    # it with find_one_and_update's filter pinned to the exact prior
+    # status/residualValue/redemptionCount/updatedAt it read — MongoDB
+    # only applies the write if nothing else changed the document in
+    # between (the same compare-and-swap idiom services/wallet_service.py's
+    # redeem_voucher_line already uses), so a losing concurrent attempt
+    # sees no match and retries against the winner's fresh state instead of
+    # clobbering it.
+    max_attempts = 8
+    updated = None
+    applied = 0.0
+    for _attempt in range(max_attempts):
+        v = await _resolve_voucher(body.code, body.token, user.get("businessId"))
 
-    # Duplicate redemption guard must run BEFORE rule/quota checks so that
-    # accidental double-clicks return a clear 409 rather than "max reached".
-    if body.transactionId and any(r.get("transactionId") == body.transactionId for r in v.get("redemptions", [])):
-        raise HTTPException(409, "Voucher already applied to this transaction")
+        # Duplicate redemption guard must run BEFORE rule/quota checks so that
+        # accidental double-clicks return a clear 409 rather than "max reached".
+        if body.transactionId and any(r.get("transactionId") == body.transactionId for r in v.get("redemptions", [])):
+            raise HTTPException(409, "Voucher already applied to this transaction")
 
-    reason = _validate_voucher_rules(v, cart=body.cart, location_id=body.locationId)
-    if reason:
-        # Partial-redeemable exception: a one_time voucher with residual > 0
-        # should still accept additional partial applications until residual
-        # hits zero. Only skip if the failure is specifically "max reached".
-        if v.get("partialRedeemable") and float(v.get("residualValue", 0)) > 0 and "max redemptions" in reason.lower():
-            pass   # allow — partial redemptions decrement residual, not the counter
-        else:
-            raise HTTPException(400, reason)
+        reason = _validate_voucher_rules(v, cart=body.cart, location_id=body.locationId)
+        if reason:
+            # Partial-redeemable exception: a one_time voucher with residual > 0
+            # should still accept additional partial applications until residual
+            # hits zero. Only skip if the failure is specifically "max reached".
+            if v.get("partialRedeemable") and float(v.get("residualValue", 0)) > 0 and "max redemptions" in reason.lower():
+                pass   # allow — partial redemptions decrement residual, not the counter
+            else:
+                raise HTTPException(400, reason)
 
-    # Determine amount actually applied
-    requested = float(body.amount)
-    if v["valueType"] == "amount":
+        # Determine amount actually applied
+        requested = float(body.amount)
+        if v["valueType"] == "amount":
+            if v.get("partialRedeemable"):
+                applied = min(requested, float(v.get("residualValue", v["value"])))
+            else:
+                applied = min(requested, float(v["value"]))
+        elif v["valueType"] == "percentage":
+            applied = requested  # caller (POS) computes % → $ before calling
+        else:  # free_item / tier_upgrade — face value is informational
+            applied = min(requested, float(v.get("value", 0)))
+
+        if applied <= 0:
+            raise HTTPException(400, "Voucher residual value is $0")
+
+        # Build audit entry
+        rec = VoucherRedemption(
+            amount=round(applied, 2),
+            staffId=user.get("id"),
+            staffName=user.get("name") or user.get("email"),
+            terminalId=body.terminalId,
+            transactionId=body.transactionId,
+            locationId=body.locationId,
+            note=body.note,
+        ).dict()
+
+        new_count = v.get("redemptionCount", 0) + 1
+        new_residual = v.get("residualValue", 0.0)
+        new_status = v["status"]
         if v.get("partialRedeemable"):
-            applied = min(requested, float(v.get("residualValue", v["value"])))
+            # Partial vouchers use residual value as the true "remaining budget"
+            # — max_redemptions is treated as informational, not a hard cap.
+            prev_residual = float(v.get("residualValue") if v.get("residualValue") is not None else v["value"])
+            new_residual = round(max(0.0, prev_residual - applied), 2)
+            new_status = "redeemed" if new_residual <= 0 else "partial"
         else:
-            applied = min(requested, float(v["value"]))
-    elif v["valueType"] == "percentage":
-        applied = requested  # caller (POS) computes % → $ before calling
-    else:  # free_item / tier_upgrade — face value is informational
-        applied = min(requested, float(v.get("value", 0)))
+            if not v.get("maxRedemptions") or new_count >= v["maxRedemptions"]:
+                new_status = "redeemed"
 
-    if applied <= 0:
-        raise HTTPException(400, "Voucher residual value is $0")
-
-    # Build audit entry
-    rec = VoucherRedemption(
-        amount=round(applied, 2),
-        staffId=user.get("id"),
-        staffName=user.get("name") or user.get("email"),
-        terminalId=body.terminalId,
-        transactionId=body.transactionId,
-        locationId=body.locationId,
-        note=body.note,
-    ).dict()
-
-    new_count = v.get("redemptionCount", 0) + 1
-    new_residual = v.get("residualValue", 0.0)
-    new_status = v["status"]
-    if v.get("partialRedeemable"):
-        # Partial vouchers use residual value as the true "remaining budget"
-        # — max_redemptions is treated as informational, not a hard cap.
-        prev_residual = float(v.get("residualValue") if v.get("residualValue") is not None else v["value"])
-        new_residual = round(max(0.0, prev_residual - applied), 2)
-        new_status = "redeemed" if new_residual <= 0 else "partial"
-    else:
-        if not v.get("maxRedemptions") or new_count >= v["maxRedemptions"]:
-            new_status = "redeemed"
-
-    await db.vouchers.update_one(
-        {"id": v["id"]},
-        {
-            "$push": {"redemptions": rec},
-            "$set": {
-                "status": new_status,
-                "residualValue": new_residual,
-                "redemptionCount": new_count,
-                "lastRedeemedAt": _iso(_now()),
+        cas_filter = {
+            "id": v["id"],
+            "status": v["status"],
+            "redemptionCount": v.get("redemptionCount", 0),
+            "residualValue": v.get("residualValue", 0.0),
+        }
+        updated = await db.vouchers.find_one_and_update(
+            cas_filter,
+            {
+                "$push": {"redemptions": rec},
+                "$set": {
+                    "status": new_status,
+                    "residualValue": new_residual,
+                    "redemptionCount": new_count,
+                    "lastRedeemedAt": _iso(_now()),
+                },
             },
-        },
-    )
+            return_document=True,
+        )
+        if updated is not None:
+            break
+        # Someone else redeemed (or revoked) this exact voucher between our
+        # read and our write — loop back and retry against fresh state
+        # rather than silently applying a decision based on stale data.
+    else:
+        raise HTTPException(
+            409, "Voucher was redeemed by another request at the same moment — please retry"
+        )
 
     # Ledger write (if voucher was assigned to a customer)
-    if v.get("customerId"):
+    if updated.get("customerId"):
         await _ledger_write(
-            customer_id=v["customerId"], type_="voucher", sign=-1,
-            amount=applied, source_type="voucher_redeem", source_ref=v["id"],
+            customer_id=updated["customerId"], type_="voucher", sign=-1,
+            amount=applied, source_type="voucher_redeem", source_ref=updated["id"],
             metadata={
-                "voucherCode": v["code"],
+                "voucherCode": updated["code"],
                 "transactionId": body.transactionId,
                 "terminalId": body.terminalId,
                 "staffId": user.get("id"),
@@ -445,7 +488,7 @@ async def redeem_voucher(body: VoucherRedeemRequest, user: dict = Depends(get_us
             },
         )
 
-    updated = await db.vouchers.find_one({"id": v["id"]}, {"_id": 0})
+    updated.pop("_id", None)
     return {"ok": True, "amountApplied": round(applied, 2), "voucher": updated}
 
 
@@ -454,7 +497,7 @@ async def revoke_voucher(voucher_id: str, body: dict, user: dict = Depends(get_u
     if user["role"] not in ("owner", "manager"):
         raise HTTPException(403, "Owner/manager only")
     v = await db.vouchers.find_one({"id": voucher_id})
-    if not v:
+    if not v or not tenant_owns_strict(v.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Voucher not found")
     await db.vouchers.update_one({"id": voucher_id}, {"$set": {
         "status": "revoked",
@@ -496,6 +539,15 @@ async def _ledger_write(*, customer_id: str, type_: str, sign: int, amount: floa
 @router.get("/wallet/{customer_id}")
 async def get_wallet(customer_id: str, user: dict = Depends(get_user)):
     c = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+    # NOT tenant_owns_strict — models/customer.py's Customer model has no
+    # businessId field at all; it's stamped externally, inconsistently,
+    # at ~15+ different creation call sites and test fixtures across this
+    # codebase (confirmed via the full test suite: converting this site
+    # broke test_loyalty_v2_points_field.py/test_voice_calls.py, both of
+    # which seed a customer via the bare Customer(...).dict() shape with
+    # no businessId). Auditing and fixing every customer-creation site
+    # plus every test fixture that relies on this is a larger, separate
+    # effort — not attempted this pass.
     if not c or not tenant_owns(c.get("businessId"), user.get("businessId")):
         raise HTTPException(404, "Customer not found")
     entries = await db.wallet_ledger.find({"customerId": customer_id}, {"_id": 0}).sort("createdAt", -1).to_list(2000)

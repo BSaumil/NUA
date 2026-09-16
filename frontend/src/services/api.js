@@ -298,11 +298,14 @@ export const reservationsAPI = {
   seat: (id, tableId) => api.post(`/reservations/${id}/seat`, null, { params: { table_id: tableId } }),
   complete: (id) => api.post(`/reservations/${id}/complete`),
   noShow: (id, fee) => api.post(`/reservations/${id}/no-show`, null, { params: { fee } }),
+  requestDeposit: (id, originUrl) => api.post(`/reservations/${id}/request-deposit`, { originUrl }),
   cancel: (id, reason) => api.post(`/reservations/${id}/cancel`, { reason }),
   restore: (id, status) => api.post(`/reservations/${id}/restore`, status ? { status } : {}),
   approve: (id) => api.post(`/reservations/${id}/approve`),
   reject: (id, reason) => api.post(`/reservations/${id}/reject`, { reason }),
   autoAssign: (id) => api.get(`/reservations/auto-assign/${id}`),
+  getCancellationPolicy: () => api.get('/reservations/cancellation-policy'),
+  updateCancellationPolicy: (data) => api.put('/reservations/cancellation-policy', data),
   // Booking calendar helpers
   dayCounts: (fromDate, toDate) => api.get('/reservations/day-counts', { params: { fromDate, toDate } }),
   createBlackout: (data) => api.post('/reservations/blackouts', data),
@@ -719,6 +722,13 @@ export const agentAPI = {
   getSegments: () => api.get('/agent/segments'),
   getDecisions: (limit = 100) => api.get('/agent/decisions', { params: { limit } }),
   tick: () => api.post('/agent/tick'),
+  // audioBase64: a data: URL as produced by FileReader.readAsDataURL(blob)
+  // (same convention v15API.voiceOrder uses — the backend strips the
+  // "data:...;base64," prefix itself either way).
+  voiceCommand: (audioBase64, mime = 'audio/webm') =>
+    api.post('/agent/voice-command', { audioBase64, mime }),
+  voiceCommandText: (text) => api.post('/agent/voice-command', { text }),
+  voiceCatalog: () => api.get('/agent/voice-catalog'),
 };
 // Phase E+F — Autonomy config, Phone Agent, POs, A/B tests, Your Usual
 export const phaseEFAPI = {
