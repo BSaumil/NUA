@@ -303,15 +303,24 @@ def test_capacity_lock_serializes_two_holders_for_the_same_business_and_date():
     capacity_lock for a given business+date, a second acquire attempt for
     that SAME business+date must not succeed until the first releases —
     proving this is a real mutex, not a no-op context manager — while a
-    different business or a different date must acquire immediately,
-    proving the lock doesn't over-serialize unrelated bookings."""
+    different date must acquire immediately, proving the lock doesn't
+    over-serialize unrelated dates.
+
+    A *different business* for the SAME date must also block: capacity_lock
+    always takes a shared per-date "unscoped" lock underneath its
+    business-specific one, because capacity_for_slot's tenant_scope_filter
+    counts a business's own rows PLUS every untagged row (guest bookings,
+    pre-tenant-stamping legacy rows) toward that business's capacity — so a
+    lock keyed only on the caller's own business_id would let an untagged or
+    other-business booking race straight through it on the same date. See
+    capacity_lock's docstring."""
     import asyncio
     from services import booking_rules_engine as bre
 
     async def _scenario():
         entered_together = False
         other_date_acquired = False
-        other_business_acquired = False
+        other_business_entered_together = False
         async with bre.capacity_lock("lock-test-biz", "2099-01-01"):
             try:
                 async with asyncio.timeout(0.3):
@@ -319,20 +328,27 @@ def test_capacity_lock_serializes_two_holders_for_the_same_business_and_date():
                         entered_together = True
             except TimeoutError:
                 pass
+            try:
+                async with asyncio.timeout(0.3):
+                    async with bre.capacity_lock("some-other-biz", "2099-01-01"):
+                        other_business_entered_together = True
+            except TimeoutError:
+                pass
             async with asyncio.timeout(1):
                 async with bre.capacity_lock("lock-test-biz", "2099-01-02"):
                     other_date_acquired = True
-                async with bre.capacity_lock("some-other-biz", "2099-01-01"):
-                    other_business_acquired = True
-        return entered_together, other_date_acquired, other_business_acquired
+        return entered_together, other_date_acquired, other_business_entered_together
 
-    entered_together, other_date_acquired, other_business_acquired = _run(_scenario())
+    entered_together, other_date_acquired, other_business_entered_together = _run(_scenario())
     assert not entered_together, (
         "a second caller must never be inside the lock for the same business+date "
         "while the first still holds it"
     )
     assert other_date_acquired, "a different date for the same business must not be blocked by this lock"
-    assert other_business_acquired, "a different business must not be blocked by this lock"
+    assert not other_business_entered_together, (
+        "a different business for the SAME date must still be blocked, because untagged/guest "
+        "bookings on that date count toward every business's capacity"
+    )
 
 
 def test_two_concurrent_bookings_for_the_last_slot_never_both_succeed(client, owner_headers):

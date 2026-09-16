@@ -69,31 +69,10 @@ _LOCK_POLL_INTERVAL_SECONDS = 0.05
 
 
 @asynccontextmanager
-async def capacity_lock(business_id: Optional[str], date_str: str):
-    """Serializes reservation creation for one business's given date.
-
-    capacity_for_slot's covers-booked count is a read (aggregate query
-    across db.reservations), not a single document — unlike the atomic
-    compare-and-swap this codebase uses elsewhere for a single-document race
-    (services/wallet_service.py, routes/commerce_v29.py's voucher redemption),
-    there's no one document to pin a filter to here. Two simultaneous
-    requests for the last remaining slot on the same date would otherwise
-    both read "capacity available" before either commits its insert, both
-    pass validate_and_enrich_booking, and both land — overbooking despite
-    enforceCapacity being on.
-
-    Every caller of validate_and_enrich_booking that goes on to actually
-    insert a reservation wraps that whole check-then-insert sequence in
-    `async with capacity_lock(business_id, date):` — this is the atomic
-    primitive that closes the race, not a change to the capacity math
-    itself (which stays exactly the sliding ±slotBufferMinutes window it
-    always was).
-
-    Held for a bounded time (LOCK_TTL_SECONDS) so a crashed holder can never
-    wedge every future booking on that date; a waiter gives up after
-    LOCK_MAX_WAIT_SECONDS with a clear, retryable error rather than hanging.
-    """
-    lock_id = f"{business_id or 'unscoped'}:{date_str}"
+async def _acquire_one(lock_id: str):
+    """Acquire a single named mutex row in db.booking_capacity_locks, TTL'd
+    and token-pinned on release. Factored out of capacity_lock so a caller
+    can hold more than one of these at once (see capacity_lock)."""
     token = uuid.uuid4().hex
     deadline = time.monotonic() + _LOCK_MAX_WAIT_SECONDS
     acquired = False
@@ -129,6 +108,60 @@ async def capacity_lock(business_id: Optional[str], date_str: str):
     finally:
         if acquired:
             await db.booking_capacity_locks.delete_one({"_id": lock_id, "token": token})
+
+
+@asynccontextmanager
+async def capacity_lock(business_id: Optional[str], date_str: str):
+    """Serializes reservation creation for one business's given date.
+
+    capacity_for_slot's covers-booked count is a read (aggregate query
+    across db.reservations), not a single document — unlike the atomic
+    compare-and-swap this codebase uses elsewhere for a single-document race
+    (services/wallet_service.py, routes/commerce_v29.py's voucher redemption),
+    there's no one document to pin a filter to here. Two simultaneous
+    requests for the last remaining slot on the same date would otherwise
+    both read "capacity available" before either commits its insert, both
+    pass validate_and_enrich_booking, and both land — overbooking despite
+    enforceCapacity being on.
+
+    Every caller of validate_and_enrich_booking that goes on to actually
+    insert a reservation wraps that whole check-then-insert sequence in
+    `async with capacity_lock(business_id, date):` — this is the atomic
+    primitive that closes the race, not a change to the capacity math
+    itself (which stays exactly the sliding ±slotBufferMinutes window it
+    always was).
+
+    Held for a bounded time (LOCK_TTL_SECONDS) so a crashed holder can never
+    wedge every future booking on that date; a waiter gives up after
+    LOCK_MAX_WAIT_SECONDS with a clear, retryable error rather than hanging.
+
+    Lock granularity matches capacity_for_slot's query scope, not just the
+    caller's own business_id: tenant_scope_filter() (which capacity_for_slot
+    uses to count covers) matches a tagged business's own rows PLUS every
+    untagged row (no businessId at all — the state of every guest-path
+    booking today, and of any pre-tenant-stamping legacy row). A tagged
+    business's lock used to be keyed only on its own business_id, so a
+    concurrent untagged/guest booking for the same date — which still counts
+    toward that business's capacity via the untagged fallback — held a
+    *different* lock and could race straight through it, overbooking despite
+    the lock appearing to be held. Every acquisition now also takes the
+    shared "unscoped" lock for the date first, so a tagged business's
+    check-then-insert and any untagged booking's check-then-insert for that
+    same date are mutually exclusive, matching what their capacity reads
+    actually overlap with. The cost is that all businesses now serialize
+    with each other on a given date rather than just against themselves;
+    acceptable until tenant stamping is fully backfilled and the untagged
+    fallback stops matching anything (see this module's top-of-file
+    docstring).
+    """
+    unscoped_id = f"unscoped:{date_str}"
+    if business_id:
+        async with _acquire_one(unscoped_id):
+            async with _acquire_one(f"{business_id}:{date_str}"):
+                yield
+    else:
+        async with _acquire_one(unscoped_id):
+            yield
 
 
 DEFAULT_RULES: Dict[str, Any] = {
