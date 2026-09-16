@@ -1,10 +1,10 @@
 # NUA POS Trust Release — Final Verdict
 
 **Branch:** `trust-release/p0-security-foundation`
-**Final head:** `75b0ddcd64759e7e141d284012e854071f83b596`
+**Final head:** `f3b2f080e7f4cdc42a86b4466eb73f095c375d7d`
 **Base:** `main` @ `073750a31a90289f3a5e1aa3e351a8dede8973ec` (confirmed a strict ancestor — zero divergence, no rebase needed)
 **PR:** [#95](https://github.com/BSaumil/NUA/pull/95) — open, not merged, `mergeable_state: clean`
-**Commits:** 86 ahead of `main`, all pushed to `origin`, none merged
+**Commits:** 88 ahead of `main`, all pushed to `origin`, none merged
 
 This is a standalone summary of the release-closure pass documented in full in `backend/TRUST_RELEASE_FINAL_REPORT.md` §11. That file is the source of truth; this one exists so the verdict itself has its own citable, shareable artifact. It supersedes the prior verdict summary (§10's two audit rounds, both still closed and unchanged — see that section for their own detail).
 
@@ -32,7 +32,7 @@ A bounded release-closure pass against seven specific items — not a new audit 
 | mypy differential gate | **810/810 errors, 16/16 known error codes** — reconciled down from a stale 816, net improvement from the `phase_ef.py` fix, zero new error categories |
 | Dependency differential gate | 14/14 advisories within accepted baseline (unchanged) |
 | Lint (`flake8`) | Clean |
-| CI — final head `75b0ddc` | **In progress at the time this file was written** — `secret-scan` and `frontend-build` green on both the `push` and `pull_request` runs; `backend-tests` and `e2e-tests` still running. This is disclosed as pending evidence, not assumed green — confirm directly (Actions tab, or `pull_request_read` → `get_check_runs`) before treating CI as re-confirmed for this exact head. |
+| CI — final head `f3b2f08` | **Confirmed green.** All 8 check runs (`backend-tests`, `secret-scan`, `frontend-build`, `e2e-tests`, on both the branch `push` run and the PR's own `pull_request` run) `completed`/`success`. `mergeable_state: clean`, `main` unchanged and a strict ancestor, 88 commits ahead / 0 behind. |
 
 ---
 
@@ -49,7 +49,7 @@ A bounded release-closure pass against seven specific items — not a new audit 
 
 | Level | Verdict | Basis |
 |---|---|---|
-| **MERGE-READY** | **YES, pending final CI confirmation on `75b0ddc`** | All local gates pass; every Critical/High finding from the original audit and both independent re-audit rounds (§10) remains closed; this pass's own new work is itself tested and revert-verified. CI's own run on this exact head was still in progress when this file was written. |
+| **MERGE-READY** | **YES** | All local gates pass; every Critical/High finding from the original audit and both independent re-audit rounds (§10) remains closed; this pass's own new work is itself tested and revert-verified; CI is confirmed green on the exact final head (`f3b2f08`, all 8 check runs `success`, `mergeable_state: clean`). |
 | **STAGING-DEPLOYMENT-READY** | **YES** | All code/config checklist items this session can satisfy are satisfied (§11.7-A). Remaining items are staging-environment provisioning steps (secrets, seed data, monitoring, backup drill) — this session's job is to name them, not perform them; it was never given, and should never be given, real staging credentials or infrastructure access. |
 | **STAGING-VALIDATED** | **NO — cannot be established from this session** | Requires real staging traffic and human operators (§11.7-B); no deployment action was taken. |
 | **PILOT-READY** | **NO — blocked specifically on the X-Forwarded-For / deployment-topology gap** | A deployment-configuration fact this report cannot confirm from the repository alone. Named explicitly rather than inferred from silence. |
