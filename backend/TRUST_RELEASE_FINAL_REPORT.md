@@ -658,16 +658,27 @@ Legitimate workflows were confirmed still working, not just security-tested: two
 
 Already completed earlier in this same session (task #70, commit `4f75795`) and unchanged by this section: `FORWARDED_ALLOW_IPS` env var (default `127.0.0.1` — trust nobody unless explicitly configured, replacing the old hardcoded `'*'`) in `Dockerfile`/`railway.json`; `backend/scripts/verify_forwarded_allow_ips.py` empirically reproduces the mechanism against real uvicorn subprocesses under three configurations (untrusted IP not matching the real peer, trusted IP matching the real peer, the old `'*'` value); `backend/FORWARDED_ALLOW_IPS_SETUP.md` documents exactly what infrastructure evidence is needed to set this correctly in a real deployment. **The blocker named in §11.4/§11.9 is unchanged and still explicit**: this repository cannot confirm which platform actually serves production traffic or whether a real stripping proxy sits in front of it, so PILOT-READY remains blocked on that specific operational confirmation — this pass made the setting configurable and locally verifiable, it did not and could not verify the real edge, and does not claim to.
 
-### 12.6 Full gate suite — exact results, this pass's own final head (`45bece3`)
+### 12.6 Full gate suite — exact results, this pass's true final head (`7e56490`)
 
 | Gate | Command | Result |
 |---|---|---|
-| Backend suite | `python -m pytest tests/inprocess -q` | **788 passed, 0 failed, 0 skipped** |
+| Backend suite | `python -m pytest tests/inprocess -q` | **788 passed, 0 failed, 0 skipped** (verified on `45bece3`, the last code-bearing commit — `7e56490` on top of it is the report update alone, no code change) |
 | Lint | `python -m flake8 .` | clean |
 | Differential type gate | `python scripts/check_type_baseline.py` | **814/814 errors, 16/16 known error codes — pass** |
 | Differential dependency gate | `python scripts/check_dependency_baseline.py` | **14/14 advisories within accepted baseline — pass** |
 
-Two commits this pass: `5f932dd` (bulk conversion + migration engine + tests, 787 passed pre-push confirmation run) and `45bece3` (the accounting.py read-path fix + test, 788 passed — the +1 is the new test itself). Both pushed to `origin/trust-release/p0-security-foundation`.
+Three commits this pass: `5f932dd` (bulk conversion + migration engine + tests, 787 passed pre-push confirmation run), `45bece3` (the accounting.py read-path fix + test, 788 passed — the +1 is the new test itself), and `7e56490` (this report update, documentation only). All three pushed to `origin/trust-release/p0-security-foundation`.
+
+**CI re-checked directly against the actual final head**, not assumed carried over: on `7e56490`, all 8 check runs — `backend-tests`, `secret-scan`, `frontend-build`, `e2e-tests`, each on both the branch `push` run ([`35085579650`](https://github.com/BSaumil/NUA/actions/runs/35085579650)) and the PR's own `pull_request` run ([`35085583671`](https://github.com/BSaumil/NUA/actions/runs/35085583671)) — are `completed`/`success`:
+
+| Job | Push run | PR run |
+|---|---|---|
+| backend-tests | [success](https://github.com/BSaumil/NUA/actions/runs/35085579650/job/104759553379) | [success](https://github.com/BSaumil/NUA/actions/runs/35085583671/job/104759559352) |
+| secret-scan | [success](https://github.com/BSaumil/NUA/actions/runs/35085579650/job/104759553251) | [success](https://github.com/BSaumil/NUA/actions/runs/35085583671/job/104759559297) |
+| frontend-build | [success](https://github.com/BSaumil/NUA/actions/runs/35085579650/job/104759553108) | [success](https://github.com/BSaumil/NUA/actions/runs/35085583671/job/104759559025) |
+| e2e-tests | [success](https://github.com/BSaumil/NUA/actions/runs/35085579650/job/104759553512) | [success](https://github.com/BSaumil/NUA/actions/runs/35085583671/job/104759559189) |
+
+`pull_request_read` confirms `mergeable_state: clean`, `main` still an unadvanced strict ancestor at `073750a`, PR #95 open, head `7e56490`, 95 commits ahead of main (via `git log origin/main..HEAD`), 0 behind.
 
 ### 12.7 Corrections to prior stale claims
 
@@ -687,8 +698,8 @@ Per the directive's explicit instruction to correct stale summaries rather than 
 | **PILOT-READY** | **NO — still specifically blocked on the X-Forwarded-For / deployment-topology confirmation (§11.4/§12.5)** | Unchanged: the setting is now configurable and locally verified, but this repository still cannot confirm the real production edge topology. Separately, the three disclosed residual ownership-inventory classes (§12.1) should be closed or explicitly accepted as permanent before a pilot handles real customer data across those collections, since a pilot is exactly the point real cross-tenant legacy data would first surface. |
 | **PRODUCTION-READY** | **NOT YET** | Inherits every blocker in §11.9 plus this pass's own three disclosed residual classes (§12.1) — none of them tenant-isolation regressions introduced by this pass, all of them named, scoped follow-up work: a `purchase_orders` document-shape reconciliation, a `table_ordering.py` guest-flow fix (already disclosed in §10.10), and a `Customer` model schema change plus a fixture-wide audit. |
 
-This branch remains on `trust-release/p0-security-foundation`, pushed to `origin` at `45bece3`, **not merged and not deployed by this session.** No production settings and no live customer data were touched at any point in this pass.
+This branch remains on `trust-release/p0-security-foundation`, pushed to `origin` at `7e56490`, **not merged and not deployed by this session.** No production settings and no live customer data were touched at any point in this pass.
 
 ---
 
-*No credentials, certifications, or regulatory approvals have been fabricated or implied anywhere in this work. No live customer data was touched — all testing ran against the in-process mongomock test database. 95 commits are on `trust-release/p0-security-foundation`, pushed to `origin`, not merged to `main` (`origin/main` confirmed a strict ancestor, zero divergence, as of `45bece3`).*
+*No credentials, certifications, or regulatory approvals have been fabricated or implied anywhere in this work. No live customer data was touched — all testing ran against the in-process mongomock test database. 95 commits are on `trust-release/p0-security-foundation`, pushed to `origin`, not merged to `main` (`origin/main` confirmed a strict ancestor, zero divergence, as of `7e56490`). CI green on this exact final head — all 8 check runs `success` (§12.6).*
