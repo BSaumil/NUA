@@ -342,6 +342,7 @@ async def staff_process_tab(split_id: str, data: dict, user: dict = Depends(get_
     tab_id = data.get("tabId")
     amount = data.get("amount", 0)
     method = data.get("method", "cash")
+    idempotency_key = data.get("idempotencyKey")
 
     if not tab_id:
         raise HTTPException(status_code=400, detail="tabId required")
@@ -353,9 +354,21 @@ async def staff_process_tab(split_id: str, data: dict, user: dict = Depends(get_
     if not owning_split or owning_split.get("businessId") != user.get("businessId"):
         raise HTTPException(status_code=404, detail="Tab not found")
 
-    result = await split_payment.staff_process_tab_payment(tab_id, amount, method)
+    result = await split_payment.staff_process_tab_payment(tab_id, amount, method, idempotency_key)
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("error"))
+
+    if not result.get("replayed"):
+        try:
+            from services.audit_service import log_event
+            await log_event(
+                entity_type="split_tab", entity_id=tab_id, action="updated",
+                after=result, memo=f"Staff collected {amount} via {method} on tab {tab_id}",
+                severity="notice", tags=["payment", "split_tab"],
+            )
+        except Exception as e:
+            from utils.errors import log_and_continue
+            log_and_continue(log, f"Split-tab payment audit log write failed for {tab_id}", e)
 
     await realtime_mgr.broadcast_update(split_id, "tab_payment_received", {
         "tabId": tab_id,
