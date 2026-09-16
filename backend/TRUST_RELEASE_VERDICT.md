@@ -1,65 +1,47 @@
 # NUA POS Trust Release — Final Verdict
 
 **Branch:** `trust-release/p0-security-foundation`
-**Final head:** `a34b4aa1d6d99084aecd94b8c2edda46a5eaed2c`
+**Final head:** `75b0ddcd64759e7e141d284012e854071f83b596`
 **Base:** `main` @ `073750a31a90289f3a5e1aa3e351a8dede8973ec` (confirmed a strict ancestor — zero divergence, no rebase needed)
 **PR:** [#95](https://github.com/BSaumil/NUA/pull/95) — open, not merged, `mergeable_state: clean`
-**Commits:** 83 ahead of `main`, all pushed to `origin`, none merged
+**Commits:** 86 ahead of `main`, all pushed to `origin`, none merged
 
-This is a standalone summary of the completion pass documented in full in `backend/TRUST_RELEASE_FINAL_REPORT.md` §10. That file is the source of truth; this one exists so the verdict itself has its own citable, shareable artifact.
+This is a standalone summary of the release-closure pass documented in full in `backend/TRUST_RELEASE_FINAL_REPORT.md` §11. That file is the source of truth; this one exists so the verdict itself has its own citable, shareable artifact. It supersedes the prior verdict summary (§10's two audit rounds, both still closed and unchanged — see that section for their own detail).
 
 ---
 
 ## What this pass closed
 
-The standing directive required that MERGE-READY not be declared without an independent final audit confirming the result. Two audit rounds ran, each against the head the previous round's own fixes produced.
+A bounded release-closure pass against seven specific items — not a new audit round, and explicitly not another feature expansion.
 
-### Round 1 — 10 findings, all fixed
-
-| # | Finding | Fix |
-|---|---|---|
-| 1 | `gdpr_purge` — no tenant check, no collection allowlist | Cross-tenant hard-delete of any document in any collection was possible; restricted to an allowlist + tenant check |
-| 2 | 4 `customers.py` endpoints — no tenant check | Cross-tenant customer PII/store-credit access; added `tenant_owns()` gates |
-| 3 | `revoke_voucher` — no tenant check | Any owner/manager could revoke any other business's voucher |
-| 4 | `partial_checkout` fabricated a completed payment | Recorded a "paid" tender with zero payment processor involved; now records guest intent only, staff must confirm |
-| 5 | Guest bill-split websocket leaked phone numbers | `connect`/`sync_request` payloads redacted (later found incomplete — see round 2, item 2) |
-| 6 | `create_split_group` — no existence check | Created orphaned groups for any guessed/typo'd split_id |
-| 7 | `redeem_wallet_voucher` — lost-update race | Same CAS bug already fixed elsewhere, reachable live from POS checkout |
-| 8 | `capacity_lock` — tenant-scope mismatch | Didn't account for untagged/other-business rows pooling into the same capacity count |
-| 9 | Business export — unfiltered fallback on empty query | Leaked every business's data when the caller's own scoped query was empty |
-| 10 | Server-clock date parsing (voice inbound + AI phone agent) | Switched to venue-local timezone |
-
-### Round 2 — against round 1's own result
-
-| Severity | Finding | Fix |
-|---|---|---|
-| **CRITICAL** | `routes/items_system.py` (categories, modifiers, discounts, comp/void, payment links) had **zero tenant scoping anywhere** — an entire route file missed by every prior sweep | Tenant-scoped every read/write, stamped `businessId` on every create path, scoped the merge endpoint's cross-collection update |
-| **HIGH** | Round 1's websocket redaction (item 5) was incomplete — several other broadcast paths still sent raw phone numbers | Redacted at the source in `SplitRealtimeManager`; no `broadcast_*` method accepts or emits a phone number anymore |
-| Concern | `gdpr_purge`'s tenant check (round 1, item 1) used this codebase's usual fail-open-to-untagged-data convention — correct for a read, wrong for a hard delete | Tightened to an exact `businessId` match; an unconfirmed-ownership document is now refused, not risked |
-
-**All 10 round-1 fixes were independently re-verified correct** by the round-2 audit before it looked for anything new.
+1. **Live baseline re-verified** — PR head/base/CI checked directly, not assumed carried-over from an earlier check.
+2. **Fail-open-to-untagged-data, on mutations**: added `tenant_owns_strict()` — an exact-match, fail-**closed** counterpart to the codebase's existing (and, for reads, deliberately unchanged) fail-open `tenant_owns()`. Applied to 15 write/delete call sites across `accounting.py`, `awards.py`, and `items_system.py`'s discounts/payment-links, each with a two-tenant regression test proving an untagged document is quarantined (refused), never auto-assigned or deleted. Explicitly **declined** to convert `reservations.py` or `items_system.py`'s categories/modifiers after discovering both collections have currently-active (not just historical) untagged-data-creation paths — a strict conversion there would have 404'd real staff workflows. **Disclosed, not hidden:** roughly 117 other mutation call sites across the rest of the codebase were not individually re-reviewed this pass.
+3. **mypy differential gate**: every net-new/removed diagnostic individually re-checked against the TRUE original baseline (804 errors, commit `922202c`), not just the last incremental bump. Found and fixed one genuine type-safety defect in `routes/phase_ef.py` (a dict-literal inference footgun, not a motor-stub false positive) rather than baselining it. Reconciled the baseline file down to the true count: **810**.
+4. **Deployment edge / X-Forwarded-For**: empirically reproduced the spoofing risk against a real uvicorn instance running this deployment's actual flags (`--proxy-headers --forwarded-allow-ips '*'`). Fixed the topology-independent part — login/2FA brute-force lockout no longer keys on the spoofable `request.client.host`. Named, rather than guessed at, what's still open: the guest-surface rate limits and `forgot_password`'s throttle remain spoofable until whoever owns the real production edge confirms its actual topology.
+5. **Guest partial-checkout hardening**: `staff_process_tab` is now atomic (compare-and-swap, matching the voucher-redemption pattern) and idempotent (an `idempotencyKey` prevents a retry or double-tap from double-recording a real payment), and every real collection now writes an audit-log entry. Fixed misleading guest-facing copy ("Pay $X" → "Add $X to Tab", all 4 locales) so the UI stops implying the tap itself completes a charge. No new payment integration was built.
+6. **Finding-to-fix map**: every item in the original `NUA_POS_PR95_Final_Readiness_Audit.md` mapped explicitly to closed/open status — full table in the main report §11.6.
+7. **Staging checklist**: split into "ready to deploy to staging" (code/config — satisfied) versus "staging validated" (needs real staging traffic and human operators — cannot be checked from this session).
 
 ---
 
-## Verification discipline
-
-Every fix above has a dedicated regression test. Every one was verified by reverting the specific fix (`git apply -R` against the isolated diff) and confirming the new test **fails** against the pre-fix code, then restoring the fix and confirming it passes again — no exceptions.
-
-## Tests and gates
+## Tests and gates (this pass's own head, local re-run)
 
 | Metric | Result |
 |---|---|
-| Backend suite | **742 passed, 0 failed, 0 skipped**, 0 collection errors (up from 613 pre-session) |
-| mypy differential gate | 816/816 errors, 16/16 known error codes — all new findings the documented motor-stub `find_one` false-positive class, zero new error categories |
-| Dependency differential gate | 14/14 advisories within accepted baseline |
+| Backend suite | **755 passed, 0 failed, 0 skipped**, 0 collection errors (up from 742 before this pass) |
+| mypy differential gate | **810/810 errors, 16/16 known error codes** — reconciled down from a stale 816, net improvement from the `phase_ef.py` fix, zero new error categories |
+| Dependency differential gate | 14/14 advisories within accepted baseline (unchanged) |
 | Lint (`flake8`) | Clean |
-| CI — final head `a34b4aa` | All 4 required jobs (`backend-tests`, `secret-scan`, `frontend-build`, `e2e-tests`) green, on both the branch `push` run and the PR's own `pull_request` run |
+| CI — final head `75b0ddc` | **In progress at the time this file was written** — `secret-scan` and `frontend-build` green on both the `push` and `pull_request` runs; `backend-tests` and `e2e-tests` still running. This is disclosed as pending evidence, not assumed green — confirm directly (Actions tab, or `pull_request_read` → `get_check_runs`) before treating CI as re-confirmed for this exact head. |
 
-## Remaining named risks (not fixed — deployment-topology decisions this repo can't answer alone)
+---
 
-- **`X-Forwarded-For` / uvicorn `--forwarded-allow-ips '*'`** (`Dockerfile`, `railway.json`): if this app is genuinely internet-facing without a header-stripping proxy in front of it, a client can spoof a fresh IP per request and bypass every IP-keyed rate limit (including login/2FA brute-force protection). Whoever owns the production deployment topology needs to confirm which case applies.
-- **Guest bill-split partial payments** (`partial_checkout`) record guest intent only — no real Stripe/Coinbase charge is wired into this specific flow yet. Staff must manually collect and confirm via `staff-process-tab`. Full processor integration is a separate, larger feature addition.
-- **Item 17**: the 50 live-server-only test suites outside `tests/inprocess/` remain unmigrated and don't run in CI — a known coverage gap, not a regression.
+## Remaining named risks (unchanged from §10, still open)
+
+- **`X-Forwarded-For` / uvicorn `--forwarded-allow-ips '*'`**: the login/2FA lockout fix in this pass closes one specific bypass; the broader rate-limit layer and `forgot_password`'s throttle remain spoofable until the real production edge topology is confirmed. **This specifically keeps PILOT-READY blocked.**
+- **Guest bill-split partial payments** still record intent only — no real Stripe/Coinbase charge wired into this flow; staff must manually collect and confirm. A real processor integration remains separate, larger, and out of scope for this pass.
+- **Item 17**: the 50 live-server-only test suites outside `tests/inprocess/` remain unmigrated and don't run in CI.
+- **New this pass**: ~117 mutation-path `tenant_owns()` call sites outside the 15 converted this pass were not individually re-reviewed for the same active-untagged-creation-path hazard found in `reservations.py`/`items_system.py`.
 
 ---
 
@@ -67,13 +49,14 @@ Every fix above has a dedicated regression test. Every one was verified by rever
 
 | Level | Verdict | Basis |
 |---|---|---|
-| **MERGE-READY** | **YES** | Every Critical/High finding from both audit rounds closed and independently re-audited; full gate suite green on the current head; zero fabricated evidence |
-| **STAGING-READY** | **YES** | Same evidence, plus staging is exactly the right environment to validate the two named residual risks under real traffic before general exposure |
-| **CONTROLLED-PILOT-READY** | **YES**, with the network-topology risk named and understood | Reasonable for a small number of trusted businesses once `--forwarded-allow-ips` is confirmed against the real deployment edge |
-| **GENERAL-PRODUCTION-READY** | **NOT YET** | Blocked on the X-Forwarded-For topology decision (and fix, if the app is genuinely internet-facing) and on wiring a real payment processor into guest bill-split partial payments |
+| **MERGE-READY** | **YES, pending final CI confirmation on `75b0ddc`** | All local gates pass; every Critical/High finding from the original audit and both independent re-audit rounds (§10) remains closed; this pass's own new work is itself tested and revert-verified. CI's own run on this exact head was still in progress when this file was written. |
+| **STAGING-DEPLOYMENT-READY** | **YES** | All code/config checklist items this session can satisfy are satisfied (§11.7-A). Remaining items are staging-environment provisioning steps (secrets, seed data, monitoring, backup drill) — this session's job is to name them, not perform them; it was never given, and should never be given, real staging credentials or infrastructure access. |
+| **STAGING-VALIDATED** | **NO — cannot be established from this session** | Requires real staging traffic and human operators (§11.7-B); no deployment action was taken. |
+| **PILOT-READY** | **NO — blocked specifically on the X-Forwarded-For / deployment-topology gap** | A deployment-configuration fact this report cannot confirm from the repository alone. Named explicitly rather than inferred from silence. |
+| **PRODUCTION-READY** | **NOT YET** | Inherits every blocker above, plus the two long-standing named gaps (processor integration, topology confirmation) and this pass's own two disclosed-open items (the 117 unreviewed mutation sites; the 50 unmigrated test suites). None are tenant-isolation or data-integrity defects; all are named decisions or follow-up work. |
 
-**This branch has not been merged or deployed. Merging remains the user's decision.**
+**This branch has not been merged or deployed. No production settings and no live customer data were touched. Merging remains the user's decision.**
 
 ---
 
-*Full evidence, file-by-file citations, commit tables, and exact gate output live in `backend/TRUST_RELEASE_FINAL_REPORT.md` §10.*
+*Full evidence, file-by-file citations, the complete finding-to-fix map, and the two-part staging checklist live in `backend/TRUST_RELEASE_FINAL_REPORT.md` §11.*
