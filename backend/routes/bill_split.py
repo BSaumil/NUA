@@ -187,7 +187,7 @@ async def checkout(split_id: str, data: dict, http_request: Request, session: di
     amount = payload.get("amount", 0)
     points = await split_loyalty.calculate_loyalty_points(amount)
     await split_loyalty.award_loyalty_points(customer["id"], points, split_id, "guest_split_payment")
-    await realtime_mgr.broadcast_payment(split_id, session["phone"], amount)
+    await realtime_mgr.broadcast_payment(split_id, amount)
 
     return response
 
@@ -203,7 +203,12 @@ async def create_group(split_id: str, session: dict = Depends(get_guest_session)
     if group is None:
         raise HTTPException(status_code=404, detail="Split not found")
     await split_group.sync_group_to_split(split_id)
-    await realtime_mgr.broadcast_update(split_id, "group_created", group)
+    # Redacted the same way get_group_status redacts for a non-participant —
+    # this websocket has no authentication at all (see
+    # websocket_split_updates's own docstring), so organizerPhone/
+    # participants (a phone list) must never go out on it.
+    public_group = {k: v for k, v in group.items() if k not in ("organizerPhone", "participants")}
+    await realtime_mgr.broadcast_update(split_id, "group_created", public_group)
     return group
 
 
@@ -218,7 +223,7 @@ async def send_invite(split_id: str, data: dict, session: dict = Depends(get_gue
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("error"))
 
-    await realtime_mgr.broadcast_group_invite(split_id, invite_phone)
+    await realtime_mgr.broadcast_group_invite(split_id)
     return result
 
 
@@ -234,9 +239,9 @@ async def accept_group_invite(split_id: str, data: dict, session: dict = Depends
         raise HTTPException(status_code=400, detail=result.get("error"))
 
     await split_group.sync_group_to_split(split_id)
-    await realtime_mgr.broadcast_update(split_id, "guest_joined_group", {
-        "guestPhone": session["phone"]
-    })
+    # No guestPhone in the broadcast — this websocket has no authentication
+    # at all (see websocket_split_updates's own docstring).
+    await realtime_mgr.broadcast_update(split_id, "guest_joined_group", {})
     return result
 
 
@@ -293,8 +298,10 @@ async def partial_checkout(split_id: str, data: dict, session: dict = Depends(ge
 
     tab = await split_payment.create_guest_tab(split_id, session["phone"], total_amount, line_ids, slot_index)
 
+    # No guestPhone in the broadcast — this websocket has no authentication
+    # at all (see websocket_split_updates's own docstring).
     await realtime_mgr.broadcast_update(split_id, "guest_intends_partial_payment", {
-        "guestPhone": session["phone"], "tabId": tab["id"], "intendedAmount": amount,
+        "tabId": tab["id"], "intendedAmount": amount,
     })
 
     return {

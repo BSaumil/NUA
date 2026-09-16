@@ -934,3 +934,74 @@ def test_group_status_redacts_organizer_and_participants_for_a_non_participant(c
         assert r_organizer.json().get("organizerPhone") == "+61412345114"
     finally:
         _cleanup_table("T-GROUP-2")
+
+
+# ------------------------------------------------------- websocket broadcast
+
+
+class _FakeWebSocket:
+    def __init__(self):
+        self.messages = []
+
+    async def send_json(self, msg):
+        self.messages.append(msg)
+
+
+def _register_fake_ws(split_id):
+    from services import split_realtime
+    mgr = split_realtime.get_manager()
+    ws = _FakeWebSocket()
+    _run(mgr.register_connection(split_id, ws))
+    return ws
+
+
+def _no_phone_leaked(messages, *phones):
+    """No broadcast message anywhere in `messages` — at any nesting level —
+    may contain any of `phones` as a value."""
+    import json
+    blob = json.dumps(messages, default=str)
+    return all(phone not in blob for phone in phones)
+
+
+def test_group_create_invite_and_partial_checkout_never_broadcast_a_phone_number(client):
+    """These broadcasts go out on /ws/split/{split_id}, which has no
+    authentication at all by design (see websocket_split_updates's own
+    docstring) — anyone who can open it for a split_id (itself reachable
+    via the unauthenticated GET .../split) can watch every event on it.
+    group_created used to carry the group's raw organizerPhone and
+    participants list; guest_joined_group and guest_intends_partial_payment
+    each carried the acting guest's raw phone. Found during a second
+    independent final readiness audit."""
+    _seed_table_order("T-WS-PII-1")
+    try:
+        split = req(client, "GET", "/api/table/T-WS-PII-1/split?business=default").json()
+        ws = _register_fake_ws(split["id"])
+
+        organizer_phone = "+61412345200"
+        invitee_phone = "+61412345201"
+        organizer_token = _guest_token(organizer_phone)
+
+        r = req(client, "POST", f"/api/table/split/{split['id']}/group/create",
+                headers={"Authorization": f"Bearer {organizer_token}"})
+        assert r.status_code == 200, r.text
+
+        r2 = req(client, "POST", f"/api/table/split/{split['id']}/group/invite",
+                  headers={"Authorization": f"Bearer {organizer_token}"}, json={"phone": invitee_phone})
+        assert r2.status_code == 200, r2.text
+
+        invitee_token = _guest_token(invitee_phone)
+        line_id = split["lines"][0]["id"]
+        req(client, "POST", f"/api/table/split/{split['id']}/claim",
+            headers={"Authorization": f"Bearer {invitee_token}"}, json={"lineIds": [line_id]})
+        r3 = req(client, "POST", f"/api/table/split/{split['id']}/partial-checkout",
+                  headers={"Authorization": f"Bearer {invitee_token}"},
+                  json={"amount": 1, "lineIds": [line_id], "totalAmount": 15})
+        assert r3.status_code == 200, r3.text
+
+        assert len(ws.messages) >= 3, "expected at least the group-create/invite/partial-payment broadcasts"
+        assert _no_phone_leaked(ws.messages, organizer_phone, invitee_phone), (
+            f"a guest phone number must never appear in an unauthenticated websocket broadcast, "
+            f"got messages: {ws.messages}"
+        )
+    finally:
+        _cleanup_table("T-WS-PII-1")
