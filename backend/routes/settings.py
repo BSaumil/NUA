@@ -9,7 +9,7 @@ from models.table import Table, TableCreate
 from models.eftpos import EFTPOSConfig, EFTPOSConfigCreate, EFTPOSTransaction, EFTPOSTransactionRequest
 from models.staff import StaffShift
 from utils.mongo_safe import safe_find_list
-from middleware.actor_context import tenant_scope_filter
+from middleware.actor_context import tenant_scope_filter, tenant_owns_strict
 from utils.dates import date_range_filter
 import logging
 import uuid
@@ -115,14 +115,31 @@ async def create_user(user: UserCreate):
 
 # ============ OFFLINE SYNC API ============
 @router.post("/offline/sync")
-async def sync_offline_data(data: dict):
+async def sync_offline_data(data: dict, user: dict = Depends(get_user)):
+    """Previously had no auth dependency at all and upserted caller-supplied
+    transaction/product documents by id with no tenant check whatsoever —
+    any authenticated staff member of any business could overwrite (with
+    entirely caller-controlled fields) another business's transaction or
+    product just by knowing/guessing its id. Now requires auth, refuses
+    (skips, doesn't error the whole batch) any id that already belongs to
+    a different business, and stamps the caller's own businessId on every
+    upserted document."""
+    business_id = user.get("businessId")
     synced = {"transactions": 0, "products": 0, "customers": 0}
     if "transactions" in data:
         for txn in data["transactions"]:
+            existing = await db.transactions.find_one({"id": txn["id"]}, {"_id": 0, "businessId": 1})
+            if existing and not tenant_owns_strict(existing.get("businessId"), business_id):
+                continue
+            txn["businessId"] = business_id
             await db.transactions.update_one({"id": txn["id"]}, {"$set": txn}, upsert=True)
             synced["transactions"] += 1
     if "products" in data:
         for prod in data["products"]:
+            existing = await db.products.find_one({"id": prod["id"]}, {"_id": 0, "businessId": 1})
+            if existing and not tenant_owns_strict(existing.get("businessId"), business_id):
+                continue
+            prod["businessId"] = business_id
             await db.products.update_one({"id": prod["id"]}, {"$set": prod}, upsert=True)
             synced["products"] += 1
     return {"message": "Sync complete", "synced": synced}

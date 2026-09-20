@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone, timedelta
 from database import db
+from middleware.actor_context import tenant_scope_filter
 import asyncio
 import os
 import uuid
@@ -486,8 +487,23 @@ GENERATORS = [
 ]
 
 
-async def run_all_insights(include_summary: bool = False) -> Dict[str, Any]:
-    """Runs all 15 (or 16) generators concurrently. Upserts by (category, key)."""
+async def run_all_insights(include_summary: bool = False, business_id: Optional[str] = None) -> Dict[str, Any]:
+    """Runs all 15 (or 16) generators concurrently. Upserts by (category, key, businessId).
+
+    None of the 16 individual generators scope their own internal reads
+    (transactions/customers/products/staff/roster) by business yet — that
+    is a real, separate, larger follow-up (each one queries a different
+    mix of collections). This fixes the narrower but still severe half of
+    the problem: without businessId in the upsert key, two businesses'
+    same-named insight (e.g. category="theft", key="theft-signal-1")
+    collided on one document, so one business's run_all_insights() call
+    could silently overwrite — and later "resolve" — another business's
+    still-active insight. business_id defaults from the request's actor
+    context, same pattern as notification_service.send().
+    """
+    if business_id is None:
+        from middleware.actor_context import get_actor_context
+        business_id = get_actor_context().get("businessId")
     tasks = [g() for _, g in GENERATORS]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     all_insights: List[Dict[str, Any]] = []
@@ -510,22 +526,29 @@ async def run_all_insights(include_summary: bool = False) -> Dict[str, Any]:
         except Exception as e:
             errors["summary"] = str(e)
 
-    # Upsert into `ash_insights`, indexed by (category, key), fresh each run
+    # Upsert into `ash_insights`, indexed by (category, key, businessId) —
+    # businessId is part of the key itself, not just a stamped field, so two
+    # businesses' same-named insight can never collide on one document.
     for ins in all_insights:
+        ins["businessId"] = business_id
         await db.ash_insights.update_one(
-            {"category": ins["category"], "key": ins["key"]},
+            {"category": ins["category"], "key": ins["key"], "businessId": business_id},
             {"$set": ins, "$setOnInsert": {"firstSeenAt": ins["createdAt"]}},
             upsert=True,
         )
-    # Mark stale insights (not touched this run) as resolved
+    # Mark stale insights (not touched this run) as resolved — scoped to
+    # this business's own insights, so running the scan for one business
+    # never resolves another business's still-active ones.
     fresh_keys = [(i["category"], i["key"]) for i in all_insights]
     resolved = 0
     if fresh_keys:
-        cursor = db.ash_insights.find({"resolvedAt": None}, {"_id": 0, "category": 1, "key": 1})
+        cursor = db.ash_insights.find(
+            {"resolvedAt": None, **tenant_scope_filter(business_id)},
+            {"_id": 0, "category": 1, "key": 1})
         async for row in cursor:
             if (row["category"], row["key"]) not in fresh_keys:
                 await db.ash_insights.update_one(
-                    {"category": row["category"], "key": row["key"]},
+                    {"category": row["category"], "key": row["key"], **tenant_scope_filter(business_id)},
                     {"$set": {"resolvedAt": _now().isoformat()}},
                 )
                 resolved += 1

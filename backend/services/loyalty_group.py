@@ -64,7 +64,15 @@ async def passport_view(phone: str, anchor_business_id: Optional[str]) -> Dict[s
     )
     biz_names = {b["id"]: b["name"] for b in biz_rows}
 
-    tiers = await db.loyalty_tiers.find({}, {"_id": 0}).sort("minPoints", 1).to_list(20)
+    # Tier definitions are business-scoped (see routes/loyalty.py) — an
+    # unscoped read here would compute the group's displayed tier name
+    # from whichever business's tier documents the query happened to hit
+    # first, not the anchor business's own. Scoped to the anchor
+    # specifically (not the whole sibling group): a multi-location owner
+    # could in principle set different tier ladders per venue, and the
+    # guest is looking this up from one specific venue's context.
+    from middleware.actor_context import tenant_scope_filter
+    tiers = await db.loyalty_tiers.find(tenant_scope_filter(anchor_business_id), {"_id": 0}).sort("minPoints", 1).to_list(20)
     group_points = sum(int(r.get("points") or 0) for r in records)
     group_spent = round(sum(float(r.get("totalSpent") or 0) for r in records), 2)
     group_visits = sum(int(r.get("visits") or 0) for r in records)

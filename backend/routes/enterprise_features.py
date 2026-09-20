@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
-from deps import require_owner, require_owner_or_manager
+from deps import require_owner, require_owner_or_manager, get_user
 from database import db
 from middleware.actor_context import tenant_scope_filter
 from datetime import datetime, timezone
@@ -8,24 +8,29 @@ import uuid
 router = APIRouter()
 
 # ============ AUTO SURCHARGING (Public Holiday + Weekend) ============
+# Every endpoint in this file previously had no auth dependency at all, and
+# every db.settings read/write below was a single document shared by every
+# business on the deployment — see services/tenant_settings.py.
 @router.get("/surcharge/settings")
-async def get_surcharge_settings():
-    s = await db.settings.find_one({"key": "surcharge_config"}, {"_id": 0})
-    return s.get("value", {}) if s else {
+async def get_surcharge_settings(user: dict = Depends(get_user)):
+    from services.tenant_settings import get_setting
+    value = await get_setting("surcharge_config", user.get("businessId"))
+    return value or {
         "weekendSurcharge": 0, "publicHolidaySurcharge": 0, "enabled": False,
         "publicHolidays": [], "weekendDays": ["Saturday", "Sunday"],
     }
 
 @router.post("/surcharge/settings")
-async def save_surcharge_settings(data: dict, _: dict = Depends(require_owner)):
-    await db.settings.update_one({"key": "surcharge_config"}, {"$set": {"key": "surcharge_config", "value": data}}, upsert=True)
+async def save_surcharge_settings(data: dict, user: dict = Depends(require_owner)):
+    from services.tenant_settings import set_setting
+    await set_setting("surcharge_config", data, user.get("businessId"))
     return {"message": "Surcharge settings saved"}
 
 @router.get("/surcharge/check")
-async def check_surcharge():
+async def check_surcharge(user: dict = Depends(get_user)):
     """Check if surcharge applies right now"""
-    s = await db.settings.find_one({"key": "surcharge_config"}, {"_id": 0})
-    config = s.get("value", {}) if s else {}
+    from services.tenant_settings import get_setting
+    config = await get_setting("surcharge_config", user.get("businessId")) or {}
     if not config.get("enabled"):
         return {"surchargePercent": 0, "reason": None}
     now = datetime.now(timezone.utc)
@@ -43,17 +48,19 @@ async def check_surcharge():
 # discounted net — a discount shouldn't quietly shrink the tip a server
 # earned for the same work.
 @router.get("/gratuity/settings")
-async def get_gratuity_settings():
-    s = await db.settings.find_one({"key": "gratuity_config"}, {"_id": 0})
-    return s.get("value", {}) if s else {
+async def get_gratuity_settings(user: dict = Depends(get_user)):
+    from services.tenant_settings import get_setting
+    value = await get_setting("gratuity_config", user.get("businessId"))
+    return value or {
         "enabled": False,
         "calculateOn": "post_discount",  # pre_discount | post_discount
         "rates": [],  # [{id, label, percent, minCovers, maxCovers}]
     }
 
 @router.post("/gratuity/settings")
-async def save_gratuity_settings(data: dict, _: dict = Depends(require_owner)):
-    await db.settings.update_one({"key": "gratuity_config"}, {"$set": {"key": "gratuity_config", "value": data}}, upsert=True)
+async def save_gratuity_settings(data: dict, user: dict = Depends(require_owner)):
+    from services.tenant_settings import set_setting
+    await set_setting("gratuity_config", data, user.get("businessId"))
     return {"message": "Gratuity settings saved"}
 
 def _match_gratuity_rate(rates, covers):
@@ -72,10 +79,10 @@ def _match_gratuity_rate(rates, covers):
     return None
 
 @router.get("/gratuity/check")
-async def check_gratuity(covers: int = None):
+async def check_gratuity(covers: int = None, user: dict = Depends(get_user)):
     """Which gratuity rate (if any) applies right now, for this party size."""
-    s = await db.settings.find_one({"key": "gratuity_config"}, {"_id": 0})
-    config = s.get("value", {}) if s else {}
+    from services.tenant_settings import get_setting
+    config = await get_setting("gratuity_config", user.get("businessId")) or {}
     calculate_on = config.get("calculateOn", "post_discount")
     if not config.get("enabled"):
         return {"gratuityPercent": 0, "label": None, "calculateOn": calculate_on}
@@ -260,17 +267,19 @@ async def clear_staff_override(staff_id: str, _: dict = Depends(require_owner)):
 
 # ============ AUTOMATED REPORTING ============
 @router.get("/reports/automated-config")
-async def get_report_config(_: dict = Depends(require_owner)):
-    s = await db.settings.find_one({"key": "auto_report_config"}, {"_id": 0})
-    return s.get("value", {}) if s else {
+async def get_report_config(user: dict = Depends(require_owner)):
+    from services.tenant_settings import get_setting
+    value = await get_setting("auto_report_config", user.get("businessId"))
+    return value or {
         "enabled": False, "frequency": "daily", "time": "23:00",
         "reportTypes": ["itemised", "category", "detailed"],
         "recipientEmail": "", "includeAIInsights": True,
     }
 
 @router.post("/reports/automated-config")
-async def save_report_config(data: dict, _: dict = Depends(require_owner)):
-    await db.settings.update_one({"key": "auto_report_config"}, {"$set": {"key": "auto_report_config", "value": data}}, upsert=True)
+async def save_report_config(data: dict, user: dict = Depends(require_owner)):
+    from services.tenant_settings import set_setting
+    await set_setting("auto_report_config", data, user.get("businessId"))
     return {"message": "Automated report settings saved"}
 
 # ============ HARDWARE INTEGRATIONS ============

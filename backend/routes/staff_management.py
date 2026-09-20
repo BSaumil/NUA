@@ -250,16 +250,18 @@ _POS_SESSION_ALLOWED_MINUTES = {0, 2, 5, 10}
 
 
 @router.get("/settings/pos-session")
-async def get_pos_session_settings(_: dict = Depends(get_user)):
-    s = await db.settings.find_one({"key": "pos_session"}, {"_id": 0})
+async def get_pos_session_settings(user: dict = Depends(get_user)):
+    from services.tenant_settings import get_setting
+    value = await get_setting("pos_session", user.get("businessId"))
     cfg = dict(POS_SESSION_DEFAULTS)
-    if s and isinstance(s.get("value"), dict):
-        cfg.update({k: v for k, v in s["value"].items() if v is not None})
+    if isinstance(value, dict):
+        cfg.update({k: v for k, v in value.items() if v is not None})
     return cfg
 
 
 @router.post("/settings/pos-session")
-async def save_pos_session_settings(data: dict, _: dict = Depends(require_owner)):
+async def save_pos_session_settings(data: dict, user: dict = Depends(require_owner)):
+    from services.tenant_settings import set_setting
     try:
         timeout = int(data.get("timeoutMinutes", 0))
     except (TypeError, ValueError):
@@ -267,9 +269,7 @@ async def save_pos_session_settings(data: dict, _: dict = Depends(require_owner)
     if timeout not in _POS_SESSION_ALLOWED_MINUTES:
         raise HTTPException(status_code=400, detail="timeoutMinutes must be one of 0 (stay logged in), 2, 5, 10")
     cfg = {"timeoutMinutes": timeout}
-    await db.settings.update_one(
-        {"key": "pos_session"}, {"$set": {"key": "pos_session", "value": cfg}}, upsert=True
-    )
+    await set_setting("pos_session", cfg, user.get("businessId"))
     return cfg
 
 @router.get("/staff/timecards")
@@ -618,19 +618,17 @@ async def get_staff_reports( period: str = "week", _: dict = Depends(require_own
 
 # ============ RECEIPT SETTINGS ============
 @router.get("/receipt/settings")
-async def get_receipt_settings():
-    s = await db.settings.find_one({"key": "receipt_config"}, {"_id": 0})
-    return s.get("value", {}) if s else {
+async def get_receipt_settings(user: dict = Depends(get_user)):
+    from services.tenant_settings import get_setting
+    value = await get_setting("receipt_config", user.get("businessId"))
+    return value or {
         "logoUrl": "", "showPaymentQR": True, "showSocialQR": True,
         "showPromoQR": True, "socialMediaUrl": "", "promoText": "",
         "businessName": "NUA", "businessAddress": "", "businessPhone": "",
     }
 
 @router.post("/receipt/settings")
-async def save_receipt_settings(data: dict, _: dict = Depends(require_owner_or_manager)):
-    await db.settings.update_one(
-        {"key": "receipt_config"},
-        {"$set": {"key": "receipt_config", "value": data}},
-        upsert=True
-    )
+async def save_receipt_settings(data: dict, user: dict = Depends(require_owner_or_manager)):
+    from services.tenant_settings import set_setting
+    await set_setting("receipt_config", data, user.get("businessId"))
     return {"message": "Receipt settings saved"}

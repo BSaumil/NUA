@@ -53,7 +53,8 @@ def compute_points_earned(
     return int(total * loyalty_multiplier * earn_rate * category_mult)
 
 
-async def credit_loyalty_points(customer_id: str, points_earned: int, total: float, transaction_id: str) -> None:
+async def credit_loyalty_points(customer_id: str, points_earned: int, total: float, transaction_id: str,
+                                 business_id: Optional[str] = None) -> None:
     """$inc a customer's points/totalSpent/visits and write the earn-side
     loyalty ledger entry for one sale. Safe to call with points_earned == 0
     (still records the visit/spend)."""
@@ -80,6 +81,7 @@ async def credit_loyalty_points(customer_id: str, points_earned: int, total: flo
                 "transactionId": transaction_id,
                 "type": "earn",
                 "points": points_earned,
+                "businessId": business_id,
                 "createdAt": datetime.utcnow().isoformat(),
             })
         except Exception:

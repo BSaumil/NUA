@@ -9,7 +9,7 @@ import uuid
 from database import db
 from deps import get_user, optional_user, require_owner_or_manager
 from models.product import Product, ProductCreate, ProductUpdate
-from middleware.actor_context import tenant_scope_filter, tenant_owns
+from middleware.actor_context import tenant_scope_filter, tenant_owns_strict
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -89,7 +89,7 @@ async def create_product(product: ProductCreate, _: dict = Depends(require_owner
 async def update_product(product_id: str, product_update: ProductUpdate, user: dict = Depends(require_owner_or_manager)):
     from services.entity_service import stamped_update
     existing = await db.products.find_one({"id": product_id}, {"_id": 0, "businessId": 1})
-    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if not existing or not tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Product not found")
     update_data = {k: v for k, v in product_update.dict().items() if v is not None}
     result = await stamped_update("products", product_id, update_data, entity_type="product")
@@ -101,7 +101,7 @@ async def update_product(product_id: str, product_update: ProductUpdate, user: d
 async def delete_product(product_id: str, user: dict = Depends(require_owner_or_manager)):
     from services.entity_service import soft_delete
     existing = await db.products.find_one({"id": product_id}, {"_id": 0, "businessId": 1})
-    if not existing or not tenant_owns(existing.get("businessId"), user.get("businessId")):
+    if not existing or not tenant_owns_strict(existing.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Product not found")
     result = await soft_delete("products", product_id, entity_type="product")
     if not result:
@@ -114,7 +114,7 @@ async def adjust_stock(product_id: str, data: dict, user: dict = Depends(require
     reason = data.get("reason", "Manual adjustment")
     location = data.get("location")  # optional — see below
     product = await db.products.find_one({"id": product_id})
-    if not product or not tenant_owns(product.get("businessId"), user.get("businessId")):
+    if not product or not tenant_owns_strict(product.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Product not found")
 
     if location:
@@ -211,7 +211,7 @@ async def auto_translate_product(product_id: str, user: dict = Depends(require_o
     below.
     """
     product = await db.products.find_one({"id": product_id}, {"_id": 0})
-    if not product or not tenant_owns(product.get("businessId"), user.get("businessId")):
+    if not product or not tenant_owns_strict(product.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Product not found")
 
     api_key = os.environ.get("EMERGENT_LLM_KEY")

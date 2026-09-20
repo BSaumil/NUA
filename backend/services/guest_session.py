@@ -27,7 +27,7 @@ GUEST_SESSION_TTL_MINUTES = 60
 
 
 def _secret() -> str:
-    return os.environ.get("JWT_SECRET") or "nua-fallback-please-set-jwt-secret"
+    return os.environ["JWT_SECRET"]
 
 
 def issue_guest_token(phone: str) -> str:

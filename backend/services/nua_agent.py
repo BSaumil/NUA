@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 from database import db
-from services import nua_tools, nua_personas, nua_memory
+from services import nua_tools, nua_personas, nua_memory, audit_service
 import json
 import logging
 import os
@@ -218,8 +218,22 @@ Live context (last 15 audit rows, 10 open insights, 10 pending approvals):
                     result = {"status": "blocked",
                                 "reason": f"Tool '{tool_name}' is outside {persona_obj.label}'s remit — switch persona.",
                                 "tool": tool_name, "persona": persona_obj.id}
+                    await audit_service.log_event(
+                        entity_type="ash_tool:persona_guard", entity_id=tool_name, action="blocked",
+                        after={"reason": "outside_persona_remit", "persona": persona_obj.id, "args": args},
+                        memo=f"Blocked call to '{tool_name}' — outside {persona_obj.label}'s remit",
+                        severity="notice", tags=["ash_agent", "blocked", "persona_guard"],
+                    )
                 else:
-                    result = await nua_tools.execute_tool(tool_name, args, actor=actor)
+                    # session_id+turn+tool uniquely identifies this exact
+                    # tool call within this chat — a retried request for the
+                    # same turn (client timeout-and-retry, a replayed
+                    # webhook, etc.) dedups instead of re-running a mutating
+                    # tool a second time.
+                    result = await nua_tools.execute_tool(
+                        tool_name, args, actor=actor,
+                        idempotency_key=f"chat:{session_id}:{turn}:{tool_name}",
+                    )
                 tool_results.append(result)
                 outcomes_summary.append({
                     "tool": tool_name,

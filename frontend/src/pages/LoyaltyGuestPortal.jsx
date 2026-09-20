@@ -7,7 +7,7 @@ import { Badge } from '../components/ui/badge';
 import { loyaltyGuestAPI } from '../services/api';
 import {
   Sparkles, Coffee, Heart, Trophy, DollarSign, Crown, Sunrise, Wine, Users, Gift,
-  Lock, CheckCircle2, Target, Loader2, Phone, MapPin,
+  Lock, CheckCircle2, Target, Loader2, Phone, MapPin, Star,
 } from 'lucide-react';
 
 const ICONS = {
@@ -186,6 +186,22 @@ export default function LoyaltyGuestPortal() {
                       </div>
                     ))}
                   </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {data.subscription && (
+              <Card className="border-amber-200 bg-amber-50/60" data-testid="guest-subscription-card">
+                <CardContent className="p-5 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Star size={16} className="text-amber-600" fill="currentColor" />
+                    <p className="font-semibold text-sm text-amber-800">{data.subscription.planName} member</p>
+                  </div>
+                  {data.subscription.perks?.length > 0 && (
+                    <ul className="text-xs text-amber-700/90 space-y-1 pl-1">
+                      {data.subscription.perks.map((p, i) => <li key={i}>• {p}</li>)}
+                    </ul>
+                  )}
                 </CardContent>
               </Card>
             )}

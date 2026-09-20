@@ -24,7 +24,7 @@ import uuid
 
 from utils.notifications import notify_order
 from routes.commerce_v29 import _resolve_voucher, _validate_voucher_rules, _compute_voucher_discount
-from middleware.actor_context import tenant_scope_filter, tenant_owns
+from middleware.actor_context import tenant_scope_filter, tenant_owns_strict
 
 router = APIRouter()
 
@@ -138,12 +138,17 @@ async def _adjust_stock_for_items(items: list, sign: int):
     now does (mirroring routes/transactions.py's create_transaction), and
     cancelling a previously-accepted paid order reverses it — the same
     deduct-on-sale/restore-on-refund pairing the POS already has."""
+    touched = []
     for item in items or []:
         pid = item.get("productId") or item.get("id")
         qty = int(item.get("quantity", 1))
         if not pid or qty <= 0:
             continue
         await db.products.update_one({"id": pid}, {"$inc": {"stock": sign * qty}})
+        touched.append(pid)
+    if sign < 0 and touched:
+        from utils.stock_ops import clamp_negative_stock
+        await clamp_negative_stock(touched)
 
 
 def _append_event(order: dict, kind: str, message: str, actor: Optional[str] = None) -> dict:
@@ -175,6 +180,37 @@ async def _resolve_business_id(business: Optional[str]) -> Optional[str]:
         return None
     biz = await db.businesses.find_one({"$or": [{"id": business}, {"slug": business}]}, {"_id": 0, "id": 1})
     return biz["id"] if biz else None
+
+
+async def resolve_or_require_business_id(business: Optional[str]) -> str:
+    """Like _resolve_business_id, but for a record a guest CREATES rather
+    than a page a guest reads. An untagged/pooled reservation or waitlist
+    entry isn't just imprecise — it's operationally meaningless (whose
+    tables, whose kitchen, whose capacity is actually being held?), and on
+    any deployment with more than one business it's a real cross-tenant
+    data-exposure gap, not just noise.
+
+    Resolves an explicit ?business= normally. With none given, auto-
+    resolves to the sole business IFF exactly one exists in this
+    deployment — the single-tenant-deployment case _resolve_business_id's
+    own docstring describes ("no reason to ever pass this param") stays
+    completely unaffected. Refuses (400) rather than guessing whenever
+    that's not unambiguous: zero businesses configured, or more than one
+    with no ?business= to disambiguate between them.
+    """
+    business_id = await _resolve_business_id(business)
+    if business_id:
+        return business_id
+    candidates = await db.businesses.find({}, {"_id": 0, "id": 1}).to_list(2)
+    if len(candidates) == 1:
+        return candidates[0]["id"]
+    if not candidates:
+        raise HTTPException(status_code=400, detail="No business is configured on this deployment")
+    raise HTTPException(
+        status_code=400,
+        detail="A valid business must be specified (?business=<slug-or-id>) — "
+               "more than one business is configured on this deployment",
+    )
 
 
 @router.get("/online/business")
@@ -254,6 +290,19 @@ async def place_order(data: dict):
     # Menu prices are GST-inclusive — the listed price is what the customer
     # pays, GST is disclosed as the component within it, not added on top.
     subtotal = sum(float(i.get("price", 0)) * int(i.get("quantity", 1)) for i in items)
+    # No loyalty-tier discount is applied here, unlike routes/transactions.py's
+    # POS checkout (which reads db.loyalty_tiers off transaction.customerId).
+    # This is a deliberate, structural limitation, not an oversight: `customer`
+    # above is freeform guest contact info (name/phone/email typed into the
+    # storefront form), never resolved to an actual db.customers record —
+    # there is no customerId here to look a tier up against. Giving online
+    # ordering the same tier-discount behavior POS has would mean building
+    # real guest-to-customer identification at checkout (matching/creating a
+    # db.customers row, then trusting its membershipTier) — a new feature,
+    # not a bug fix, and out of scope here. See
+    # tests/inprocess/test_loyalty_tier_discount_channel_consistency.py for
+    # the contract this currently holds to.
+    #
     # Voucher discount is re-validated server-side here, not trusted from the
     # client — same voucher document commerce_v29's staff-facing apply uses.
     voucher_code = (data.get("voucherCode") or "").strip()
@@ -326,8 +375,6 @@ async def create_online_order_checkout(data: dict, http_request: Request):
     would need a path-param-aware entry in server.py's public-path matcher,
     which only does prefix matching — a body field keeps this an exact,
     easily-audited allowlist entry instead)."""
-    from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
-
     order_id = data.get("orderId")
     if not order_id:
         raise HTTPException(status_code=400, detail="orderId is required")
@@ -342,6 +389,25 @@ async def create_online_order_checkout(data: dict, http_request: Request):
         # Not a hard failure — the guest just falls back to paying at
         # pickup/delivery like every online order before this endpoint existed.
         return {"configured": False, "url": None}
+
+    # Deliberately imported only after the config check above, not before:
+    # this endpoint must degrade to the pickup/delivery fallback whenever
+    # Stripe isn't configured, even in an environment where this optional
+    # SDK isn't installed at all — importing it unconditionally at the top
+    # turned every checkout attempt into an unhandled 500 in exactly that
+    # case (found running this endpoint end to end via Playwright). Matches
+    # routes/integrations.py's _create_stripe_session, which already does
+    # this the right way round.
+    from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
+
+    # A double-click or a client retry must not create two live Stripe
+    # sessions for the same order — order_id is already a stable resource
+    # identity (unlike a freshly-generated one), so this needs no new
+    # client-supplied key at all. See services/payment_idempotency.py.
+    from services.payment_idempotency import claim_or_wait, record_result
+    prior_result = await claim_or_wait("stripe_online_order", order_id)
+    if prior_result is not None:
+        return {"configured": True, **prior_result}
 
     origin_url = data.get("originUrl", str(http_request.base_url).rstrip("/"))
     host_url = str(http_request.base_url).rstrip("/")
@@ -374,7 +440,9 @@ async def create_online_order_checkout(data: dict, http_request: Request):
     }
     await db.payment_transactions.insert_one(payment_doc)
     await db.online_orders.update_one({"id": order_id}, {"$set": {"paymentSessionId": session.session_id}})
-    return {"configured": True, "url": session.url, "sessionId": session.session_id}
+    result = {"url": session.url, "sessionId": session.session_id}
+    await record_result("stripe_online_order", order_id, result)
+    return {"configured": True, **result}
 
 
 # =============================================================================
@@ -393,7 +461,7 @@ async def list_orders( status: Optional[str] = None, limit: int = 100, user: dic
 @router.get("/online/orders/{order_id}")
 async def get_order(order_id: str, user: dict = Depends(get_user)):
     row = await db.online_orders.find_one({"id": order_id}, {"_id": 0})
-    if not row or not tenant_owns(row.get("businessId"), user.get("businessId")):
+    if not row or not tenant_owns_strict(row.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Order not found")
     return row
 
@@ -407,6 +475,33 @@ async def update_status(order_id: str, data: dict, user: dict = Depends(get_user
         raise HTTPException(status_code=400, detail=f"Invalid status. Allowed: {_STATUS_ORDER}")
     order = await db.online_orders.find_one({"id": order_id}, {"_id": 0})
     if not order: raise HTTPException(status_code=404, detail="Order not found")
+
+    # Atomically claim this exact transition before doing any side effects.
+    # This used to be read order -> mutate a Python dict -> blind $set at
+    # the very end, which let two near-simultaneous requests (two staff
+    # both hitting Accept, or an accept racing a cancel) both read the same
+    # pre-transition order, both pass every guard below (stockDeducted was
+    # checked against each request's own stale in-memory copy, not the
+    # database), and both apply side effects — double stock deduction being
+    # the sharpest edge — with whichever request's final update_one landed
+    # last silently overwriting the other's status/event/refund outcome.
+    # The filter re-verifies the order is still at the exact status this
+    # request read; a request that loses the race gets a clean 409 instead
+    # of proceeding to recompute and clobber. Tradeoff: status flips here,
+    # before the derived side effects (stock, kitchen ticket, notifications)
+    # are computed and persisted a few lines down — a crash in that narrow
+    # window would leave the order's status updated without those side
+    # effects applied. Accepted as strictly safer than the prior
+    # no-protection-at-all state; see FINANCIAL_OFFLINE_INTEGRITY_REMAINING_WORK.md.
+    claimed = await db.online_orders.find_one_and_update(
+        {"id": order_id, "status": order["status"]},
+        {"$set": {"status": new_status}},
+        projection={"_id": 0},
+    )
+    if not claimed:
+        raise HTTPException(status_code=409,
+                             detail="Order status was just changed by another request — reload and try again")
+    order = claimed
     # Append event + notification with a status-specific message
     cust_name = (order.get("customer") or {}).get("name", "")
     ch = order.get("channel")
@@ -444,6 +539,7 @@ async def update_status(order_id: str, data: dict, user: dict = Depends(get_user
                 guest_name=(order.get("customer") or {}).get("name"),
                 notes=order.get("notes"),
                 actor=user.get("name") or "Online",
+                business_id=user.get("businessId"),
             )
             if ticket:
                 order["kitchenOrderId"] = ticket["id"]

@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from database import db
 from deps import get_user
+from middleware.actor_context import tenant_scope_filter, tenant_owns, tenant_owns_strict, get_actor_context
 from services import voice_calls as vc
 import os
 import uuid
@@ -72,13 +73,25 @@ def _closing_message(outcome: str) -> str:
 
 
 async def initiate_call(*, customer_id: Optional[str], phone: Optional[str], purpose: str,
-                          context: Optional[dict], base_url: str, actor: Optional[dict]) -> dict:
+                          context: Optional[dict], base_url: str, actor: Optional[dict],
+                          business_id: Optional[str] = None) -> dict:
     """Shared by the HTTP endpoint and the Ash `call_customer` tool."""
+    if business_id is None:
+        business_id = get_actor_context().get("businessId")
     context = context or {}
     customer = None
     if customer_id:
         customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
-        if not customer:
+    # NOT tenant_owns_strict — models/customer.py's Customer model has no
+    # businessId field at all; it's stamped externally, inconsistently,
+    # at ~15+ different creation call sites and test fixtures across this
+    # codebase (confirmed via the full test suite: converting this site
+    # broke test_loyalty_v2_points_field.py/test_voice_calls.py, both of
+    # which seed a customer via the bare Customer(...).dict() shape with
+    # no businessId). Auditing and fixing every customer-creation site
+    # plus every test fixture that relies on this is a larger, separate
+    # effort — not attempted this pass.
+        if customer is None or not tenant_owns(customer.get("businessId"), business_id):
             raise HTTPException(status_code=404, detail="Customer not found")
         phone = phone or customer.get("phone")
 
@@ -99,7 +112,7 @@ async def initiate_call(*, customer_id: Optional[str], phone: Optional[str], pur
         "transcript": [{"speaker": "nua", "text": opening, "at": _now()}],
         "turns": 0, "status": "initiating", "outcome": None,
         "createdBy": (actor or {}).get("name") or (actor or {}).get("id") or "ash-agent",
-        "createdAt": _now(),
+        "createdAt": _now(), "businessId": business_id,
     }
     await db.voice_calls.insert_one(dict(doc))
 
@@ -127,16 +140,17 @@ async def create_call(data: dict, http_request: Request, user: dict = Depends(ge
 
 
 @router.get("/voice/calls")
-async def list_calls(limit: int = 50, _: dict = Depends(get_user)):
+async def list_calls(limit: int = 50, user: dict = Depends(get_user)):
     limit = max(1, min(200, limit))
-    rows = await db.voice_calls.find({}, {"_id": 0}).sort("createdAt", -1).to_list(limit)
+    rows = await db.voice_calls.find(tenant_scope_filter(user.get("businessId")), {"_id": 0}) \
+        .sort("createdAt", -1).to_list(limit)
     return rows
 
 
 @router.get("/voice/calls/{call_id}")
-async def get_call(call_id: str, _: dict = Depends(get_user)):
+async def get_call(call_id: str, user: dict = Depends(get_user)):
     row = await db.voice_calls.find_one({"id": call_id}, {"_id": 0})
-    if not row:
+    if row is None or not tenant_owns_strict(row.get("businessId"), user.get("businessId")):
         raise HTTPException(status_code=404, detail="Call not found")
     return row
 
